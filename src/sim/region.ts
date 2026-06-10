@@ -34,7 +34,27 @@ export interface Settlement {
   housing: number; // capacity
   landQuality: number; // 0.8–1.2
   lastRaidDay: number;
+  strikeUntil: number; // day; > now means production strike
+  grievance: number; // 0–100 pressure gauge (GDD §5.5 unrest ladder)
 }
+
+/** Provisional government lean chosen at the Incorporation ceremony. */
+export type GovLean = 'council' | 'mayor' | 'compact';
+
+export const GOV_LEANS: Record<GovLean, { name: string; desc: string }> = {
+  council: {
+    name: 'Council of Towns',
+    desc: 'Every town a voice. +6 satisfaction everywhere, but consensus is slow: −15% tax collection.',
+  },
+  mayor: {
+    name: 'The Iron Mayor',
+    desc: 'One strong hand. +20% tax collection, +20% militia — and −6 satisfaction (people grumble).',
+  },
+  compact: {
+    name: 'Merchant Compact',
+    desc: 'Commerce rules. +15% income per worker, but services cost +25% (everything is invoiced).',
+  },
+};
 
 export type NotableRole = 'Mayor' | 'Doctor' | 'Captain' | 'Granger' | 'Forewoman' | 'Reeve';
 
@@ -84,7 +104,17 @@ export class RegionSim {
   expeditions: Expedition[] = [];
   log: LogEntry[] = [];
   stateProclaimed = false;
+  /** charter done, waiting on the player's ceremony choices */
+  ceremonyPending = false;
   charterProgress = 0; // 0–100, fills once eligible; the civics gate of the slice
+  // ---- State-tier systems (switch on at Incorporation, GDD §2.5) ----
+  stateName = '';
+  govLean: GovLean | null = null;
+  treasury = 0;
+  taxRate = 0.1; // 0–0.3
+  servicesLevel = 1; // 0–2: health & schools — satisfaction + mortality
+  militiaLevel = 1; // 0–2: funded defense
+  gdpLastMonth = 0;
   gameOver = false;
   private nextId = 1000;
   private nextEventDay: number;
@@ -175,6 +205,8 @@ export class RegionSim {
       housing: Math.max(stayers + 6, sim.builtOf('sleep').length * 6 + 8),
       landQuality: 1,
       lastRaidDay: -99,
+      strikeUntil: -1,
+      grievance: 0,
     };
     region.settlements.push(home);
 
@@ -242,23 +274,38 @@ export class RegionSim {
       // Production & consumption
       const granger = 1 + 0.1 * this.roleMult(t, 'Granger');
       const forewoman = 1 + 0.1 * this.roleMult(t, 'Forewoman');
-      t.food += workers * 1.15 * seasonMult * t.landQuality * granger;
+      const strike = this.day < t.strikeUntil ? 0.6 : 1;
+      t.food += workers * 1.15 * seasonMult * t.landQuality * granger * strike;
       t.food -= pop * 0.75;
-      t.wood += workers * 0.25 * forewoman;
+      t.wood += workers * 0.25 * forewoman * strike;
       // Housing grows when wood allows
       if (t.housing < pop + 4 && t.wood >= 20) {
         t.wood -= 20;
         t.housing += 3;
       }
-      // Satisfaction: food security, crowding, raid fear, mayor
+      // Satisfaction: food security, crowding, raid fear, mayor — plus,
+      // after Incorporation, the politics of taxes and services
       const foodDays = t.food / Math.max(1, pop * 0.75);
+      const stateTerms = this.stateProclaimed
+        ? -this.taxRate * 40 +
+          this.servicesLevel * 4 +
+          (this.govLean === 'council' ? 6 : this.govLean === 'mayor' ? -6 : 0) -
+          (this.day < t.strikeUntil ? 5 : 0)
+        : 0;
       const target =
         50 +
         Math.min(20, foodDays * 1.5) -
         Math.max(0, (pop - t.housing) * 2) -
         (this.day - t.lastRaidDay < 10 ? 10 : 0) +
-        5 * this.roleMult(t, 'Mayor');
+        5 * this.roleMult(t, 'Mayor') +
+        stateTerms;
       t.satisfaction += (Math.max(0, Math.min(100, target)) - t.satisfaction) * 0.08;
+      // Grievance: heavy taxes build pressure daily; services and contentment vent it
+      if (this.stateProclaimed) {
+        const pressure =
+          Math.max(0, this.taxRate - 0.15) * 35 - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05;
+        t.grievance = Math.max(0, Math.min(100, t.grievance + pressure));
+      }
       // Starvation
       if (t.food < 0) {
         const starved = Math.min(pop * 0.02, -t.food / 10);
@@ -294,10 +341,11 @@ export class RegionSim {
         b[i] -= moved;
         b[i + 1] += moved;
       }
-      // Mortality (doctor helps); the oldest band carries most of it
+      // Mortality (doctor and funded services help); elders carry most of it
       const doctor = this.roleMult(t, 'Doctor') ? 0.85 : 1;
+      const services = this.stateProclaimed ? 1 - 0.05 * this.servicesLevel : 1;
       for (let i = 0; i < b.length; i++) {
-        b[i] -= b[i] * (BASE_MORTALITY_PER_YEAR[i] / 12) * doctor;
+        b[i] -= b[i] * (BASE_MORTALITY_PER_YEAR[i] / 12) * doctor * services;
       }
       // Immigration: the frontier draws people to fed, content towns
       const reeve = 1 + 0.1 * this.roleMult(t, 'Reeve');
@@ -310,6 +358,42 @@ export class RegionSim {
     }
     this.migrate();
     this.ageNotables();
+    if (this.stateProclaimed) this.monthlyEconomy();
+  }
+
+  /** The money layer that arrives with Statehood (GDD §2.5). */
+  private monthlyEconomy(): void {
+    const incomeMult = this.govLean === 'compact' ? 1.15 : 1;
+    const collection = this.govLean === 'council' ? 0.85 : this.govLean === 'mayor' ? 1.2 : 1;
+    const serviceCost = this.govLean === 'compact' ? 1.25 : 1;
+    let gdp = 0;
+    for (const t of this.settlements) {
+      const strike = this.day < t.strikeUntil ? 0.6 : 1;
+      gdp += this.workersOf(t) * 1.2 * (0.8 + t.landQuality * 0.2) * incomeMult * strike;
+    }
+    this.gdpLastMonth = gdp;
+    const revenue = gdp * this.taxRate * collection;
+    const pop = this.totalPop();
+    const spending =
+      pop * 0.05 * this.servicesLevel * serviceCost +
+      pop * 0.03 * this.militiaLevel +
+      this.settlements.length * 5; // administration
+    this.treasury += revenue - spending;
+    if (this.treasury < 0) {
+      this.treasury = 0;
+      if (this.servicesLevel > 0) {
+        this.servicesLevel--;
+        this.addLog('The treasury is empty — services are cut back. The towns notice.', 'bad');
+      }
+    }
+    // Strikes: pressure vents when grievance boils over
+    for (const t of this.settlements) {
+      if (t.grievance > 60 && this.day >= t.strikeUntil && this.rng.chance(0.5)) {
+        t.strikeUntil = this.day + 15;
+        t.grievance -= 40; // the strike itself is the release valve
+        this.addLog(`Strike in ${t.name}! Workers down tools over taxes and conditions.`, 'bad');
+      }
+    }
   }
 
   private migrate(): void {
@@ -367,7 +451,8 @@ export class RegionSim {
       // Raid, resolved abstractly by militia strength (GDD §7: abstraction rises with tier)
       const strength = 2 + this.rng.int(Math.max(2, Math.floor(this.totalPop() / 40)));
       const captain = 1 + 0.25 * this.roleMult(t, 'Captain');
-      const militia = this.workersOf(t) * 0.12 * captain;
+      const funded = this.stateProclaimed ? 1 + 0.2 * this.militiaLevel + (this.govLean === 'mayor' ? 0.2 : 0) : 1;
+      const militia = this.workersOf(t) * 0.12 * captain * funded;
       t.lastRaidDay = this.day;
       if (militia >= strength) {
         this.addLog(`Raiders struck ${t.name} and were driven off by the militia.`, 'good');
@@ -452,6 +537,8 @@ export class RegionSim {
           housing: e.pop + 4,
           landQuality: 0.85 + this.rng.next() * 0.35,
           lastRaidDay: -99,
+          strikeUntil: -1,
+          grievance: 0,
         };
         this.settlements.push(town);
         this.expeditions = this.expeditions.filter((o) => o !== e);
@@ -472,24 +559,35 @@ export class RegionSim {
   }
 
   private updateCharter(): void {
-    if (this.stateProclaimed) return;
+    if (this.stateProclaimed || this.ceremonyPending) return;
     if (this.charterEligible()) {
       // The Mayor drafts the Regional Charter — the slice's civics gate.
       this.charterProgress = Math.min(100, this.charterProgress + 100 / 90); // ~90 days of drafting
       if (this.charterProgress >= 100) {
-        this.stateProclaimed = true;
-        const mayor = this.notables.find((n) => n.alive && n.role === 'Mayor');
-        this.addLog(
-          `INCORPORATION: with ${this.settlements.length} towns and ${this.totalPop()} citizens, ` +
-          `${mayor ? mayor.name + ' signs' : 'the council signs'} the Regional Charter. ` +
-          `The colony is now a STATE — Tier 2 begins here.`,
-          'good',
-        );
-        if (mayor) mayor.bio.push(`Signed the Regional Charter, ${this.year}.`);
+        this.ceremonyPending = true;
+        this.addLog('The Regional Charter is drafted. The towns await your word. (Incorporation ceremony)', 'good');
       }
     } else {
       this.charterProgress = Math.max(0, this.charterProgress - 0.5);
     }
+  }
+
+  /** The promotion-as-moment (GDD §2.2): the player names the State and sets its lean. */
+  completeIncorporation(stateName: string, lean: GovLean): void {
+    if (!this.ceremonyPending || this.stateProclaimed) return;
+    this.ceremonyPending = false;
+    this.stateProclaimed = true;
+    this.stateName = stateName.trim() || 'The Valley State';
+    this.govLean = lean;
+    this.treasury = 50;
+    const mayor = this.notables.find((n) => n.alive && n.role === 'Mayor');
+    this.addLog(
+      `INCORPORATION: with ${this.settlements.length} towns and ${this.totalPop()} citizens, ` +
+      `${mayor ? mayor.name + ' signs' : 'the council signs'} the Regional Charter under the banner of ` +
+      `${GOV_LEANS[lean].name}. ${this.stateName} is proclaimed — Tier 2 begins here.`,
+      'good',
+    );
+    if (mayor) mayor.bio.push(`Signed the Regional Charter of ${this.stateName}, ${this.year}.`);
   }
 
   private removePop(t: Settlement, count: number): void {

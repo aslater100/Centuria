@@ -135,7 +135,7 @@ function loop(now: number): void {
     let guard = 0;
     while (acc >= 1 && guard++ < 64) {
       if (mode === 'town') sim.tick();
-      else region?.tick();
+      else if (!regionView?.ceremonyOpen) region?.tick(); // history pauses for the ceremony
       acc -= 1;
     }
   }
