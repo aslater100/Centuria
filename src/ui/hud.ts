@@ -82,8 +82,12 @@ export class Hud {
   }
 
   drawRegionTopBar(r: import('../sim/region').RegionSim, dioramaOpen: boolean): void {
+    const wx = r.weather.forDay(r.day);
+    const skyIcon = { clear: '☀', overcast: '☁', rain: '☔', storm: '⛈', snow: '❄' }[wx.sky];
+    const drought = r.weather.isDrought(r.day) && r.seasonIndex < 3 ? ' <span class="tb-over">DROUGHT</span>' : '';
     this.topBar.innerHTML =
       `<span class="tb-date">${r.dateLabel}</span>` +
+      `<span>${skyIcon}${drought}</span>` +
       `<span>TOWNS ${r.settlements.length}${r.expeditions.length ? ` (+${r.expeditions.length} en route)` : ''}</span>` +
       `<span>POP ${r.totalPop()}</span>` +
       `<span>NOTABLES ${r.notables.filter((n) => n.alive).length}</span>` +
@@ -128,9 +132,11 @@ export class Hud {
     const mm = String(Math.floor((s.hour % 1) * 60)).padStart(2, '0');
     const over = s.settlers.length - TUNING.softCapPop;
     const capWarn = over > 0 ? ` ⚠ growing pains −${Math.round((1 - s.softCapWorkMult()) * 100)}% work` : '';
+    const skyIcon = { clear: '☀', overcast: '☁', rain: '☔', storm: '⛈', snow: '❄' }[s.weatherToday().sky];
+    const drought = s.weather.isDrought(s.day) && s.growingSeason ? ' <span class="tb-over">DROUGHT</span>' : '';
     this.topBar.innerHTML =
       `<span class="tb-date">${s.dateLabel} ${hh}:${mm}</span>` +
-      `<span>${Math.round(s.temperature())}°C</span>` +
+      `<span>${skyIcon} ${Math.round(s.temperature())}°C${drought}</span>` +
       `<span>POP ${s.settlers.length}${capWarn}</span>` +
       `<span>wood ${s.stock.wood} · grain ${s.stock.grain} · meals ${s.stock.meal}</span>` +
       `<span title="average of all settler moods">MOOD ${Math.round(s.avgMood())}</span>` +

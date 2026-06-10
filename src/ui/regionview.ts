@@ -3,13 +3,17 @@
  * operating altitude after the flip (GDD §2.5). Painterly backdrop, town
  * markers, routes, expedition wagons; DOM panel for the selected settlement.
  */
-import type { RegionSim, Settlement } from '../sim/region';
-import { AGE_BANDS, ROLE_BONUS_DESC } from '../sim/region';
+import type { RegionSim, Settlement, GovLean } from '../sim/region';
+import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS } from '../sim/region';
 
 export class RegionView {
   selectedId: number | null = null;
+  /** set true by the view while the Incorporation ceremony is on screen */
+  ceremonyOpen = false;
   private g: CanvasRenderingContext2D;
   private panel: HTMLElement;
+  private statePanel: HTMLElement;
+  private ceremony: HTMLElement;
   private frame = 0;
 
   constructor(private canvas: HTMLCanvasElement, private region: RegionSim, root: HTMLElement) {
@@ -17,10 +21,18 @@ export class RegionView {
     this.panel = document.createElement('div');
     this.panel.className = 'inspector region-panel hidden';
     root.appendChild(this.panel);
+    this.statePanel = document.createElement('div');
+    this.statePanel.className = 'palette state-panel hidden';
+    root.appendChild(this.statePanel);
+    this.ceremony = document.createElement('div');
+    this.ceremony.className = 'ceremony hidden';
+    root.appendChild(this.ceremony);
   }
 
   destroyPanel(): void {
     this.panel.remove();
+    this.statePanel.remove();
+    this.ceremony.remove();
   }
 
   private toPx(x: number, y: number): { px: number; py: number } {
@@ -47,29 +59,9 @@ export class RegionView {
     const W = canvas.width;
     const H = canvas.height;
 
-    // Terrain: layered dusk-toned region map
-    const grad = g.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, '#2c3a2a');
-    grad.addColorStop(1, '#1f2a20');
-    g.fillStyle = grad;
+    g.fillStyle = '#10141c';
     g.fillRect(0, 0, W, H);
-    // dithered texture + ridge bands for the painterly feel
-    g.fillStyle = 'rgba(255,255,255,0.025)';
-    for (let i = 0; i < 400; i++) {
-      const x = (i * 131) % W;
-      const y = (i * 197) % H;
-      g.fillRect(x, y, 2, 2);
-    }
-    g.fillStyle = 'rgba(40,60,80,0.5)';
-    for (let x = 0; x < W; x += 6) {
-      const h = 24 + 16 * Math.abs(Math.sin(x * 0.021));
-      g.fillRect(x, 0, 6, h); // northern mountains
-    }
-    g.fillStyle = 'rgba(46,74,92,0.7)';
-    for (let x = 0; x < W; x += 4) {
-      const h = 14 + 9 * Math.abs(Math.sin(x * 0.013 + 2));
-      g.fillRect(x, H - h, 4, h); // southern river
-    }
+    this.drawTerrain(W, H);
 
     // Routes between settlements (dotted)
     g.fillStyle = 'rgba(220,210,170,0.35)';
@@ -136,11 +128,13 @@ export class RegionView {
     if (!region.stateProclaimed) {
       g.fillStyle = 'rgba(16,14,10,0.85)';
       g.fillRect(W / 2 - 230, H - 40, 460, 26);
-      g.fillStyle = region.charterEligible() ? '#8fc26a' : '#998c6e';
+      g.fillStyle = region.charterEligible() || region.ceremonyPending ? '#8fc26a' : '#998c6e';
       g.font = '12px monospace';
-      const need = region.charterEligible()
-        ? `Regional Charter being drafted… ${Math.floor(region.charterProgress)}%`
-        : `Toward Statehood: ${region.settlements.length}/3 towns · ${region.totalPop()}/500 citizens`;
+      const need = region.ceremonyPending
+        ? 'The Charter is drafted — the towns await your proclamation.'
+        : region.charterEligible()
+          ? `Regional Charter being drafted… ${Math.floor(region.charterProgress)}%`
+          : `Toward Statehood: ${region.settlements.length}/3 towns · ${region.totalPop()}/500 citizens`;
       g.fillText(need, W / 2 - 220, H - 23);
     } else {
       g.fillStyle = 'rgba(110,74,47,0.92)';
@@ -148,11 +142,156 @@ export class RegionView {
       g.fillStyle = '#e8d27a';
       g.font = 'bold 14px monospace';
       g.textAlign = 'center';
-      g.fillText('★ THE STATE IS PROCLAIMED ★', W / 2, H - 24);
+      g.fillText(`★ ${region.stateName.toUpperCase()} ★`, W / 2, H - 24);
       g.textAlign = 'left';
     }
 
+    this.drawWeather(W, H);
     this.drawPanel();
+    this.drawStatePanel();
+    this.drawCeremony();
+  }
+
+  /** The generated land itself, in 8-bit blocks: this map IS the world. */
+  private drawTerrain(W: number, H: number): void {
+    const { g, region } = this;
+    const map = region.map;
+    const N = 64; // REGION_N
+    const m = 60;
+    const cw = (W - 2 * m) / N;
+    const ch = (H - 2 * m) / N;
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        const c = map.at(x, y);
+        let col: string;
+        switch (c.biome) {
+          case 'sea': col = '#243d52'; break;
+          case 'lake': col = '#2e4a5c'; break;
+          case 'river': col = '#36586e'; break;
+          case 'marsh': col = '#39503e'; break;
+          case 'plains': col = '#46563a'; break;
+          case 'forest': col = '#33502c'; break;
+          case 'hills': col = '#5a5742'; break;
+          case 'mountains': col = c.elevation > 0.85 ? '#9a978f' : '#6a6358'; break;
+        }
+        g.fillStyle = col;
+        g.fillRect(Math.floor(m + x * cw), Math.floor(m + y * ch), Math.ceil(cw), Math.ceil(ch));
+        // elevation shading + a pixel of texture
+        if ((x * 7 + y * 13) % 9 === 0 && c.biome !== 'sea') {
+          g.fillStyle = 'rgba(0,0,0,0.15)';
+          g.fillRect(Math.floor(m + x * cw), Math.floor(m + y * ch), 2, 2);
+        }
+        if (c.elevation > 0.5 && c.biome !== 'mountains') {
+          g.fillStyle = `rgba(255,255,240,${(c.elevation - 0.5) * 0.12})`;
+          g.fillRect(Math.floor(m + x * cw), Math.floor(m + y * ch), Math.ceil(cw), Math.ceil(ch));
+        }
+      }
+    }
+    // border vignette so the map reads as a map
+    g.strokeStyle = '#6e4a2f';
+    g.lineWidth = 2;
+    g.strokeRect(m - 4, m - 4, W - 2 * m + 8, H - 2 * m + 8);
+  }
+
+  /** Cloud cover and rain streaks driven by today's actual weather. */
+  private drawWeather(W: number, H: number): void {
+    const { g, region } = this;
+    const w = region.weather.forDay(region.day);
+    if (w.rainfall < 0.25) return;
+    // drifting cloud shadows
+    g.fillStyle = `rgba(14,16,24,${Math.min(0.35, w.rainfall * 0.4)})`;
+    const drift = this.frame * 0.3;
+    for (let i = 0; i < 6; i++) {
+      const cx = ((i * 977 + drift) % (W + 400)) - 200;
+      const cy = 80 + ((i * 613) % (H - 160));
+      for (let k = 0; k < 5; k++) {
+        g.fillRect(cx + k * 38 - 76, cy + (k % 2) * 14 - 7, 80, 26);
+      }
+    }
+    if (w.sky === 'rain' || w.sky === 'storm' || w.sky === 'snow') {
+      g.fillStyle = w.sky === 'snow' ? 'rgba(230,235,245,0.5)' : 'rgba(160,190,220,0.4)';
+      const n = w.sky === 'storm' ? 220 : 120;
+      for (let i = 0; i < n; i++) {
+        const x = (i * 89 + this.frame * (w.sky === 'snow' ? 1 : 7)) % W;
+        const y = (i * 53 + this.frame * (w.sky === 'snow' ? 2 : 11)) % H;
+        if (w.sky === 'snow') g.fillRect(x, y, 2, 2);
+        else g.fillRect(x, y, 1, 5);
+      }
+    }
+  }
+
+  /** The promotion-as-moment (GDD §2.2): name the State, choose its lean. */
+  private drawCeremony(): void {
+    const r = this.region;
+    if (!r.ceremonyPending) {
+      if (this.ceremonyOpen) {
+        this.ceremonyOpen = false;
+        this.ceremony.classList.add('hidden');
+      }
+      return;
+    }
+    if (this.ceremonyOpen) return; // already on screen
+    this.ceremonyOpen = true;
+    this.ceremony.classList.remove('hidden');
+    const leans = (Object.keys(GOV_LEANS) as GovLean[])
+      .map(
+        (k) =>
+          `<label class="lean-card"><input type="radio" name="lean" value="${k}" ${k === 'council' ? 'checked' : ''}>` +
+          `<b>${GOV_LEANS[k].name}</b><br><span>${GOV_LEANS[k].desc}</span></label>`,
+      )
+      .join('');
+    this.ceremony.innerHTML =
+      `<div class="ceremony-box">` +
+      `<h2>★ THE INCORPORATION ★</h2>` +
+      `<p>${r.settlements.length} towns. ${r.totalPop()} citizens. The Regional Charter is drafted —<br>` +
+      `all that remains is a name, and a way of ruling.</p>` +
+      `<input id="state-name" type="text" maxlength="28" placeholder="Name your State…" value="The Valley State">` +
+      `<div class="lean-row">${leans}</div>` +
+      `<button id="proclaim-btn">Proclaim the State</button>` +
+      `</div>`;
+    this.ceremony.querySelector<HTMLButtonElement>('#proclaim-btn')!.onclick = () => {
+      const name = this.ceremony.querySelector<HTMLInputElement>('#state-name')!.value;
+      const lean = (this.ceremony.querySelector<HTMLInputElement>('input[name=lean]:checked')?.value ?? 'council') as GovLean;
+      r.completeIncorporation(name, lean);
+      this.ceremonyOpen = false;
+      this.ceremony.classList.add('hidden');
+    };
+  }
+
+  /** Tier-2 dashboard: treasury, taxes, funded services — visible once proclaimed. */
+  private drawStatePanel(): void {
+    const r = this.region;
+    if (!r.stateProclaimed) {
+      this.statePanel.classList.add('hidden');
+      return;
+    }
+    this.statePanel.classList.remove('hidden');
+    const lvl = (v: number) => ['none', 'basic', 'funded'][v];
+    this.statePanel.innerHTML =
+      `<div class="pal-title">${r.stateName.toUpperCase()}</div>` +
+      `<p class="insp-skills">${r.govLean ? GOV_LEANS[r.govLean].name : ''}</p>` +
+      `<p>treasury £${Math.floor(r.treasury)}</p>` +
+      `<p>GDP £${Math.floor(r.gdpLastMonth)}/mo</p>` +
+      `<p>tax <span id="tax-val">${Math.round(r.taxRate * 100)}%</span></p>` +
+      `<input id="tax-slider" type="range" min="0" max="30" value="${Math.round(r.taxRate * 100)}">` +
+      `<p>services: <b>${lvl(r.servicesLevel)}</b> <button class="mini" id="svc-up">+</button><button class="mini" id="svc-dn">−</button></p>` +
+      `<p>militia: <b>${lvl(r.militiaLevel)}</b> <button class="mini" id="mil-up">+</button><button class="mini" id="mil-dn">−</button></p>` +
+      `<p class="insp-skills">high taxes breed strikes; services cost £ but save lives</p>`;
+    this.statePanel.querySelector<HTMLInputElement>('#tax-slider')!.oninput = (e) => {
+      r.taxRate = Number((e.target as HTMLInputElement).value) / 100;
+    };
+    this.statePanel.querySelector<HTMLButtonElement>('#svc-up')!.onclick = () => {
+      r.servicesLevel = Math.min(2, r.servicesLevel + 1);
+    };
+    this.statePanel.querySelector<HTMLButtonElement>('#svc-dn')!.onclick = () => {
+      r.servicesLevel = Math.max(0, r.servicesLevel - 1);
+    };
+    this.statePanel.querySelector<HTMLButtonElement>('#mil-up')!.onclick = () => {
+      r.militiaLevel = Math.min(2, r.militiaLevel + 1);
+    };
+    this.statePanel.querySelector<HTMLButtonElement>('#mil-dn')!.onclick = () => {
+      r.militiaLevel = Math.max(0, r.militiaLevel - 1);
+    };
   }
 
   private drawPanel(): void {
@@ -183,7 +322,17 @@ export class RegionView {
     return (
       `<h3>${t.name}</h3>` +
       `<p class="insp-state">pop ${Math.round(r.popOf(t))} · housing ${Math.floor(t.housing)} · satisfaction ${Math.round(t.satisfaction)}</p>` +
+      (r.stateProclaimed
+        ? `<p class="${t.grievance > 50 ? 'insp-cond' : 'insp-skills'}">grievance ${Math.round(t.grievance)}${this.region.day < t.strikeUntil ? ' · ON STRIKE' : ''}</p>`
+        : '') +
       `<p>food ${Math.floor(t.food)} · wood ${Math.floor(t.wood)} · land ${t.landQuality.toFixed(2)}</p>` +
+      `<p class="insp-skills">${[
+        t.site.river ? 'river (fishery, flood risk)' : '',
+        t.site.coastal ? 'coastal (fishery)' : '',
+        t.site.forest > 0.5 ? 'forested (good timber)' : '',
+        t.site.roughness > 0.5 ? 'rough country' : '',
+        t.site.fertility > 1.05 ? 'rich soil' : t.site.fertility < 0.7 ? 'poor soil' : '',
+      ].filter(Boolean).join(' · ') || 'open plains'}</p>` +
       `<p class="insp-skills">COHORTS</p>` + bands +
       (notables ? `<p class="insp-skills">NOTABLES</p><ul class="thoughts">${notables}</ul>` : '') +
       `<button id="found-btn" ${can.ok ? '' : 'disabled'} title="${can.reason}">Found new town (8 pop, 80 food, 80 wood)</button>` +

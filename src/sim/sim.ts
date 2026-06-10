@@ -1,6 +1,10 @@
 import { Rng } from './rng';
 import { World, MAP_W, MAP_H } from './world';
 import type { Vec } from './world';
+import { RegionMap } from './worldgen';
+import type { TownSite } from './worldgen';
+import { Weather } from './weather';
+import type { DayWeather } from './weather';
 import {
   BUILDING_DEFS, buildingDef, traitDef, FIRST_NAMES, LAST_NAMES, TRAIT_DEFS,
   MINUTES_PER_TICK, MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR,
@@ -112,16 +116,21 @@ const SEASON_BASE_C = [10, 22, 8, -8];
 export class Simulation {
   rng: Rng;
   world: World;
+  regionMap: RegionMap;
+  site: TownSite;
+  weather: Weather;
   minute = 0;
   settlers: Settler[] = [];
   buildings: Building[] = [];
   items: GroundItem[] = [];
-  stock: Record<ResourceKind, number> = { wood: 80, grain: 40, meal: 160 };
+  stock: Record<ResourceKind, number> = { wood: 80, grain: 60, meal: 160 };
   log: LogEntry[] = [];
   gameOver = false;
   coldSnapUntil = -1;
   raiders: Raider[] = [];
   raidActive = false;
+  private droughtActive = false;
+  private lastFloodDay = -99;
   /** pairwise relationship scores, keyed "lowId:highId" */
   opinions = new Map<string, number>();
   private raidUntil = 0;
@@ -132,10 +141,19 @@ export class Simulation {
 
   constructor(seed: number) {
     this.rng = new Rng(seed);
-    this.world = new World(this.rng);
+    // The world precedes the colony: one seeded region, and the best
+    // river-valley cell in it is where the wagon stops (GDD: terrain first).
+    this.regionMap = new RegionMap(seed);
+    this.site = this.regionMap.startSite();
+    this.weather = new Weather(seed);
+    this.world = new World(this.rng, this.site);
     this.nextEventDay = 4 + this.rng.int(3);
     this.nextRaidDay = TUNING.firstRaidDay + this.rng.int(5);
     this.foundColony();
+  }
+
+  weatherToday(): DayWeather {
+    return this.weather.forDay(this.day);
   }
 
   // ---- time ----
@@ -165,11 +183,11 @@ export class Simulation {
     return this.seasonIndex < 3; // crops die in winter
   }
 
-  /** Outdoor temperature in °C: season base + diurnal swing + cold snaps. */
+  /** Outdoor temperature in °C: season base + diurnal swing + weather + cold snaps. */
   temperature(): number {
     const diurnal = -6 * Math.cos(((this.hour - 14) / 24) * Math.PI * 2) - 2;
     const snap = this.minute < this.coldSnapUntil ? -10 : 0;
-    return SEASON_BASE_C[this.seasonIndex] + diurnal + snap;
+    return SEASON_BASE_C[this.seasonIndex] + diurnal + snap + this.weatherToday().tempAnomalyC;
   }
 
   avgMood(): number {
@@ -373,6 +391,34 @@ export class Simulation {
           t.sown = false;
           t.growth = 0;
         }
+      }
+    }
+    // Weather has consequences (GDD: limitations propagate through the system)
+    const drought = this.weather.isDrought(this.day);
+    if (drought && !this.droughtActive && this.growingSeason) {
+      this.addLog('Drought. The soil cracks and the crops slow to a crawl.', 'bad');
+    }
+    this.droughtActive = drought;
+    if (this.weather.isFloodRisk(this.day) && this.site.river && this.day - this.lastFloodDay > 20) {
+      this.lastFloodDay = this.day;
+      let drowned = 0;
+      for (let y = 0; y < MAP_H; y++) {
+        for (let x = 0; x < MAP_W; x++) {
+          const t = this.world.at(x, y);
+          if (t.kind !== 'soil' || (!t.sown && t.growth === 0)) continue;
+          const nearWater = [[-2, 0], [2, 0], [0, -2], [0, 2], [-1, 0], [1, 0], [0, 1], [0, -1]]
+            .some(([dx, dy]) => this.world.inBounds(x + dx, y + dy) && this.world.at(x + dx, y + dy).kind === 'water');
+          if (nearWater) {
+            t.sown = false;
+            t.growth = 0;
+            drowned++;
+          }
+        }
+      }
+      if (drowned > 0) {
+        this.addLog(`The river bursts its banks — ${drowned} field tiles drowned.`, 'bad');
+      } else {
+        this.addLog('The river runs high and brown. Keep the fields back from the banks.', 'info');
       }
     }
   }
@@ -894,8 +940,11 @@ export class Simulation {
       s.state = 'working';
     }
     const sickMult = s.sickUntil > this.minute ? TUNING.sickWorkMult : 1;
+    const sky = this.weatherToday().sky;
+    const outdoorWork = task.kind === 'farm' || task.kind === 'chop' || task.kind === 'build' || task.kind === 'haul';
+    const rainMult = outdoorWork && (sky === 'rain' || sky === 'storm' || sky === 'snow') ? 0.85 : 1;
     const speed =
-      (0.5 + s.skills[task.kind] * 0.1) * this.traitMult(s, 'workSpeed') * this.softCapWorkMult() * sickMult;
+      (0.5 + s.skills[task.kind] * 0.1) * this.traitMult(s, 'workSpeed') * this.softCapWorkMult() * sickMult * rainMult;
     const work = hours * 60 * speed;
     s.skills[task.kind] = Math.min(10, s.skills[task.kind] + hours * 0.06);
 
@@ -1166,10 +1215,12 @@ export class Simulation {
 
   private updateFarms(): void {
     if (!this.growingSeason) return;
-    const perTick = (100 / (TUNING.farmGrowDays * MINUTES_PER_DAY)) * MINUTES_PER_TICK;
+    // The land and the sky set the pace: tile fertility × the water balance.
+    const weatherMult = this.weather.growthMult(this.day);
+    const perTick = (100 / (TUNING.farmGrowDays * MINUTES_PER_DAY)) * MINUTES_PER_TICK * weatherMult;
     for (const t of this.world.tiles) {
       if (t.kind === 'soil' && t.sown && t.growth < 100) {
-        t.growth = Math.min(100, t.growth + perTick);
+        t.growth = Math.min(100, t.growth + perTick * t.fertility);
       }
     }
   }

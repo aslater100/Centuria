@@ -82,9 +82,8 @@ describe('RegionSim (aggregate model)', () => {
     expect(mayors.some((n) => n.alive)).toBe(true);
   });
 
-  it('reaches Statehood: 3 towns + 500 pop + charter drafting', () => {
-    const r = flipped(42);
-    for (let year = 0; year < 14 && !r.stateProclaimed; year++) {
+  function toStatehood(r: RegionSim): void {
+    for (let year = 0; year < 18 && !r.ceremonyPending; year++) {
       runDays(r, 60);
       // expand whenever the strongest town can afford it (a player would)
       for (const t of r.settlements) {
@@ -94,9 +93,34 @@ describe('RegionSim (aggregate model)', () => {
         }
       }
     }
+    r.completeIncorporation('Testonia', 'council');
+  }
+
+  it('reaches Statehood: 3 towns + 500 pop + charter + ceremony', () => {
+    const r = flipped(42);
+    toStatehood(r);
     expect(r.settlements.length).toBeGreaterThanOrEqual(3);
     expect(r.stateProclaimed).toBe(true);
+    expect(r.stateName).toBe('Testonia');
     expect(r.log.some((l) => l.text.includes('INCORPORATION'))).toBe(true);
+  });
+
+  it('statehood brings money: taxes fill the treasury, spending drains it', () => {
+    const r = flipped(42);
+    toStatehood(r);
+    r.taxRate = 0.15;
+    runDays(r, 120);
+    expect(r.gdpLastMonth).toBeGreaterThan(0);
+    expect(r.treasury).toBeGreaterThan(0);
+  });
+
+  it('crushing taxes breed strikes', () => {
+    const r = flipped(42);
+    toStatehood(r);
+    r.taxRate = 0.3;
+    r.servicesLevel = 0;
+    runDays(r, 360);
+    expect(r.log.some((l) => l.text.includes('Strike in'))).toBe(true);
   });
 
   it('is deterministic for a given seed', () => {
