@@ -9,6 +9,9 @@
 import { Rng } from './rng';
 import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR } from './defs';
 import type { Simulation, Settler, LogEntry } from './sim';
+import { RegionMap } from './worldgen';
+import type { TownSite } from './worldgen';
+import { Weather } from './weather';
 
 /** Region-tier clock runs faster: 30 game-minutes per tick (GDD §8.6). */
 export const REGION_MINUTES_PER_TICK = 30;
@@ -32,8 +35,10 @@ export interface Settlement {
   wood: number;
   satisfaction: number; // 0–100
   housing: number; // capacity
-  landQuality: number; // 0.8–1.2
+  landQuality: number; // = site fertility: the land budgets the farms
+  site: TownSite;
   lastRaidDay: number;
+  lastFloodDay: number;
   strikeUntil: number; // day; > now means production strike
   grievance: number; // 0–100 pressure gauge (GDD §5.5 unrest ladder)
 }
@@ -78,8 +83,10 @@ export interface Expedition {
   pop: number;
   food: number;
   wood: number;
+  departDay: number;
   arrivesDay: number;
   name: string;
+  site: TownSite;
 }
 
 const TOWN_NAMES = [
@@ -99,6 +106,8 @@ export const ROLE_BONUS_DESC: Record<NotableRole, string> = {
 export class RegionSim {
   rng: Rng;
   minute: number;
+  map: RegionMap;
+  weather: Weather;
   settlements: Settlement[] = [];
   notables: Notable[] = [];
   expeditions: Expedition[] = [];
@@ -116,13 +125,16 @@ export class RegionSim {
   militiaLevel = 1; // 0–2: funded defense
   gdpLastMonth = 0;
   gameOver = false;
+  private droughtAnnounced = false;
   private nextId = 1000;
   private nextEventDay: number;
   private townNamePool: string[];
 
-  constructor(rng: Rng, minute: number) {
+  constructor(rng: Rng, minute: number, map: RegionMap, weather: Weather) {
     this.rng = rng;
     this.minute = minute;
+    this.map = map;
+    this.weather = weather;
     this.nextEventDay = this.day + 4 + rng.int(4);
     this.townNamePool = [...TOWN_NAMES];
   }
@@ -174,7 +186,8 @@ export class RegionSim {
 
   // ---- THE FLIP: build the region from the founding town (GDD §2.4) ----
   static fromTown(sim: Simulation, expeditionPop: number, expeditionFood: number, expeditionWood: number): RegionSim {
-    const region = new RegionSim(sim.rng, sim.minute);
+    // The region inherits the town's world: same map, same weather, one truth.
+    const region = new RegionSim(sim.rng, sim.minute, sim.regionMap, sim.weather);
     region.log = [...sim.log];
 
     // Town #1 cohortifies: real settler ages, minus those leaving on the expedition.
@@ -192,19 +205,22 @@ export class RegionSim {
       toRemove -= take;
       if (toRemove <= 0) break;
     }
+    const homeCoord = region.map.cellToCoord(sim.site.cellX, sim.site.cellY);
     const home: Settlement = {
       id: region.nextId++,
       name: 'Founder\'s Rest',
-      x: 30,
-      y: 55,
+      x: homeCoord.rx,
+      y: homeCoord.ry,
       foundedDay: 0,
       cohorts: { bands },
       food: Math.max(0, sim.stock.meal + sim.stock.grain * 0.5 - expeditionFood),
       wood: Math.max(0, sim.stock.wood - expeditionWood),
       satisfaction: Math.round(sim.avgMood()),
       housing: Math.max(stayers + 6, sim.builtOf('sleep').length * 6 + 8),
-      landQuality: 1,
+      landQuality: sim.site.fertility,
+      site: sim.site,
       lastRaidDay: -99,
+      lastFloodDay: -99,
       strikeUntil: -1,
       grievance: 0,
     };
@@ -235,21 +251,39 @@ export class RegionSim {
       'good',
     );
 
-    // Expedition en route to a generated site.
-    const site = { x: 30 + 18 + region.rng.int(20), y: 30 + region.rng.int(40) };
-    region.expeditions.push({
-      fromId: home.id,
-      x: home.x,
-      y: home.y,
-      targetX: site.x,
-      targetY: site.y,
-      pop: expeditionPop,
-      food: expeditionFood,
-      wood: expeditionWood,
-      arrivesDay: region.day + 3,
-      name: region.townNamePool.splice(region.rng.int(region.townNamePool.length), 1)[0],
-    });
+    // Expedition en route: scouts have read the land for the best nearby site.
+    region.launchExpedition(home, expeditionPop, expeditionFood, expeditionWood);
     return region;
+  }
+
+  /** Site selection and travel time come from the terrain, not dice. */
+  private launchExpedition(from: Settlement, pop: number, food: number, wood: number): boolean {
+    const fromCell = this.map.coordToCell(from.x, from.y);
+    const claimed = this.settlements
+      .map((s) => this.map.coordToCell(s.x, s.y))
+      .concat(this.expeditions.map((e) => this.map.coordToCell(e.targetX, e.targetY)));
+    const site = this.map.bestSiteNear(fromCell.x, fromCell.y, claimed);
+    if (!site) return false;
+    const target = this.map.cellToCoord(site.cellX, site.cellY);
+    const travel = this.map.travelDays(fromCell.x, fromCell.y, site.cellX, site.cellY);
+    const name = this.townNamePool.length > 0
+      ? this.townNamePool.splice(this.rng.int(this.townNamePool.length), 1)[0]
+      : `New Town ${this.settlements.length + 1}`;
+    this.expeditions.push({
+      fromId: from.id,
+      x: from.x,
+      y: from.y,
+      targetX: target.rx,
+      targetY: target.ry,
+      pop,
+      food,
+      wood,
+      departDay: this.day,
+      arrivesDay: this.day + travel,
+      name,
+      site,
+    });
+    return true;
   }
 
   private storyScore(sim: Simulation, s: Settler): number {
@@ -267,17 +301,29 @@ export class RegionSim {
 
   private dailyUpdate(): void {
     const seasonMult = [1.25, 1.35, 1.0, 0.15][this.seasonIndex];
+    const weatherMult = this.weather.growthMult(this.day);
+    const drought = this.weather.isDrought(this.day);
+    const floodRisk = this.weather.isFloodRisk(this.day);
     for (const t of this.settlements) {
       const pop = this.popOf(t);
       if (pop <= 0) continue;
       const workers = this.workersOf(t);
-      // Production & consumption
+      // Production & consumption: the land budgets the farms, the sky pays or
+      // withholds, and the river feeds you whatever the weather (fishing).
       const granger = 1 + 0.1 * this.roleMult(t, 'Granger');
       const forewoman = 1 + 0.1 * this.roleMult(t, 'Forewoman');
       const strike = this.day < t.strikeUntil ? 0.6 : 1;
-      t.food += workers * 1.15 * seasonMult * t.landQuality * granger * strike;
+      t.food += workers * 1.15 * seasonMult * t.landQuality * weatherMult * granger * strike;
+      if (t.site.river || t.site.coastal) t.food += workers * 0.18; // the fishery
       t.food -= pop * 0.75;
-      t.wood += workers * 0.25 * forewoman * strike;
+      t.wood += workers * 0.25 * (0.5 + t.site.forest) * forewoman * strike;
+      // Floods hit river towns' stores and fields
+      if (floodRisk && t.site.river && this.day - t.lastFloodDay > 25) {
+        t.lastFloodDay = this.day;
+        t.food *= 0.85;
+        t.satisfaction -= 6;
+        this.addLog(`The river floods at ${t.name} — stores spoiled, fields under water.`, 'bad');
+      }
       // Housing grows when wood allows
       if (t.housing < pop + 4 && t.wood >= 20) {
         t.wood -= 20;
@@ -315,6 +361,13 @@ export class RegionSim {
           this.addLog(`Hunger stalks ${t.name} — the granary is empty.`, 'bad');
         }
       }
+    }
+    // Drought is regional news: announce on onset, during growing seasons
+    if (drought && !this.droughtAnnounced && this.seasonIndex < 3) {
+      this.droughtAnnounced = true;
+      this.addLog('Drought grips the region. Every town\'s fields slow; river towns lean on the fishery.', 'bad');
+    } else if (!drought) {
+      this.droughtAnnounced = false;
     }
     if (this.day % 30 === 0) this.monthlyUpdate();
     if (this.day >= this.nextEventDay) {
@@ -357,8 +410,29 @@ export class RegionSim {
       }
     }
     this.migrate();
+    this.caravans();
     this.ageNotables();
     if (this.stateProclaimed) this.monthlyEconomy();
+  }
+
+  /** Grain caravans: surplus towns provision hungry ones — the land is
+   *  uneven (that's the worldgen's point), so the network evens it out. */
+  private caravans(): void {
+    if (this.settlements.length < 2) return;
+    for (const needy of this.settlements) {
+      const need = this.popOf(needy) * 0.75 * 20 - needy.food; // 20-day buffer target
+      if (need <= 0) continue;
+      const donor = [...this.settlements]
+        .filter((t) => t !== needy && t.food > this.popOf(t) * 0.75 * 60)
+        .sort((a, b) => b.food - a.food)[0];
+      if (!donor) continue;
+      const sent = Math.min(need, donor.food - this.popOf(donor) * 0.75 * 60);
+      donor.food -= sent;
+      needy.food += sent * 0.9; // the road takes its tithe
+      if (sent > 40 && this.rng.chance(0.4)) {
+        this.addLog(`Grain caravans roll from ${donor.name} to ${needy.name}.`, 'info');
+      }
+    }
   }
 
   /** The money layer that arrives with Statehood (GDD §2.5). */
@@ -490,6 +564,13 @@ export class RegionSim {
     if (this.popOf(t) < 24) return { ok: false, reason: `needs 24 pop (has ${Math.floor(this.popOf(t))})` };
     if (t.food < 80) return { ok: false, reason: `needs 80 food (has ${Math.floor(t.food)})` };
     if (t.wood < 80) return { ok: false, reason: `needs 80 wood (has ${Math.floor(t.wood)})` };
+    const fromCell = this.map.coordToCell(t.x, t.y);
+    const claimed = this.settlements
+      .map((s) => this.map.coordToCell(s.x, s.y))
+      .concat(this.expeditions.map((e) => this.map.coordToCell(e.targetX, e.targetY)));
+    if (!this.map.bestSiteNear(fromCell.x, fromCell.y, claimed)) {
+      return { ok: false, reason: 'no viable land within reach' };
+    }
     return { ok: true, reason: '' };
   }
 
@@ -497,30 +578,25 @@ export class RegionSim {
     const check = this.canFoundTown(fromId);
     const t = this.settlement(fromId);
     if (!check.ok || !t) return false;
+    if (!this.launchExpedition(t, 8, 80, 80)) return false;
     this.removePop(t, 8);
     t.food -= 80;
     t.wood -= 80;
-    this.expeditions.push({
-      fromId,
-      x: t.x,
-      y: t.y,
-      targetX: 10 + this.rng.int(80),
-      targetY: 15 + this.rng.int(70),
-      pop: 8,
-      food: 80,
-      wood: 80,
-      arrivesDay: this.day + 3,
-      name: this.townNamePool.splice(this.rng.int(this.townNamePool.length), 1)[0] ?? `New Town ${this.settlements.length + 1}`,
-    });
-    this.addLog(`An expedition of 8 sets out from ${t.name} to found ${this.expeditions[this.expeditions.length - 1].name}.`, 'info');
+    const e = this.expeditions[this.expeditions.length - 1];
+    const days = e.arrivesDay - this.day;
+    this.addLog(
+      `An expedition of 8 sets out from ${t.name} for ${e.name} — ${days} days through ` +
+      `${e.site.roughness > 0.5 ? 'hard country' : 'open country'}` +
+      `${e.site.river ? ', bound for a river site' : ''}${e.site.coastal ? ', on the coast' : ''}.`,
+      'info',
+    );
     return true;
   }
 
   private updateExpeditions(): void {
     for (const e of [...this.expeditions]) {
-      const totalDays = 3;
-      const remaining = Math.max(0, e.arrivesDay - this.day);
-      const f = 1 - remaining / totalDays;
+      const totalDays = Math.max(1, e.arrivesDay - e.departDay);
+      const f = Math.min(1, (this.day - e.departDay) / totalDays);
       e.x = e.x + (e.targetX - e.x) * Math.min(1, f * 0.5 + 0.1);
       e.y = e.y + (e.targetY - e.y) * Math.min(1, f * 0.5 + 0.1);
       if (this.day >= e.arrivesDay) {
@@ -535,14 +611,17 @@ export class RegionSim {
           wood: e.wood,
           satisfaction: 60,
           housing: e.pop + 4,
-          landQuality: 0.85 + this.rng.next() * 0.35,
+          landQuality: e.site.fertility,
+          site: e.site,
           lastRaidDay: -99,
+          lastFloodDay: -99,
           strikeUntil: -1,
           grievance: 0,
         };
         this.settlements.push(town);
         this.expeditions = this.expeditions.filter((o) => o !== e);
-        this.addLog(`${town.name} is founded — the ${this.ordinal(this.settlements.length)} town of the colony.`, 'good');
+        const flavor = e.site.river ? 'on the riverbank' : e.site.coastal ? 'by the sea' : e.site.fertility > 1 ? 'in good black soil' : 'on thin ground';
+        this.addLog(`${town.name} is founded ${flavor} — the ${this.ordinal(this.settlements.length)} town of the colony.`, 'good');
         // A founder steps up
         this.mintNotable('Reeve', town.id);
       }

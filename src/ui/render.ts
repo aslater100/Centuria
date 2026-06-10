@@ -202,6 +202,24 @@ export class Renderer {
       if (this.cam.selectedSettler === s.id) this.outline(px, py + 4, TILE, TILE - 2);
     }
 
+    // Weather: precipitation streaks and storm gloom over the whole scene
+    const wx = sim.weatherToday();
+    if (wx.sky === 'overcast' || wx.sky === 'rain' || wx.sky === 'storm') {
+      g.fillStyle = `rgba(40,48,60,${wx.sky === 'storm' ? 0.28 : wx.sky === 'rain' ? 0.18 : 0.1})`;
+      g.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    }
+    if (wx.sky === 'rain' || wx.sky === 'storm' || wx.sky === 'snow') {
+      const snow = wx.sky === 'snow';
+      g.fillStyle = snow ? 'rgba(235,240,250,0.7)' : 'rgba(170,200,230,0.45)';
+      const n = wx.sky === 'storm' ? 260 : 140;
+      for (let i = 0; i < n; i++) {
+        const x = (i * 97 + this.frame * (snow ? 1 : 9)) % this.canvas.width;
+        const y = (i * 61 + this.frame * (snow ? 2 : 13)) % this.canvas.height;
+        if (snow) g.fillRect(x, y, 2, 2);
+        else g.fillRect(x, y, 1, 6);
+      }
+    }
+
     // Night darkening over the play field only (backdrop handles its own light)
     const d = daylight(sim.hour);
     if (d < 0.45) {

@@ -83,7 +83,7 @@ describe('RegionSim (aggregate model)', () => {
   });
 
   function toStatehood(r: RegionSim): void {
-    for (let year = 0; year < 14 && !r.ceremonyPending; year++) {
+    for (let year = 0; year < 18 && !r.ceremonyPending; year++) {
       runDays(r, 60);
       // expand whenever the strongest town can afford it (a player would)
       for (const t of r.settlements) {

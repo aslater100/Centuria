@@ -77,13 +77,13 @@ describe('Simulation', () => {
 
   it('palisades block pathing until destroyed', () => {
     const sim = new Simulation(42);
-    const b = sim.placeBuilding('palisade', 32, 20, true);
+    const b = sim.placeBuilding('palisade', 32, 26, true); // inside the wagon clearing
     expect(b).not.toBeNull();
     // prebuilt palisades don't set the wall flag via construction; set directly
-    sim.world.at(32, 20).wall = true;
-    expect(sim.world.passable(32, 20)).toBe(false);
-    sim.world.at(32, 20).wall = false;
-    expect(sim.world.passable(32, 20)).toBe(true);
+    sim.world.at(32, 26).wall = true;
+    expect(sim.world.passable(32, 26)).toBe(false);
+    sim.world.at(32, 26).wall = false;
+    expect(sim.world.passable(32, 26)).toBe(true);
   });
 
   it('a medic treats wounds, clearing infection risk', () => {

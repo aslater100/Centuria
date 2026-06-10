@@ -1,4 +1,6 @@
 import { Rng } from './rng';
+import { fbm } from './worldgen';
+import type { TownSite } from './worldgen';
 
 export type TileKind = 'grass' | 'tree' | 'water' | 'soil' | 'rock';
 
@@ -12,6 +14,8 @@ export interface Tile {
   marked: boolean;
   /** a built palisade stands here (blocks movement) */
   wall: boolean;
+  /** soil productivity multiplier from the land itself (0.3–1.5) */
+  fertility: number;
   buildingId: number | null;
 }
 
@@ -23,12 +27,18 @@ export interface Vec {
 export const MAP_W = 64;
 export const MAP_H = 64;
 
+const DEFAULT_SITE: TownSite = {
+  cellX: 32, cellY: 32, fertility: 1, forest: 0.4, roughness: 0.2, river: true, coastal: false,
+};
+
 export class World {
   tiles: Tile[] = [];
+  site: TownSite;
 
-  constructor(rng: Rng) {
+  constructor(rng: Rng, site: TownSite = DEFAULT_SITE) {
+    this.site = site;
     for (let i = 0; i < MAP_W * MAP_H; i++) {
-      this.tiles.push({ kind: 'grass', growth: 0, sown: false, marked: false, wall: false, buildingId: null });
+      this.tiles.push({ kind: 'grass', growth: 0, sown: false, marked: false, wall: false, fertility: 1, buildingId: null });
     }
     this.generate(rng);
   }
@@ -47,19 +57,81 @@ export class World {
     return t.kind !== 'water' && t.kind !== 'rock' && t.kind !== 'tree' && !t.wall;
   }
 
+  /**
+   * The town map derives from its region cell (GDD-by-way-of-worldgen):
+   * fertility paints the soil, forest density places the timber, roughness
+   * places the stone, and a river or coast brings water — with everything
+   * that implies (irrigation, fishing, floods) downstream in the sim.
+   */
   private generate(rng: Rng): void {
-    // A pond and a stream edge; tree stands; rocky outcrops. Center clearing for the wagon start.
-    const pondX = 8 + rng.int(10);
-    const pondY = 40 + rng.int(12);
-    this.blob(pondX, pondY, 5 + rng.int(3), 'water', rng);
-    for (let i = 0; i < 14; i++) {
+    const s = this.site;
+    const seed = rng.int(1 << 30);
+
+    // Per-tile fertility: the site's base modulated by smooth noise; river
+    // and coast proximity irrigate (filled in after water placement).
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        const n = fbm(x / 18, y / 18, seed + 5, 3);
+        this.at(x, y).fertility = Math.max(0.3, Math.min(1.5, s.fertility * (0.75 + n * 0.5)));
+      }
+    }
+
+    // Water: a meandering river east of the start clearing, and/or a western sea.
+    if (s.river) {
+      for (let y = 0; y < MAP_H; y++) {
+        const center = 51 + Math.round((fbm(y / 14, 0.3, seed + 11, 3) - 0.5) * 10);
+        const width = 2 + Math.round(fbm(y / 9, 4.2, seed + 13, 2) * 2);
+        for (let x = center - Math.floor(width / 2); x <= center + Math.floor(width / 2); x++) {
+          if (this.inBounds(x, y)) this.at(x, y).kind = 'water';
+        }
+      }
+    } else {
+      const pondX = 8 + rng.int(10);
+      const pondY = 40 + rng.int(12);
+      this.blob(pondX, pondY, 5 + rng.int(3), 'water', rng);
+    }
+    if (s.coastal) {
+      for (let y = 0; y < MAP_H; y++) {
+        const edge = 3 + Math.round(fbm(y / 11, 9.1, seed + 17, 3) * 4);
+        for (let x = 0; x < edge; x++) this.at(x, y).kind = 'water';
+      }
+    }
+
+    // Irrigation: fertility rises near water
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        if (this.at(x, y).kind !== 'water') continue;
+        for (let dy = -3; dy <= 3; dy++) {
+          for (let dx = -3; dx <= 3; dx++) {
+            if (!this.inBounds(x + dx, y + dy)) continue;
+            const d = Math.abs(dx) + Math.abs(dy);
+            if (d > 0 && d <= 3) {
+              const t = this.at(x + dx, y + dy);
+              t.fertility = Math.min(1.5, t.fertility + 0.06 * (4 - d) * 0.5);
+            }
+          }
+        }
+      }
+    }
+
+    // Timber by forest density; stone by roughness
+    const treeBlobs = Math.round(6 + s.forest * 22);
+    for (let i = 0; i < treeBlobs; i++) {
       const cx = rng.int(MAP_W);
       const cy = rng.int(MAP_H);
-      if (Math.abs(cx - MAP_W / 2) < 10 && Math.abs(cy - MAP_H / 2) < 10) continue;
       this.blob(cx, cy, 2 + rng.int(4), 'tree', rng);
     }
-    for (let i = 0; i < 4; i++) {
+    const rockBlobs = Math.round(1 + s.roughness * 7);
+    for (let i = 0; i < rockBlobs; i++) {
       this.blob(rng.int(MAP_W), rng.int(MAP_H), 1 + rng.int(2), 'rock', rng);
+    }
+
+    // The wagon clearing: a guaranteed buildable heart so no start is unwinnable.
+    for (let y = 24; y <= 44; y++) {
+      for (let x = 20; x <= 44; x++) {
+        const t = this.at(x, y);
+        if (t.kind === 'tree' || t.kind === 'rock') t.kind = 'grass';
+      }
     }
   }
 

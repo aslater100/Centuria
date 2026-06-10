@@ -74,7 +74,7 @@ export const TUNING = {
   healthRegenPerHour: 0.5,
   treeWood: 5,
   treeChopWork: 60,
-  farmGrowDays: 12,
+  farmGrowDays: 10, // effective ~12 after fertility & weather drag
   farmYieldPerTile: 10,
   cookWorkPerMeal: 20,
   cookBatch: 4,
