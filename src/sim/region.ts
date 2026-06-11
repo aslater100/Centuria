@@ -103,6 +103,9 @@ export const ROLE_BONUS_DESC: Record<NotableRole, string> = {
   Reeve: '+10% immigration appeal',
 };
 
+/** Hard cap on settlements per region — see docs/design/map-scale.md. */
+export const MAX_SETTLEMENTS = 9;
+
 export class RegionSim {
   rng: Rng;
   minute: number;
@@ -560,7 +563,9 @@ export class RegionSim {
   canFoundTown(fromId: number): { ok: boolean; reason: string } {
     const t = this.settlement(fromId);
     if (!t) return { ok: false, reason: 'no settlement' };
-    if (this.settlements.length + this.expeditions.length >= 9) return { ok: false, reason: 'region fully settled' };
+    if (this.settlements.length + this.expeditions.length >= MAX_SETTLEMENTS) {
+      return { ok: false, reason: 'region fully settled (see map-scale design)' };
+    }
     if (this.popOf(t) < 24) return { ok: false, reason: `needs 24 pop (has ${Math.floor(this.popOf(t))})` };
     if (t.food < 80) return { ok: false, reason: `needs 80 food (has ${Math.floor(t.food)})` };
     if (t.wood < 80) return { ok: false, reason: `needs 80 wood (has ${Math.floor(t.wood)})` };
