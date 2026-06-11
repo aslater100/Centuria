@@ -1,0 +1,122 @@
+{
+  "nodes": [
+    {
+      "id": "steam_power",
+      "name": "Steam Power",
+      "tree": "tech",
+      "cost": 0,
+      "prereqs": [],
+      "era": 0,
+      "desc": "Steam engines drive the first mills and locomotives. Available from the start."
+    },
+    {
+      "id": "steel_industry",
+      "name": "Industrial Steel",
+      "tree": "tech",
+      "cost": 80,
+      "prereqs": ["steam_power"],
+      "era": 1900,
+      "desc": "Bessemer converters yield structural steel at scale. Rail can be laid five years early."
+    },
+    {
+      "id": "combustion_engine",
+      "name": "Combustion Engine",
+      "tree": "tech",
+      "cost": 100,
+      "prereqs": ["steam_power"],
+      "era": 1905,
+      "desc": "Petrol engines replace draft animals in industry and freight."
+    },
+    {
+      "id": "electrical_grid",
+      "name": "Electrical Grid",
+      "tree": "tech",
+      "cost": 120,
+      "prereqs": ["steel_industry"],
+      "era": 1912,
+      "desc": "Centralized generation powers factories and homes. Research rate +25%."
+    },
+    {
+      "id": "mass_production",
+      "name": "Mass Production",
+      "tree": "tech",
+      "cost": 150,
+      "prereqs": ["electrical_grid", "combustion_engine"],
+      "era": 1922,
+      "desc": "Assembly lines cut the cost of everything from nails to rifles. Build costs −15%."
+    },
+    {
+      "id": "asphalt",
+      "name": "Asphalt Paving",
+      "tree": "tech",
+      "cost": 110,
+      "prereqs": ["combustion_engine"],
+      "era": 1938,
+      "desc": "Bitumen coats the region's arteries. Highways unlock five years early."
+    },
+    {
+      "id": "atomic_age",
+      "name": "The Atomic Age",
+      "tree": "tech",
+      "cost": 200,
+      "prereqs": ["mass_production", "electrical_grid"],
+      "era": 1945,
+      "desc": "The atom is split. This era marker unlocks advanced research in the next tier."
+    },
+    {
+      "id": "common_law",
+      "name": "Common Law",
+      "tree": "civics",
+      "cost": 0,
+      "prereqs": [],
+      "era": 0,
+      "desc": "Precedent and custom give settlers predictable rights. Available from the start."
+    },
+    {
+      "id": "public_education",
+      "name": "Public Education",
+      "tree": "civics",
+      "cost": 60,
+      "prereqs": ["common_law"],
+      "era": 1900,
+      "desc": "A schoolhouse in every settlement doubles literacy. Research rate +50%."
+    },
+    {
+      "id": "free_press",
+      "name": "Free Press",
+      "tree": "civics",
+      "cost": 70,
+      "prereqs": ["public_education"],
+      "era": 1910,
+      "desc": "Newspapers carry opinion faster than officials can manage."
+    },
+    {
+      "id": "labor_law",
+      "name": "Labor Standards",
+      "tree": "civics",
+      "cost": 80,
+      "prereqs": ["free_press"],
+      "era": 1918,
+      "desc": "Regulated hours and safety rules. Grievance builds 30% more slowly."
+    },
+    {
+      "id": "income_tax",
+      "name": "Income Tax",
+      "tree": "civics",
+      "cost": 80,
+      "prereqs": ["common_law"],
+      "era": 1914,
+      "requiresState": true,
+      "desc": "Progressive levies on wages, not just trade. Treasury receives +3% of GDP monthly."
+    },
+    {
+      "id": "universal_suffrage",
+      "name": "Universal Suffrage",
+      "tree": "civics",
+      "cost": 100,
+      "prereqs": ["labor_law"],
+      "era": 1920,
+      "desc": "All adults vote; factions must win opinion, not just interests. Satisfaction +3."
+    }
+  ]
+}

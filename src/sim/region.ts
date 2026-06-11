@@ -12,6 +12,20 @@ import type { Simulation, Settler, LogEntry } from './sim';
 import { RegionMap } from './worldgen';
 import type { TownSite } from './worldgen';
 import { Weather } from './weather';
+import techTreeJson from '../data/techtree.json';
+
+export interface TechNode {
+  id: string;
+  name: string;
+  tree: 'tech' | 'civics';
+  cost: number;
+  prereqs: string[];
+  era: number;
+  requiresState?: boolean;
+  desc: string;
+}
+
+export const TECH_TREE: TechNode[] = techTreeJson.nodes as TechNode[];
 
 /** Region-tier clock runs faster: 30 game-minutes per tick (GDD §8.6). */
 export const REGION_MINUTES_PER_TICK = 30;
@@ -187,6 +201,12 @@ export class RegionSim {
   militiaLevel = 1; // 0–2: funded defense
   gdpLastMonth = 0;
   gameOver = false;
+  /** Research: nodes that have been completed (ids). Start nodes (cost 0) pre-seeded. */
+  researched: string[] = ['steam_power', 'common_law'];
+  /** The node currently being invested in, or null if idle. */
+  activeResearch: string | null = null;
+  /** Accumulated research points invested in activeResearch. */
+  researchProgress = 0;
   private droughtAnnounced = false;
   private railAnnounced = false;
   private highwayAnnounced = false;
@@ -317,14 +337,73 @@ export class RegionSim {
     return this.linkCost(aId, bId, 'highway');
   }
 
-  /** The Railworks gate: steel needs both a State and the 1912 era. */
-  railUnlocked(): boolean {
-    return this.stateProclaimed && this.year >= RAIL_ERA_YEAR;
+  /** Query whether a tech/civics node has been researched. */
+  has(id: string): boolean {
+    return this.researched.includes(id);
   }
 
-  /** The asphalt gate: paving plants need a State and the 1945 era. */
+  /** Research points generated per day; scales with population and boosts from nodes. */
+  researchRate(): number {
+    const base = this.settlements.length * 0.5 + this.totalPop() * 0.004;
+    let mult = 1;
+    if (this.has('public_education')) mult *= 1.5;
+    if (this.has('electrical_grid')) mult *= 1.25;
+    return base * mult;
+  }
+
+  /** Nodes that can be started right now: prereqs met, era reached, not yet done. */
+  availableToResearch(): TechNode[] {
+    return TECH_TREE.filter(
+      (n) =>
+        n.cost > 0 &&
+        !this.has(n.id) &&
+        n.prereqs.every((p) => this.has(p)) &&
+        this.year >= n.era &&
+        (!n.requiresState || this.stateProclaimed),
+    );
+  }
+
+  /** Set the active research target; resets progress. Returns false if not available. */
+  startResearch(id: string): boolean {
+    if (!this.availableToResearch().find((n) => n.id === id)) return false;
+    this.activeResearch = id;
+    this.researchProgress = 0;
+    return true;
+  }
+
+  /** Cancel the active research (progress is lost). */
+  cancelResearch(): void {
+    this.activeResearch = null;
+    this.researchProgress = 0;
+  }
+
+  /** Called once per game-day; drains the rate into the active node. */
+  private tickResearch(): void {
+    if (!this.activeResearch) return;
+    const node = TECH_TREE.find((n) => n.id === this.activeResearch);
+    if (!node) { this.activeResearch = null; return; }
+    this.researchProgress += this.researchRate();
+    if (this.researchProgress >= node.cost) {
+      this.researched.push(this.activeResearch);
+      const label = node.tree === 'tech' ? 'Technology' : 'Civics';
+      this.addLog(`${label} breakthrough: "${node.name}". ${node.desc.split('.')[0]}.`, 'good');
+      this.activeResearch = null;
+      this.researchProgress = 0;
+    }
+  }
+
+  /** The Railworks gate: steel needs both a State and the 1912 era.
+   *  Industrial Steel research unlocks rail five years early. */
+  railUnlocked(): boolean {
+    const threshold = this.has('steel_industry') ? RAIL_ERA_YEAR - 5 : RAIL_ERA_YEAR;
+    return this.stateProclaimed && this.year >= threshold;
+  }
+
+  /** The asphalt gate: paving plants need a State and the 1945 era.
+   *  Asphalt Paving research unlocks highways five years early. */
   highwayUnlocked(): boolean {
-    return this.stateProclaimed && this.year >= HIGHWAY_ERA_YEAR;
+    const threshold = this.has('asphalt') ? HIGHWAY_ERA_YEAR - 5 : HIGHWAY_ERA_YEAR;
+    return this.stateProclaimed && this.year >= threshold;
   }
 
   /** Built links are State works, paid from the treasury; links only upgrade. */
@@ -659,12 +738,15 @@ export class RegionSim {
         Math.max(0, (pop - t.housing) * 2) -
         (this.day - t.lastRaidDay < 10 ? 10 : 0) +
         5 * this.roleMult(t, 'Mayor') +
+        (this.has('universal_suffrage') ? 3 : 0) +
         stateTerms;
       t.satisfaction += (Math.max(0, Math.min(100, target)) - t.satisfaction) * 0.08;
-      // Grievance: heavy taxes build pressure daily; services and contentment vent it
+      // Grievance: heavy taxes build pressure daily; services and contentment vent it.
+      // Labor Standards research (labor_law) slows the build by 30%.
       if (this.stateProclaimed) {
+        const laborFactor = this.has('labor_law') ? 0.7 : 1;
         const pressure =
-          Math.max(0, this.taxRate - 0.15) * 35 - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05;
+          (Math.max(0, this.taxRate - 0.15) * 35 - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05) * laborFactor;
         t.grievance = Math.max(0, Math.min(100, t.grievance + pressure));
       }
       this.updateMarket(t);
@@ -703,6 +785,7 @@ export class RegionSim {
         'good',
       );
     }
+    this.tickResearch();
     if (this.day % 30 === 0) this.monthlyUpdate();
     if (this.day >= this.nextEventDay) {
       this.fireEvent();
@@ -879,7 +962,9 @@ export class RegionSim {
       pop * 0.05 * this.servicesLevel * serviceCost +
       pop * 0.03 * this.militiaLevel +
       this.settlements.length * 5; // administration
-    this.treasury += revenue - spending;
+    // Income Tax (civic research): a progressive levy adds 3% of GDP on top
+    const incomeTaxBonus = this.has('income_tax') ? this.gdpLastMonth * 0.03 : 0;
+    this.treasury += revenue - spending + incomeTaxBonus;
     if (this.treasury < 0) {
       this.treasury = 0;
       if (this.servicesLevel > 0) {
@@ -1257,6 +1342,9 @@ export class RegionSim {
       droughtAnnounced: this.droughtAnnounced,
       railAnnounced: this.railAnnounced,
       highwayAnnounced: this.highwayAnnounced,
+      researched: this.researched,
+      activeResearch: this.activeResearch,
+      researchProgress: this.researchProgress,
       nextId: this.nextId,
       nextEventDay: this.nextEventDay,
       townNamePool: this.townNamePool,
@@ -1289,6 +1377,9 @@ export class RegionSim {
     r.droughtAnnounced = d.droughtAnnounced;
     r.railAnnounced = d.railAnnounced;
     r.highwayAnnounced = d.highwayAnnounced ?? false;
+    r.researched = d.researched ?? ['steam_power', 'common_law'];
+    r.activeResearch = d.activeResearch ?? null;
+    r.researchProgress = d.researchProgress ?? 0;
     r.nextId = d.nextId;
     r.nextEventDay = d.nextEventDay;
     r.townNamePool = d.townNamePool;
