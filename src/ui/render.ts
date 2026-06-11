@@ -195,9 +195,15 @@ export class Renderer {
       if (this.cam.selectedBuilding === b.id) this.outline(ox + b.x * TILE, oy + b.y * TILE, def.w * TILE, def.h * TILE);
     }
 
-    // Ground items
+    // Graves (over the burial-ground plot), then ground items, then the unburied
+    for (const gr of sim.graves) {
+      g.drawImage(this.sprites.grave, ox + gr.x * TILE, oy + gr.y * TILE);
+    }
     for (const it of sim.items) {
       g.drawImage(this.sprites.items[it.kind], ox + it.x * TILE, oy + it.y * TILE);
+    }
+    for (const c of sim.corpses) {
+      g.drawImage(this.sprites.corpse, ox + c.x * TILE, oy + c.y * TILE);
     }
 
     // Raiders

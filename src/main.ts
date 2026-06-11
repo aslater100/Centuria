@@ -47,6 +47,9 @@ let dioramaOpen = false;
 let region: RegionSim | null = null;
 let regionView: RegionView | null = null;
 
+// A lost colony offers a clean slate: reload re-seeds from the clock.
+hud.onRestart = () => location.reload();
+
 hud.onFoundTown = () => {
   region = RegionSim.fromTown(sim, 8, 80, 80);
   (window as unknown as { region: RegionSim }).region = region;

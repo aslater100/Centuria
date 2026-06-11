@@ -97,7 +97,9 @@ export interface SpriteSet {
   roadPlans: Record<string, HTMLCanvasElement>;
   settler: HTMLCanvasElement[][];
   raider: HTMLCanvasElement[];
-  items: Record<'wood' | 'grain' | 'meal' | 'stone', HTMLCanvasElement>;
+  items: Record<'wood' | 'grain' | 'meal' | 'stone' | 'clothes', HTMLCanvasElement>;
+  grave: HTMLCanvasElement;
+  corpse: HTMLCanvasElement;
   buildings: Record<string, HTMLCanvasElement>;
   blueprints: Record<string, HTMLCanvasElement>;
 }
@@ -361,6 +363,40 @@ function buildingSprite(defId: string, w: number, h: number, ghost: boolean): HT
     g.fillRect(1, 1, W - 2, H - 2);
     g.fillStyle = P.soilDark;
     for (let y = 3; y < H; y += 5) g.fillRect(1, y, W - 2, 2);
+  } else if (defId === 'hearth') {
+    // stone fire ring with a live flame
+    g.fillStyle = P.grassB;
+    g.fillRect(1, 1, W - 2, H - 2);
+    g.fillStyle = P.rockDark;
+    g.fillRect(3, 3, W - 6, H - 6);
+    g.fillStyle = P.rock;
+    g.fillRect(3, 3, 3, 3);
+    g.fillRect(W - 6, 3, 3, 3);
+    g.fillRect(3, H - 6, 3, 3);
+    g.fillRect(W - 6, H - 6, 3, 3);
+    if (!ghost) {
+      g.fillStyle = '#c25b2e';
+      g.fillRect(6, 6, 4, 5);
+      g.fillStyle = '#e8a44a';
+      g.fillRect(7, 5, 2, 4);
+      g.fillStyle = '#f0d060';
+      g.fillRect(7, 7, 1, 2);
+    }
+  } else if (defId === 'graveyard') {
+    // fenced earth plot
+    g.fillStyle = P.grassC;
+    g.fillRect(1, 1, W - 2, H - 2);
+    g.fillStyle = P.soilDark;
+    g.fillRect(3, 3, W - 6, H - 6);
+    g.fillStyle = wallD;
+    for (let x = 1; x < W - 1; x += 4) {
+      g.fillRect(x, 1, 1, 3);
+      g.fillRect(x, H - 4, 1, 3);
+    }
+    for (let y = 1; y < H - 1; y += 4) {
+      g.fillRect(1, y, 3, 1);
+      g.fillRect(W - 4, y, 3, 1);
+    }
   } else {
     // walls visible at the base, roof above — reads as a structure, not a blob
     const roofH = Math.floor(H * 0.55);
@@ -394,7 +430,7 @@ function buildingSprite(defId: string, w: number, h: number, ghost: boolean): HT
   return c;
 }
 
-function itemSprite(kind: 'wood' | 'grain' | 'meal' | 'stone'): HTMLCanvasElement {
+function itemSprite(kind: 'wood' | 'grain' | 'meal' | 'stone' | 'clothes'): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = TILE;
   c.height = TILE;
@@ -414,6 +450,14 @@ function itemSprite(kind: 'wood' | 'grain' | 'meal' | 'stone'): HTMLCanvasElemen
     g.fillRect(5, 5, 6, 5);
     g.fillStyle = P.rockLight;
     g.fillRect(6, 5, 3, 2);
+  } else if (kind === 'clothes') {
+    // a folded stack of woven cloth
+    g.fillStyle = P.cloth2;
+    g.fillRect(3, 7, 10, 4);
+    g.fillStyle = P.cloth3;
+    g.fillRect(4, 5, 8, 3);
+    g.fillStyle = P.cloth1;
+    g.fillRect(5, 3, 6, 3);
   } else {
     const col = kind === 'grain' ? P.grain : P.meal;
     g.fillStyle = col;
@@ -422,6 +466,46 @@ function itemSprite(kind: 'wood' | 'grain' | 'meal' | 'stone'): HTMLCanvasElemen
     g.fillStyle = P.outline;
     g.fillRect(4, 11, 8, 1);
   }
+  return c;
+}
+
+/** A low earth mound with a wooden cross — drawn over burial-ground tiles. */
+function graveSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE;
+  c.height = TILE;
+  const g = c.getContext('2d')!;
+  g.fillStyle = P.shadow;
+  g.fillRect(3, 12, 11, 3);
+  g.fillStyle = P.soilDark;
+  g.fillRect(4, 10, 9, 4);
+  g.fillStyle = P.soil;
+  g.fillRect(5, 9, 7, 3);
+  g.fillStyle = P.woodDark;
+  g.fillRect(7, 2, 2, 9);
+  g.fillRect(4, 4, 8, 2);
+  g.fillStyle = P.wood;
+  g.fillRect(7, 2, 1, 9);
+  g.fillRect(4, 4, 8, 1);
+  return c;
+}
+
+/** A fallen settler awaiting burial. */
+function corpseSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE;
+  c.height = TILE;
+  const g = c.getContext('2d')!;
+  g.fillStyle = P.shadow;
+  g.fillRect(1, 10, 14, 4);
+  g.fillStyle = P.cloth1;
+  g.fillRect(4, 8, 9, 4); // body lying on its side
+  g.fillStyle = P.skinB;
+  g.fillRect(1, 8, 3, 4); // head
+  g.fillStyle = P.hairA;
+  g.fillRect(1, 7, 3, 2);
+  g.fillStyle = P.wallDark;
+  g.fillRect(13, 9, 2, 3); // boots
   return c;
 }
 
@@ -464,7 +548,10 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number }[
       grain: itemSprite('grain'),
       meal: itemSprite('meal'),
       stone: itemSprite('stone'),
+      clothes: itemSprite('clothes'),
     },
+    grave: graveSprite(),
+    corpse: corpseSprite(),
     buildings,
     blueprints,
   };
