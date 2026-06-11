@@ -9,6 +9,7 @@ import { Hud } from './ui/hud';
 import { RegionView } from './ui/regionview';
 import { TILE } from './ui/sprites';
 import { Sfx } from './ui/audio';
+import { Music } from './ui/music';
 
 const root = document.getElementById('app')!;
 const canvas = document.createElement('canvas');
@@ -78,12 +79,13 @@ resize();
 window.addEventListener('resize', resize);
 
 const sfx = new Sfx();
+const music = new Music();
 // Browsers gate audio behind a user gesture; the first input unlocks it.
-window.addEventListener('mousedown', () => sfx.unlock(), { once: true });
-window.addEventListener('keydown', () => sfx.unlock(), { once: true });
+window.addEventListener('mousedown', () => { sfx.unlock(); music.unlock(); }, { once: true });
+window.addEventListener('keydown', () => { sfx.unlock(); music.unlock(); }, { once: true });
 
 const renderer = new Renderer(canvas, sim, cam);
-const hud = new Hud(root, sim, cam, sfx);
+const hud = new Hud(root, sim, cam, sfx, music);
 
 hud.onSave = () => {
   try {
@@ -106,13 +108,20 @@ hud.hasSave = () => {
   }
 };
 
+// The soundtrack's tension scalar: bumped by alarming log lines, decaying each
+// frame, so the music swells into a crisis and settles once it passes.
+let tension = 0;
+
 // Event sounds: watch the colony log and voice the moments that matter.
 let sfxLogLen = sim.log.length;
 function playLogSounds(): void {
   if (sim.log.length === sfxLogLen) return;
   const fresh = sim.log.slice(sfxLogLen);
   sfxLogLen = sim.log.length;
-  if (fresh.some((l) => l.text.startsWith('RAID!') || l.text.startsWith('Wolves'))) return sfx.horn();
+  const danger = fresh.some((l) => l.text.startsWith('RAID!') || l.text.startsWith('Wolves'));
+  if (danger) tension = 1;
+  else if (fresh.some((l) => l.kind === 'bad')) tension = Math.max(tension, 0.5);
+  if (danger) return sfx.horn();
   if (fresh.some((l) => l.text.includes('has died'))) return sfx.knell();
   if (fresh.some((l) => l.kind === 'bad')) return sfx.thud();
   if (fresh.some((l) => l.kind === 'good')) return sfx.chime();
@@ -361,6 +370,13 @@ function loop(now: number): void {
       dioramaOpen = !dioramaOpen;
     };
   }
+
+  // Soundtrack: era by year, ambient-only when paused, swelling with tension.
+  if (mode === 'town' && sim.raidActive) tension = 1;
+  else tension = Math.max(0, tension - dt * 0.12); // ~8s to settle from a peak
+  const year = mode === 'region' && region ? region.year : sim.year;
+  music.update({ year, paused: hud.paused, tension });
+
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

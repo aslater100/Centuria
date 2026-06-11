@@ -72,11 +72,22 @@ PR): `highway` kind (capacity 900, £3/terrain-cost, £0.15/cell/mo)
 behind State + 1945; KIND_RANK puts highway above rail so paving
 *replaces* steel — the stranded-asset choice is the player's; asphalt
 art with dashed centerline and shuttling trucks. The transportation
-era arc (trail→road→rail→highway) is now fully built. Open ideas
-consistent with the GDD (minus whatever the two in-flight PRs land):
-town-tier fishing jobs, music/ambience, town-tier event variety,
-maglev/automated freight (2000+, speculative-era, transportation.md
-§5).
+era arc (trail→road→rail→highway) is now fully built. Music layer
+shipped (v0.10.0 PR): a procedural era-aware soundtrack in
+`src/ui/music.ts` — no assets, every note a WebAudio oscillator like
+the SFX synth. A lookahead scheduler lays a chord pad, bassline,
+arpeggiated lead and light percussion; `eraForYear()` ages the
+instrumentation across six date windows (ragtime chiptune → chip-jazz
+→ mid-century synth strings → analog → electronica → speculative
+hybrid, GDD §3.3). Dynamic mixing: a `tension` scalar in main (bumped
+by raid/wolf/bad logs and `sim.raidActive`, decaying ~8s) swells the
+lead/drums; paused drops to the ambient pad alone. Independent
+`Music: ON/OFF` menu toggle persisted under `centuria-music` (separate
+from the SFX `Sound:` toggle). Open ideas consistent with the GDD
+(minus whatever the two in-flight PRs land): town-tier fishing jobs,
+diegetic soundscape layers (§3.3 — hammering/whistles/unrest under the
+music), town-tier event variety, maglev/automated freight (2000+,
+speculative-era, transportation.md §5).
 
 ## Architecture notes for M6c
 
