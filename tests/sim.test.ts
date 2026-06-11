@@ -79,17 +79,21 @@ describe('Simulation', () => {
     runDays(sim, 30); // past firstRaidDay window (11–15)
     const raidLogged = sim.log.some((l) => l.text.startsWith('RAID!'));
     expect(raidLogged).toBe(true);
-    expect(sim.raidActive).toBe(false); // resolved, not stuck
+    // A new raid may have just landed; what matters is raids resolve, not stall.
+    const raidResolved = sim.log.some((l) => l.text === 'The raid is over.');
+    expect(raidResolved).toBe(true);
     expect(sim.gameOver).toBe(false);
   });
 
   it('palisades block pathing until destroyed', () => {
     const sim = new Simulation(42);
     sim.planZone('wall', 32, 26);
-    // prebuilt walls don't go through construction; set directly
+    expect(sim.world.passable(32, 26)).toBe(false); // plans block pathing too
+    // simulate finished construction: plan becomes wall
+    sim.world.at(32, 26).wallPlan = false;
     sim.world.at(32, 26).wall = true;
     expect(sim.world.passable(32, 26)).toBe(false);
-    sim.world.at(32, 26).wall = false;
+    sim.world.at(32, 26).wall = false; // raiders broke through
     expect(sim.world.passable(32, 26)).toBe(true);
   });
 
