@@ -58,6 +58,8 @@ export interface Settlement {
   prices: MarketPrices; // local market, £/unit (GDD §5.2 first slice)
   /** Adaptation works (GDD §8.2): a raised coastal town shrugs off the rising sea. */
   seaWall?: boolean;
+  /** Per-town growth/event log: last 12 entries, newest first. */
+  recentEvents: { day: number; text: string; kind: 'good' | 'bad' | 'info' }[];
 }
 
 /** Local markets (GDD §5.2, first slice): each town prices the two goods
@@ -1525,6 +1527,7 @@ export class RegionSim {
       strikeUntil: -1,
       grievance: 0,
       prices: defaultPrices(),
+      recentEvents: [],
     };
     region.settlements.push(home);
 
@@ -1627,11 +1630,15 @@ export class RegionSim {
         t.food *= 0.85;
         t.satisfaction -= 6;
         this.addLog(`The river floods at ${t.name} — stores spoiled, fields under water.`, 'bad');
+        this.townEvent(t, 'River flood — stores spoiled, fields under water.', 'bad');
       }
       // Housing grows when wood allows
       if (t.housing < pop + 4 && t.wood >= 20) {
         t.wood -= 20;
         t.housing += 3;
+        if (Math.round(t.housing) % 15 === 0) {
+          this.townEvent(t, `New dwellings raised — housing capacity now ${Math.floor(t.housing)}.`, 'good');
+        }
       }
       // Satisfaction: food security, crowding, raid fear, mayor — plus,
       // after Incorporation, the politics of taxes and services
@@ -1674,6 +1681,7 @@ export class RegionSim {
         t.food = 0;
         if (starved > 0.5 && this.rng.chance(0.2)) {
           this.addLog(`Hunger stalks ${t.name} — the granary is empty.`, 'bad');
+          this.townEvent(t, 'Granary empty — hunger in the streets.', 'bad');
         }
       }
     }
@@ -1757,6 +1765,17 @@ export class RegionSim {
         b[1] += arrivals * 0.6;
         b[2] += arrivals * 0.3;
         b[0] += arrivals * 0.1;
+        if (arrivals >= 3 && this.rng.chance(0.25)) {
+          this.townEvent(t, `${Math.round(arrivals)} settlers drawn in by word of good land.`, 'good');
+        }
+      }
+      // Population milestone events
+      const popNow = Math.round(this.popOf(t));
+      for (const milestone of [50, 100, 200, 500, 1000, 2000]) {
+        const popBefore = popNow - Math.round(b.reduce((a, x) => a + x, 0) * 0.001);
+        if (popBefore < milestone && popNow >= milestone) {
+          this.townEvent(t, `Population reaches ${milestone} — a true town now.`, 'good');
+        }
       }
     }
     this.migrate();
@@ -2056,11 +2075,13 @@ export class RegionSim {
           : `Raiders struck ${t.name} and were driven off by the militia.`) + foreignArms,
         'good',
       );
+      this.townEvent(t, 'Raiders repelled by the militia.', 'good');
     } else {
       const losses = Math.min(this.popOf(t) * 0.06, strength - militia);
       this.removePop(t, losses);
       t.food *= 0.85;
       this.addLog(`Raiders overran ${t.name}'s pickets — ${Math.max(1, Math.round(losses))} lost, stores plundered.` + foreignArms, 'bad');
+      this.townEvent(t, `Raid — ${Math.max(1, Math.round(losses))} killed, stores plundered.`, 'bad');
     }
   }
 
@@ -2070,11 +2091,13 @@ export class RegionSim {
     t.cohorts.bands[0] *= 0.97;
     t.satisfaction -= 5;
     this.addLog(`Fever in ${t.name} — ${sick} bedridden; the old and the young suffer worst.`, 'bad');
+    this.townEvent(t, `Fever — ${sick} bedridden; the old and the young suffer worst.`, 'bad');
   }
 
   private eventHarvest(t: Settlement): void {
     t.food += this.workersOf(t) * 4;
     this.addLog(`A bumper harvest in ${t.name}.`, 'good');
+    this.townEvent(t, 'Bumper harvest — the granaries overflow.', 'good');
   }
 
   private eventWagonTrain(t: Settlement): void {
@@ -2082,11 +2105,13 @@ export class RegionSim {
     t.cohorts.bands[1] += wave * 0.7;
     t.cohorts.bands[2] += wave * 0.3;
     this.addLog(`A wagon train of ${wave} arrives at ${t.name}, drawn by word of the frontier.`, 'good');
+    this.townEvent(t, `Wagon train arrives — ${wave} new settlers join the town.`, 'good');
   }
 
   private eventFair(t: Settlement): void {
     t.satisfaction = Math.min(100, t.satisfaction + 6);
     this.addLog(`${t.name} holds a harvest fair. Spirits lift.`, 'good');
+    this.townEvent(t, 'Harvest fair held — spirits lift across the town.', 'info');
   }
 
   /** Highwaymen work the routes — but they rob freight, not subsistence:
@@ -2236,6 +2261,7 @@ export class RegionSim {
           strikeUntil: -1,
           grievance: 0,
           prices: defaultPrices(),
+          recentEvents: [],
         };
         this.settlements.push(town);
         this.expeditions = this.expeditions.filter((o) => o !== e);
@@ -3656,7 +3682,7 @@ export class RegionSim {
     const d = JSON.parse(json);
     const r = new RegionSim(sim.rng, d.minute, sim.regionMap, sim.weather);
     // pre-market saves carry no prices: open those towns at the base rates
-    r.settlements = (d.settlements as Settlement[]).map((s) => ({ ...s, prices: s.prices ?? defaultPrices() }));
+    r.settlements = (d.settlements as Settlement[]).map((s) => ({ ...s, prices: s.prices ?? defaultPrices(), recentEvents: s.recentEvents ?? [] }));
     r.notables = d.notables;
     r.expeditions = d.expeditions;
     r.routes = d.routes;
@@ -3734,5 +3760,11 @@ export class RegionSim {
   addLog(text: string, kind: LogEntry['kind']): void {
     this.log.push({ day: this.day, text, kind });
     if (this.log.length > 200) this.log.shift();
+  }
+
+  /** Push a per-town event (kept newest-first, capped at 12). */
+  private townEvent(t: Settlement, text: string, kind: 'good' | 'bad' | 'info'): void {
+    t.recentEvents.unshift({ day: this.day, text, kind });
+    if (t.recentEvents.length > 12) t.recentEvents.pop();
   }
 }

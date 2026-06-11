@@ -116,6 +116,7 @@ export class Hud {
   onRestart: (() => void) | null = null;
   onSave: (() => boolean) | null = null;
   onLoad: (() => void) | null = null;
+  onQuit: ((save: boolean) => void) | null = null;
   hasSave: (() => boolean) | null = null;
   menuOpen = false;
   private pausedBeforeMenu = false;
@@ -238,6 +239,13 @@ export class Hud {
         case 'menu-mute': this.sfx?.toggleMuted(); this.renderMenu(); break;
         case 'menu-music': this.music?.toggle(); this.music?.unlock(); this.renderMenu(); break;
         case 'menu-soundscape': this.soundscape?.toggle(); this.soundscape?.unlock(); this.renderMenu(); break;
+        case 'menu-save-quit':
+          if (this.onSave?.()) this.onQuit?.(true);
+          else this.renderMenu('Save failed — check storage.');
+          break;
+        case 'menu-quit':
+          if (confirm('Quit without saving? Unsaved progress will be lost.')) this.onQuit?.(false);
+          break;
         case 'menu-restart':
           if (confirm('Abandon this colony and start over?')) this.onRestart?.();
           break;
@@ -431,6 +439,8 @@ export class Hud {
       `<button id="menu-mute">${this.sfx?.muted ? 'Sound: OFF' : 'Sound: ON'}</button>` +
       `<button id="menu-music">${this.music?.enabled ? 'Music: ON' : 'Music: OFF'}</button>` +
       `<button id="menu-soundscape">${this.soundscape?.enabled ? 'Ambience: ON' : 'Ambience: OFF'}</button>` +
+      `<button id="menu-save-quit"${canSave ? '' : ' disabled'}>Save &amp; Quit</button>` +
+      `<button id="menu-quit">Quit without Saving</button>` +
       `<button id="menu-restart">Restart Colony</button>` +
       `</div>`);
   }
