@@ -6,6 +6,7 @@ import type { Simulation, Settler } from '../sim/sim';
 import { BUILDING_DEFS, buildingDef, traitDef, WORK_KINDS, TUNING } from '../sim/defs';
 import type { WorkKind } from '../sim/defs';
 import type { Camera } from './render';
+import type { PaintKind } from '../sim/world';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, parent: HTMLElement): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -88,23 +89,26 @@ export class Hud {
     chop.onclick = () => {
       this.cam.chopMode = !this.cam.chopMode;
       this.cam.placing = null;
-      this.cam.placingRoad = null;
+      this.cam.placingZone = null;
       this.refreshPaletteState();
     };
-    // Roads (drag to paint; click a plan to cancel it)
-    const roadDefs: [import('../sim/world').RoadKind, string, string][] = [
+    // Zones and roads (drag to paint)
+    const zoneDefs: [PaintKind, string, string][] = [
+      ['farm', 'Farm Zone', 'Paint farmable soil tiles; settlers sow and harvest automatically'],
+      ['stockpile', 'Stockpile Zone', 'Designate tiles as storage; settlers haul here'],
+      ['wall', 'Palisade Wall', 'Paint wall tiles; workers build them with wood'],
       ['dirt', 'Dirt Path (free)', 'Quick ruts: ×1.3 speed, mud in rain'],
       ['plank', 'Plank Road (1w)', 'All-weather timber: ×1.6 speed'],
       ['gravel', 'Gravel Road (1s)', 'Best surface: ×1.8 speed (needs quarried stone)'],
       ['bridge', 'Bridge (4w)', 'The only way across water'],
     ];
-    for (const [kind, label, desc] of roadDefs) {
+    for (const [kind, label, desc] of zoneDefs) {
       const b = el('button', 'pal-btn', this.palette);
       b.textContent = label;
       b.title = desc;
-      b.dataset.def = `road-${kind}`;
+      b.dataset.def = `zone-${kind}`;
       b.onclick = () => {
-        this.cam.placingRoad = this.cam.placingRoad === kind ? null : kind;
+        this.cam.placingZone = this.cam.placingZone === kind ? null : kind;
         this.cam.placing = null;
         this.cam.chopMode = false;
         this.refreshPaletteState();
@@ -171,7 +175,7 @@ export class Hud {
       const active =
         b.dataset.def === this.cam.placing ||
         (b.dataset.def === 'chop' && this.cam.chopMode) ||
-        b.dataset.def === `road-${this.cam.placingRoad}` ||
+        b.dataset.def === `zone-${this.cam.placingZone}` ||
         (b.dataset.def === 'overlay-traffic' && this.cam.overlay === 'traffic');
       b.classList.toggle('active', active);
     }

@@ -21,7 +21,7 @@ const cam: Camera = {
   x: (MAP_W * TILE) / 2 - window.innerWidth / 2,
   y: (MAP_H * TILE) / 2 - window.innerHeight / 2,
   placing: null,
-  placingRoad: null,
+  placingZone: null,
   chopMode: false,
   overlay: 'none',
   mouseTile: { x: 0, y: 0 },
@@ -72,7 +72,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key === '3') hud.speed = 8;
   if (e.key === 'Escape') {
     cam.placing = null;
-    cam.placingRoad = null;
+    cam.placingZone = null;
     cam.chopMode = false;
     cam.selectedSettler = null;
     cam.selectedBuilding = null;
@@ -83,12 +83,17 @@ window.addEventListener('keyup', (e) => keys.delete(e.key));
 
 canvas.addEventListener('mousemove', (e) => {
   cam.mouseTile = renderer.tileAt(e.clientX, e.clientY);
-  // drag-paint roads and chop/quarry marks
+  // drag-paint zones/roads and chop/quarry marks
   if (e.buttons === 1 && mode === 'town') {
     const t = cam.mouseTile;
-    if (cam.placingRoad && !paintedTiles.has(`${t.x},${t.y}`)) {
+    if (cam.placingZone && !paintedTiles.has(`${t.x},${t.y}`)) {
       paintedTiles.add(`${t.x},${t.y}`);
-      sim.planRoad(cam.placingRoad, t.x, t.y);
+      const kind = cam.placingZone;
+      if (kind === 'dirt' || kind === 'plank' || kind === 'gravel' || kind === 'bridge') {
+        sim.planRoad(kind, t.x, t.y);
+      } else {
+        sim.planZone(kind, t.x, t.y);
+      }
     } else if (cam.chopMode && !paintedTiles.has(`${t.x},${t.y}`)) {
       paintedTiles.add(`${t.x},${t.y}`);
       sim.markTree(t.x, t.y);
@@ -115,8 +120,13 @@ canvas.addEventListener('click', (e) => {
     }
     return;
   }
-  if (cam.placingRoad) {
-    if (!paintedTiles.has(`${t.x},${t.y}`)) sim.planRoad(cam.placingRoad, t.x, t.y);
+  if (cam.placingZone) {
+    const kind = cam.placingZone;
+    if (kind === 'dirt' || kind === 'plank' || kind === 'gravel' || kind === 'bridge') {
+      if (!paintedTiles.has(`${t.x},${t.y}`)) sim.planRoad(kind, t.x, t.y);
+    } else {
+      if (!paintedTiles.has(`${t.x},${t.y}`)) sim.planZone(kind, t.x, t.y);
+    }
     return;
   }
   if (cam.chopMode) {
@@ -138,6 +148,14 @@ canvas.addEventListener('click', (e) => {
     const id = sim.world.at(t.x, t.y).buildingId;
     if (id !== null) cam.selectedBuilding = id;
   }
+});
+
+// Right-click to bulldoze/cancel zones
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (mode !== 'town') return;
+  const t = renderer.tileAt(e.clientX, e.clientY);
+  sim.bulldozeTile(t.x, t.y);
 });
 
 // ---- main loop: fixed-timestep sim, rAF render ----

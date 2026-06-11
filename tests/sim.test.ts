@@ -8,12 +8,20 @@ function runDays(sim: Simulation, days: number): void {
   for (let i = 0; i < days * ticksPerDay; i++) sim.tick();
 }
 
+function paintFarm(sim: Simulation, x: number, y: number, w: number, h: number): void {
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) {
+      sim.planZone('farm', x + dx, y + dy);
+    }
+  }
+}
+
 describe('Simulation', () => {
   it('founds a colony of 12 with starting stocks', () => {
     const sim = new Simulation(42);
     expect(sim.settlers).toHaveLength(12);
     expect(sim.stock.meal).toBeGreaterThan(0);
-    expect(sim.buildings.some((b) => b.built && b.defId === 'stockpile')).toBe(true);
+    expect(sim.world.tiles.some((t) => t.stockpileZone)).toBe(true);
   });
 
   it('is deterministic for a given seed', () => {
@@ -37,9 +45,9 @@ describe('Simulation', () => {
 
   it('farms sown in spring sustain the colony past the wagon provisions', () => {
     const sim = new Simulation(42);
-    sim.placeBuilding('farm', 24, 36);
-    sim.placeBuilding('farm', 28, 36);
-    sim.placeBuilding('farm', 32, 36);
+    paintFarm(sim, 24, 36, 3, 3);
+    paintFarm(sim, 28, 36, 3, 3);
+    paintFarm(sim, 32, 36, 3, 3);
     sim.placeBuilding('kitchen', 38, 32);
     runDays(sim, TUNING.farmGrowDays + 14);
     expect(sim.world.tiles.some((t) => t.kind === 'soil')).toBe(true);
@@ -64,9 +72,9 @@ describe('Simulation', () => {
 
   it('raids arrive, are fought off or leave, and the colony endures', () => {
     const sim = new Simulation(42);
-    sim.placeBuilding('farm', 24, 36);
-    sim.placeBuilding('farm', 28, 36);
-    sim.placeBuilding('farm', 32, 36);
+    paintFarm(sim, 24, 36, 3, 3);
+    paintFarm(sim, 28, 36, 3, 3);
+    paintFarm(sim, 32, 36, 3, 3);
     sim.placeBuilding('kitchen', 38, 32);
     runDays(sim, 30); // past firstRaidDay window (11–15)
     const raidLogged = sim.log.some((l) => l.text.startsWith('RAID!'));
@@ -77,9 +85,8 @@ describe('Simulation', () => {
 
   it('palisades block pathing until destroyed', () => {
     const sim = new Simulation(42);
-    const b = sim.placeBuilding('palisade', 32, 26, true); // inside the wagon clearing
-    expect(b).not.toBeNull();
-    // prebuilt palisades don't set the wall flag via construction; set directly
+    sim.planZone('wall', 32, 26);
+    // prebuilt walls don't go through construction; set directly
     sim.world.at(32, 26).wall = true;
     expect(sim.world.passable(32, 26)).toBe(false);
     sim.world.at(32, 26).wall = false;
@@ -102,9 +109,9 @@ describe('Simulation', () => {
 
   it('settlers recreating together become friends, deepening grief', () => {
     const sim = new Simulation(42);
-    sim.placeBuilding('farm', 24, 36);
-    sim.placeBuilding('farm', 28, 36);
-    sim.placeBuilding('farm', 32, 36);
+    paintFarm(sim, 24, 36, 3, 3);
+    paintFarm(sim, 28, 36, 3, 3);
+    paintFarm(sim, 32, 36, 3, 3);
     sim.placeBuilding('kitchen', 38, 32);
     sim.placeBuilding('hall', 24, 28);
     runDays(sim, 25);
@@ -196,10 +203,10 @@ describe('Simulation', () => {
 
   it('colony survives 60 days with basic infrastructure on default seeds', () => {
     const sim = new Simulation(1001);
-    sim.placeBuilding('farm', 24, 36);
-    sim.placeBuilding('farm', 28, 36);
-    sim.placeBuilding('farm', 24, 40);
-    sim.placeBuilding('farm', 28, 40);
+    paintFarm(sim, 24, 36, 3, 3);
+    paintFarm(sim, 28, 36, 3, 3);
+    paintFarm(sim, 24, 40, 3, 3);
+    paintFarm(sim, 28, 40, 3, 3);
     sim.placeBuilding('kitchen', 38, 32);
     sim.placeBuilding('house', 23, 28);
     sim.placeBuilding('house', 40, 28);

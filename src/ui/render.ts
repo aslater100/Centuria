@@ -13,7 +13,7 @@ export interface Camera {
   x: number; // pixels
   y: number;
   placing: string | null; // building def id when in placement mode
-  placingRoad: import('../sim/world').RoadKind | null;
+  placingZone: import('../sim/world').PaintKind | null;
   chopMode: boolean;
   overlay: 'none' | 'traffic';
   mouseTile: { x: number; y: number };
@@ -151,9 +151,11 @@ export class Renderer {
         }
         if (t.road) g.drawImage(sprites.roads[t.road], px, py);
         else if (t.roadPlan) g.drawImage(sprites.roadPlans[t.roadPlan], px, py);
+        if (t.stockpileZone && !t.road) g.drawImage(sprites.stockpileZone, px, py);
+        if (t.wallPlan) g.drawImage(sprites.wallPlan, px, py);
       }
     }
-    // Pass 2: standing terrain (rocks, then trees with overhanging canopies)
+    // Pass 2: standing terrain (rocks, palisades, then trees with overhanging canopies)
     for (let y = 0; y < MAP_H; y++) {
       for (let x = 0; x < MAP_W; x++) {
         const t = sim.world.at(x, y);
@@ -161,7 +163,21 @@ export class Renderer {
         const py = oy + y * TILE;
         if (px < -TILE * 2 || py < -TILE * 2 || px > this.canvas.width || py > this.canvas.height) continue;
         if (t.kind === 'rock') g.drawImage(t.marked ? sprites.rockMarked : sprites.rock, px, py);
+        else if (t.wall) g.drawImage(sprites.palisade, px, py);
         else if (t.kind === 'tree') g.drawImage(t.marked ? sprites.treeMarked : sprites.tree, px - 2, py - 6);
+      }
+    }
+    // Wall HP bars
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        const t = sim.world.at(x, y);
+        if (t.wall && t.wallHp < TUNING.wallMaxHp) {
+          const px = ox + x * TILE;
+          const py = oy + y * TILE;
+          if (px >= -TILE && py >= -TILE && px < this.canvas.width && py < this.canvas.height) {
+            this.hpBar(px, py - 3, t.wallHp / TUNING.wallMaxHp);
+          }
+        }
       }
     }
 
@@ -180,7 +196,6 @@ export class Renderer {
     // Buildings (built solid, blueprints ghosted)
     for (const b of sim.buildings) {
       const def = buildingDef(b.defId);
-      if (def.provides === 'farm') continue; // farms render as soil tiles
       const img = b.built ? this.sprites.buildings[b.defId] : this.sprites.blueprints[b.defId];
       g.drawImage(img, ox + b.x * TILE, oy + b.y * TILE);
       if (!b.built) {
@@ -288,10 +303,20 @@ export class Renderer {
       const def = buildingDef(cam.placing);
       g.strokeStyle = ok ? '#7ac26a' : '#c25b2e';
       g.strokeRect(ox + cam.mouseTile.x * TILE + 0.5, oy + cam.mouseTile.y * TILE + 0.5, def.w * TILE - 1, def.h * TILE - 1);
-    } else if (cam.placingRoad) {
-      const ok = sim.world.inBounds(cam.mouseTile.x, cam.mouseTile.y);
-      if (ok) g.drawImage(this.sprites.roadPlans[cam.placingRoad], ox + cam.mouseTile.x * TILE, oy + cam.mouseTile.y * TILE);
-      g.strokeStyle = '#9cc4e4';
+    } else if (cam.placingZone) {
+      const isRoad = cam.placingZone === 'dirt' || cam.placingZone === 'plank' ||
+                     cam.placingZone === 'gravel' || cam.placingZone === 'bridge';
+      if (isRoad) {
+        g.drawImage(this.sprites.roadPlans[cam.placingZone as any], ox + cam.mouseTile.x * TILE, oy + cam.mouseTile.y * TILE);
+        g.strokeStyle = '#9cc4e4';
+      } else {
+        g.globalAlpha = 0.6;
+        const zoneColors: Record<string, string> = { farm: '#7ac26a', stockpile: '#e8d27a', wall: '#c25b2e' };
+        g.fillStyle = zoneColors[cam.placingZone] || '#999';
+        g.fillRect(ox + cam.mouseTile.x * TILE, oy + cam.mouseTile.y * TILE, TILE, TILE);
+        g.globalAlpha = 1;
+        g.strokeStyle = '#9cc4e4';
+      }
       g.strokeRect(ox + cam.mouseTile.x * TILE + 0.5, oy + cam.mouseTile.y * TILE + 0.5, TILE - 1, TILE - 1);
     } else if (cam.chopMode) {
       g.strokeStyle = '#c25b2e';

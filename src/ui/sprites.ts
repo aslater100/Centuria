@@ -95,6 +95,9 @@ export interface SpriteSet {
   soilRipe: HTMLCanvasElement;
   roads: Record<string, HTMLCanvasElement>;
   roadPlans: Record<string, HTMLCanvasElement>;
+  stockpileZone: HTMLCanvasElement;
+  wallPlan: HTMLCanvasElement;
+  palisade: HTMLCanvasElement;
   settler: HTMLCanvasElement[][];
   raider: HTMLCanvasElement[];
   items: Record<'wood' | 'grain' | 'meal' | 'stone' | 'clothes', HTMLCanvasElement>;
@@ -509,6 +512,65 @@ function corpseSprite(): HTMLCanvasElement {
   return c;
 }
 
+/** Stockpile zone: floor pattern with diagonal lines. */
+function stockpileZoneTile(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE;
+  c.height = TILE;
+  const g = c.getContext('2d')!;
+  g.fillStyle = P.floor;
+  g.fillRect(0, 0, TILE, TILE);
+  g.fillStyle = P.plankDark;
+  g.globalAlpha = 0.4;
+  for (let i = 0; i < 32; i += 4) {
+    g.fillRect(i, 0, 1, TILE);
+  }
+  for (let i = 0; i < 32; i += 4) {
+    g.fillRect(0, i, TILE, 1);
+  }
+  g.globalAlpha = 1;
+  return c;
+}
+
+/** Wall plan: ghost palisade outline. */
+function wallPlanTile(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE;
+  c.height = TILE;
+  const g = c.getContext('2d')!;
+  g.fillStyle = P.grass;
+  g.globalAlpha = 0.5;
+  g.fillStyle = '#c25b2e';
+  for (let x = 2; x < 14; x += 3) {
+    g.fillRect(x, 8, 2, 5);
+  }
+  g.globalAlpha = 1;
+  return c;
+}
+
+/** Built palisade wall: wooden vertical planks. */
+function palisadeTile(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE;
+  c.height = TILE;
+  const g = c.getContext('2d')!;
+  g.fillStyle = P.shadow;
+  g.fillRect(0, 12, TILE, 3);
+  g.fillStyle = P.wood;
+  for (let x = 1; x < 14; x += 3) {
+    g.fillRect(x, 6, 2, 7);
+  }
+  g.fillStyle = P.woodDark;
+  for (let x = 3; x < 14; x += 3) {
+    g.fillRect(x, 6, 1, 7);
+  }
+  g.fillStyle = P.rockLight;
+  for (let x = 2; x < 14; x += 3) {
+    g.fillRect(x, 13, 1, 1);
+  }
+  return c;
+}
+
 export function buildSprites(buildingDefs: { id: string; w: number; h: number }[]): SpriteSet {
   const buildings: Record<string, HTMLCanvasElement> = {};
   const blueprints: Record<string, HTMLCanvasElement> = {};
@@ -541,6 +603,9 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number }[
     soilRipe: soilTile('ripe'),
     roads,
     roadPlans,
+    stockpileZone: stockpileZoneTile(),
+    wallPlan: wallPlanTile(),
+    palisade: palisadeTile(),
     settler: pawnLooks.map(([c, s, h]) => [pawnSprite(c, 0, s, h), pawnSprite(c, 1, s, h)]),
     raider: [pawnSprite(P.clothRaider, 0, P.skinB, P.hairA, true), pawnSprite(P.clothRaider, 1, P.skinB, P.hairA, true)],
     items: {

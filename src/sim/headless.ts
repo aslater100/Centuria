@@ -37,9 +37,37 @@ function autoPlay(sim: Simulation): void {
       }
     }
   }
+  // Paint farm zones in outward ring pattern
+  let farmsPainted = 0;
+  outer: for (let r = 4; r < 26 && farmsPainted < 3; r++) {
+    for (let y = cy - r; y <= cy + r; y += 4) {
+      for (let x = cx - r; x <= cx + r; x += 4) {
+        if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) !== r) continue;
+        if (sim.world.inBounds(x, y) && sim.world.inBounds(x + 2, y + 2)) {
+          let canPaint = true;
+          for (let dy = 0; dy < 3 && canPaint; dy++) {
+            for (let dx = 0; dx < 3 && canPaint; dx++) {
+              const tile = sim.world.at(x + dx, y + dy);
+              if (tile.kind === 'water' || tile.kind === 'rock' || tile.kind === 'tree' || tile.wall || tile.farmZone || tile.stockpileZone) {
+                canPaint = false;
+              }
+            }
+          }
+          if (canPaint) {
+            for (let dy = 0; dy < 3; dy++) {
+              for (let dx = 0; dx < 3; dx++) {
+                sim.planZone('farm', x + dx, y + dy);
+              }
+            }
+            farmsPainted++;
+          }
+        }
+      }
+    }
+  }
   // Place each wanted building at the first free spot in an outward ring search,
   // the way a player works around terrain.
-  const wants = ['farm', 'farm', 'farm', 'kitchen', 'house', 'house', 'hall'];
+  const wants = ['kitchen', 'house', 'house', 'hall'];
   for (const def of wants) {
     outer: for (let r = 4; r < 26; r++) {
       for (let y = cy - r; y <= cy + r; y += 2) {
