@@ -89,6 +89,36 @@ export interface Expedition {
   site: TownSite;
 }
 
+/**
+ * Routes (Milestone 6b, docs/design/transportation.md §3): first-class
+ * links between settlements, laid along a real A* corridor through the
+ * terrain. Everything that moves between towns rides this network.
+ */
+export type RouteKind = 'trail' | 'road'; // rail arrives in 6c
+
+export interface Route {
+  a: number; // settlement ids
+  b: number;
+  kind: RouteKind;
+  condition: number; // 0–100; capacity scales with it
+  path: { x: number; y: number }[]; // region cells, computed once by A*
+  terrainCost: number; // summed cell costs — what the land charges
+  freight: number; // food moved last caravan season (the overlay number)
+}
+
+export const ROUTE_SPECS: Record<RouteKind, {
+  capacity: number; // food-equivalent per month at condition 100
+  speed: number;
+  buildPerCost: number; // £ per point of terrain cost
+  maintPerCell: number; // £ per path cell per month
+}> = {
+  trail: { capacity: 60, speed: 1.0, buildPerCost: 0, maintPerCell: 0 },
+  road: { capacity: 200, speed: 1.7, buildPerCost: 2, maintPerCell: 0.2 },
+};
+
+/** A rotted route is still a walkable track — people keep using it. */
+const ROUTE_CONDITION_FLOOR = 15;
+
 const TOWN_NAMES = [
   'Eastvale', 'Norwick', 'Millbrook', 'Ashford', 'Redfort', 'Larkspur',
   'Coldwater', 'Hartsfield', 'Brindle', 'Ostmark', 'Fenwick', 'Sorrel',
@@ -114,6 +144,7 @@ export class RegionSim {
   settlements: Settlement[] = [];
   notables: Notable[] = [];
   expeditions: Expedition[] = [];
+  routes: Route[] = [];
   log: LogEntry[] = [];
   stateProclaimed = false;
   /** charter done, waiting on the player's ceremony choices */
@@ -185,6 +216,164 @@ export class RegionSim {
 
   private roleMult(t: Settlement, role: NotableRole): number {
     return this.notablesAt(t.id).some((n) => n.role === role) ? 1 : 0;
+  }
+
+  // ---- the route network (M6b: transportation.md §3) ----
+  routeBetween(aId: number, bId: number): Route | undefined {
+    return this.routes.find((r) => (r.a === aId && r.b === bId) || (r.a === bId && r.b === aId));
+  }
+
+  /** Throughput a route can actually carry: capacity scales with condition. */
+  effectiveCapacity(r: Route): number {
+    return ROUTE_SPECS[r.kind].capacity * (r.condition / 100);
+  }
+
+  /** A trail is blazed automatically when a settlement is founded. */
+  private blazeTrail(fromId: number, toId: number): void {
+    const a = this.settlement(fromId);
+    const b = this.settlement(toId);
+    if (!a || !b || this.routeBetween(fromId, toId)) return;
+    const c = this.corridorBetween(a, b);
+    // no land corridor (water between): the chord stands in — peddler boats
+    const path = c ? c.path : [this.map.coordToCell(a.x, a.y), this.map.coordToCell(b.x, b.y)];
+    this.routes.push({
+      a: fromId, b: toId, kind: 'trail', condition: 100,
+      path, terrainCost: c ? c.cost : path.length * 2, freight: 0,
+    });
+  }
+
+  /** Corridors between fixed towns never change — cache them (the UI
+   *  prices roads every frame). */
+  private corridorCache = new Map<string, { path: { x: number; y: number }[]; cost: number } | null>();
+
+  private corridorBetween(a: Settlement, b: Settlement): { path: { x: number; y: number }[]; cost: number } | null {
+    const key = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`;
+    let c = this.corridorCache.get(key);
+    if (c === undefined) {
+      const ac = this.map.coordToCell(a.x, a.y);
+      const bc = this.map.coordToCell(b.x, b.y);
+      c = this.map.corridor(ac.x, ac.y, bc.x, bc.y);
+      this.corridorCache.set(key, c);
+    }
+    return c;
+  }
+
+  /** Price a wagon road between two towns: the terrain's itemized bill. */
+  roadCost(aId: number, bId: number): { total: number; cells: number; breakdown: string } | null {
+    const a = this.settlement(aId);
+    const b = this.settlement(bId);
+    if (!a || !b) return null;
+    const c = this.corridorBetween(a, b);
+    if (!c) return null;
+    const counts: Record<string, number> = {};
+    for (const p of c.path) {
+      const biome = this.map.at(p.x, p.y).biome;
+      const label = biome === 'river' ? 'river crossing' : biome;
+      counts[label] = (counts[label] ?? 0) + 1;
+    }
+    const breakdown = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ');
+    return { total: Math.ceil(c.cost * ROUTE_SPECS.road.buildPerCost), cells: c.path.length, breakdown };
+  }
+
+  /** Roads are a State work: grading and bridgework paid from the treasury. */
+  buildRoad(aId: number, bId: number): boolean {
+    if (!this.stateProclaimed) return false;
+    const existing = this.routeBetween(aId, bId);
+    if (existing && existing.kind === 'road') return false;
+    const a = this.settlement(aId);
+    const b = this.settlement(bId);
+    const cost = this.roadCost(aId, bId);
+    if (!a || !b || !cost || this.treasury < cost.total) return false;
+    const c = this.corridorBetween(a, b)!;
+    this.treasury -= cost.total;
+    if (existing) {
+      existing.kind = 'road';
+      existing.condition = 100;
+      existing.path = c.path;
+      existing.terrainCost = c.cost;
+    } else {
+      this.routes.push({ a: aId, b: bId, kind: 'road', condition: 100, path: c.path, terrainCost: c.cost, freight: 0 });
+    }
+    this.addLog(`A wagon road opens between ${a.name} and ${b.name} — £${cost.total} of grading and bridgework.`, 'good');
+    return true;
+  }
+
+  /** Shortest hop-path through the route graph; null when unconnected. */
+  private routePath(fromId: number, toId: number): Route[] | null {
+    if (fromId === toId) return [];
+    const prev = new Map<number, { via: Route; from: number }>();
+    const seen = new Set([fromId]);
+    const queue = [fromId];
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      for (const r of this.routes) {
+        const other = r.a === cur ? r.b : r.b === cur ? r.a : -1;
+        if (other < 0 || seen.has(other)) continue;
+        seen.add(other);
+        prev.set(other, { via: r, from: cur });
+        if (other === toId) {
+          const out: Route[] = [];
+          let k = toId;
+          while (k !== fromId) {
+            const p = prev.get(k)!;
+            out.push(p.via);
+            k = p.from;
+          }
+          return out.reverse();
+        }
+        queue.push(other);
+      }
+    }
+    return null;
+  }
+
+  /** The GDD §2.2 connection requirement, made real by the route graph. */
+  connectedToAll(): boolean {
+    if (this.settlements.length < 2) return true;
+    const start = this.settlements[0].id;
+    const seen = new Set([start]);
+    const queue = [start];
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      for (const r of this.routes) {
+        const other = r.a === cur ? r.b : r.b === cur ? r.a : -1;
+        if (other < 0 || seen.has(other)) continue;
+        seen.add(other);
+        queue.push(other);
+      }
+    }
+    return this.settlements.every((t) => seen.has(t.id));
+  }
+
+  /** Storms wear routes down; footfall keeps trails open, roads need £. */
+  private weatherRoutes(): void {
+    const storm = this.weather.forDay(this.day).sky === 'storm';
+    for (const r of this.routes) {
+      if (storm) {
+        r.condition = Math.max(ROUTE_CONDITION_FLOOR, r.condition - (r.kind === 'trail' ? 2 : 0.5));
+      } else if (r.kind === 'trail') {
+        r.condition = Math.min(100, r.condition + 0.1);
+      }
+    }
+  }
+
+  /** Monthly road upkeep from the treasury — an unmaintained empire rots. */
+  private maintainRoutes(): void {
+    let rotting = false;
+    for (const r of this.routes) {
+      if (r.kind !== 'road') continue;
+      const bill = r.path.length * ROUTE_SPECS.road.maintPerCell;
+      if (this.treasury >= bill) {
+        this.treasury -= bill;
+        r.condition = Math.min(100, r.condition + 8);
+      } else {
+        r.condition = Math.max(ROUTE_CONDITION_FLOOR, r.condition - 6);
+        rotting = true;
+      }
+    }
+    if (rotting && this.rng.chance(0.3)) {
+      this.addLog('No coin for the road gangs — the wagon roads are rutting over.', 'bad');
+    }
   }
 
   // ---- THE FLIP: build the region from the founding town (GDD §2.4) ----
@@ -372,6 +561,7 @@ export class RegionSim {
     } else if (!drought) {
       this.droughtAnnounced = false;
     }
+    this.weatherRoutes();
     if (this.day % 30 === 0) this.monthlyUpdate();
     if (this.day >= this.nextEventDay) {
       this.fireEvent();
@@ -418,10 +608,13 @@ export class RegionSim {
     if (this.stateProclaimed) this.monthlyEconomy();
   }
 
-  /** Grain caravans: surplus towns provision hungry ones — the land is
-   *  uneven (that's the worldgen's point), so the network evens it out. */
-  private caravans(): void {
+  /** Grain caravans ride the route network (M6b): surplus towns provision
+   *  hungry ones, but every leg clamps to its route's remaining capacity —
+   *  a famine behind a goat trail is now possible, and fixable with money.
+   *  Public so tests and the harness can run a caravan season directly. */
+  caravans(): void {
     if (this.settlements.length < 2) return;
+    for (const r of this.routes) r.freight = 0;
     for (const needy of this.settlements) {
       const need = this.popOf(needy) * 0.75 * 20 - needy.food; // 20-day buffer target
       if (need <= 0) continue;
@@ -429,11 +622,29 @@ export class RegionSim {
         .filter((t) => t !== needy && t.food > this.popOf(t) * 0.75 * 60)
         .sort((a, b) => b.food - a.food)[0];
       if (!donor) continue;
-      const sent = Math.min(need, donor.food - this.popOf(donor) * 0.75 * 60);
-      donor.food -= sent;
-      needy.food += sent * 0.9; // the road takes its tithe
-      if (sent > 40 && this.rng.chance(0.4)) {
-        this.addLog(`Grain caravans roll from ${donor.name} to ${needy.name}.`, 'info');
+      const surplus = donor.food - this.popOf(donor) * 0.75 * 60;
+      const legs = this.routePath(donor.id, needy.id);
+      if (legs && legs.length > 0) {
+        const cap = Math.min(...legs.map((r) => this.effectiveCapacity(r) - r.freight));
+        const sent = Math.max(0, Math.min(need, surplus, cap));
+        if (sent <= 0) continue;
+        donor.food -= sent;
+        needy.food += sent * 0.9; // the road takes its tithe
+        for (const r of legs) r.freight += sent;
+        if (sent < Math.min(need, surplus) - 1 && this.rng.chance(0.4)) {
+          this.addLog(`The route to ${needy.name} is choked — wagons turn back with grain still wanted.`, 'bad');
+        } else if (sent > 40 && this.rng.chance(0.4)) {
+          this.addLog(`Grain caravans roll from ${donor.name} to ${needy.name}.`, 'info');
+        }
+      } else {
+        // No route at all: smugglers and peddlers move a trickle, at a price
+        const sent = Math.min(need, surplus);
+        if (sent <= 0) continue;
+        donor.food -= sent;
+        needy.food += sent * 0.3;
+        if (this.rng.chance(0.3)) {
+          this.addLog(`Peddlers carry what they can to ${needy.name} — no road reaches it.`, 'bad');
+        }
       }
     }
   }
@@ -463,6 +674,7 @@ export class RegionSim {
         this.addLog('The treasury is empty — services are cut back. The towns notice.', 'bad');
       }
     }
+    this.maintainRoutes();
     // Strikes: pressure vents when grievance boils over
     for (const t of this.settlements) {
       if (t.grievance > 60 && this.day >= t.strikeUntil && this.rng.chance(0.5)) {
@@ -479,7 +691,9 @@ export class RegionSim {
     const best = ranked[0];
     const worst = ranked[ranked.length - 1];
     if (best.satisfaction - worst.satisfaction > 15 && this.popOf(worst) > 10) {
-      const movers = this.popOf(worst) * 0.02;
+      // movers ride the network too: without a route, only a trickle walks out
+      const connected = this.routePath(worst.id, best.id) !== null;
+      const movers = this.popOf(worst) * 0.02 * (connected ? 1 : 0.3);
       this.removePop(worst, movers);
       best.cohorts.bands[1] += movers * 0.7;
       best.cohorts.bands[2] += movers * 0.3;
@@ -627,6 +841,8 @@ export class RegionSim {
         this.expeditions = this.expeditions.filter((o) => o !== e);
         const flavor = e.site.river ? 'on the riverbank' : e.site.coastal ? 'by the sea' : e.site.fertility > 1 ? 'in good black soil' : 'on thin ground';
         this.addLog(`${town.name} is founded ${flavor} — the ${this.ordinal(this.settlements.length)} town of the colony.`, 'good');
+        // the expedition's tracks become the new town's trail home
+        this.blazeTrail(e.fromId, town.id);
         // A founder steps up
         this.mintNotable('Reeve', town.id);
       }
@@ -639,7 +855,8 @@ export class RegionSim {
 
   // ---- the State gate (GDD §2.2) ----
   charterEligible(): boolean {
-    return this.settlements.length >= 3 && this.totalPop() >= 500;
+    // GDD §2.2: 3 towns, 500 citizens — and all of them connected by routes
+    return this.settlements.length >= 3 && this.totalPop() >= 500 && this.connectedToAll();
   }
 
   private updateCharter(): void {
