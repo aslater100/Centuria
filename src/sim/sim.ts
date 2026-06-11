@@ -322,7 +322,6 @@ export class Simulation {
       for (let dx = 0; dx < def.w; dx++) {
         const t = this.world.at(x + dx, y + dy);
         t.buildingId = b.id;
-        if (def.provides === 'farm') t.kind = 'soil';
       }
     }
     return b;
@@ -416,7 +415,7 @@ export class Simulation {
       return;
     }
     if (t.wallPlan) {
-      t.wallPlan = null;
+      t.wallPlan = false;
       return;
     }
     if (t.farmZone && !t.sown && t.growth === 0) {
@@ -757,20 +756,6 @@ export class Simulation {
       if (d < bd) { bd = d; best = { x, y }; }
     }
     return best;
-  }
-
-  private destroyBuilding(b: Building): void {
-    const def = buildingDef(b.defId);
-    for (let dy = 0; dy < def.h; dy++) {
-      for (let dx = 0; dx < def.w; dx++) {
-        const t = this.world.at(b.x + dx, b.y + dy);
-        t.buildingId = null;
-        t.wall = false;
-        if (t.kind === 'soil') t.kind = 'grass';
-      }
-    }
-    this.buildings = this.buildings.filter((o) => o !== b);
-    this.addLog(`${def.name} destroyed by raiders!`, 'bad');
   }
 
   private damageSettler(s: Settler, dmg: number): void {
@@ -1266,13 +1251,7 @@ export class Simulation {
         b.buildLeft -= work;
         if (b.buildLeft <= 0) {
           b.built = true;
-          if (def.provides === 'wall') {
-            for (let dy = 0; dy < def.h; dy++) {
-              for (let dx = 0; dx < def.w; dx++) this.world.at(b.x + dx, b.y + dy).wall = true;
-            }
-          } else {
-            this.addLog(`${def.name} finished.`, 'good');
-          }
+          this.addLog(`${def.name} finished.`, 'good');
           this.finishTask(s);
         }
         return;

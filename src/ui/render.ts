@@ -5,7 +5,7 @@
  */
 import type { Simulation } from '../sim/sim';
 import { MAP_W, MAP_H } from '../sim/world';
-import { buildingDef, BUILDING_DEFS } from '../sim/defs';
+import { buildingDef, BUILDING_DEFS, TUNING } from '../sim/defs';
 import { buildSprites, TILE } from './sprites';
 import type { SpriteSet } from './sprites';
 

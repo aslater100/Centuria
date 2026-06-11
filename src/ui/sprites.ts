@@ -538,7 +538,6 @@ function wallPlanTile(): HTMLCanvasElement {
   c.width = TILE;
   c.height = TILE;
   const g = c.getContext('2d')!;
-  g.fillStyle = P.grass;
   g.globalAlpha = 0.5;
   g.fillStyle = '#c25b2e';
   for (let x = 2; x < 14; x += 3) {
