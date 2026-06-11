@@ -267,8 +267,11 @@ export class Hud {
       `<span>NOTABLES ${r.notables.filter((n) => n.alive).length}</span>` +
       (r.stateProclaimed ? `<span class="tb-date">★ STATE</span>` : '') +
       `<button id="tb-diorama" class="tb-btn">${dioramaOpen ? 'Region Map' : "Visit Founder's Rest"}</button>` +
+      `<button id="tb-menu" class="tb-btn">Menu [Esc]</button>` +
       `<span class="tb-speed">${this.paused ? '⏸ PAUSED' : '▶'.repeat(this.speed)} <i>(space, 1-3)</i></span>` +
       (r.gameOver ? `<span class="tb-over">THE COLONY HAS PERISHED</span>` : ''));
+    const menuBtn = this.topBar.querySelector<HTMLButtonElement>('#tb-menu');
+    if (menuBtn) menuBtn.onclick = () => this.toggleMenu();
   }
 
   regionLog(r: import('../sim/region').RegionSim): void {

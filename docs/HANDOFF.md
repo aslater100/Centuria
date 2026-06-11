@@ -44,13 +44,16 @@ then push the matching `v*` tag after merge.
 
 ## The plan from here
 
-Transportation is complete. Open ideas consistent with the GDD (minus
-whatever the two in-flight PRs land): town-tier fishing jobs,
-region-tier save/load (the in-game menu disables saving after the flip —
-`sim.serialize()` is town-tier only; routes/settlements/notables need a
-serializer), music/ambience, more event variety, Tier-2 goods markets
-along routes (arbitrage, GDD §5.2), paved-highway era (1945+, ×2.2 —
-the rail stranded-asset lesson, transportation.md §5).
+Transportation is complete. Region-tier save/load shipped (v0.6.0 PR):
+v2 combined snapshots `{v:2, mode:'region', town, region}` under the
+same `centuria-save` key; v1 town saves still load. `RegionSim.serialize`
+/ `.deserialize(json, sim)` — the region re-shares the restored town's
+rng/map/weather; the corridor cache refills lazily; the menu now opens
+in region mode (Esc or the top-bar button). Open ideas consistent with
+the GDD (minus whatever the two in-flight PRs land): town-tier fishing
+jobs, music/ambience, more event variety, Tier-2 goods markets along
+routes (arbitrage, GDD §5.2), paved-highway era (1945+, ×2.2 — the rail
+stranded-asset lesson, transportation.md §5).
 
 ## Architecture notes for M6c
 
