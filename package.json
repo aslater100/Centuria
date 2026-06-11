@@ -11,7 +11,7 @@
     "test": "vitest run",
     "sim": "tsx src/sim/headless.ts",
     "app": "npm run build && electron .",
-    "app:dist": "npm run build && electron-builder"
+    "app:dist": "npm run build && npx electron-builder"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
