@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Simulation } from '../src/sim/sim';
 import { MINUTES_PER_DAY, MINUTES_PER_TICK, TUNING } from '../src/sim/defs';
+import { World, MAP_W, MAP_H } from '../src/sim/world';
+import { Rng } from '../src/sim/rng';
 
 const ticksPerDay = MINUTES_PER_DAY / MINUTES_PER_TICK;
 
@@ -222,5 +224,45 @@ describe('Simulation', () => {
     runDays(sim, 60);
     expect(sim.gameOver).toBe(false);
     expect(sim.settlers.length).toBeGreaterThan(6);
+  });
+});
+
+describe('Fog of war', () => {
+  it('revealAround marks tiles within radius explored and leaves outer tiles dark', () => {
+    const world = new World(new Rng(1));
+    const cx = 32, cy = 32, r = 5;
+    world.revealAround(cx, cy, r);
+    // centre is explored
+    expect(world.at(cx, cy).explored).toBe(true);
+    // tile exactly at radius (on an axis) is explored
+    expect(world.at(cx + r, cy).explored).toBe(true);
+    // tile one beyond radius (diagonal corner) is not explored
+    expect(world.at(cx + r + 1, cy + r + 1).explored).toBe(false);
+  });
+
+  it('new Simulation pre-reveals the starting area', () => {
+    const sim = new Simulation(42);
+    const cx = Math.floor(MAP_W / 2);
+    const cy = Math.floor(MAP_H / 2);
+    // spawn centre and nearby tiles should be explored from day 1
+    expect(sim.world.at(cx, cy).explored).toBe(true);
+    expect(sim.world.at(cx + 5, cy).explored).toBe(true);
+    // corners of the map are still dark
+    expect(sim.world.at(0, 0).explored).toBe(false);
+    expect(sim.world.at(MAP_W - 1, MAP_H - 1).explored).toBe(false);
+  });
+
+  it('settlers expand explored area as they move', () => {
+    const sim = new Simulation(42);
+    // Count explored before settlers have moved
+    const before = sim.world.tiles.filter((t) => t.explored).length;
+    // Send a settler to a corner of the map that was unexplored
+    const s = sim.settlers[0];
+    // manually set position to an unexplored area
+    s.pos = { x: 5, y: 5 };
+    sim.tick();
+    const after = sim.world.tiles.filter((t) => t.explored).length;
+    expect(after).toBeGreaterThan(before);
+    expect(sim.world.at(5, 5).explored).toBe(true);
   });
 });

@@ -461,6 +461,33 @@ body {
   border-collapse: collapse;
 }
 
+#minimap {
+  position: fixed;
+  bottom: 8px;
+  right: 8px;
+  width: 160px;
+  height: 120px;
+  cursor: pointer;
+  z-index: 10;
+  image-rendering: pixelated;
+  border: 2px solid #6e4a2f;
+  box-shadow: 0 0 0 1px #1a1410;
+}
+
+#minimap:hover {
+  border-color: #e8d27a;
+}
+
+#minimap-label {
+  position: fixed;
+  bottom: 130px;
+  right: 8px;
+  font-size: 10px;
+  color: #998c6e;
+  z-index: 10;
+  pointer-events: none;
+}
+
 .priorities th {
   color: #e8d27a;
   padding: 2px 6px;

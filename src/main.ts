@@ -3,7 +3,7 @@ import { Simulation } from './sim/sim';
 import { RegionSim } from './sim/region';
 import { TICKS_PER_SECOND } from './sim/defs';
 import { MAP_W, MAP_H } from './sim/world';
-import { Renderer } from './ui/render';
+import { Renderer, drawMinimap } from './ui/render';
 import type { Camera } from './ui/render';
 import { Hud } from './ui/hud';
 import { RegionView } from './ui/regionview';
@@ -14,6 +14,17 @@ const root = document.getElementById('app')!;
 const canvas = document.createElement('canvas');
 canvas.id = 'game';
 root.appendChild(canvas);
+
+// Minimap: a small region-map preview in the bottom-right corner (Civ 6 style).
+const MINIMAP_W = 160;
+const MINIMAP_H = 120;
+const minimapCanvas = document.createElement('canvas');
+minimapCanvas.id = 'minimap';
+minimapCanvas.width = MINIMAP_W;
+minimapCanvas.height = MINIMAP_H;
+root.appendChild(minimapCanvas);
+const minimapCtx = minimapCanvas.getContext('2d')!;
+minimapCtx.imageSmoothingEnabled = false;
 
 const SAVE_KEY = 'centuria-save';
 
@@ -160,23 +171,54 @@ canvas.addEventListener('mousemove', (e) => {
   // drag-paint zones/roads and chop/quarry marks
   if (e.buttons === 1 && mode === 'town') {
     const t = cam.mouseTile;
-    if (cam.placingZone && !paintedTiles.has(`${t.x},${t.y}`)) {
-      paintedTiles.add(`${t.x},${t.y}`);
-      const kind = cam.placingZone;
-      if (kind === 'dirt' || kind === 'plank' || kind === 'gravel' || kind === 'bridge') {
-        sim.planRoad(kind, t.x, t.y);
-      } else {
-        sim.planZone(kind, t.x, t.y);
+    const prev = prevDragTile ?? t;
+    // Bresenham fill: paint every tile along the line from prev to current so
+    // fast mouse sweeps don't leave gaps in roads or zone designations.
+    const line = bresenhamLine(prev.x, prev.y, t.x, t.y);
+    prevDragTile = t;
+    for (const pt of line) {
+      const key = `${pt.x},${pt.y}`;
+      if (cam.placingZone && !paintedTiles.has(key)) {
+        paintedTiles.add(key);
+        const kind = cam.placingZone;
+        if (kind === 'dirt' || kind === 'plank' || kind === 'gravel' || kind === 'bridge') {
+          sim.planRoad(kind, pt.x, pt.y);
+        } else {
+          sim.planZone(kind, pt.x, pt.y);
+        }
+      } else if (cam.chopMode && !paintedTiles.has(key)) {
+        paintedTiles.add(key);
+        sim.markTree(pt.x, pt.y);
       }
-    } else if (cam.chopMode && !paintedTiles.has(`${t.x},${t.y}`)) {
-      paintedTiles.add(`${t.x},${t.y}`);
-      sim.markTree(t.x, t.y);
     }
+  } else {
+    prevDragTile = null;
   }
 });
 
+/** Bresenham line: all tiles from (x0,y0) to (x1,y1) inclusive. */
+function bresenhamLine(x0: number, y0: number, x1: number, y1: number): { x: number; y: number }[] {
+  const pts: { x: number; y: number }[] = [];
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+  while (true) {
+    pts.push({ x: x0, y: y0 });
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = err * 2;
+    if (e2 > -dy) { err -= dy; x0 += sx; }
+    if (e2 < dx) { err += dx; y0 += sy; }
+  }
+  return pts;
+}
+
 const paintedTiles = new Set<string>();
-canvas.addEventListener('mousedown', () => paintedTiles.clear());
+let prevDragTile: { x: number; y: number } | null = null;
+
+canvas.addEventListener('mousedown', () => {
+  paintedTiles.clear();
+  prevDragTile = null;
+});
 
 canvas.addEventListener('click', (e) => {
   if (mode === 'region' && !dioramaOpen) {
@@ -224,6 +266,18 @@ canvas.addEventListener('click', (e) => {
   }
 });
 
+// Minimap click: switch to region view (or back to town if already in region)
+minimapCanvas.addEventListener('click', () => {
+  if (mode === 'town' && region) {
+    // Flip has happened: switch to region
+    dioramaOpen = false;
+    mode = 'region';
+    hud.setRegionMode(true);
+  } else if (mode === 'region' && dioramaOpen) {
+    dioramaOpen = false;
+  }
+});
+
 // Right-click to bulldoze/cancel zones
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
@@ -259,12 +313,18 @@ function loop(now: number): void {
     renderer.draw();
     hud.update();
     playLogSounds();
+    // Minimap: always draw region preview during town play
+    minimapCanvas.classList.remove('hidden');
+    drawMinimap(minimapCtx, sim.regionMap, sim.site, MINIMAP_W, MINIMAP_H);
   } else if (region) {
     if (dioramaOpen) {
       sim.tickDiorama(region.minute);
       renderer.draw();
+      minimapCanvas.classList.remove('hidden');
+      drawMinimap(minimapCtx, sim.regionMap, sim.site, MINIMAP_W, MINIMAP_H);
     } else {
       regionView?.draw();
+      minimapCanvas.classList.add('hidden');
     }
     hud.drawRegionTopBar(region, dioramaOpen);
     hud.regionLog(region);

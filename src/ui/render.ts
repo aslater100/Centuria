@@ -8,6 +8,8 @@ import { MAP_W, MAP_H } from '../sim/world';
 import { buildingDef, BUILDING_DEFS, TUNING } from '../sim/defs';
 import { buildSprites, TILE } from './sprites';
 import type { SpriteSet } from './sprites';
+import type { RegionMap } from '../sim/worldgen';
+import type { TownSite } from '../sim/worldgen';
 
 export interface Camera {
   x: number; // pixels
@@ -290,6 +292,18 @@ export class Renderer {
       g.fillStyle = `rgba(10,12,30,${(0.45 - d) * 0.9})`;
       g.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
+
+    // Fog of war: hard black over unexplored tiles
+    g.fillStyle = '#000';
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        if (sim.world.at(x, y).explored) continue;
+        const px = ox + x * TILE;
+        const py = oy + y * TILE;
+        if (px < -TILE || py < -TILE || px > this.canvas.width || py > this.canvas.height) continue;
+        g.fillRect(px, py, TILE, TILE);
+      }
+    }
   }
 
   private hpBar(x: number, y: number, frac: number): void {
@@ -304,6 +318,11 @@ export class Renderer {
     this.g.strokeStyle = '#e8d27a';
     this.g.lineWidth = 1;
     this.g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  }
+
+  /** Expose the tile-at-pixel calc so main.ts can forward clicks correctly. */
+  hitTest(px: number, py: number): { x: number; y: number } {
+    return this.tileAt(px, py);
   }
 
   private drawPlacementGhost(): void {
@@ -337,4 +356,48 @@ export class Renderer {
       g.strokeRect(ox + cam.mouseTile.x * TILE + 0.5, oy + cam.mouseTile.y * TILE + 0.5, TILE - 1, TILE - 1);
     }
   }
+}
+
+/**
+ * Draw the 64×64 region map into `ctx` at size W×H — used for the
+ * bottom-right minimap (Civ 6 style). Same colour palette as RegionView.
+ */
+export function drawMinimap(
+  ctx: CanvasRenderingContext2D,
+  regionMap: RegionMap,
+  site: TownSite,
+  W: number,
+  H: number,
+): void {
+  const N = 64;
+  const cw = W / N;
+  const ch = H / N;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const c = regionMap.at(x, y);
+      let col: string;
+      switch (c.biome) {
+        case 'sea': col = '#243d52'; break;
+        case 'lake': col = '#2e4a5c'; break;
+        case 'river': col = '#36586e'; break;
+        case 'marsh': col = '#39503e'; break;
+        case 'plains': col = '#46563a'; break;
+        case 'forest': col = '#33502c'; break;
+        case 'hills': col = '#5a5742'; break;
+        case 'mountains': col = c.elevation > 0.85 ? '#9a978f' : '#6a6358'; break;
+        default: col = '#333'; break;
+      }
+      ctx.fillStyle = col;
+      ctx.fillRect(Math.floor(x * cw), Math.floor(y * ch), Math.ceil(cw), Math.ceil(ch));
+    }
+  }
+  // Town marker
+  const tx = (site.cellX / N) * W;
+  const ty = (site.cellY / N) * H;
+  ctx.fillStyle = '#e8d27a';
+  ctx.fillRect(Math.round(tx) - 2, Math.round(ty) - 2, 5, 5);
+  // Border
+  ctx.strokeStyle = '#6e4a2f';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, W - 2, H - 2);
 }
