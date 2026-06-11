@@ -227,6 +227,91 @@ describe('Simulation', () => {
   });
 });
 
+describe('Town-tier event variety', () => {
+  it('evtBumperHarvest adds grain (more with farm tiles)', () => {
+    const sim = new Simulation(42);
+    sim.planZone('farm', 28, 36);
+    const before = sim.stock.grain;
+    (sim as any).evtBumperHarvest();
+    expect(sim.stock.grain).toBeGreaterThan(before);
+    expect(sim.log.some((l) => l.text.includes('harvest'))).toBe(true);
+  });
+
+  it('evtWindfallTimber adds wood and logs the deadfall', () => {
+    const sim = new Simulation(42);
+    const before = sim.stock.wood;
+    (sim as any).evtWindfallTimber();
+    expect(sim.stock.wood).toBeGreaterThan(before);
+    expect(sim.log.some((l) => l.text.includes('deadfall'))).toBe(true);
+  });
+
+  it('evtSkillBreakthrough improves a settler skill and adds a Breakthrough thought', () => {
+    const sim = new Simulation(42);
+    const maxSkillsBefore = sim.settlers.map((s) => Math.max(...Object.values(s.skills)));
+    (sim as any).evtSkillBreakthrough();
+    const maxSkillsAfter = sim.settlers.map((s) => Math.max(...Object.values(s.skills)));
+    expect(maxSkillsAfter.some((v, i) => v > maxSkillsBefore[i])).toBe(true);
+    expect(sim.settlers.some((s) => s.thoughts.some((t) => t.label === 'Breakthrough!'))).toBe(true);
+  });
+
+  it('evtStormDamage spoils provisions and appears in the log', () => {
+    const sim = new Simulation(42);
+    sim.stock.meal = 100;
+    sim.stock.grain = 100;
+    const totalBefore = sim.stock.meal + sim.stock.grain;
+    (sim as any).evtStormDamage();
+    expect(sim.stock.meal + sim.stock.grain).toBeLessThan(totalBefore);
+    expect(sim.log.some((l) => l.text.toLowerCase().includes('storm'))).toBe(true);
+  });
+
+  it('evtStormDamage damages the weakest palisade section when one exists', () => {
+    const sim = new Simulation(42);
+    sim.world.at(32, 26).wall = true;
+    sim.world.at(32, 26).wallHp = 80;
+    (sim as any).evtStormDamage();
+    expect(sim.world.at(32, 26).wallHp).toBeLessThan(80);
+    expect(sim.log.some((l) => l.text.includes('palisade'))).toBe(true);
+  });
+
+  it('evtInjuredWorker wounds a healthy settler', () => {
+    const sim = new Simulation(42);
+    for (const s of sim.settlers) s.wound = null;
+    (sim as any).evtInjuredWorker();
+    expect(sim.settlers.some((s) => s.wound?.untreated === true)).toBe(true);
+    expect(sim.log.some((l) => l.text.includes('bad fall'))).toBe(true);
+  });
+
+  it('evtMerchant with a built market converts 3 wood to 5 grain', () => {
+    const sim = new Simulation(42);
+    sim.placeBuilding('market', 30, 30, true);
+    sim.stock.wood = 10;
+    const grainBefore = sim.stock.grain;
+    (sim as any).evtMerchant();
+    expect(sim.stock.grain).toBe(grainBefore + 5);
+    expect(sim.stock.wood).toBe(7);
+  });
+
+  it('evtMerchant without a market leaves a tinker grain gift', () => {
+    const sim = new Simulation(42);
+    sim.stock.wood = 0;
+    const grainBefore = sim.stock.grain;
+    (sim as any).evtMerchant();
+    expect(sim.stock.grain).toBeGreaterThan(grainBefore);
+    expect(sim.log.some((l) => l.text.includes('tinker'))).toBe(true);
+  });
+
+  it('evtSettlerFeud gives both participants a negative thought', () => {
+    const sim = new Simulation(42);
+    (sim as any).evtSettlerFeud();
+    const feuders = sim.settlers.filter((s) =>
+      s.thoughts.some((t) => t.label === 'Feuding with a neighbour'),
+    );
+    expect(feuders).toHaveLength(2);
+    expect(feuders.every((s) => s.thoughts.some((t) => t.delta < 0))).toBe(true);
+    expect(sim.log.some((l) => l.text.includes('blows'))).toBe(true);
+  });
+});
+
 describe('Fog of war', () => {
   it('revealAround marks tiles within radius explored and leaves outer tiles dark', () => {
     const world = new World(new Rng(1));

@@ -695,37 +695,152 @@ export class Simulation {
     }
   }
 
+  /** Town-tier incident deck — 12 named events, ~45% bad / 55% good (GDD §3.3). */
   private fireEvent(): void {
     const roll = this.rng.next();
-    if (roll < 0.3 && this.settlers.length < TUNING.hardCapPop) {
-      // Word travels: nobody joins a colony that can't feed itself.
-      if (this.stock.meal + this.stock.grain > this.settlers.length * 2) {
-        const s = this.spawnSettler(1, Math.floor(MAP_H / 2));
-        this.addLog(`A wanderer, ${s.name}, asks to join the colony. They settle in.`, 'good');
-      } else {
-        this.addLog('A wanderer eyes the empty stores and moves on.', 'info');
-      }
-    } else if (roll < 0.5) {
-      this.coldSnapUntil = this.minute + 3 * MINUTES_PER_DAY;
-      this.addLog('A cold snap rolls in from the mountains. Three bitter days.', 'bad');
-    } else if (roll < 0.7) {
-      const lost = Math.ceil(this.stock.grain * 0.1);
-      if (lost > 0) {
-        this.stock.grain -= lost;
-        this.addLog(`Rats in the stores — ${lost} grain lost.`, 'bad');
-      }
-    } else if (roll < 0.85) {
-      for (const s of this.settlers) this.addThought(s, 'Festival night', 8, 2 * MINUTES_PER_DAY);
-      this.addLog('The settlers hold an impromptu festival. Spirits lift.', 'good');
+    if      (roll < 0.12) this.evtWanderer();
+    else if (roll < 0.21) this.evtColdSnap();
+    else if (roll < 0.30) this.evtRats();
+    else if (roll < 0.42) this.evtFestival();
+    else if (roll < 0.52) this.evtFever();
+    else if (roll < 0.62) this.evtBumperHarvest();
+    else if (roll < 0.70) this.evtWindfallTimber();
+    else if (roll < 0.78) this.evtSkillBreakthrough();
+    else if (roll < 0.85) this.evtStormDamage();
+    else if (roll < 0.91) this.evtInjuredWorker();
+    else if (roll < 0.96) this.evtMerchant();
+    else                  this.evtSettlerFeud();
+  }
+
+  private evtWanderer(): void {
+    if (this.settlers.length >= TUNING.hardCapPop) return;
+    if (this.stock.meal + this.stock.grain > this.settlers.length * 2) {
+      const s = this.spawnSettler(1, Math.floor(MAP_H / 2));
+      this.addLog(`A wanderer, ${s.name}, asks to join the colony. They settle in.`, 'good');
     } else {
-      const n = 1 + this.rng.int(3);
-      const victims = [...this.settlers].sort(() => this.rng.next() - 0.5).slice(0, n);
-      for (const v of victims) {
-        v.sickUntil = this.minute + (2 + this.rng.int(2)) * MINUTES_PER_DAY;
-        this.addThought(v, 'Feverish', -6, v.sickUntil - this.minute);
-      }
-      this.addLog(`A fever spreads through camp — ${victims.map((v) => v.name.split(' ')[0]).join(', ')} fall ill.`, 'bad');
+      this.addLog('A wanderer eyes the empty stores and moves on.', 'info');
     }
+  }
+
+  private evtColdSnap(): void {
+    this.coldSnapUntil = this.minute + 3 * MINUTES_PER_DAY;
+    this.addLog('A cold snap rolls in from the mountains. Three bitter days.', 'bad');
+  }
+
+  private evtRats(): void {
+    const lost = Math.ceil(this.stock.grain * 0.1);
+    if (lost > 0) {
+      this.stock.grain -= lost;
+      this.addLog(`Rats in the stores — ${lost} grain lost.`, 'bad');
+    }
+  }
+
+  private evtFestival(): void {
+    for (const s of this.settlers) this.addThought(s, 'Festival night', 8, 2 * MINUTES_PER_DAY);
+    this.addLog('The settlers hold an impromptu festival. Spirits lift.', 'good');
+  }
+
+  private evtFever(): void {
+    const n = 1 + this.rng.int(3);
+    const victims = [...this.settlers].sort(() => this.rng.next() - 0.5).slice(0, n);
+    for (const v of victims) {
+      v.sickUntil = this.minute + (2 + this.rng.int(2)) * MINUTES_PER_DAY;
+      this.addThought(v, 'Feverish', -6, v.sickUntil - this.minute);
+    }
+    this.addLog(`A fever spreads through camp — ${victims.map((v) => v.name.split(' ')[0]).join(', ')} fall ill.`, 'bad');
+  }
+
+  /** Extra grain when the colony has been farming. */
+  private evtBumperHarvest(): void {
+    const farmCount = this.world.tiles.filter((t) => t.farmZone || t.kind === 'soil').length;
+    const bonus = 15 + farmCount * 2 + this.rng.int(10);
+    this.stock.grain += bonus;
+    this.addLog(`The harvest comes in heavy this year — ${bonus} grain added to the stores.`, 'good');
+  }
+
+  /** A fallen deadfall near the tree line: free timber. */
+  private evtWindfallTimber(): void {
+    const logs = 15 + this.rng.int(10);
+    this.stock.wood += logs;
+    this.addLog(`A deadfall near the tree line yields ${logs} timber — the settlers haul it in.`, 'good');
+  }
+
+  /** One settler makes a study breakthrough and improves their best skill. */
+  private evtSkillBreakthrough(): void {
+    if (this.settlers.length === 0) return;
+    const s = this.rng.pick(this.settlers);
+    const best = WORK_KINDS.reduce((a, b) => (s.skills[a] >= s.skills[b] ? a : b));
+    s.skills[best] = Math.min(10, s.skills[best] + 1 + this.rng.int(2));
+    this.addThought(s, 'Breakthrough!', 10, 3 * MINUTES_PER_DAY);
+    this.addLog(`${s.name.split(' ')[0]} has been studying hard — their ${best} improves.`, 'good');
+  }
+
+  /** Storm batters the camp: food spoils and, if palisade exists, one section takes damage. */
+  private evtStormDamage(): void {
+    const total = this.stock.meal + this.stock.grain;
+    const spoiled = Math.ceil(total * 0.06);
+    const fromMeal = Math.min(this.stock.meal, spoiled);
+    this.stock.meal -= fromMeal;
+    this.stock.grain -= Math.max(0, spoiled - fromMeal);
+    // Damage the weakest wall/gate tile if the colony has one.
+    let worstIdx = -1;
+    let worstHp = Infinity;
+    for (let idx = 0; idx < this.world.tiles.length; idx++) {
+      const t = this.world.tiles[idx];
+      if ((t.wall || t.gate) && t.wallHp > 0 && t.wallHp < worstHp) {
+        worstHp = t.wallHp;
+        worstIdx = idx;
+      }
+    }
+    if (worstIdx >= 0) {
+      this.world.tiles[worstIdx].wallHp = Math.max(0, worstHp - 25);
+      this.addLog(`A storm lashes camp — ${spoiled} provisions spoiled and a palisade section took damage.`, 'bad');
+    } else {
+      this.addLog(`A storm lashes camp overnight — ${spoiled} provisions spoiled in the wet.`, 'bad');
+    }
+  }
+
+  /** A settler takes a bad fall at work — they need treatment. */
+  private evtInjuredWorker(): void {
+    const healthy = this.settlers.filter((s) => !s.wound && s.health > 20);
+    if (healthy.length === 0) return;
+    const s = this.rng.pick(healthy);
+    s.wound = { at: this.minute, untreated: true, infectionRolled: false };
+    this.addThought(s, 'Hurt at work', -8, 2 * MINUTES_PER_DAY);
+    this.addLog(`${s.name.split(' ')[0]} takes a bad fall — they need treatment.`, 'bad');
+  }
+
+  /** A merchant passes through: favorable barter at the market, small gift otherwise. */
+  private evtMerchant(): void {
+    const hasMarket = this.buildings.some((b) => b.built && buildingDef(b.defId).provides === 'trade');
+    if (hasMarket) {
+      if (this.stock.wood >= 3) {
+        this.stock.wood -= 3;
+        this.stock.grain += 5;
+        this.addLog('A merchant stops at the market — 3 wood trades for 5 grain.', 'good');
+      } else if (this.stock.grain >= 5) {
+        this.stock.grain -= 5;
+        this.stock.meal += 8;
+        this.addLog('A merchant mills 5 grain into 8 prepared meals at the market.', 'good');
+      } else {
+        this.addLog('A merchant calls at the market but the colony has nothing spare to trade.', 'info');
+      }
+    } else {
+      const gift = 3 + this.rng.int(4);
+      this.stock.grain += gift;
+      this.addLog(`A tinker's cart rolls through at dusk — leaves ${gift} grain for a night's hospitality.`, 'good');
+    }
+  }
+
+  /** Two settlers feud over a boundary dispute — tempers run hot for a few days. */
+  private evtSettlerFeud(): void {
+    if (this.settlers.length < 2) return;
+    const shuffled = [...this.settlers].sort(() => this.rng.next() - 0.5);
+    const a = shuffled[0];
+    const b = shuffled[1];
+    this.addThought(a, 'Feuding with a neighbour', -5, 4 * MINUTES_PER_DAY);
+    this.addThought(b, 'Feuding with a neighbour', -5, 4 * MINUTES_PER_DAY);
+    this.addLog(`${a.name.split(' ')[0]} and ${b.name.split(' ')[0]} come to blows over a boundary dispute.`, 'bad');
   }
 
   /** Colony wealth drives raid size: prosperity attracts trouble (GDD §8.4). */
