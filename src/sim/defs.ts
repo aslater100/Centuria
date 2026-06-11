@@ -5,8 +5,7 @@ import namesJson from '../data/names.json';
 /** All content defs load from JSON so they are moddable without touching code (GDD §8.8). */
 
 export type ResourceKind = 'wood' | 'grain' | 'meal' | 'stone' | 'clothes';
-export type Provides =
-  'storage' | 'sleep' | 'farm' | 'cook' | 'recreation' | 'wall' | 'warmth' | 'craft' | 'burial';
+export type Provides = 'storage' | 'sleep' | 'cook' | 'recreation' | 'warmth' | 'craft' | 'burial';
 export type WorkKind = 'build' | 'farm' | 'chop' | 'cook' | 'haul' | 'medic' | 'craft' | 'bury';
 export const WORK_KINDS: WorkKind[] = ['build', 'farm', 'chop', 'cook', 'haul', 'medic', 'craft', 'bury'];
 
@@ -121,6 +120,9 @@ export const TUNING = {
   combatDamagePerHour: 30, // + combat skill × 6
   combatDamagePerSkill: 6,
   fightMinCombat: 3, // settlers below this flee instead
+  wallCost: { wood: 3 },
+  wallWork: 30,
+  wallMaxHp: 80,
   wallDamagePerHour: 50,
   // Medical
   woundBleedPerHour: 0.8,

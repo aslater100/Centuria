@@ -5,6 +5,8 @@ import type { TownSite } from './worldgen';
 export type TileKind = 'grass' | 'tree' | 'water' | 'soil' | 'rock';
 
 export type RoadKind = 'dirt' | 'plank' | 'gravel' | 'bridge';
+export type ZoneKind = 'farm' | 'stockpile' | 'wall';
+export type PaintKind = RoadKind | ZoneKind;
 
 /** Speed multiplier walking this road type (design: docs/design/transportation.md §2). */
 export const ROAD_SPEED: Record<RoadKind, number> = {
@@ -30,6 +32,14 @@ export interface Tile {
   road: RoadKind | null;
   /** road planned by the player, awaiting construction */
   roadPlan: RoadKind | null;
+  /** tile designated for crop work (replaces Building-backed farm) */
+  farmZone: boolean;
+  /** tile designated as storage (replaces Building-backed stockpile) */
+  stockpileZone: boolean;
+  /** wall ordered but not yet built */
+  wallPlan: boolean;
+  /** HP of built wall on this tile */
+  wallHp: number;
   buildingId: number | null;
 }
 
@@ -54,7 +64,9 @@ export class World {
     for (let i = 0; i < MAP_W * MAP_H; i++) {
       this.tiles.push({
         kind: 'grass', growth: 0, sown: false, marked: false, wall: false,
-        fertility: 1, road: null, roadPlan: null, buildingId: null,
+        fertility: 1, road: null, roadPlan: null,
+        farmZone: false, stockpileZone: false, wallPlan: false, wallHp: 0,
+        buildingId: null,
       });
     }
     this.generate(rng);
@@ -71,7 +83,7 @@ export class World {
   passable(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false;
     const t = this.at(x, y);
-    if (t.wall) return false;
+    if (t.wall || t.wallPlan) return false;
     if (t.kind === 'water') return t.road === 'bridge';
     return t.kind !== 'rock' && t.kind !== 'tree';
   }

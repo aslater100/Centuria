@@ -39,6 +39,7 @@ export interface Task {
   itemId?: number;
   patientId?: number;
   roadTile?: boolean;
+  wallTile?: boolean;
   workLeft: number;
   label: string;
 }
@@ -230,7 +231,11 @@ export class Simulation {
   private foundColony(): void {
     const cx = Math.floor(MAP_W / 2);
     const cy = Math.floor(MAP_H / 2);
-    this.placeBuilding('stockpile', cx - 1, cy - 1, true);
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 3; dx++) {
+        this.planZone('stockpile', cx - 1 + dx, cy - 1 + dy);
+      }
+    }
     this.placeBuilding('house', cx - 5, cy - 2, true);
     this.placeBuilding('house', cx + 3, cy - 2, true);
     for (let i = 0; i < 12; i++) {
@@ -291,7 +296,8 @@ export class Simulation {
       for (let dx = 0; dx < def.w; dx++) {
         if (!this.world.inBounds(x + dx, y + dy)) return false;
         const t = this.world.at(x + dx, y + dy);
-        if (t.kind !== 'grass' || t.buildingId !== null) return false;
+        if (t.kind !== 'grass' || t.buildingId !== null || t.wall || t.wallPlan ||
+            t.farmZone || t.stockpileZone) return false;
       }
     }
     return true;
@@ -316,7 +322,6 @@ export class Simulation {
       for (let dx = 0; dx < def.w; dx++) {
         const t = this.world.at(x + dx, y + dy);
         t.buildingId = b.id;
-        if (def.provides === 'farm') t.kind = 'soil';
       }
     }
     return b;
@@ -353,7 +358,7 @@ export class Simulation {
       t.roadPlan = null; // toggle off
       return true;
     }
-    if (t.road === kind || t.wall || t.buildingId !== null) return false;
+    if (t.road === kind || t.wall || t.wallPlan || t.buildingId !== null) return false;
     if (kind === 'bridge') {
       if (t.kind !== 'water') return false;
     } else if (t.kind !== 'grass' && t.kind !== 'soil') {
@@ -361,6 +366,76 @@ export class Simulation {
     }
     t.roadPlan = kind;
     return true;
+  }
+
+  /** Paint a zone tile: farm, stockpile, or wall. Toggle on/off by painting the same kind twice. */
+  planZone(kind: import('./world').ZoneKind, x: number, y: number): boolean {
+    if (!this.world.inBounds(x, y)) return false;
+    const t = this.world.at(x, y);
+    if (kind === 'farm') {
+      if (t.farmZone) {
+        t.farmZone = false;
+        if (!t.sown && t.growth === 0) t.kind = 'grass';
+        return true;
+      }
+      if (t.kind === 'water' || t.kind === 'rock' || t.kind === 'tree') return false;
+      if (t.buildingId !== null || t.wall || t.wallPlan) return false;
+      t.farmZone = true;
+      t.kind = 'soil';
+      t.stockpileZone = false;
+      return true;
+    } else if (kind === 'stockpile') {
+      if (t.stockpileZone) {
+        t.stockpileZone = false;
+        return true;
+      }
+      if (t.kind === 'water' || t.kind === 'rock' || t.kind === 'tree') return false;
+      if (t.buildingId !== null || t.wall || t.wallPlan) return false;
+      t.stockpileZone = true;
+      t.farmZone = false;
+      return true;
+    } else if (kind === 'wall') {
+      if (t.wallPlan) {
+        t.wallPlan = false;
+        return true;
+      }
+      if (t.kind === 'water' || t.buildingId !== null || t.wall) return false;
+      t.wallPlan = true;
+      return true;
+    }
+    return false;
+  }
+
+  /** Right-click to cancel zone plans or clear zone designations; demolish walls instantly. */
+  bulldozeTile(x: number, y: number): void {
+    if (!this.world.inBounds(x, y)) return;
+    const t = this.world.at(x, y);
+    if (t.roadPlan) {
+      t.roadPlan = null;
+      return;
+    }
+    if (t.wallPlan) {
+      t.wallPlan = false;
+      return;
+    }
+    if (t.farmZone && !t.sown && t.growth === 0) {
+      t.farmZone = false;
+      t.kind = 'grass';
+      return;
+    }
+    if (t.stockpileZone) {
+      t.stockpileZone = false;
+      return;
+    }
+    if (t.farmZone) {
+      t.farmZone = false;
+      return;
+    }
+    if (t.wall) {
+      t.wall = false;
+      t.wallHp = 0;
+      return;
+    }
   }
 
   building(id: number | null | undefined): Building | undefined {
@@ -636,8 +711,13 @@ export class Simulation {
           }
           const wd = Math.hypot(wall.x + 0.5 - r.pos.x - 0.5, wall.y + 0.5 - r.pos.y - 0.5);
           if (wd <= 1.4) {
-            wall.hp -= TUNING.wallDamagePerHour * hours;
-            if (wall.hp <= 0) this.destroyBuilding(wall);
+            const wt = this.world.at(wall.x, wall.y);
+            wt.wallHp -= TUNING.wallDamagePerHour * hours;
+            if (wt.wallHp <= 0) {
+              wt.wall = false;
+              wt.wallHp = 0;
+              this.addLog('Palisade destroyed by raiders!', 'bad');
+            }
             continue;
           }
           const wp = this.world.findPath({ x: Math.round(r.pos.x), y: Math.round(r.pos.y) }, { x: wall.x, y: wall.y });
@@ -664,32 +744,18 @@ export class Simulation {
     return best;
   }
 
-  private nearestWall(p: Vec): Building | null {
-    let best: Building | null = null;
+  private nearestWall(p: Vec): Vec | null {
+    let best: Vec | null = null;
     let bd = Infinity;
-    for (const b of this.buildings) {
-      if (!b.built || buildingDef(b.defId).provides !== 'wall') continue;
-      const d = Math.hypot(b.x - p.x, b.y - p.y);
-      if (d < bd) {
-        bd = d;
-        best = b;
-      }
+    for (let idx = 0; idx < this.world.tiles.length; idx++) {
+      const t = this.world.tiles[idx];
+      if (!t.wall) continue;
+      const x = idx % MAP_W;
+      const y = Math.floor(idx / MAP_W);
+      const d = Math.hypot(x - p.x, y - p.y);
+      if (d < bd) { bd = d; best = { x, y }; }
     }
     return best;
-  }
-
-  private destroyBuilding(b: Building): void {
-    const def = buildingDef(b.defId);
-    for (let dy = 0; dy < def.h; dy++) {
-      for (let dx = 0; dx < def.w; dx++) {
-        const t = this.world.at(b.x + dx, b.y + dy);
-        t.buildingId = null;
-        t.wall = false;
-        if (t.kind === 'soil') t.kind = 'grass';
-      }
-    }
-    this.buildings = this.buildings.filter((o) => o !== b);
-    this.addLog(`${def.name} destroyed by raiders!`, 'bad');
   }
 
   private damageSettler(s: Settler, dmg: number): void {
@@ -911,8 +977,8 @@ export class Simulation {
     // Hunger comes before everything — bed rest and sleep used to outrank it,
     // and settlers starved in bed beside a stocked larder (0.1 death-spiral fix).
     if (s.needs.food < 30 && (this.stock.meal > 0 || this.stock.grain > 0)) {
-      const sp = this.builtOf('storage')[0];
-      if (sp) this.setDestination(s, this.buildingCenter(sp));
+      const spTile = this.nearestStockpileTile(s.pos);
+      if (spTile) this.setDestination(s, spTile);
       s.state = 'eating'; // if the walk fails, eat where you stand rather than starve
       return;
     }
@@ -937,11 +1003,13 @@ export class Simulation {
       }
     }
     if (s.needs.recreation < 60 || s.needs.social < 50) {
-      const hall = this.builtOf('recreation')[0] ?? this.builtOf('storage')[0];
-      if (hall) {
+      const hall = this.builtOf('recreation')[0];
+      const spTile = this.nearestStockpileTile(s.pos);
+      const dest = hall ? this.buildingCenter(hall) : spTile;
+      if (dest) {
         s.state = 'recreating';
         s.stateUntil = this.minute + 180;
-        this.setDestination(s, this.buildingCenter(hall));
+        this.setDestination(s, dest);
         return;
       }
     }
@@ -958,9 +1026,9 @@ export class Simulation {
       candidates.push({ task, prio, dist });
     };
 
-    // Haul ground items to the stockpile.
-    const sp = this.builtOf('storage')[0];
-    if (sp) {
+    // Haul ground items to the stockpile zone.
+    const hasStockpile = this.world.tiles.some((t) => t.stockpileZone);
+    if (hasStockpile) {
       for (const it of this.items) {
         if (it.reservedBy === null) {
           push({ kind: 'haul', x: it.x, y: it.y, itemId: it.id, workLeft: 5, label: `haul ${it.kind}` }, 'haul');
@@ -968,13 +1036,26 @@ export class Simulation {
       }
     }
     // Deliver wood to blueprints, then build them.
+    const spTile = this.nearestStockpileTile({ x: Math.floor(MAP_W / 2), y: Math.floor(MAP_H / 2) });
     for (const b of this.buildings) {
       if (b.built) continue;
       const need = (buildingDef(b.defId).cost.wood ?? 0) - b.delivered;
-      if (need > 0 && this.stock.wood > 0 && sp) {
-        push({ kind: 'build', x: sp.x + 1, y: sp.y, buildingId: b.id, workLeft: 0, label: `fetch wood for ${buildingDef(b.defId).name}` }, 'build');
+      if (need > 0 && this.stock.wood > 0 && spTile) {
+        push({ kind: 'build', x: spTile.x, y: spTile.y, buildingId: b.id, workLeft: 0, label: `fetch wood for ${buildingDef(b.defId).name}` }, 'build');
       } else if (need <= 0) {
         push({ kind: 'build', x: b.x, y: b.y, buildingId: b.id, workLeft: b.buildLeft, label: `build ${buildingDef(b.defId).name}` }, 'build');
+      }
+    }
+    // Build wall zones.
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        const tile = this.world.at(x, y);
+        if (tile.wallPlan && !tile.wall) {
+          const affordable = (TUNING.wallCost.wood ?? 0) <= this.stock.wood;
+          if (affordable) {
+            push({ kind: 'build', x, y, workLeft: TUNING.wallWork, label: 'build palisade', wallTile: true }, 'build');
+          }
+        }
       }
     }
     // Chop marked trees, quarry marked rock, lay planned roads.
@@ -999,9 +1080,7 @@ export class Simulation {
     for (let y = 0; y < MAP_H; y++) {
       for (let x = 0; x < MAP_W; x++) {
         const tile = this.world.at(x, y);
-        if (tile.kind !== 'soil' || tile.buildingId === null) continue;
-        const plot = this.building(tile.buildingId);
-        if (!plot?.built) continue;
+        if (!tile.farmZone) continue;
         if (tile.growth >= 100) {
           push({ kind: 'farm', x, y, workLeft: 10, label: 'harvest grain' }, 'farm');
         } else if (!tile.sown && this.growingSeason) {
@@ -1103,10 +1182,10 @@ export class Simulation {
           item.reservedBy = s.id;
           s.carrying = { kind: item.kind, qty: item.qty };
           this.items = this.items.filter((i) => i.id !== item.id);
-          const sp = this.builtOf('storage')[0];
-          if (!sp) return this.finishTask(s);
+          const spTile = this.nearestStockpileTile(s.pos);
+          if (!spTile) return this.finishTask(s);
           s.state = 'moving';
-          this.setDestination(s, this.buildingCenter(sp));
+          this.setDestination(s, spTile);
           return;
         }
         this.stock[s.carrying.kind] += s.carrying.qty;
@@ -1115,6 +1194,22 @@ export class Simulation {
         return;
       }
       case 'build': {
+        // Wall tiles: materials deducted, wall HP set on completion.
+        if (task.wallTile) {
+          const tile = this.world.at(task.x, task.y);
+          if (!tile.wallPlan) return this.finishTask(s);
+          task.workLeft -= work;
+          if (task.workLeft <= 0) {
+            const cost = TUNING.wallCost;
+            if ((cost.wood ?? 0) > this.stock.wood) return this.finishTask(s);
+            this.stock.wood -= cost.wood ?? 0;
+            tile.wall = true;
+            tile.wallPlan = false;
+            tile.wallHp = TUNING.wallMaxHp;
+            this.finishTask(s);
+          }
+          return;
+        }
         // Road tiles: small jobs — materials charged on completion.
         if (task.roadTile) {
           const tile = this.world.at(task.x, task.y);
@@ -1156,13 +1251,7 @@ export class Simulation {
         b.buildLeft -= work;
         if (b.buildLeft <= 0) {
           b.built = true;
-          if (def.provides === 'wall') {
-            for (let dy = 0; dy < def.h; dy++) {
-              for (let dx = 0; dx < def.w; dx++) this.world.at(b.x + dx, b.y + dy).wall = true;
-            }
-          } else {
-            this.addLog(`${def.name} finished.`, 'good');
-          }
+          this.addLog(`${def.name} finished.`, 'good');
           this.finishTask(s);
         }
         return;
@@ -1330,6 +1419,20 @@ export class Simulation {
   }
 
   // ---- helpers ----
+  private nearestStockpileTile(pos: Vec): Vec | null {
+    let best: Vec | null = null;
+    let bd = Infinity;
+    for (let idx = 0; idx < this.world.tiles.length; idx++) {
+      const t = this.world.tiles[idx];
+      if (!t.stockpileZone) continue;
+      const x = idx % MAP_W;
+      const y = Math.floor(idx / MAP_W);
+      const d = Math.hypot(x - pos.x, y - pos.y);
+      if (d < bd) { bd = d; best = { x, y }; }
+    }
+    return best;
+  }
+
   private effectiveTemp(s: Settler): number {
     const tile = this.world.inBounds(Math.round(s.pos.x), Math.round(s.pos.y))
       ? this.world.at(Math.round(s.pos.x), Math.round(s.pos.y))
@@ -1460,7 +1563,7 @@ export class Simulation {
     const weatherMult = this.weather.growthMult(this.day);
     const perTick = (100 / (TUNING.farmGrowDays * MINUTES_PER_DAY)) * MINUTES_PER_TICK * weatherMult;
     for (const t of this.world.tiles) {
-      if (t.kind === 'soil' && t.sown && t.growth < 100) {
+      if (t.kind === 'soil' && t.farmZone && t.sown && t.growth < 100) {
         t.growth = Math.min(100, t.growth + perTick * t.fertility);
       }
     }
