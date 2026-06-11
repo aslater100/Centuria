@@ -4,7 +4,7 @@
  * markers, routes, expedition wagons; DOM panel for the selected settlement.
  */
 import type { RegionSim, Settlement, GovLean } from '../sim/region';
-import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, RAIL_ERA_YEAR } from '../sim/region';
+import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, RAIL_ERA_YEAR, TECH_TREE } from '../sim/region';
 
 export class RegionView {
   selectedId: number | null = null;
@@ -13,6 +13,8 @@ export class RegionView {
   private g: CanvasRenderingContext2D;
   private panel: HTMLElement;
   private statePanel: HTMLElement;
+  private researchPanel: HTMLElement;
+  researchOpen = false;
   private ceremony: HTMLElement;
   private frame = 0;
 
@@ -24,6 +26,9 @@ export class RegionView {
     this.statePanel = document.createElement('div');
     this.statePanel.className = 'palette state-panel hidden';
     root.appendChild(this.statePanel);
+    this.researchPanel = document.createElement('div');
+    this.researchPanel.className = 'palette research-panel hidden';
+    root.appendChild(this.researchPanel);
     this.ceremony = document.createElement('div');
     this.ceremony.className = 'ceremony hidden';
     root.appendChild(this.ceremony);
@@ -32,6 +37,7 @@ export class RegionView {
   destroyPanel(): void {
     this.panel.remove();
     this.statePanel.remove();
+    this.researchPanel.remove();
     this.ceremony.remove();
   }
 
@@ -205,6 +211,7 @@ export class RegionView {
     this.drawWeather(W, H);
     this.drawPanel();
     this.drawStatePanel();
+    this.drawResearchPanel();
     this.drawCeremony();
   }
 
@@ -355,6 +362,9 @@ export class RegionView {
     }
     this.statePanel.classList.remove('hidden');
     const lvl = (v: number) => ['none', 'basic', 'funded'][v];
+    const researchLabel = r.activeResearch
+      ? TECH_TREE.find((n) => n.id === r.activeResearch)?.name ?? r.activeResearch
+      : `${r.researched.length}/${TECH_TREE.length} nodes`;
     this.statePanel.innerHTML =
       `<div class="pal-title">${r.stateName.toUpperCase()}</div>` +
       `<p class="insp-skills">${r.govLean ? GOV_LEANS[r.govLean].name : ''}</p>` +
@@ -371,6 +381,7 @@ export class RegionView {
         : r.railUnlocked()
           ? 'RAILWORKS chartered — lay rail from any town panel'
           : `railworks expected ~${RAIL_ERA_YEAR}`}</p>` +
+      `<p><button class="mini" id="research-toggle">${this.researchOpen ? '▲ research' : '▼ research'}</button> <span class="insp-skills">${researchLabel}</span></p>` +
       this.freightHtml();
     this.statePanel.querySelector<HTMLInputElement>('#tax-slider')!.oninput = (e) => {
       r.taxRate = Number((e.target as HTMLInputElement).value) / 100;
@@ -386,6 +397,9 @@ export class RegionView {
     };
     this.statePanel.querySelector<HTMLButtonElement>('#mil-dn')!.onclick = () => {
       r.militiaLevel = Math.max(0, r.militiaLevel - 1);
+    };
+    this.statePanel.querySelector<HTMLButtonElement>('#research-toggle')!.onclick = () => {
+      this.researchOpen = !this.researchOpen;
     };
   }
 
@@ -482,6 +496,55 @@ export class RegionView {
       .join('');
     if (!rows) return '';
     return `<p class="insp-skills">ROUTES</p><ul class="thoughts">${rows}</ul>`;
+  }
+
+  /** Research panel: tech + civics tree progress, node browser, start/cancel. */
+  private drawResearchPanel(): void {
+    const r = this.region;
+    if (!this.researchOpen) {
+      this.researchPanel.classList.add('hidden');
+      return;
+    }
+    this.researchPanel.classList.remove('hidden');
+    const rate = r.researchRate().toFixed(1);
+    const active = r.activeResearch ? TECH_TREE.find((n) => n.id === r.activeResearch) : null;
+    const progressPct = active ? Math.min(100, Math.round((r.researchProgress / active.cost) * 100)) : 0;
+
+    const nodeRow = (id: string): string => {
+      const node = TECH_TREE.find((n) => n.id === id)!;
+      const done = r.has(id);
+      const available = !done && r.availableToResearch().find((n) => n.id === id);
+      const isActive = r.activeResearch === id;
+      const label = node.tree === 'tech' ? 'T' : 'C';
+      let cls = done ? 'res-done' : available ? 'res-avail' : 'res-locked';
+      if (isActive) cls = 'res-active';
+      let btn = '';
+      if (available && !isActive) {
+        btn = `<button class="mini res-start-btn" data-id="${id}">research</button>`;
+      } else if (isActive) {
+        btn = `<button class="mini res-cancel-btn">cancel</button>`;
+      }
+      const pctStr = isActive ? ` ${progressPct}%` : '';
+      return `<div class="res-row ${cls}" title="${node.desc}">[${label}] ${node.name} (${node.cost || '✓'} RP)${pctStr}${btn}</div>`;
+    };
+
+    const techNodes = TECH_TREE.filter((n) => n.tree === 'tech').map((n) => nodeRow(n.id)).join('');
+    const civicNodes = TECH_TREE.filter((n) => n.tree === 'civics').map((n) => nodeRow(n.id)).join('');
+
+    this.researchPanel.innerHTML =
+      `<div class="pal-title">RESEARCH</div>` +
+      `<p class="insp-skills">${rate} RP/day${active ? ` → <b>${active.name}</b>` : ' (idle)'}</p>` +
+      (active ? `<div class="res-bar"><div class="res-bar-fill" style="width:${progressPct}%"></div></div>` : '') +
+      `<p class="insp-skills" style="margin-top:6px">TECHNOLOGY</p>` +
+      techNodes +
+      `<p class="insp-skills" style="margin-top:6px">CIVICS</p>` +
+      civicNodes;
+
+    for (const btn of this.researchPanel.querySelectorAll<HTMLButtonElement>('.res-start-btn')) {
+      btn.onclick = () => r.startResearch(btn.dataset.id!);
+    }
+    const cancelBtn = this.researchPanel.querySelector<HTMLButtonElement>('.res-cancel-btn');
+    if (cancelBtn) cancelBtn.onclick = () => r.cancelResearch();
   }
 
   private panelHtml(t: Settlement): string {
