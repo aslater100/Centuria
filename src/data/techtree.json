@@ -117,6 +117,16 @@
       "prereqs": ["labor_law"],
       "era": 1920,
       "desc": "All adults vote; factions must win opinion, not just interests. Satisfaction +3."
+    },
+    {
+      "id": "statecraft",
+      "name": "Statecraft",
+      "tree": "civics",
+      "cost": 120,
+      "prereqs": ["universal_suffrage", "income_tax"],
+      "era": 1930,
+      "requiresState": true,
+      "desc": "The science of governing a multi-state nation. Unlocks the Constitutional Convention — the path to Proclamation."
     }
   ]
 }

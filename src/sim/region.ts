@@ -72,6 +72,63 @@ export function defaultPrices(): MarketPrices {
 /** Provisional government lean chosen at the Incorporation ceremony. */
 export type GovLean = 'council' | 'mayor' | 'compact';
 
+// ---- Faction politics (GDD §5.3) ----
+
+export type FactionId = 'workers' | 'landowners' | 'merchants';
+
+export interface Faction {
+  id: FactionId;
+  name: string;
+  power: number;   // 0–100: how much economic/social weight they carry
+  support: number; // 0–100: how much they back the current regime
+  demand: string;  // what they want (text hint for the player)
+}
+
+/** One-time policy acts funded with political capital (GDD §5.3). */
+export interface RegionLaw {
+  id: string;
+  name: string;
+  cost: number;       // political capital
+  prereqs: string[];  // tech/civics node ids
+  requiresState: boolean;
+  desc: string;
+}
+
+export const REGION_LAWS: RegionLaw[] = [
+  {
+    id: 'workers_charter',
+    name: 'Workers Charter',
+    cost: 30,
+    prereqs: [],
+    requiresState: true,
+    desc: 'Fund services. Services +1. Workers support +20, Merchants/Landowners −10.',
+  },
+  {
+    id: 'merchants_charter',
+    name: "Merchants' Charter",
+    cost: 25,
+    prereqs: [],
+    requiresState: true,
+    desc: 'Lower trade levy 5%→3%. Merchants support +25, Workers −5.',
+  },
+  {
+    id: 'estate_tax',
+    name: 'Estate Tax',
+    cost: 35,
+    prereqs: ['income_tax'],
+    requiresState: true,
+    desc: 'Monthly levy on land wealth adds £0.1/citizen. Landowners −25, Workers +10.',
+  },
+  {
+    id: 'conscription_act',
+    name: 'Conscription Act',
+    cost: 20,
+    prereqs: [],
+    requiresState: true,
+    desc: 'Mandatory service. Militia +1. Workers support −5.',
+  },
+];
+
 export const GOV_LEANS: Record<GovLean, { name: string; desc: string }> = {
   council: {
     name: 'Council of Towns',
@@ -207,6 +264,21 @@ export class RegionSim {
   activeResearch: string | null = null;
   /** Accumulated research points invested in activeResearch. */
   researchProgress = 0;
+  // ---- Elections & faction politics (GDD §5.3) ----
+  /** Currency earned at elections; spent to enact laws. */
+  politicalCapital = 0;
+  /** Absolute day of the next election; −1 until both State and suffrage exist. */
+  nextElectionDay = -1;
+  /** Game year of the most recent election (for the UI). */
+  lastElectionYear = -1;
+  /** Computed each month; live display of faction power/support. */
+  factions: Faction[] = [];
+  /** Law ids that have been enacted (one-time, permanent). */
+  passedLaws: string[] = [];
+  /** Trade levy taken from merchant turnover; default 5%, reducible by law. */
+  tradeLevyRate = 0.05;
+  /** Estate Tax law active: monthly wealth levy. */
+  estateTaxActive = false;
   private droughtAnnounced = false;
   private railAnnounced = false;
   private highwayAnnounced = false;
@@ -786,6 +858,7 @@ export class RegionSim {
       );
     }
     this.tickResearch();
+    this.checkElection();
     if (this.day % 30 === 0) this.monthlyUpdate();
     if (this.day >= this.nextEventDay) {
       this.fireEvent();
@@ -831,6 +904,7 @@ export class RegionSim {
     this.traders();
     this.ageNotables();
     if (this.stateProclaimed) this.monthlyEconomy();
+    if (this.stateProclaimed) this.updateFactions();
   }
 
   // ---- local markets & trade (GDD §5.2, first slice) ----
@@ -899,7 +973,7 @@ export class RegionSim {
     }
     this.tradeValueLastMonth = turnover;
     if (this.stateProclaimed && turnover > 0) {
-      this.treasury += turnover * 0.05; // the market levy
+      this.treasury += turnover * this.tradeLevyRate; // the market levy
     }
   }
 
@@ -964,7 +1038,9 @@ export class RegionSim {
       this.settlements.length * 5; // administration
     // Income Tax (civic research): a progressive levy adds 3% of GDP on top
     const incomeTaxBonus = this.has('income_tax') ? this.gdpLastMonth * 0.03 : 0;
-    this.treasury += revenue - spending + incomeTaxBonus;
+    // Estate Tax law: a wealth levy on the land
+    const estateLevyBonus = this.estateTaxActive ? this.totalPop() * 0.1 : 0;
+    this.treasury += revenue - spending + incomeTaxBonus + estateLevyBonus;
     if (this.treasury < 0) {
       this.treasury = 0;
       if (this.servicesLevel > 0) {
@@ -1303,6 +1379,127 @@ export class RegionSim {
     if (mayor) mayor.bio.push(`Signed the Regional Charter of ${this.stateName}, ${this.year}.`);
   }
 
+  // ---- Faction system (GDD §5.3) ----
+
+  /** Recompute faction power and support from current game state (called monthly). */
+  private updateFactions(): void {
+    const pop = this.totalPop();
+    const food = this.settlements.reduce((s, t) => s + t.food, 0);
+    const trade = this.tradeValueLastMonth;
+
+    const workerPower = Math.min(70, 30 + pop * 0.05);
+    const workerSupport = Math.max(0, Math.min(100,
+      50 + (this.servicesLevel - 1) * 20
+      - Math.max(0, this.taxRate - 0.15) * 100
+      + (this.passedLaws.includes('workers_charter') ? 20 : 0)
+      - (this.passedLaws.includes('conscription_act') ? 5 : 0)
+      + (this.passedLaws.includes('estate_tax') ? 10 : 0),
+    ));
+
+    const landownerPower = Math.min(50, 15 + food * 0.005);
+    const landownerSupport = Math.max(0, Math.min(100,
+      70 - this.taxRate * 160
+      - (this.passedLaws.includes('estate_tax') ? 25 : 0)
+      - (this.passedLaws.includes('workers_charter') ? 10 : 0),
+    ));
+
+    const merchantPower = Math.min(40, 10 + trade * 0.12);
+    const merchantSupport = Math.max(0, Math.min(100,
+      50 + trade * 0.05
+      + (this.passedLaws.includes('merchants_charter') ? 25 : 0)
+      - (this.passedLaws.includes('workers_charter') ? 10 : 0),
+    ));
+
+    this.factions = [
+      {
+        id: 'workers', name: 'Workers', power: workerPower, support: workerSupport,
+        demand: workerSupport < 40 ? 'better services & lower taxes' : 'content',
+      },
+      {
+        id: 'landowners', name: 'Landowners', power: landownerPower, support: landownerSupport,
+        demand: landownerSupport < 40 ? 'tax cuts' : 'content',
+      },
+      {
+        id: 'merchants', name: 'Merchants', power: merchantPower, support: merchantSupport,
+        demand: merchantSupport < 40 ? 'open markets' : 'content',
+      },
+    ];
+  }
+
+  // ---- Elections (GDD §5.3) ----
+
+  /** Schedule the first election once universal suffrage + state both exist. */
+  private checkElection(): void {
+    if (!this.stateProclaimed || !this.has('universal_suffrage')) return;
+    if (this.nextElectionDay < 0) {
+      this.nextElectionDay = this.day + 240; // ~4 game-years
+    }
+    if (this.day >= this.nextElectionDay) this.runElection();
+  }
+
+  /** Run an election: award political capital proportional to approval. */
+  private runElection(): void {
+    const n = this.settlements.length;
+    const avgSat = n > 0
+      ? this.settlements.reduce((s, t) => s + t.satisfaction, 0) / n
+      : 50;
+    const earned = Math.round(20 + (avgSat / 100) * 80);
+    this.politicalCapital = Math.min(200, this.politicalCapital + earned);
+    this.lastElectionYear = this.year;
+    this.nextElectionDay = this.day + 240;
+    const result = avgSat >= 65 ? 'LANDSLIDE' : avgSat >= 50 ? 'MAJORITY' : avgSat >= 35 ? 'MINORITY' : 'LOST';
+    this.addLog(
+      `ELECTION ${this.year}: ${result} (approval ${Math.round(avgSat)}%) — ${earned} political capital earned.` +
+      (result === 'LOST' ? ' The government limps on.' : ''),
+      avgSat >= 50 ? 'good' : 'bad',
+    );
+  }
+
+  // ---- Law system (GDD §5.3) ----
+
+  /** Laws available to be enacted: not yet passed, prereqs met, state if required. */
+  availableLaws(): (RegionLaw & { canAfford: boolean })[] {
+    return REGION_LAWS
+      .filter(
+        (l) =>
+          !this.passedLaws.includes(l.id) &&
+          (!l.requiresState || this.stateProclaimed) &&
+          l.prereqs.every((p) => this.has(p)),
+      )
+      .map((l) => ({ ...l, canAfford: this.politicalCapital >= l.cost }));
+  }
+
+  /** Enact a law: spend political capital and apply the permanent effect. */
+  enactLaw(id: string): boolean {
+    if (this.passedLaws.includes(id)) return false;
+    const law = REGION_LAWS.find((l) => l.id === id);
+    if (!law) return false;
+    if (law.requiresState && !this.stateProclaimed) return false;
+    if (!law.prereqs.every((p) => this.has(p))) return false;
+    if (this.politicalCapital < law.cost) return false;
+
+    this.politicalCapital -= law.cost;
+    this.passedLaws.push(id);
+
+    switch (id) {
+      case 'workers_charter':
+        this.servicesLevel = Math.min(2, this.servicesLevel + 1);
+        break;
+      case 'merchants_charter':
+        this.tradeLevyRate = 0.03;
+        break;
+      case 'estate_tax':
+        this.estateTaxActive = true;
+        break;
+      case 'conscription_act':
+        this.militiaLevel = Math.min(2, this.militiaLevel + 1);
+        break;
+    }
+
+    this.addLog(`LAW ENACTED: "${law.name}". ${law.desc.split('.')[0]}.`, 'good');
+    return true;
+  }
+
   private removePop(t: Settlement, count: number): void {
     const pop = this.popOf(t);
     if (pop <= 0) return;
@@ -1345,6 +1542,12 @@ export class RegionSim {
       researched: this.researched,
       activeResearch: this.activeResearch,
       researchProgress: this.researchProgress,
+      politicalCapital: this.politicalCapital,
+      nextElectionDay: this.nextElectionDay,
+      lastElectionYear: this.lastElectionYear,
+      passedLaws: this.passedLaws,
+      tradeLevyRate: this.tradeLevyRate,
+      estateTaxActive: this.estateTaxActive,
       nextId: this.nextId,
       nextEventDay: this.nextEventDay,
       townNamePool: this.townNamePool,
@@ -1380,6 +1583,12 @@ export class RegionSim {
     r.researched = d.researched ?? ['steam_power', 'common_law'];
     r.activeResearch = d.activeResearch ?? null;
     r.researchProgress = d.researchProgress ?? 0;
+    r.politicalCapital = d.politicalCapital ?? 0;
+    r.nextElectionDay = d.nextElectionDay ?? -1;
+    r.lastElectionYear = d.lastElectionYear ?? -1;
+    r.passedLaws = d.passedLaws ?? [];
+    r.tradeLevyRate = d.tradeLevyRate ?? 0.05;
+    r.estateTaxActive = d.estateTaxActive ?? false;
     r.nextId = d.nextId;
     r.nextEventDay = d.nextEventDay;
     r.townNamePool = d.townNamePool;
