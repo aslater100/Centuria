@@ -154,6 +154,33 @@
       "era": 1930,
       "requiresState": true,
       "desc": "The science of governing a multi-state nation. Unlocks the Constitutional Convention — the path to Proclamation."
+    },
+    {
+      "id": "renewables",
+      "name": "Renewable Energy",
+      "tree": "tech",
+      "cost": 240,
+      "prereqs": ["electrical_grid", "mass_production"],
+      "era": 1972,
+      "desc": "Wind, water, and sun displace the coal seam. National emissions ×0.6 — and rivals copy the proven designs (world emissions −20%)."
+    },
+    {
+      "id": "fusion_power",
+      "name": "Fusion Power",
+      "tree": "tech",
+      "cost": 420,
+      "prereqs": ["renewables", "atomic_age", "computing"],
+      "era": 2045,
+      "desc": "A star in a bottle, at last. National emissions ×0.15, and the design diffuses worldwide (world emissions −50%)."
+    },
+    {
+      "id": "environmentalism",
+      "name": "Environmentalism",
+      "tree": "civics",
+      "cost": 180,
+      "prereqs": ["universal_suffrage", "free_press"],
+      "era": 1968,
+      "desc": "Society notices the smoke. Unlocks the Carbon Levy act."
     }
   ]
 }
