@@ -165,45 +165,34 @@ export class RegionView {
       }
     }
 
-    // Settlements
+    // Settlements — tiered sprites: shack → cottage → house → town → manor → castle
     for (const t of ss) {
       const { px, py } = this.toPx(t.x, t.y);
       const pop = Math.round(region.popOf(t));
-      const houses = Math.min(7, 2 + Math.floor(pop / 25));
       // Station (M6c): towns on the rail network get a depot by the tracks
-      if (region.routes.some((r) => r.kind === 'rail' && (r.a === t.id || r.b === t.id))) {
-        const sx = px + houses * 4 + 4;
-        g.fillStyle = '#7a3b2e'; // brick depot
+      const onRail = region.routes.some((r) => r.kind === 'rail' && (r.a === t.id || r.b === t.id));
+      if (onRail) {
+        const sx = px + 22;
+        g.fillStyle = '#7a3b2e';
         g.fillRect(sx, py - 4, 10, 10);
         g.fillStyle = '#3a2e26';
-        g.fillRect(sx - 1, py - 7, 12, 4); // roof
+        g.fillRect(sx - 1, py - 7, 12, 4);
         g.fillStyle = '#969ca8';
-        g.fillRect(sx - 2, py + 7, 14, 2); // platform
+        g.fillRect(sx - 2, py + 7, 14, 2);
         g.fillStyle = '#e8d27a';
-        g.fillRect(sx + 4, py - 1, 2, 2); // lamplit window
+        g.fillRect(sx + 4, py - 1, 2, 2);
       }
-      g.fillStyle = '#1a1410';
-      g.fillRect(px - houses * 4 - 1, py - 9, houses * 8 + 2, 18);
-      for (let i = 0; i < houses; i++) {
-        const hx = px - houses * 4 + i * 8;
-        g.fillStyle = '#6e4a2f';
-        g.fillRect(hx + 1, py - 2, 6, 8);
-        g.fillStyle = '#3a2e26';
-        g.fillRect(hx, py - 7, 8, 5);
-      }
-      if (this.selectedId === t.id) {
-        g.strokeStyle = '#e8d27a';
-        g.strokeRect(px - houses * 4 - 3.5, py - 11.5, houses * 8 + 7, 23);
-      }
+      this.drawTownTier(px, py, pop, this.selectedId === t.id);
       g.fillStyle = '#e8d27a';
       g.font = '12px monospace';
       g.textAlign = 'center';
-      g.fillText(t.name, px, py + 24);
-      g.fillStyle = '#dfe6ee';
-      g.fillText(`${pop}`, px, py + 38);
+      g.fillText(t.name, px, py + 28);
+      g.fillStyle = '#9ab0c4';
+      g.font = '10px monospace';
+      g.fillText(`${pop}`, px, py + 40);
       if (region.day - t.lastRaidDay < 5) {
         g.fillStyle = '#e04444';
-        g.fillText('⚔', px + houses * 4 + 12, py);
+        g.fillText('⚔', px + 22, py - 6);
       }
     }
 
@@ -339,6 +328,128 @@ export class RegionView {
     g.fillRect(Math.round(p.px) - 3, Math.round(p.py) - 1, 7, 1); // the field glow beneath
   }
 
+  /** Pixel-art town sprite scaled by population tier:
+   *  <30 shack, 30-80 cottage, 80-200 house, 200-500 town, 500-1k manor, 1k+ castle */
+  private drawTownTier(px: number, py: number, pop: number, selected: boolean): void {
+    const g = this.g;
+    // shadow / ground plate
+    g.fillStyle = 'rgba(0,0,0,0.35)';
+    g.fillRect(px - 16, py + 8, 32, 4);
+
+    if (pop < 30) {
+      // Shack: one tiny building, rough timber
+      g.fillStyle = '#4a3822';
+      g.fillRect(px - 6, py - 4, 12, 12);
+      g.fillStyle = '#2e2018';
+      g.fillRect(px - 7, py - 8, 14, 5); // lean-to roof
+      g.fillStyle = '#c2a14d';
+      g.fillRect(px - 1, py - 2, 2, 4); // door
+    } else if (pop < 80) {
+      // Cottage: tidy house with chimney
+      g.fillStyle = '#6e4a2f';
+      g.fillRect(px - 8, py - 4, 16, 12);
+      g.fillStyle = '#3a2e26';
+      g.fillRect(px - 9, py - 10, 18, 7); // gable roof
+      g.fillStyle = '#554030';
+      g.fillRect(px + 3, py - 15, 4, 6); // chimney
+      g.fillStyle = '#e8d27a';
+      g.fillRect(px - 4, py - 1, 3, 3); // window
+      g.fillRect(px + 2, py - 1, 3, 3);
+    } else if (pop < 200) {
+      // House: proper two-story with detail
+      g.fillStyle = '#7a5840';
+      g.fillRect(px - 10, py - 8, 20, 16);
+      g.fillStyle = '#3a2e26';
+      g.fillRect(px - 11, py - 14, 22, 7);
+      g.fillStyle = '#554030';
+      g.fillRect(px + 5, py - 19, 4, 6);
+      g.fillStyle = '#1a1410';
+      g.fillRect(px - 3, py - 3, 6, 8); // door arch
+      g.fillStyle = '#e8d27a';
+      g.fillRect(px - 8, py - 5, 3, 3);
+      g.fillRect(px + 5, py - 5, 3, 3);
+      g.fillRect(px - 8, py + 2, 3, 3);
+      g.fillRect(px + 5, py + 2, 3, 3);
+    } else if (pop < 500) {
+      // Town: cluster of buildings with a central hall
+      g.fillStyle = '#8c6848';
+      g.fillRect(px - 14, py - 6, 28, 14); // base block
+      g.fillStyle = '#6e4a2f';
+      g.fillRect(px - 7, py - 12, 14, 18); // central hall taller
+      g.fillStyle = '#2e2018';
+      g.fillRect(px - 15, py - 10, 30, 5); // wide roof
+      g.fillStyle = '#3a2e26';
+      g.fillRect(px - 8, py - 16, 16, 5); // peaked center
+      g.fillStyle = '#e8d27a';
+      g.fillRect(px - 5, py - 9, 3, 4);
+      g.fillRect(px + 2, py - 9, 3, 4);
+      g.fillStyle = '#c2a14d';
+      g.fillRect(px - 1, py - 1, 2, 6); // central door
+      // flanking cottages
+      g.fillStyle = '#6e4a2f';
+      g.fillRect(px - 14, py - 4, 6, 10);
+      g.fillRect(px + 8, py - 4, 6, 10);
+      g.fillStyle = '#3a2e26';
+      g.fillRect(px - 15, py - 8, 8, 5);
+      g.fillRect(px + 7, py - 8, 8, 5);
+    } else if (pop < 1000) {
+      // Manor: grand estate with towers
+      g.fillStyle = '#9a7858';
+      g.fillRect(px - 16, py - 8, 32, 16);
+      g.fillStyle = '#7a5840';
+      g.fillRect(px - 10, py - 14, 20, 22);
+      g.fillStyle = '#2e2018';
+      g.fillRect(px - 17, py - 12, 34, 5);
+      g.fillStyle = '#3a2e26';
+      g.fillRect(px - 11, py - 18, 22, 5);
+      // corner towers
+      g.fillStyle = '#5a4030';
+      g.fillRect(px - 18, py - 14, 6, 18);
+      g.fillRect(px + 12, py - 14, 6, 18);
+      g.fillStyle = '#2e2018';
+      g.fillRect(px - 19, py - 18, 8, 5);
+      g.fillRect(px + 11, py - 18, 8, 5);
+      g.fillStyle = '#e8d27a';
+      g.fillRect(px - 7, py - 10, 3, 4);
+      g.fillRect(px + 4, py - 10, 3, 4);
+      g.fillRect(px - 7, py - 2, 3, 4);
+      g.fillRect(px + 4, py - 2, 3, 4);
+      g.fillStyle = '#c2a14d';
+      g.fillRect(px - 2, py - 4, 4, 8);
+    } else {
+      // Castle: fortified keep with battlements
+      g.fillStyle = '#6a6358';
+      g.fillRect(px - 18, py - 10, 36, 18); // curtain wall
+      g.fillStyle = '#7a7060';
+      g.fillRect(px - 12, py - 18, 24, 26); // keep
+      // battlements
+      g.fillStyle = '#5a5448';
+      for (let bx = -16; bx <= 12; bx += 4) {
+        g.fillRect(px + bx, py - 13, 3, 4);
+      }
+      for (let bx = -10; bx <= 8; bx += 4) {
+        g.fillRect(px + bx, py - 21, 3, 4);
+      }
+      // windows
+      g.fillStyle = '#e8d27a';
+      g.fillRect(px - 8, py - 14, 3, 4);
+      g.fillRect(px + 5, py - 14, 3, 4);
+      g.fillRect(px - 8, py - 5, 3, 4);
+      g.fillRect(px + 5, py - 5, 3, 4);
+      g.fillStyle = '#c2a14d';
+      g.fillRect(px - 2, py - 4, 4, 12); // gate
+      g.fillStyle = '#3a2e26';
+      g.fillRect(px - 1, py - 6, 2, 3); // portcullis
+    }
+    // selection glow
+    if (selected) {
+      g.strokeStyle = '#e8d27a';
+      g.lineWidth = 2;
+      g.strokeRect(px - 20, py - 24, 40, 36);
+      g.lineWidth = 1;
+    }
+  }
+
   /** The generated land itself, in 8-bit blocks: this map IS the world. */
   private drawTerrain(W: number, H: number): void {
     const { g, region } = this;
@@ -350,27 +461,80 @@ export class RegionView {
     for (let y = 0; y < N; y++) {
       for (let x = 0; x < N; x++) {
         const c = map.at(x, y);
+        const bx = Math.floor(m + x * cw);
+        const by = Math.floor(m + y * ch);
+        const bw = Math.ceil(cw);
+        const bh = Math.ceil(ch);
+        // Base biome colour
         let col: string;
         switch (c.biome) {
-          case 'sea': col = '#243d52'; break;
-          case 'lake': col = '#2e4a5c'; break;
-          case 'river': col = '#36586e'; break;
-          case 'marsh': col = '#39503e'; break;
-          case 'plains': col = '#46563a'; break;
-          case 'forest': col = '#33502c'; break;
-          case 'hills': col = '#5a5742'; break;
-          case 'mountains': col = c.elevation > 0.85 ? '#9a978f' : '#6a6358'; break;
+          case 'sea':       col = c.elevation < -0.3 ? '#1c3244' : '#243d52'; break;
+          case 'lake':      col = '#2e4a5c'; break;
+          case 'river':     col = '#36586e'; break;
+          case 'marsh':     col = '#39503e'; break;
+          case 'plains':    col = c.elevation > 0.35 ? '#4e5e40' : '#46563a'; break;
+          case 'forest':    col = c.elevation > 0.4 ? '#2e4826' : '#33502c'; break;
+          case 'hills':     col = c.elevation > 0.6 ? '#6a6450' : '#5a5742'; break;
+          case 'mountains': col = c.elevation > 0.88 ? '#d0cec8' : c.elevation > 0.78 ? '#a8a49c' : '#7a7060'; break;
+          default:          col = '#46563a';
         }
         g.fillStyle = col;
-        g.fillRect(Math.floor(m + x * cw), Math.floor(m + y * ch), Math.ceil(cw), Math.ceil(ch));
-        // elevation shading + a pixel of texture
-        if ((x * 7 + y * 13) % 9 === 0 && c.biome !== 'sea') {
-          g.fillStyle = 'rgba(0,0,0,0.15)';
-          g.fillRect(Math.floor(m + x * cw), Math.floor(m + y * ch), 2, 2);
+        g.fillRect(bx, by, bw, bh);
+
+        // Elevation-based lighting: NW-lit hillshade
+        const north = y > 0 ? map.at(x, y - 1).elevation : c.elevation;
+        const west  = x > 0 ? map.at(x - 1, y).elevation : c.elevation;
+        const shade = (c.elevation - north + c.elevation - west) * 1.4;
+        if (shade > 0.01) {
+          g.fillStyle = `rgba(255,255,240,${Math.min(0.32, shade * 0.6)})`;
+          g.fillRect(bx, by, bw, bh);
+        } else if (shade < -0.01) {
+          g.fillStyle = `rgba(0,0,0,${Math.min(0.30, -shade * 0.5)})`;
+          g.fillRect(bx, by, bw, bh);
         }
-        if (c.elevation > 0.5 && c.biome !== 'mountains') {
-          g.fillStyle = `rgba(255,255,240,${(c.elevation - 0.5) * 0.12})`;
-          g.fillRect(Math.floor(m + x * cw), Math.floor(m + y * ch), Math.ceil(cw), Math.ceil(ch));
+
+        // Forest texture: scattered tree dots
+        if (c.biome === 'forest') {
+          const seed = (x * 17 + y * 31) % 7;
+          if (seed < 3) {
+            g.fillStyle = 'rgba(20,40,16,0.55)';
+            g.fillRect(bx + (seed * 3) % bw, by + (seed * 5) % bh, Math.max(1, bw * 0.4), Math.max(1, bh * 0.4));
+          }
+        }
+        // Mountain snow caps on highest peaks
+        if (c.biome === 'mountains' && c.elevation > 0.82) {
+          g.fillStyle = `rgba(230,230,240,${(c.elevation - 0.82) * 2.5})`;
+          g.fillRect(bx, by, bw, Math.max(1, bh * 0.5));
+        }
+        // River shimmer
+        if (c.biome === 'river' && (x + y + Math.floor(this.frame / 12)) % 5 === 0) {
+          g.fillStyle = 'rgba(180,220,240,0.22)';
+          g.fillRect(bx, by, bw, bh);
+        }
+        // Marsh reeds texture
+        if (c.biome === 'marsh' && (x * 5 + y * 7) % 11 < 3) {
+          g.fillStyle = 'rgba(60,80,30,0.4)';
+          g.fillRect(bx + bw * 0.3, by, Math.max(1, bw * 0.2), bh);
+        }
+      }
+    }
+    // Contour lines: thin strokes where elevation crosses 0.2/0.4/0.6/0.8
+    g.strokeStyle = 'rgba(0,0,0,0.12)';
+    g.lineWidth = 1;
+    for (const level of [0.2, 0.4, 0.6, 0.8]) {
+      for (let y = 0; y < N - 1; y++) {
+        for (let x = 0; x < N - 1; x++) {
+          const a = map.at(x, y).elevation;
+          const b2 = map.at(x + 1, y).elevation;
+          const c2 = map.at(x, y + 1).elevation;
+          if ((a < level) !== (b2 < level) || (a < level) !== (c2 < level)) {
+            const bx = Math.floor(m + x * cw);
+            const by2 = Math.floor(m + y * ch);
+            g.beginPath();
+            g.moveTo(bx, by2);
+            g.lineTo(bx + Math.ceil(cw), by2 + Math.ceil(ch));
+            g.stroke();
+          }
         }
       }
     }
@@ -1093,6 +1257,13 @@ export class RegionView {
         this.region.foundTown(t.id);
       };
     }
+    const renameBtn = this.panel.querySelector<HTMLButtonElement>('#rename-btn');
+    if (renameBtn) {
+      renameBtn.onclick = () => {
+        const name = prompt('Rename town:', t.name);
+        if (name && name.trim()) t.name = name.trim();
+      };
+    }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.road-btn')) {
       rb.onclick = () => {
         this.region.buildRoad(t.id, Number(rb.dataset.to));
@@ -1228,6 +1399,7 @@ export class RegionView {
 
   private panelHtml(t: Settlement): string {
     const r = this.region;
+    const pop = Math.round(r.popOf(t));
     const bands = t.cohorts.bands
       .map((v, i) => `<div class="bar-row"><span>${AGE_BANDS[i]}</span><div class="bar"><div class="bar-fill" style="width:${Math.min(100, (v / Math.max(1, r.popOf(t))) * 100 * 2.5)}%"></div></div><span>${Math.round(v)}</span></div>`)
       .join('');
@@ -1235,8 +1407,17 @@ export class RegionView {
       .map((n) => `<li><b>${n.name}</b>, ${Math.floor(n.age)} — <abbr title="${ROLE_BONUS_DESC[n.role]}">${n.role}</abbr><br><span class="insp-skills">${n.bio[n.bio.length - 1]}</span></li>`)
       .join('');
     const can = r.canFoundTown(t.id);
+    const tier = pop < 30 ? 'Shack' : pop < 80 ? 'Cottage' : pop < 200 ? 'House' : pop < 500 ? 'Town' : pop < 1000 ? 'Manor' : 'Castle';
+    const recentHtml = t.recentEvents.length
+      ? `<p class="insp-skills">RECENT EVENTS</p><ul class="thoughts">${
+          t.recentEvents.slice(0, 6).map((ev) =>
+            `<li class="log-${ev.kind}">d${ev.day} · ${ev.text}</li>`
+          ).join('')
+        }</ul>`
+      : '';
     return (
-      `<h3>${t.name}</h3>` +
+      `<h3>${t.name} <button id="rename-btn" class="mini" title="Rename this town">✎</button></h3>` +
+      `<p class="insp-lvl">${tier} · day ${r.day - t.foundedDay} old</p>` +
       `<p class="insp-state">pop ${Math.round(r.popOf(t))} · housing ${Math.floor(t.housing)} · satisfaction ${Math.round(t.satisfaction)}</p>` +
       (r.stateProclaimed
         ? `<p class="${t.grievance > 50 ? 'insp-cond' : 'insp-skills'}">grievance ${Math.round(t.grievance)}${this.region.day < t.strikeUntil ? ' · ON STRIKE' : ''}</p>`
@@ -1256,6 +1437,7 @@ export class RegionView {
           `sea wall £${r.seaWallCost(t)}</button></p>`
         : '') +
       this.routesHtml(t) +
+      recentHtml +
       `<p class="insp-skills">COHORTS</p>` + bands +
       (notables ? `<p class="insp-skills">NOTABLES</p><ul class="thoughts">${notables}</ul>` : '') +
       `<button id="found-btn" ${can.ok ? '' : 'disabled'} title="${can.reason}">Found new town (8 pop, 80 food, 80 wood)</button>` +

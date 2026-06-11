@@ -140,6 +140,7 @@ let regionView: RegionView | null = null;
 
 // A lost colony offers a clean slate: reload re-seeds from the clock.
 hud.onRestart = () => location.reload();
+hud.onQuit = () => window.close();
 
 /** Shared by the flip and the load path: hand the screen to the region. */
 function enterRegionMode(r: RegionSim): void {
