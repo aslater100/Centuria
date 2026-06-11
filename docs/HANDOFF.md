@@ -1,8 +1,8 @@
-# Session Handoff — 2026-06-11 (v0.20.0)
+# Session Handoff — 2026-06-11 (v0.21.0)
 
 ## Current state
 
-Version **v0.20.0** (maglev + automated freight). Transportation arc **including the speculative era** (trail→road→rail→highway→maglev), governance stack, audio layer, rival nations + diplomacy, the full war loop, the §6.3 bargaining engine (deal baskets + counter-offers, also pricing the peace table), and §7.3–7.4 war depth (blockade, co-belligerence, occupation/resistance) are complete.
+Version **v0.21.0** (the reckoning). Transportation arc **including the speculative era** (trail→road→rail→highway→maglev), governance stack, audio layer, rival nations + diplomacy, the full war loop, the §6.3 bargaining engine, §7.3–7.4 war depth, and now the **climate ledger + eras 7–8** (CO₂/warming with 20-year lag, climate impacts, sea walls, the 2040 solarpunk/dystopia/drowned verdict, the 2100 Century Report) are complete. The game now runs its full 1900–2100 arc.
 
 ## Shipped
 
@@ -28,6 +28,7 @@ Version **v0.20.0** (maglev + automated freight). Transportation arc **including
 | 0.18 | War (GDD §7): nation-tier `playerWar` — 3 casus belli (CB quality sets war support; fabrication costs legitimacy + reputation), 3 mobilization levels (GDP stimulus + £/pop drain + rationing), monthly front resolution on `manpower^0.6 × quality` power ratio, attrition scars cohorts, support floors per regime (home front breaks → capitulation), peace table priced in war score (status quo/reparations/annex/regime change) with grudge premium + Versailles trap; hostile rivals can declare on the player |
 | 0.19 | Negotiation engine (§6.3) + war depth (§7.3–7.4): deal baskets (treaties + gold both ways + border settlement) valued in diplomatic points from each rival's own personality, accept/counter-within-30%/walk-with-reason, signable counter-offers; peace table re-priced through the same engine (multi-term baskets, counter names what they'd sign, occupied marches discount the ask, annexation requires held ground); blockade (needs funded militia/standing army; enemy power ×0.85, pop bleed, score drift, upkeep + export interdiction both ways), allied co-belligerence (called pacts fight at 0.5 vs 0.25 passive, share victory/defeat; refusing a defensive call tears the pact; enemy allies join honor-weighted), occupation/resistance (≤3 marches, conciliatory/brutal policy, partisans past resistance 50, brutality is legitimacy now + grudge forever), enemy raiders cut routes monthly |
 | 0.20 | Maglev + automated freight (transportation.md §5 speculative era): `maglev` route kind (capacity 3,000, ×8 speed, £14/tc — dearest build, £0.2/cell/mo) behind State + 2005; late-century tech chain `computing` (1965, research +25%) → `automated_logistics` (1990, all route maintenance ×0.6) → `maglev` (1998, lines 5 years early); cyan guideway on pylons with a gliding pod; capex-vs-opex inverts the asphalt trap |
+| 0.21 | The reckoning (GDD §8.2, §3.2 eras 7–8): global CO₂ ledger from 295 ppm with 20-year warming lag; player + world emissions (green tech diffuses: renewables ×0.8 world, fusion ×0.5); impacts = crop drag past +0.8°C, washouts scale with warming, tidal flooding on unwalled coastal towns from 2035/+1.5°C; `renewables`/`fusion_power`/`environmentalism` nodes + Carbon Levy law; sea walls (State + 2025, £120+0.4/pop); 2040 verdict → `eraBranch` solarpunk/dystopia/drowned with ongoing effects; 1 Jan 2100 Century Report (graded A–F: stewardship/prosperity/liberty/standing), sandbox continues |
 
 ## Ship loop
 
@@ -42,15 +43,16 @@ User merges and play-tests; CI validates (test.yml — do not run the suite loca
 ## What's next
 
 GDD-aligned open items (roughly in order of pull):
-- Eras 7–8 (2040–2100: solarpunk / dystopia / drowned endings)
-- Full climate system (CO₂ ledger framework exists; impacts currently simplified to events)
+- Climate accords + geoengineering (GDD §8.2: the late-era negotiation with teeth; ledger + diffusion hooks exist)
 - FX & monetary regimes (single-currency only today)
 - Espionage + misinformation systems
 - Historical scenarios (GDD §9)
+- Branch-tinted music/backdrops for eras 7–8 (sim branch exists; music.ts still plays one speculative window)
 - Animal husbandry + ranged combat polish (may be partially shipped; check src/)
 
 ## Architecture reference
 
+- **Climate (GDD §8.2):** `tickClimate()` runs in every `monthlyUpdate` (no RNG draws — climate is arithmetic, so it can't shift the event stream). `co2ppm` += `playerEmissions()` (pop-scaled tech intensity; renewables ×0.6, fusion ×0.15, Carbon Levy ×0.7) + `worldEmissions()` (rival pop ≥ 12k floor × 1905–1960 ramp × post-2030 decarb × diffusion — the player's green research bends the *world* curve, which is the real lever). `warmingC` closes 1/40 of the gap to `(ppm−295)×0.011` per tick (20-year lag, 2 ticks/yr). Impacts: `climateDrag` on crops past +0.8°C, washout chance ×(1+0.3×warming) capped 0.3 (reuses the same rng draw), tidal flooding (year ≥ 2035, warming > 1.5, coastal, no `seaWall`). `projectedWarming()` is the 2100 ghost-line. At 2040 `decideBranch()`: proj ≥ 2.3 → drowned; else non-democratic / avgSat < 42 / legitimacy < 35 → dystopia; else solarpunk (one-shot, ongoing effects: solarpunk +4 satisfaction & emissions ×0.8, dystopia GDP ×1.08 & grievance +0.15/day, drowned tide ×1.5). At 2100 `buildCenturyReport()` (graded, `gameOver` stays false). All fields serialized with `??` defaults.
 - **Route kinds:** `'trail' | 'road' | 'rail' | 'highway' | 'maglev'`; `KIND_RANK` enforces upgrade-only; `buildLink` refuses downgrades.
 - **Gates:** `railUnlocked()` = `stateProclaimed && year >= 1912`; highway = State + year ≥ 1945; maglev = State + year ≥ 2005 (each −5 years with its tech node). `maintBill(r)` is ×0.6 once `automated_logistics` is researched.
 - **Save format:** v2 `{v:2, mode:'region', town, region}` under `centuria-save`; v1 town saves still load.

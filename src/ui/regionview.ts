@@ -4,7 +4,7 @@
  * markers, routes, expedition wagons; DOM panel for the selected settlement.
  */
 import type { RegionSim, Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy } from '../sim/region';
-import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP } from '../sim/region';
+import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP } from '../sim/region';
 
 export class RegionView {
   selectedId: number | null = null;
@@ -29,6 +29,9 @@ export class RegionView {
   private dealBorder = false;
   /** Peace terms ticked at the war room's table (GDD §7.4). */
   private peacePicks = new Set<PeaceTerm>();
+  /** The Century Report (GDD §8.4): shown once at 2100, dismissible. */
+  private centuryModal: HTMLElement;
+  private centuryDismissed = false;
   private frame = 0;
 
   constructor(private canvas: HTMLCanvasElement, private region: RegionSim, root: HTMLElement) {
@@ -54,6 +57,9 @@ export class RegionView {
     this.dealModal = document.createElement('div');
     this.dealModal.className = 'ceremony hidden';
     root.appendChild(this.dealModal);
+    this.centuryModal = document.createElement('div');
+    this.centuryModal.className = 'ceremony hidden';
+    root.appendChild(this.centuryModal);
   }
 
   destroyPanel(): void {
@@ -64,6 +70,7 @@ export class RegionView {
     this.convention.remove();
     this.policyModal.remove();
     this.dealModal.remove();
+    this.centuryModal.remove();
   }
 
   private toPx(x: number, y: number): { px: number; py: number } {
@@ -249,6 +256,7 @@ export class RegionView {
     this.drawResearchPanel();
     this.drawCeremony();
     this.drawConvention();
+    this.drawCenturyReport();
   }
 
   /** Rival nations loom at the map's edge (GDD §6.4): a flag, a name, and
@@ -492,6 +500,41 @@ export class RegionView {
     };
   }
 
+  /** 1 Jan 2100: the verdict on the modal, once (GDD §8.4). Dismissing it
+   *  hands the country back — the sandbox runs on. */
+  private drawCenturyReport(): void {
+    const rep = this.region.centuryReport;
+    if (!rep || this.centuryDismissed) {
+      this.centuryModal.classList.add('hidden');
+      return;
+    }
+    if (!this.centuryModal.classList.contains('hidden')) return; // already on screen
+    this.centuryModal.classList.remove('hidden');
+    const branchTitle =
+      rep.branch === 'solarpunk' ? 'THE GARDEN CENTURY'
+      : rep.branch === 'dystopia' ? 'THE NEON CENTURY'
+      : rep.branch === 'drowned' ? 'THE DROWNED CENTURY' : 'THE CENTURY';
+    const g = rep.grades;
+    this.centuryModal.innerHTML =
+      `<div class="ceremony-box">` +
+      `<h2>1 JANUARY 2100 — THE CENTURY REPORT</h2>` +
+      `<p class="insp-skills">${branchTitle}</p>` +
+      `<p>${rep.verdict}</p>` +
+      `<p>population <b>${rep.pop.toLocaleString()}</b> across <b>${rep.towns}</b> towns · ` +
+      `GDP £${rep.gdp}/mo · treasury £${rep.treasury}</p>` +
+      `<p>CO₂ <b>${rep.co2ppm} ppm</b> · warming <b>+${rep.warmingC}°C</b> · ` +
+      `${rep.techs} discoveries · ${rep.laws} statutes · legitimacy ${rep.legitimacy}</p>` +
+      `<p>stewardship <b>${g.stewardship}</b> · prosperity <b>${g.prosperity}</b> · ` +
+      `liberty <b>${g.liberty}</b> · standing <b>${g.standing}</b></p>` +
+      `<p class="insp-skills">Endings are graded, not won. The country is still yours.</p>` +
+      `<button id="century-close-btn">Carry on</button>` +
+      `</div>`;
+    this.centuryModal.querySelector<HTMLButtonElement>('#century-close-btn')!.onclick = () => {
+      this.centuryDismissed = true;
+      this.centuryModal.classList.add('hidden');
+    };
+  }
+
   /** Tier-2 dashboard: treasury, taxes, funded services — visible once proclaimed. */
   private drawStatePanel(): void {
     const r = this.region;
@@ -512,6 +555,9 @@ export class RegionView {
       (r.nationProclaimed ? this.nationHtml() : '') +
       `<p>treasury £${Math.floor(r.treasury)}</p>` +
       `<p>GDP £${Math.floor(r.gdpLastMonth)}/mo</p>` +
+      `<p title="The global ledger (GDD §8.2): every chimney on earth, projected to 2100. The verdict is read in 2040.">` +
+      `CO₂ ${Math.round(r.co2ppm)} ppm · +${r.warmingC.toFixed(1)}°C` +
+      `${r.eraBranch ? ` · <b>${r.eraBranch.toUpperCase()}</b>` : ` (→ +${r.projectedWarming().toFixed(1)}°C by 2100)`}</p>` +
       `<p>trade £${Math.floor(r.tradeValueLastMonth)}/mo turnover</p>` +
       `<p>tax <span id="tax-val">${Math.round(r.taxRate * 100)}%</span></p>` +
       `<input id="tax-slider" type="range" min="0" max="30" value="${Math.round(r.taxRate * 100)}">` +
@@ -1072,6 +1118,8 @@ export class RegionView {
         this.region.repairRoute(t.id, Number(rb.dataset.to));
       };
     }
+    const sw = this.panel.querySelector<HTMLButtonElement>('#seawall-btn');
+    if (sw) sw.onclick = () => this.region.buildSeaWall(t.id);
   }
 
   /** Route list to every other town, with terrain-priced build/repair buttons. */
@@ -1197,11 +1245,16 @@ export class RegionView {
       `<p class="insp-skills">market: grain £${t.prices.food.toFixed(2)} · timber £${t.prices.wood.toFixed(2)} /unit</p>` +
       `<p class="insp-skills">${[
         t.site.river ? 'river (fishery, flood risk)' : '',
-        t.site.coastal ? 'coastal (fishery)' : '',
+        t.site.coastal ? (t.seaWall ? 'coastal (sea wall raised)' : 'coastal (fishery)') : '',
         t.site.forest > 0.5 ? 'forested (good timber)' : '',
         t.site.roughness > 0.5 ? 'rough country' : '',
         t.site.fertility > 1.05 ? 'rich soil' : t.site.fertility < 0.7 ? 'poor soil' : '',
       ].filter(Boolean).join(' · ') || 'open plains'}</p>` +
+      (t.site.coastal && !t.seaWall && r.stateProclaimed && r.year >= SEA_WALL_YEAR
+        ? `<p><button class="mini" id="seawall-btn" ${r.treasury >= r.seaWallCost(t) ? '' : 'disabled'} ` +
+          `title="Granite and pumps against the rising sea (GDD §8.2) — tidal flooding never touches a walled town">` +
+          `sea wall £${r.seaWallCost(t)}</button></p>`
+        : '') +
       this.routesHtml(t) +
       `<p class="insp-skills">COHORTS</p>` + bands +
       (notables ? `<p class="insp-skills">NOTABLES</p><ul class="thoughts">${notables}</ul>` : '') +

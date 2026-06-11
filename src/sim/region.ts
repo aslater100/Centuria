@@ -56,6 +56,8 @@ export interface Settlement {
   strikeUntil: number; // day; > now means production strike
   grievance: number; // 0–100 pressure gauge (GDD §5.5 unrest ladder)
   prices: MarketPrices; // local market, £/unit (GDD §5.2 first slice)
+  /** Adaptation works (GDD §8.2): a raised coastal town shrugs off the rising sea. */
+  seaWall?: boolean;
 }
 
 /** Local markets (GDD §5.2, first slice): each town prices the two goods
@@ -214,6 +216,16 @@ export const REGION_LAWS: RegionLaw[] = [
     requiresNation: true,
     domain: 'economic',
     desc: 'Redistribution of concentrated landholdings. Food production +5%. Workers +20, Landowners −30.',
+  },
+  {
+    id: 'carbon_levy',
+    name: 'Carbon Levy',
+    cost: 35,
+    prereqs: ['environmentalism'],
+    requiresState: true,
+    requiresNation: true,
+    domain: 'economic',
+    desc: 'A tax on the smoke itself. National emissions ×0.7; treasury receives +1% of GDP monthly.',
   },
 ];
 
@@ -755,6 +767,43 @@ export const MAGLEV_ERA_YEAR = 2005;
 /** A rotted route is still a walkable track — people keep using it. */
 const ROUTE_CONDITION_FLOOR = 15;
 
+// ---- Climate & the reckoning (GDD §8.2, §3.2 eras 7–8) ----
+
+/** Atmospheric CO₂ at the wagon's arrival, 1900 (GDD §8.2). */
+export const CO2_BASE_PPM = 295;
+/** Warming equilibrium per ppm above base: 600 ppm ≈ +3.4°C at rest. */
+const WARMING_PER_PPM = 0.011;
+/** The ~20-year lag (GDD §8.2): warming closes 1/40th of the gap per
+ *  climate tick (two ticks a game-year) — the bill arrives two governments
+ *  after the smoke. */
+const WARMING_LAG_TICKS = 40;
+/** Adaptation works open once the threat is on the survey maps. */
+export const SEA_WALL_YEAR = 2025;
+/** Era 8 begins: the century's verdict is read (GDD §3.2). */
+export const BRANCH_YEAR = 2040;
+/** The game ends 1 Jan 2100 with the Century Report — sandbox continues. */
+export const CENTURY_YEAR = 2100;
+
+/** The endgame's three skies (GDD §3.2): chosen by your climate, economy,
+ *  and regime outcomes — not the calendar. */
+export type EraBranch = 'solarpunk' | 'dystopia' | 'drowned';
+
+/** The verdict at 1 Jan 2100 (GDD §8.4): graded, not won. */
+export interface CenturyReport {
+  branch: EraBranch | null;
+  pop: number;
+  towns: number;
+  gdp: number;
+  treasury: number;
+  co2ppm: number;
+  warmingC: number;
+  techs: number;
+  laws: number;
+  legitimacy: number;
+  grades: { stewardship: string; prosperity: string; liberty: string; standing: string };
+  verdict: string;
+}
+
 const TOWN_NAMES = [
   'Eastvale', 'Norwick', 'Millbrook', 'Ashford', 'Redfort', 'Larkspur',
   'Coldwater', 'Hartsfield', 'Brindle', 'Ostmark', 'Fenwick', 'Sorrel',
@@ -846,6 +895,19 @@ export class RegionSim {
   foreignWars: ForeignWar[] = [];
   /** The nation's own war, if any — one front at a time at this altitude (GDD §7). */
   playerWar: PlayerWar | null = null;
+  // ---- Climate & the reckoning (GDD §8.2, eras 7–8) ----
+  /** The global ledger: every chimney on earth exhales into one number. */
+  co2ppm = CO2_BASE_PPM;
+  /** Realized warming, °C above 1900 — lags the ledger by ~20 years. */
+  warmingC = 0;
+  /** ppm added by the last climate tick (player + world), for the UI. */
+  emissionsLastMonth = 0;
+  /** The 2040 verdict, once read. Null until era 8 opens. */
+  eraBranch: EraBranch | null = null;
+  /** The 1 Jan 2100 Century Report; sandbox continues after it. */
+  centuryReport: CenturyReport | null = null;
+  private seaRiseAnnounced = false;
+  private lastTidalLogDay = -999;
   private droughtAnnounced = false;
   private railAnnounced = false;
   private highwayAnnounced = false;
@@ -1059,6 +1121,181 @@ export class RegionSim {
     return this.stateProclaimed && this.year >= threshold;
   }
 
+  // ---- Climate & the reckoning (GDD §8.2, §3.2 eras 7–8) ----
+
+  /** Your own chimneys: pop-scaled, rising with each industrial node,
+   *  falling with green tech and the Carbon Levy. Deliberately small next
+   *  to the world's output — one green player can't solo-fix the sky. */
+  playerEmissions(): number {
+    let intensity = 0.15; // the steam era's coal-fired baseline
+    if (this.has('steel_industry')) intensity += 0.2;
+    if (this.has('combustion_engine')) intensity += 0.25;
+    if (this.has('electrical_grid')) intensity += 0.25;
+    if (this.has('mass_production')) intensity += 0.3;
+    if (this.has('renewables')) intensity *= 0.6;
+    if (this.has('fusion_power')) intensity *= 0.15;
+    if (this.passedLaws.includes('carbon_levy')) intensity *= 0.7;
+    if (this.eraBranch === 'solarpunk') intensity *= 0.8;
+    return (this.totalPop() / 1000) * intensity * 0.04;
+  }
+
+  /** Everyone else's chimneys. The old world industrializes whether you
+   *  meet it or not; after 2030 it slowly decarbonizes on its own — but
+   *  only proven green tech *diffuses* fast enough to bend the curve
+   *  (GDD §5.6: lagging nations adopt proven tech at discount). */
+  worldEmissions(): number {
+    const rivalPop = this.rivals.reduce((s, rv) => s + rv.pop, 0);
+    const worldPop = Math.max(rivalPop, 12000) / 1000;
+    const ramp = Math.max(0.05, Math.min(1, (this.year - 1905) / 55));
+    const decarb = this.year > 2030 ? Math.max(0.35, 1 - (this.year - 2030) / 100) : 1;
+    let diffusion = 1;
+    if (this.has('renewables')) diffusion *= 0.8;
+    if (this.has('fusion_power')) diffusion *= 0.5;
+    return worldPop * 0.045 * ramp * decarb * diffusion;
+  }
+
+  /** The thin blue ghost-line (GDD §8.2): where the ledger lands by 2100
+   *  if the current rate holds (discounted for the world's own transition). */
+  projectedWarming(): number {
+    const ticksLeft = Math.max(0, (CENTURY_YEAR - this.year) * 2);
+    const ppm2100 = this.co2ppm + (this.playerEmissions() + this.worldEmissions()) * ticksLeft * 0.85;
+    return Math.max(0, (ppm2100 - CO2_BASE_PPM) * WARMING_PER_PPM);
+  }
+
+  /** The climate tick — runs with every monthly update, from the first
+   *  decade (the ledger runs from day one; only its payoff waits). No RNG
+   *  draws here: climate is arithmetic, not luck. */
+  private tickClimate(): void {
+    const emit = this.playerEmissions() + this.worldEmissions();
+    this.emissionsLastMonth = emit;
+    this.co2ppm += emit;
+    const equilibrium = Math.max(0, (this.co2ppm - CO2_BASE_PPM) * WARMING_PER_PPM);
+    this.warmingC += (equilibrium - this.warmingC) / WARMING_LAG_TICKS;
+    // The ghost-line announcement: quiet dread as UI (GDD §8.2)
+    if (!this.seaRiseAnnounced && this.warmingC >= 1.2 && this.settlements.some((t) => t.site.coastal)) {
+      this.seaRiseAnnounced = true;
+      this.addLog(
+        `+${this.warmingC.toFixed(1)}°C: State surveyors pencil the projected 2100 waterline onto the coastal charts. ` +
+        `It runs through streets people live on.`,
+        'bad',
+      );
+    }
+    // The sea collects (GDD §8.2): tidal flooding on unwalled coastal towns
+    if (this.year >= 2035 && this.warmingC > 1.5) {
+      const severity = (this.warmingC - 1.5) * (this.eraBranch === 'drowned' ? 1.5 : 1);
+      let hit = false;
+      for (const t of this.settlements) {
+        if (!t.site.coastal || t.seaWall || this.popOf(t) < 1) continue;
+        t.food *= Math.max(0.7, 1 - 0.05 * severity);
+        this.removePop(t, this.popOf(t) * 0.0015 * severity);
+        t.satisfaction = Math.max(0, t.satisfaction - 2 * severity);
+        hit = true;
+      }
+      if (hit && this.day - this.lastTidalLogDay > 300) {
+        this.lastTidalLogDay = this.day;
+        this.addLog(
+          'King tides take the low streets again — unwalled coastal towns pump out cellars and count who left.',
+          'bad',
+        );
+      }
+    }
+    if (this.eraBranch === null && this.year >= BRANCH_YEAR) this.decideBranch();
+    if (!this.centuryReport && this.year >= CENTURY_YEAR) this.buildCenturyReport();
+  }
+
+  /** Era 8 opens and the verdict is read (GDD §3.2): the sky you get was
+   *  chosen by climate, regime, and how your people live — not the calendar. */
+  private decideBranch(): void {
+    const proj = this.projectedWarming();
+    const pops = this.settlements.filter((t) => this.popOf(t) >= 1);
+    const avgSat = pops.length > 0 ? pops.reduce((s, t) => s + t.satisfaction, 0) / pops.length : 50;
+    const gov = GOV_TYPES.find((g) => g.id === this.govType);
+    const democratic = gov ? gov.electionsRequired : this.has('universal_suffrage');
+    let branch: EraBranch;
+    if (proj >= 2.3) branch = 'drowned';
+    else if (!democratic || avgSat < 42 || (this.nationProclaimed && this.legitimacy < 35)) branch = 'dystopia';
+    else branch = 'solarpunk';
+    this.eraBranch = branch;
+    const lines: Record<EraBranch, string> = {
+      solarpunk:
+        `THE GARDEN CENTURY: ${BRANCH_YEAR} opens under glass and green. The grid hums clean, the ` +
+        `squares are planted, and the projected waterline stays on the chart, not in the streets.`,
+      dystopia:
+        `THE NEON CENTURY: ${BRANCH_YEAR} arrives behind checkpoints and billboards. The economy roars; ` +
+        `the people queue in its light and grumble in its shadow.`,
+      drowned:
+        `THE DROWNED CENTURY: ${BRANCH_YEAR}, and the projection is now a tide table. The sea is coming ` +
+        `for the coastal streets — wall them, move them, or mourn them.`,
+    };
+    this.addLog(lines[branch], branch === 'solarpunk' ? 'good' : 'bad');
+  }
+
+  /** Adaptation, the honest kind (GDD §8.2): province-scale money, poured
+   *  early or paid for in streets. Walls only rise where there's a coast. */
+  seaWallCost(t: Settlement): number {
+    return Math.round(120 + this.popOf(t) * 0.4);
+  }
+
+  buildSeaWall(townId: number): boolean {
+    const t = this.settlement(townId);
+    if (!t || !t.site.coastal || t.seaWall) return false;
+    if (!this.stateProclaimed || this.year < SEA_WALL_YEAR) return false;
+    const cost = this.seaWallCost(t);
+    if (this.treasury < cost) return false;
+    this.treasury -= cost;
+    t.seaWall = true;
+    this.addLog(
+      `The sea wall at ${t.name} tops out — £${cost} of granite and pumps between the town and the tide.`,
+      'good',
+    );
+    return true;
+  }
+
+  /** 1 Jan 2100: the Century Report (GDD §8.4) — a verdict, not a win
+   *  screen. The sandbox keeps running afterward if you wish. */
+  private buildCenturyReport(): void {
+    const pop = this.totalPop();
+    const gdpPerHead = pop > 0 ? this.gdpLastMonth / pop : 0;
+    const gov = GOV_TYPES.find((g) => g.id === this.govType);
+    const democratic = gov ? gov.electionsRequired : false;
+    const avgRelations =
+      this.rivals.length > 0 ? this.rivals.reduce((s, rv) => s + rv.relations, 0) / this.rivals.length : 0;
+    const grade = (v: number, bands: [number, string][]): string =>
+      bands.find(([cut]) => v >= cut)?.[1] ?? 'F';
+    const stewardship = grade(-this.warmingC, [[-1.5, 'A'], [-2.0, 'B'], [-2.5, 'C'], [-3.0, 'D']]);
+    const prosperity = grade(gdpPerHead, [[1.4, 'A'], [1.1, 'B'], [0.85, 'C'], [0.6, 'D']]);
+    const liberty = democratic
+      ? (this.legitimacy >= 60 ? 'A' : 'B')
+      : grade(this.legitimacy, [[60, 'C'], [35, 'D']]);
+    const standing = grade(avgRelations, [[40, 'A'], [15, 'B'], [-10, 'C'], [-40, 'D']]);
+    const branchLine: Record<EraBranch, string> = {
+      solarpunk: 'under solar glass, the gardens still growing',
+      dystopia: 'in neon and rain, prosperous and watched',
+      drowned: 'behind the walls that held — and beside the streets that did not',
+    };
+    const verdict =
+      `A century after twelve settlers stepped off a wagon, ${pop.toLocaleString()} people live here ` +
+      `${this.eraBranch ? branchLine[this.eraBranch] : 'on the old frontier'}. ` +
+      `The air carries ${Math.round(this.co2ppm)} ppm and +${this.warmingC.toFixed(1)}°C of the century's heat. ` +
+      `History's grades: stewardship ${stewardship}, prosperity ${prosperity}, liberty ${liberty}, standing ${standing}.`;
+    this.centuryReport = {
+      branch: this.eraBranch,
+      pop,
+      towns: this.settlements.length,
+      gdp: Math.round(this.gdpLastMonth),
+      treasury: Math.round(this.treasury),
+      co2ppm: Math.round(this.co2ppm),
+      warmingC: Math.round(this.warmingC * 10) / 10,
+      techs: this.researched.length,
+      laws: this.passedLaws.length,
+      legitimacy: Math.round(this.legitimacy),
+      grades: { stewardship, prosperity, liberty, standing },
+      verdict,
+    };
+    this.addLog(`1 JANUARY 2100 — THE CENTURY REPORT. ${verdict}`, 'info');
+    this.addLog('The century is over; the country is not. The sandbox runs on.', 'info');
+  }
+
   /** Built links are State works, paid from the treasury; links only upgrade. */
   private buildLink(aId: number, bId: number, kind: BuiltRouteKind): boolean {
     if (!this.stateProclaimed) return false;
@@ -1202,7 +1439,10 @@ export class RegionSim {
         r.condition = Math.min(100, r.condition + 0.1);
       }
     }
-    if (storm && this.routes.length > 0 && this.rng.chance(0.12)) {
+    // Washout odds rise with the thermometer (GDD §8.2): a warmer sky
+    // carries more water, and the storms that drop it hit harder.
+    const washoutChance = Math.min(0.3, 0.12 * (1 + this.warmingC * 0.3));
+    if (storm && this.routes.length > 0 && this.rng.chance(washoutChance)) {
       const r = this.routes[this.rng.int(this.routes.length)];
       if (r.kind !== 'trail' && r.condition > 40) {
         r.condition = Math.max(ROUTE_CONDITION_FLOOR, r.condition - 45);
@@ -1363,7 +1603,9 @@ export class RegionSim {
 
   private dailyUpdate(): void {
     const seasonMult = [1.25, 1.35, 1.0, 0.15][this.seasonIndex];
-    const weatherMult = this.weather.growthMult(this.day);
+    // A hotter century farms worse (GDD §8.2): yield drag past +0.8°C.
+    const climateDrag = 1 - Math.min(0.35, Math.max(0, this.warmingC - 0.8) * 0.08);
+    const weatherMult = this.weather.growthMult(this.day) * climateDrag;
     const drought = this.weather.isDrought(this.day);
     const floodRisk = this.weather.isFloodRisk(this.day);
     for (const t of this.settlements) {
@@ -1400,7 +1642,8 @@ export class RegionSim {
           (this.govLean === 'council' ? 6 : this.govLean === 'mayor' ? -6 : 0) -
           (this.day < t.strikeUntil ? 5 : 0) +
           (this.policyActive('welfare_state') ? 6 : 0) +
-          (this.passedLaws.includes('welfare_benefits') ? 5 : 0)
+          (this.passedLaws.includes('welfare_benefits') ? 5 : 0) +
+          (this.eraBranch === 'solarpunk' ? 4 : 0) // the garden century is good to live in
         : 0;
       // Land Reform (nation law) boosts food production 5%
       if (this.passedLaws.includes('land_reform')) t.food += workers * 1.15 * seasonMult * t.landQuality * weatherMult * granger * strike * 0.05;
@@ -1419,7 +1662,8 @@ export class RegionSim {
         const laborFactor = this.has('labor_law') ? 0.7 : 1;
         const constabFactor = this.policyActive('border_constabulary') ? 0.75 : 1;
         const pressure =
-          (Math.max(0, this.taxRate - 0.15) * 35 - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05) * laborFactor * constabFactor;
+          (Math.max(0, this.taxRate - 0.15) * 35 - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05) * laborFactor * constabFactor +
+          (this.eraBranch === 'dystopia' ? 0.15 : 0); // the neon century simmers
         t.grievance = Math.max(0, Math.min(100, t.grievance + pressure));
       }
       this.updateMarket(t);
@@ -1522,6 +1766,7 @@ export class RegionSim {
     if (this.stateProclaimed) this.monthlyEconomy();
     if (this.stateProclaimed) this.updateFactions();
     this.updateDiplomacy();
+    this.tickClimate(); // the ledger runs from the first decade (GDD §8.2)
   }
 
   // ---- local markets & trade (GDD §5.2, first slice) ----
@@ -1651,6 +1896,8 @@ export class RegionSim {
     // War economy (GDD §7.2): armaments demand is a stimulus first…
     const warMob = this.playerWar ? MOBILIZATION_DEFS[this.playerWar.mobilization] : null;
     if (warMob) gdp *= warMob.gdpMult;
+    // The neon century (era 8 dystopia branch): the economy roars — at a price paid in grievance
+    if (this.eraBranch === 'dystopia') gdp *= 1.08;
     this.gdpLastMonth = gdp;
     // Treasury Secretary bonus: +10% tax collection (GDD §8.7)
     const treasuryMult = this.ministerFor('treasury') ? 1.1 : 1;
@@ -1674,6 +1921,8 @@ export class RegionSim {
     const protectionismBonus = this.policyActive('protectionism') ? 3 : 0;
     // Central Bank Charter law: treasury reserves earn 0.5% interest/month
     const bankInterest = this.passedLaws.includes('central_bank_charter') ? this.treasury * 0.005 : 0;
+    // Carbon Levy law: the smoke pays 1% of GDP into the treasury
+    const carbonLevyBonus = this.passedLaws.includes('carbon_levy') ? this.gdpLastMonth * 0.01 : 0;
     // Trade agreements (GDD §5.4): export earnings per signed rival, scaled to
     // GDP and the rival's commerce appetite. Foreign wars make buyers pay more.
     const warBoom = this.day < this.warBoomUntil ? 1.5 : 1;
@@ -1688,7 +1937,7 @@ export class RegionSim {
     // requisitions the merchantmen that would have carried the exports
     if (this.playerWar) this.exportEarningsLastMonth *= this.playerWar.blockade ? 0.6 : 0.7;
     this.treasury += revenue - spending + incomeTaxBonus + estateLevyBonus +
-      progressiveTaxBonus + protectionismBonus + bankInterest + this.exportEarningsLastMonth;
+      progressiveTaxBonus + protectionismBonus + bankInterest + carbonLevyBonus + this.exportEarningsLastMonth;
     if (this.treasury < 0) {
       this.treasury = 0;
       if (this.servicesLevel > 0) {
@@ -3388,6 +3637,13 @@ export class RegionSim {
       alliances: this.alliances,
       foreignWars: this.foreignWars,
       playerWar: this.playerWar,
+      co2ppm: this.co2ppm,
+      warmingC: this.warmingC,
+      emissionsLastMonth: this.emissionsLastMonth,
+      eraBranch: this.eraBranch,
+      centuryReport: this.centuryReport,
+      seaRiseAnnounced: this.seaRiseAnnounced,
+      lastTidalLogDay: this.lastTidalLogDay,
       nextId: this.nextId,
       nextEventDay: this.nextEventDay,
       townNamePool: this.townNamePool,
@@ -3459,6 +3715,14 @@ export class RegionSim {
           ...d.playerWar,
         }
       : null;
+    // pre-climate saves opened before the ledger was kept: start it fresh
+    r.co2ppm = d.co2ppm ?? CO2_BASE_PPM;
+    r.warmingC = d.warmingC ?? 0;
+    r.emissionsLastMonth = d.emissionsLastMonth ?? 0;
+    r.eraBranch = d.eraBranch ?? null;
+    r.centuryReport = d.centuryReport ?? null;
+    r.seaRiseAnnounced = d.seaRiseAnnounced ?? false;
+    r.lastTidalLogDay = d.lastTidalLogDay ?? -999;
     r.nextId = d.nextId;
     r.nextEventDay = d.nextEventDay;
     r.townNamePool = d.townNamePool;
