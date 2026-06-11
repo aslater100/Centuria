@@ -265,6 +265,7 @@ export class Simulation {
     for (let i = 0; i < 12; i++) {
       this.spawnSettler(cx - 3 + (i % 6), cy + 3 + Math.floor(i / 6));
     }
+    this.world.revealAround(cx, cy, 10);
     this.addLog('Twelve settlers step off the wagon. Spring, 1900.', 'info');
   }
 
@@ -589,6 +590,7 @@ export class Simulation {
     this.updateRaiders();
     this.updateAnimals();
     for (const s of [...this.settlers]) this.updateSettler(s);
+    for (const s of this.settlers) this.world.revealAround(s.pos.x, s.pos.y, 5);
     if (this.settlers.length === 0 && !this.gameOver) {
       this.gameOver = true;
       this.addLog('The colony has perished. (Failure state: depopulation.)', 'bad');

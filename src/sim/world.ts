@@ -47,6 +47,8 @@ export interface Tile {
   /** HP of built wall or gate on this tile */
   wallHp: number;
   buildingId: number | null;
+  /** fog of war: true once a settler has been within sight range */
+  explored: boolean;
 }
 
 export interface Vec {
@@ -73,7 +75,7 @@ export class World {
         fertility: 1, road: null, roadPlan: null,
         farmZone: false, stockpileZone: false, wallPlan: false,
         gate: false, gatePlan: false, sapling: false, wallHp: 0,
-        buildingId: null,
+        buildingId: null, explored: false,
       });
     }
     this.generate(rng);
@@ -288,6 +290,20 @@ export class World {
       }
     }
     return null;
+  }
+
+  /** Mark all tiles within radius r of (cx, cy) as explored (fog of war lift). */
+  revealAround(cx: number, cy: number, r: number): void {
+    const r2 = r * r;
+    const fx = Math.floor(cx);
+    const fy = Math.floor(cy);
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy <= r2 && this.inBounds(fx + dx, fy + dy)) {
+          this.at(fx + dx, fy + dy).explored = true;
+        }
+      }
+    }
   }
 
   nearestPassable(p: Vec, hostile = false): Vec | null {
