@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Simulation } from '../src/sim/sim';
 import {
-  RegionSim, REGION_MINUTES_PER_TICK, RIVAL_ARCHETYPES, TREATY_DEFS,
+  RegionSim, REGION_MINUTES_PER_TICK, RIVAL_ARCHETYPES, RIVAL_REGIMES, TREATY_DEFS,
   ENVOY_COST, GIFT_COST, MAX_RIVALS, RIVAL_EMERGENCE_YEAR, TREATY_BREACH_PENALTY,
 } from '../src/sim/region';
 import { MINUTES_PER_DAY, DAYS_PER_YEAR, START_YEAR } from '../src/sim/defs';
@@ -165,6 +165,80 @@ describe('Hostility & the wider world (GDD §6.4)', () => {
   });
 });
 
+describe('The world between the powers (GDD §6.3–6.4)', () => {
+  it('regimes are era-gated: no fascism in 1900, richer pools later', () => {
+    const r = stateReady();
+    const early = r.spawnRival()!;
+    expect(RIVAL_REGIMES.find((g) => g.id === early.regime)!.eraFrom).toBeLessThanOrEqual(r.year);
+    toYear(r, 1935);
+    const late = r.spawnRival()!;
+    const def = RIVAL_REGIMES.find((g) => g.id === late.regime)!;
+    expect(def.eraFrom).toBeLessThanOrEqual(1935);
+  });
+
+  it('every power arrives with a founding history and writes more of it', () => {
+    const r = stateReady();
+    const rv = r.spawnRival('hegemon')!;
+    expect(rv.history.length).toBeGreaterThanOrEqual(1);
+    expect(rv.history[0]).toContain('Proclaimed');
+  });
+
+  it('the world keeps its own ledger: every pair of powers has relations', () => {
+    const r = stateReady();
+    r.spawnRival('hegemon');
+    r.spawnRival('trading_republic');
+    r.spawnRival('hermit_kingdom');
+    expect(Object.keys(r.rivalPairs)).toHaveLength(3); // 3 powers = 3 pairs
+  });
+
+  it('foreign wars set the pair at daggers, arm the export boom, and make news', () => {
+    const r = stateReady();
+    const a = r.spawnRival('hegemon')!;
+    const b = r.spawnRival('crusader_state')!;
+    expect(r.startForeignWar(a.id, b.id)).toBe(true);
+    expect(r.warBetween(a.id, b.id)).toBeDefined();
+    expect(r.pairRelations(a.id, b.id)).toBeLessThanOrEqual(-60);
+    expect(r.warBoomUntil).toBeGreaterThan(r.day);
+    expect(r.log.some((l) => l.text.includes('WAR ABROAD'))).toBe(true);
+    expect(r.startForeignWar(a.id, b.id)).toBe(false); // already at war
+  });
+
+  it('wars end in a dictated peace: history written, loser sometimes toppled', () => {
+    const r = stateReady();
+    const a = r.spawnRival('hegemon')!;
+    const b = r.spawnRival('opportunist')!;
+    r.startForeignWar(a.id, b.id);
+    r.foreignWars[0].endsDay = r.day + 31; // bring the peace forward
+    runDays(r, 70);
+    expect(r.foreignWars).toHaveLength(0);
+    expect(r.log.some((l) => l.text.includes('PEACE ABROAD'))).toBe(true);
+    const all = [...a.history, ...b.history].join(' ');
+    expect(all).toContain('Defeated by');
+    expect(all).toContain('Victorious over');
+  });
+
+  it('refugee waves from foreign wars reach the valley\'s towns', () => {
+    const r = stateReady();
+    const a = r.spawnRival('hegemon')!;
+    const b = r.spawnRival('crusader_state')!;
+    r.startForeignWar(a.id, b.id);
+    r.foreignWars[0].endsDay = r.day + 10000; // a long war
+    runDays(r, 24 * 30); // 24 monthly ticks at 20% each
+    expect(r.log.some((l) => l.text.includes('Refugees from the'))).toBe(true);
+  });
+
+  it('allies do not go to war with each other', () => {
+    const r = stateReady();
+    const a = r.spawnRival('hegemon')!;
+    const b = r.spawnRival('crusader_state')!;
+    const key = r.pairKey(a.id, b.id);
+    r.alliances.push(key);
+    r.rivalPairs[key] = -80; // even at daggers drawn, the pact holds
+    runDays(r, 24 * 30);
+    expect(r.warBetween(a.id, b.id)).toBeUndefined();
+  });
+});
+
 describe('Diplomacy save/load', () => {
   it('round-trips rivals, treaties, offers, and the reputation ledger', () => {
     const { sim, r } = flippedPair(42);
@@ -173,17 +247,22 @@ describe('Diplomacy save/load', () => {
     r.govLean = 'council';
     r.treasury = 500;
     const rv = r.spawnRival('trading_republic')!;
+    const foe = r.spawnRival('hegemon')!;
     rv.relations = 55;
     r.proposeTreaty(rv.id, 'trade_agreement');
     r.offers.push({ rivalId: rv.id, kind: 'non_aggression', expiresDay: r.day + 90 });
     r.treatiesBroken = 1;
+    r.startForeignWar(rv.id, foe.id);
     const town = Simulation.deserialize(sim.serialize());
     const r2 = RegionSim.deserialize(r.serialize(), town);
-    expect(r2.rivals.map((x) => [x.name, x.archetype, x.treaties])).toEqual(
-      r.rivals.map((x) => [x.name, x.archetype, x.treaties]));
+    expect(r2.rivals.map((x) => [x.name, x.archetype, x.regime, x.treaties, x.history])).toEqual(
+      r.rivals.map((x) => [x.name, x.archetype, x.regime, x.treaties, x.history]));
     expect(r2.rivals[0].relations).toBe(r.rivals[0].relations);
     expect(r2.offers).toEqual(r.offers);
     expect(r2.treatiesBroken).toBe(1);
+    expect(r2.rivalPairs).toEqual(r.rivalPairs);
+    expect(r2.foreignWars).toEqual(r.foreignWars);
+    expect(r2.alliances).toEqual(r.alliances);
   });
 
   it('pre-diplomacy saves load with an empty world', () => {

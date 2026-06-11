@@ -233,17 +233,21 @@ export class RegionView {
    *  the relations number — the world beyond the valley, read at a glance. */
   private drawRivalBanners(W: number, H: number): void {
     const { g, region } = this;
+    const edgeIdx = { north: 0, east: 0, south: 0, west: 0 };
     for (const rv of region.rivals) {
       const rel = Math.round(rv.relations);
       const col = rel >= 25 ? '#8fc26a' : rel >= -25 ? '#c2a14d' : '#e04444';
+      const i = edgeIdx[rv.compass]++;
       let x: number, y: number;
       switch (rv.compass) {
-        case 'north': x = W / 2; y = 18; break;
-        case 'south': x = 150; y = H - 18; break;
-        case 'east': x = W - 110; y = H / 2; break;
-        default: x = 110; y = H / 2; break; // west
+        case 'north': x = W / 2 + (i - 0.5) * 220; y = 18; break;
+        case 'south': x = 150 + i * 220; y = H - 18; break;
+        case 'east': x = W - 110; y = H / 2 + (i - 0.5) * 56; break;
+        default: x = 110; y = H / 2 + (i - 0.5) * 56; break; // west
       }
-      const label = `${rv.name} ${rel >= 0 ? '+' : ''}${rel}`;
+      // a power at war flies a battle streamer
+      const atWar = region.foreignWars.some((w) => w.a === rv.id || w.b === rv.id);
+      const label = `${atWar ? '⚔ ' : ''}${rv.name} ${rel >= 0 ? '+' : ''}${rel}`;
       g.font = '11px monospace';
       const tw = g.measureText(label).width;
       g.fillStyle = 'rgba(16,14,10,0.8)';
@@ -549,7 +553,8 @@ export class RegionView {
       const rel = Math.round(rv.relations);
       const col = rel >= 25 ? '#4e9' : rel >= -25 ? '#ca4' : '#e55';
       const pct = Math.round((rel + 100) / 2);
-      const gov = GOV_TYPES.find((g) => g.id === rv.govType)?.name ?? rv.govType;
+      const gov = r.regimeOf(rv).name;
+      const recentHistory = rv.history.slice(-4).join(' ');
       const treaties = rv.treaties.length > 0
         ? rv.treaties.map((k) =>
             `${TREATY_DEFS[k].name} <button class="mini dip-break-btn" data-rival="${rv.id}" data-kind="${k}" ` +
@@ -569,11 +574,11 @@ export class RegionView {
           `<button class="mini dip-prop-btn" data-rival="${rv.id}" data-kind="${k}" ` +
           `title="${TREATY_DEFS[k].desc} (their ask: relations ≥ ${r.treatyAsk(rv, k)})">${short[k]}</button>`)
         .join(' ');
-      return `<div class="bar-row" title="${RIVAL_ARCHETYPES[rv.archetype].name} — agenda: ${rv.agenda}">` +
+      return `<div class="bar-row" title="${RIVAL_ARCHETYPES[rv.archetype].name} — agenda: ${rv.agenda}. ${recentHistory}">` +
         `<span style="width:80px;display:inline-block"><b>${rv.name}</b></span>` +
         `<div class="bar" style="flex:1"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div>` +
         `<span>${rel}</span></div>` +
-        `<p class="insp-skills">${gov} · ${treaties}</p>` +
+        `<p class="insp-skills" title="${recentHistory}">${gov} · ${treaties}</p>` +
         offerRow +
         `<p><button class="mini dip-envoy-btn" data-rival="${rv.id}" ${canEnvoy ? '' : 'disabled'} ` +
         `title="A paid mission to warm relations (${ENVOY_COOLDOWN_DAYS}-day turnaround)">envoy £${ENVOY_COST}</button> ` +
@@ -581,9 +586,21 @@ export class RegionView {
         `title="A state gift — dearer, faster">gift £${GIFT_COST}</button> ` +
         proposals + `</p>`;
     }).join('');
+    // World affairs: what the powers are doing to each other (GDD §6.4)
+    const name = (id: number) => r.rival(id)?.name ?? '?';
+    const wars = r.foreignWars
+      .map((w) => `<p class="insp-skills">⚔ ${name(w.a)} vs ${name(w.b)}</p>`)
+      .join('');
+    const pacts = r.alliances
+      .map((k) => {
+        const [a, b] = k.split(':').map(Number);
+        return r.rival(a) && r.rival(b) ? `<p class="insp-skills">🤝 ${name(a)} – ${name(b)} allied</p>` : '';
+      })
+      .join('');
+    const world = wars || pacts ? `<p class="insp-skills">WORLD AFFAIRS</p>` + wars + pacts : '';
     const boom = r.day < r.warBoomUntil ? `<p class="insp-skills">WAR ABROAD — export prices booming</p>` : '';
     const exports = r.exportEarningsLastMonth > 0 ? `<p>exports £${Math.floor(r.exportEarningsLastMonth)}/mo</p>` : '';
-    return `<p class="insp-skills">DIPLOMACY (relations −100..+100)</p>` + boom + exports + rows;
+    return `<p class="insp-skills">DIPLOMACY (relations −100..+100)</p>` + boom + exports + rows + world;
   }
 
   /** Politics section: political capital, elections, faction bars, law cards. */

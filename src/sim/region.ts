@@ -408,21 +408,65 @@ export const TREATY_DEFS: Record<TreatyKind, { name: string; baseAsk: number; de
   },
 };
 
+// Rivals run richer regimes than the player's four (GDD §6.3: "the 1930s
+// should produce at least one neighboring autocracy organically"). Blocs are
+// the coarse ideology axis that feeds relations — yours and theirs.
+export type RegimeBloc = 'liberal' | 'autocratic' | 'traditional' | 'revolutionary';
+
+export interface RivalRegimeDef {
+  id: string;
+  name: string;
+  bloc: RegimeBloc;
+  eraFrom: number; // the year this form of rule first appears in the world
+}
+
+export const RIVAL_REGIMES: RivalRegimeDef[] = [
+  { id: 'parliamentary', name: 'Parliamentary Democracy', bloc: 'liberal', eraFrom: 1900 },
+  { id: 'merchant_republic', name: 'Merchant Republic', bloc: 'liberal', eraFrom: 1900 },
+  { id: 'const_monarchy', name: 'Constitutional Monarchy', bloc: 'traditional', eraFrom: 1900 },
+  { id: 'abs_monarchy', name: 'Absolute Monarchy', bloc: 'traditional', eraFrom: 1900 },
+  { id: 'theocracy', name: 'Theocracy', bloc: 'traditional', eraFrom: 1900 },
+  { id: 'junta', name: 'Military Junta', bloc: 'autocratic', eraFrom: 1900 },
+  { id: 'peoples_republic', name: "People's Republic", bloc: 'revolutionary', eraFrom: 1917 },
+  { id: 'one_party', name: 'One-Party State', bloc: 'autocratic', eraFrom: 1920 },
+  { id: 'fascist', name: 'Fascist State', bloc: 'autocratic', eraFrom: 1925 },
+  { id: 'corporate', name: 'Corporate State', bloc: 'autocratic', eraFrom: 1930 },
+];
+
+/** Ideology distance at bloc altitude (GDD §5.4): kin warm to kin, and the
+ *  century's three-way quarrel — liberal, autocrat, revolutionary — runs cold. */
+export function blocAffinity(a: RegimeBloc, b: RegimeBloc): number {
+  if (a === b) return 12;
+  const pair = [a, b].sort().join(':');
+  if (pair === 'autocratic:liberal' || pair === 'liberal:revolutionary' || pair === 'revolutionary:traditional') return -14;
+  return -4;
+}
+
 export interface RivalNation {
   id: number;
   name: string;
   leader: string;
   archetype: RivalArchetype;
   weights: RivalPersonality;
-  govType: GovType; // rivals run regimes too; distance feeds relations
+  regime: string;   // RivalRegimeDef id; distance feeds relations
   agenda: string;   // discoverable long-term goal — legible in hindsight
   compass: 'north' | 'east' | 'south' | 'west'; // which map edge they loom over
   pop: number;      // abstract: they are nation-scale already (GDD §6.4)
   relations: number; // −100..+100 ledger (GDD §5.4)
   treaties: TreatyKind[];
   emergedYear: number;
+  /** Accumulated story beats — wars, revolutions, pacts. A nation's bio. */
+  history: string[];
   lastEnvoyDay: number;
   lastGiftDay: number;
+}
+
+/** A war between two rival powers — the player reads about it, and sells into it. */
+export interface ForeignWar {
+  a: number; // rival ids
+  b: number;
+  startedDay: number;
+  endsDay: number;
 }
 
 /** An AI-initiated treaty offer, waiting in the diplomacy panel. */
@@ -438,12 +482,19 @@ export const ENVOY_COOLDOWN_DAYS = 90;
 export const GIFT_COOLDOWN_DAYS = 60;
 /** The world proclaims its first foreign nation in this band (GDD §6.2). */
 export const RIVAL_EMERGENCE_YEAR = 1922;
-export const MAX_RIVALS = 3;
+export const MAX_RIVALS = 6;
 /** Each treaty the player breaks raises every future ask (GDD §5.4 reputation). */
 export const TREATY_BREACH_PENALTY = 15;
 
-const RIVAL_NAMES = ['Vasterholm', 'Karelia', 'Tyrennia', 'Meridia', 'Vossland', 'Cantara'];
-const RIVAL_LEADERS = ['Chancellor Aldric', 'Doge Maren', 'King Osric III', 'Marshal Veka', 'First Citizen Roux', 'Queen Ilsabet'];
+const RIVAL_NAMES = [
+  'Vasterholm', 'Karelia', 'Tyrennia', 'Meridia', 'Vossland', 'Cantara',
+  'Drovny', 'Ilvermoor', 'Skarov', 'Aldenne',
+];
+const RIVAL_LEADERS = [
+  'Chancellor Aldric', 'Doge Maren', 'King Osric III', 'Marshal Veka',
+  'First Citizen Roux', 'Queen Ilsabet', 'Patriarch Symeon', 'General Brandt',
+  'Premier Olenka', 'Lord Protector Hale',
+];
 const RIVAL_AGENDAS: Record<RivalArchetype, string> = {
   hegemon: 'unite the river basins under one crown',
   trading_republic: 'corner the coastal carrying trade',
@@ -451,6 +502,17 @@ const RIVAL_AGENDAS: Record<RivalArchetype, string> = {
   crusader_state: 'spread the one true creed',
   opportunist: 'profit from every war but fight in none',
 };
+/** Founding backstories — every power arrives mid-sentence in its own story. */
+const RIVAL_ORIGINS = [
+  'forged in the wreck of the old empire',
+  'unified after thirty years of civil war',
+  'grown rich on the carrying trade long before it raised a flag',
+  'carved out by settlers who crossed the ranges a generation before yours',
+  'an ancient kingdom that finally wrote itself a constitution',
+  'born of a miners\' revolt that never disbanded',
+  'stitched together from feuding duchies by one ruthless marriage',
+  'a garrison province that outlived the army that planted it',
+];
 const COMPASS_FLAVOR: Record<RivalNation['compass'], string> = {
   north: 'beyond the northern ranges',
   east: 'across the eastern marches',
@@ -612,6 +674,13 @@ export class RegionSim {
   warBoomUntil = -1;
   /** Last month's trade-agreement export earnings (for the UI). */
   exportEarningsLastMonth = 0;
+  /** Pairwise relations between rivals, keyed `minId:maxId` — the world has
+   *  its own ledger, and the player only reads about it (GDD §6.4). */
+  rivalPairs: Record<string, number> = {};
+  /** Alliances between rival pairs (pair keys): the world choosing sides. */
+  alliances: string[] = [];
+  /** Active wars between rival powers. */
+  foreignWars: ForeignWar[] = [];
   private droughtAnnounced = false;
   private railAnnounced = false;
   private highwayAnnounced = false;
@@ -2029,6 +2098,55 @@ export class RegionSim {
     return Math.max(-100, Math.min(100, v));
   }
 
+  regimeOf(rv: RivalNation): RivalRegimeDef {
+    return RIVAL_REGIMES.find((g) => g.id === rv.regime) ?? RIVAL_REGIMES[0];
+  }
+
+  /** The player's bloc, for ideology distance — null before the Proclamation. */
+  private playerBloc(): RegimeBloc | null {
+    if (!this.nationProclaimed || !this.govType) return null;
+    return this.govType === 'junta' ? 'autocratic' : this.govType === 'monarchy' ? 'traditional' : 'liberal';
+  }
+
+  /** Personality-weighted, era-gated regime choice (GDD §6.3): juntas for the
+   *  risk-takers, theocracies for the ideologues — and no fascism before 1925. */
+  private pickRegime(w: RivalPersonality, excludeId?: string): RivalRegimeDef {
+    const pool = RIVAL_REGIMES.filter((g) => this.year >= g.eraFrom && g.id !== excludeId);
+    const scored = pool.map((g) => {
+      let s = this.rng.int(4); // history is not a formula
+      switch (g.id) {
+        case 'parliamentary': s += w.honor; break;
+        case 'merchant_republic': s += w.commerce; break;
+        case 'const_monarchy': s += (w.honor + (10 - w.risk)) / 2; break;
+        case 'abs_monarchy': s += w.expansion * 0.5 + (10 - w.commerce) * 0.4; break;
+        case 'theocracy': s += w.ideology; break;
+        case 'junta': s += (w.expansion + w.risk) / 2; break;
+        case 'peoples_republic': s += w.ideology * 0.7 + w.grudge * 0.3; break;
+        case 'one_party': s += (w.ideology + w.expansion) / 2; break;
+        case 'fascist': s += (w.expansion + w.grudge) / 2; break;
+        case 'corporate': s += w.commerce * 0.7 + w.risk * 0.3; break;
+      }
+      return { g, s };
+    });
+    scored.sort((x, y) => y.s - x.s);
+    return scored[0].g;
+  }
+
+  pairKey(a: number, b: number): string {
+    return a < b ? `${a}:${b}` : `${b}:${a}`;
+  }
+
+  /** Relations between two rival powers — the world's own ledger. */
+  pairRelations(aId: number, bId: number): number {
+    return this.rivalPairs[this.pairKey(aId, bId)] ?? 0;
+  }
+
+  warBetween(aId: number, bId: number): ForeignWar | undefined {
+    return this.foreignWars.find(
+      (w) => (w.a === aId && w.b === bId) || (w.a === bId && w.b === aId),
+    );
+  }
+
   /** A new great power proclaims itself at the edge of the map (GDD §6.2).
    *  Public so scenarios and tests can seed the world directly. */
   spawnRival(archetype?: RivalArchetype): RivalNation | null {
@@ -2041,40 +2159,50 @@ export class RegionSim {
       expansion: jitter(base.expansion),
       commerce: jitter(base.commerce),
       ideology: jitter(base.ideology),
-      honor: jitter(base.honor),
       risk: jitter(base.risk),
+      honor: jitter(base.honor),
       grudge: jitter(base.grudge),
     };
-    // Rivals choose regimes personality-weighted (GDD §6.3)
-    const govType: GovType =
-      weights.commerce >= 7 ? 'republic'
-      : weights.honor >= 6 ? 'democracy'
-      : weights.risk >= 7 || weights.expansion >= 8 ? 'junta'
-      : 'monarchy';
+    const regime = this.pickRegime(weights);
     const names = RIVAL_NAMES.filter((n) => !this.rivals.some((rv) => rv.name === n));
     const leaders = RIVAL_LEADERS.filter((n) => !this.rivals.some((rv) => rv.leader === n));
-    const compasses = (['north', 'east', 'south', 'west'] as const)
-      .filter((c) => !this.rivals.some((rv) => rv.compass === c));
+    // banners stack, but spread the powers around the horizon first
+    const counts = { north: 0, east: 0, south: 0, west: 0 };
+    for (const rv of this.rivals) counts[rv.compass]++;
+    const compass = (['north', 'east', 'south', 'west'] as const)
+      .reduce((a, b) => (counts[b] < counts[a] ? b : a));
+    const origin = RIVAL_ORIGINS[this.rng.int(RIVAL_ORIGINS.length)];
     const rv: RivalNation = {
       id: this.nextId++,
       name: names[this.rng.int(names.length)] ?? `Power ${this.rivals.length + 1}`,
       leader: leaders[this.rng.int(leaders.length)] ?? 'the Directorate',
       archetype: arch,
       weights,
-      govType,
+      regime: regime.id,
       agenda: RIVAL_AGENDAS[arch],
-      compass: compasses[this.rng.int(compasses.length)] ?? 'north',
+      compass,
       pop: 2500 + this.rng.int(3000),
       relations: this.clampRel(10 + weights.commerce - weights.expansion - weights.grudge + this.rng.int(11) - 5),
       treaties: [],
       emergedYear: this.year,
+      history: [`Proclaimed ${this.year}, ${COMPASS_FLAVOR[compass]} — ${origin}.`],
       lastEnvoyDay: -999,
       lastGiftDay: -999,
     };
+    // The newcomer arrives into a world with opinions already formed
+    for (const other of this.rivals) {
+      const ob = this.regimeOf(other).bloc;
+      const rel =
+        (rv.weights.commerce + other.weights.commerce) * 1.2 -
+        (rv.weights.expansion + other.weights.expansion) * 1.5 +
+        blocAffinity(regime.bloc, ob) +
+        this.rng.int(21) - 10;
+      this.rivalPairs[this.pairKey(rv.id, other.id)] = this.clampRel(Math.max(-60, Math.min(40, rel)));
+    }
     this.rivals.push(rv);
     this.addLog(
-      `A NEW POWER: ${COMPASS_FLAVOR[rv.compass]}, ${rv.leader} proclaims the nation of ${rv.name} — ` +
-      `${RIVAL_ARCHETYPES[arch].name}. Its agenda, the envoys say: "${rv.agenda}."`,
+      `A NEW POWER: ${COMPASS_FLAVOR[rv.compass]}, ${rv.leader} proclaims ${rv.name}, a ${regime.name.toLowerCase()} ` +
+      `${origin} — ${RIVAL_ARCHETYPES[arch].name}. Its agenda, the envoys say: "${rv.agenda}."`,
       'info',
     );
     return rv;
@@ -2186,19 +2314,16 @@ export class RegionSim {
     // banded so the first foreign power reliably exists by mid-century.
     if (this.year >= RIVAL_EMERGENCE_YEAR && this.rivals.length < MAX_RIVALS) {
       const overdue = this.rivals.length === 0 && this.year >= 1940;
-      if (this.rng.chance(overdue ? 0.25 : 0.035)) this.spawnRival();
+      if (this.rng.chance(overdue ? 0.25 : 0.03)) this.spawnRival();
     }
     this.offers = this.offers.filter((o) => o.expiresDay > this.day && this.rival(o.rivalId));
+    const myBloc = this.playerBloc();
     for (const rv of this.rivals) {
       rv.pop *= 1.0015; // they grow whether you watch or not
       // Relations drift toward a baseline set by personality, regime
       // distance (GDD §5.4), and whatever ink is already on the page.
       let base = rv.weights.commerce * 1.2 - rv.weights.expansion * 1.5 - rv.weights.grudge * 0.8;
-      if (this.nationProclaimed && this.govType) {
-        const mine = GOV_TYPES.find((g) => g.id === this.govType)!.electionsRequired;
-        const theirs = GOV_TYPES.find((g) => g.id === rv.govType)!.electionsRequired;
-        base += mine === theirs ? 12 : -12;
-      }
+      if (myBloc) base += blocAffinity(myBloc, this.regimeOf(rv).bloc);
       if (rv.treaties.includes('non_aggression')) base += 8;
       if (rv.treaties.includes('trade_agreement')) base += 12;
       if (rv.treaties.includes('defensive_pact')) base += 16;
@@ -2228,28 +2353,139 @@ export class RegionSim {
           this.addLog(`${rv.name}'s customs men shake down caravans at the frontier — £${toll} in seized goods and bribes.`, 'bad');
         }
       }
-      // Regime change abroad is world news the player reads about (GDD §6.3);
-      // the interwar window leans autocratic, as the century did.
-      if (this.rng.chance(0.012)) {
-        const old = rv.govType;
-        rv.govType = this.year < 1950 && this.rng.chance(0.5)
-          ? 'junta'
-          : (['democracy', 'republic', 'monarchy', 'junta'] as GovType[])[this.rng.int(4)];
-        if (rv.govType !== old) {
-          const oldName = GOV_TYPES.find((g) => g.id === old)!.name.toLowerCase();
-          const newName = GOV_TYPES.find((g) => g.id === rv.govType)!.name.toLowerCase();
-          this.addLog(`REGIME CHANGE in ${rv.name}: the ${oldName} falls; a ${newName} takes its place.`, 'info');
+      // Regime change abroad is world news the player reads about (GDD §6.3)
+      if (this.rng.chance(0.01)) this.changeRegime(rv, 'drift');
+    }
+    this.tickForeignRelations();
+  }
+
+  /** A nation's bio stays readable: cap the beats, keep the founding line. */
+  private noteHistory(rv: RivalNation, text: string): void {
+    rv.history.push(text);
+    if (rv.history.length > 16) rv.history.splice(1, 1);
+  }
+
+  /** A rival's government falls — by slow drift or by losing a war. The
+   *  era gates what replaces it: the interwar pool leans autocratic. */
+  private changeRegime(rv: RivalNation, cause: 'drift' | 'defeat'): void {
+    const old = this.regimeOf(rv);
+    const next = this.pickRegime(rv.weights, old.id);
+    rv.regime = next.id;
+    this.noteHistory(rv,
+      cause === 'defeat'
+        ? `Defeat brought down the ${old.name}; a ${next.name} seized power, ${this.year}.`
+        : `The ${old.name} fell; a ${next.name} took its place, ${this.year}.`,
+    );
+    this.addLog(
+      cause === 'defeat'
+        ? `REVOLUTION in ${rv.name}: defeat brings down the ${old.name.toLowerCase()} — a ${next.name.toLowerCase()} seizes power.`
+        : `REGIME CHANGE in ${rv.name}: the ${old.name.toLowerCase()} falls; a ${next.name.toLowerCase()} takes its place.`,
+      'info',
+    );
+  }
+
+  /** The world's own politics (GDD §6.4): rival pairs drift, ally, feud,
+   *  and fight — the player reads the dispatches and sells into the booms. */
+  private tickForeignRelations(): void {
+    for (let i = 0; i < this.rivals.length; i++) {
+      for (let j = i + 1; j < this.rivals.length; j++) {
+        const a = this.rivals[i];
+        const b = this.rivals[j];
+        const key = this.pairKey(a.id, b.id);
+        const allied = this.alliances.includes(key);
+        const atWar = this.warBetween(a.id, b.id) !== undefined;
+        // Drift toward a baseline from both personalities and bloc distance
+        let base =
+          (a.weights.commerce + b.weights.commerce) * 1.2 -
+          (a.weights.expansion + b.weights.expansion) * 1.5 +
+          blocAffinity(this.regimeOf(a).bloc, this.regimeOf(b).bloc);
+        if (allied) base += 25;
+        let rel = (this.rivalPairs[key] ?? 0) + (base - (this.rivalPairs[key] ?? 0)) * 0.03;
+        if (atWar) rel = Math.min(rel, -50);
+        this.rivalPairs[key] = this.clampRel(rel);
+        if (atWar) continue;
+        if (!allied && rel > 45 && a.weights.honor + b.weights.honor >= 10 && this.rng.chance(0.05)) {
+          this.alliances.push(key);
+          this.noteHistory(a, `Allied with ${b.name}, ${this.year}.`);
+          this.noteHistory(b, `Allied with ${a.name}, ${this.year}.`);
+          this.addLog(`PACT ABROAD: ${a.name} and ${b.name} sign an alliance — the world is choosing sides.`, 'info');
+        } else if (!allied && rel > 25 && a.weights.commerce + b.weights.commerce >= 10 && this.rng.chance(0.04)) {
+          this.rivalPairs[key] = this.clampRel(rel + 5);
+          this.addLog(`${a.name} and ${b.name} open a customs union — freight moves freely between them.`, 'info');
+        } else if (rel < -20 && this.rng.chance(0.06)) {
+          this.rivalPairs[key] = this.clampRel(rel - 4);
+          this.addLog(`${a.name} and ${b.name} trade ultimatums over a border survey. The chanceries buzz.`, 'info');
+        }
+        if (!allied && rel < -50 && this.rng.chance(0.03 + (a.weights.risk + b.weights.risk) * 0.003)) {
+          this.startForeignWar(a.id, b.id);
         }
       }
     }
-    // Foreign wars move prices (GDD §6.4): their fight is your market
-    if (this.rivals.length >= 2 && this.day >= this.warBoomUntil && this.rng.chance(0.025)) {
-      const a = this.rivals[this.rng.int(this.rivals.length)];
-      const others = this.rivals.filter((x) => x !== a);
-      const b = others[this.rng.int(others.length)];
-      this.warBoomUntil = this.day + 180 + this.rng.int(360);
-      this.addLog(`WAR ABROAD: ${a.name} and ${b.name} are at war. Their buyers pay any price — the valley's exports boom.`, 'info');
+    // Run the active wars: refugees flow now, the reckoning comes at the peace
+    for (const w of [...this.foreignWars]) {
+      const a = this.rival(w.a);
+      const b = this.rival(w.b);
+      if (!a || !b) {
+        this.foreignWars = this.foreignWars.filter((x) => x !== w);
+        continue;
+      }
+      if (this.rng.chance(0.2) && this.settlements.length > 0) {
+        const t = this.settlements[this.rng.int(this.settlements.length)];
+        const wave = 2 + this.rng.int(6);
+        t.cohorts.bands[1] += wave * 0.6;
+        t.cohorts.bands[0] += wave * 0.25;
+        t.cohorts.bands[2] += wave * 0.15;
+        this.addLog(`Refugees from the ${a.name}–${b.name} war reach ${t.name} — ${wave} souls with what they could carry.`, 'info');
+      }
+      if (this.day >= w.endsDay) this.endForeignWar(w, a, b);
     }
+  }
+
+  /** War between two powers (GDD §6.4: "their wars move prices").
+   *  Public so scenarios and tests can light the fuse directly. */
+  startForeignWar(aId: number, bId: number): boolean {
+    const a = this.rival(aId);
+    const b = this.rival(bId);
+    if (!a || !b || a === b || this.warBetween(aId, bId)) return false;
+    const endsDay = this.day + 240 + this.rng.int(480);
+    this.foreignWars.push({ a: aId, b: bId, startedDay: this.day, endsDay });
+    this.rivalPairs[this.pairKey(aId, bId)] = Math.min(this.pairRelations(aId, bId), -60);
+    this.warBoomUntil = Math.max(this.warBoomUntil, endsDay);
+    this.noteHistory(a, `Went to war with ${b.name}, ${this.year}.`);
+    this.noteHistory(b, `Went to war with ${a.name}, ${this.year}.`);
+    // Allies of each side turn cold toward the enemy — sides harden
+    for (const key of this.alliances) {
+      const [x, y] = key.split(':').map(Number);
+      for (const [self, foe] of [[aId, bId], [bId, aId]] as const) {
+        const ally = x === self ? y : y === self ? x : null;
+        if (ally !== null && ally !== foe) {
+          const k = this.pairKey(ally, foe);
+          this.rivalPairs[k] = this.clampRel((this.rivalPairs[k] ?? 0) - 20);
+        }
+      }
+    }
+    this.addLog(`WAR ABROAD: ${a.name} and ${b.name} are at war. Their buyers pay any price — the valley's exports boom.`, 'info');
+    return true;
+  }
+
+  /** The peace: the loser bleeds population, nurses a grudge for decades,
+   *  and may lose its government to the defeat (GDD §6.3 regime change). */
+  private endForeignWar(w: ForeignWar, a: RivalNation, b: RivalNation): void {
+    this.foreignWars = this.foreignWars.filter((x) => x !== w);
+    const aWins = this.rng.next() < a.pop / (a.pop + b.pop);
+    const winner = aWins ? a : b;
+    const loser = aWins ? b : a;
+    loser.pop *= 0.85 + this.rng.next() * 0.1;
+    winner.pop *= 1.02;
+    this.rivalPairs[this.pairKey(a.id, b.id)] = -60; // betrayal-grade memory
+    this.noteHistory(winner, `Victorious over ${loser.name}, ${this.year}.`);
+    this.noteHistory(loser, `Defeated by ${winner.name}, ${this.year}.`);
+    this.addLog(
+      `PEACE ABROAD: the ${a.name}–${b.name} war ends — ${winner.name} dictates terms, and ${loser.name} signs them. ` +
+      `The export boom cools.`,
+      'info',
+    );
+    if (this.rng.chance(0.5)) this.changeRegime(loser, 'defeat');
   }
 
   private removePop(t: Settlement, count: number): void {
@@ -2311,6 +2547,9 @@ export class RegionSim {
       treatiesBroken: this.treatiesBroken,
       warBoomUntil: this.warBoomUntil,
       exportEarningsLastMonth: this.exportEarningsLastMonth,
+      rivalPairs: this.rivalPairs,
+      alliances: this.alliances,
+      foreignWars: this.foreignWars,
       nextId: this.nextId,
       nextEventDay: this.nextEventDay,
       townNamePool: this.townNamePool,
@@ -2369,6 +2608,9 @@ export class RegionSim {
     r.treatiesBroken = d.treatiesBroken ?? 0;
     r.warBoomUntil = d.warBoomUntil ?? -1;
     r.exportEarningsLastMonth = d.exportEarningsLastMonth ?? 0;
+    r.rivalPairs = d.rivalPairs ?? {};
+    r.alliances = d.alliances ?? [];
+    r.foreignWars = d.foreignWars ?? [];
     r.nextId = d.nextId;
     r.nextEventDay = d.nextEventDay;
     r.townNamePool = d.townNamePool;
