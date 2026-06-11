@@ -81,6 +81,22 @@ export interface Settler {
   stateUntil: number; // minute when timed states end
   carrying: { kind: ResourceKind; qty: number } | null;
   bedId: number | null;
+  clothedUntil: number; // minute their clothes wear out; 0 = threadbare
+}
+
+export interface Corpse {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  diedAt: number; // minute
+}
+
+export interface Grave {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
 }
 
 export interface Building {
@@ -124,7 +140,9 @@ export class Simulation {
   settlers: Settler[] = [];
   buildings: Building[] = [];
   items: GroundItem[] = [];
-  stock: Record<ResourceKind, number> = { wood: 80, grain: 60, meal: 160, stone: 0 };
+  corpses: Corpse[] = [];
+  graves: Grave[] = [];
+  stock: Record<ResourceKind, number> = { wood: 80, grain: 60, meal: 160, stone: 0, clothes: 0 };
   /** transits per tile for the traffic overlay; decays daily */
   traffic = new Float32Array(MAP_W * MAP_H);
   log: LogEntry[] = [];
@@ -260,6 +278,7 @@ export class Simulation {
       stateUntil: 0,
       carrying: null,
       bedId: null,
+      clothedUntil: 0,
     };
     this.settlers.push(s);
     return s;
@@ -399,6 +418,7 @@ export class Simulation {
 
   private dailyUpdate(): void {
     for (let i = 0; i < this.traffic.length; i++) this.traffic[i] *= 0.9; // overlay shows recent flow
+    this.updatePopulationFlows();
     if (this.day >= this.nextEventDay) {
       this.fireEvent();
       this.nextEventDay = this.day + 3 + this.rng.int(4);
@@ -446,6 +466,38 @@ export class Simulation {
     }
   }
 
+  /**
+   * Steady immigration plus a slow birth trickle: a colony that can feed
+   * people recovers its losses instead of bleeding out (0.1 death-spiral fix).
+   */
+  private updatePopulationFlows(): void {
+    const t = TUNING;
+    const pop = this.settlers.length;
+    if (pop === 0) return;
+    const food = this.stock.meal + this.stock.grain;
+    // Immigration: word of a well-fed colony travels; wagons stop when there's no room.
+    if (this.day >= t.firstImmigrantDay && pop < t.immigrantStopPop &&
+        food >= pop * t.immigrantFoodPerCapita && this.rng.chance(t.immigrantChancePerDay)) {
+      const gate = { x: 1, y: Math.floor(MAP_H / 2) };
+      const edge = this.world.passable(gate.x, gate.y) ? gate : this.world.nearestPassable(gate);
+      if (edge) {
+        const s = this.spawnSettler(edge.x, edge.y);
+        this.addLog(`${s.name} arrives, drawn by word of a colony that eats well.`, 'good');
+      }
+    }
+    // Births: the colony's youth come of age (children are abstracted at town tier).
+    const couples = Math.floor(pop / 2);
+    if (pop >= t.birthMinPop && pop < t.hardCapPop && food >= pop * 2 &&
+        this.rng.chance(Math.min(0.25, couples * t.birthChancePerCoupleDay))) {
+      const home = this.builtOf('sleep')[0];
+      const at = home ? this.buildingCenter(home) : { x: Math.floor(MAP_W / 2), y: Math.floor(MAP_H / 2) };
+      const s = this.spawnSettler(at.x, at.y);
+      s.age = 16;
+      for (const k of WORK_KINDS) s.skills[k] = Math.min(s.skills[k], 3); // young and green
+      this.addLog(`A child of the colony, ${s.name}, comes of age.`, 'good');
+    }
+  }
+
   private fireEvent(): void {
     const roll = this.rng.next();
     if (roll < 0.3 && this.settlers.length < TUNING.hardCapPop) {
@@ -481,15 +533,24 @@ export class Simulation {
 
   /** Colony wealth drives raid size: prosperity attracts trouble (GDD §8.4). */
   wealth(): number {
-    const stocks = this.stock.wood * 0.2 + this.stock.grain + this.stock.meal;
+    const stocks = this.stock.wood * 0.2 + this.stock.grain + this.stock.meal + this.stock.clothes * 2;
     const built = this.buildings.filter((b) => b.built).length;
     return stocks + this.settlers.length * 8 + built * 15;
   }
 
-  private startRaid(): void {
+  /**
+   * Raiders mustered today: wealth and time grow the threat, but a dwindling
+   * colony is a poor target — raids shrink with the population they prey on.
+   */
+  raidSize(): number {
     const byWealth = 2 + Math.floor(this.wealth() / TUNING.raidWealthPerRaider);
     const byTime = 2 + Math.floor(Math.max(0, this.day - TUNING.firstRaidDay) / TUNING.raidRampDays);
-    const n = Math.max(2, Math.min(TUNING.raidMaxRaiders, byWealth, byTime));
+    const byPop = Math.ceil(this.settlers.length * TUNING.raidPopFactor);
+    return Math.max(1, Math.min(TUNING.raidMaxRaiders, byWealth, byTime, byPop));
+  }
+
+  private startRaid(): void {
+    const n = this.raidSize();
     const side = this.rng.int(4);
     for (let i = 0; i < n; i++) {
       const along = 4 + this.rng.int(MAP_W - 8);
@@ -641,7 +702,15 @@ export class Simulation {
   private updateSettler(s: Settler): void {
     const hours = MINUTES_PER_TICK / 60;
     const t = TUNING;
-    const temp = this.effectiveTemp(s);
+    // Felt temperature: ambient (indoors/hearth aware) plus what you wear.
+    const temp = this.effectiveTemp(s) + (s.clothedUntil > this.minute ? t.clothesWarmthC : 0);
+
+    // Anyone threadbare picks up a set from the stores as soon as one exists.
+    if (s.clothedUntil <= this.minute && this.stock.clothes > 0) {
+      this.stock.clothes--;
+      s.clothedUntil = this.minute + t.clothesWearDays * MINUTES_PER_DAY;
+      this.addThought(s, 'Warm new clothes', 3, 2 * MINUTES_PER_DAY);
+    }
 
     // Needs decay
     const foodMult = this.traitMult(s, 'foodDecay');
@@ -653,7 +722,9 @@ export class Simulation {
       const sev = Math.min(2, (12 - temp) / 12) * this.traitMult(s, 'warmthDecay');
       s.needs.warmth = Math.max(0, s.needs.warmth - t.needDecayPerHour.warmth * sev * hours);
     } else {
-      s.needs.warmth = Math.min(100, s.needs.warmth + 5 * hours);
+      // Recovery is quick beside a fire or indoors, slow in mild open air.
+      const regen = temp >= 16 ? t.warmthRegenWarmPerHour : 5;
+      s.needs.warmth = Math.min(100, s.needs.warmth + regen * hours);
     }
     if (s.state !== 'recreating') {
       s.needs.recreation = Math.max(0, s.needs.recreation - t.needDecayPerHour.recreation * hours);
@@ -689,6 +760,9 @@ export class Simulation {
 
     // Mood
     s.thoughts = s.thoughts.filter((th) => th.expiresAt > this.minute);
+    if (this.corpses.length > 0) {
+      this.refreshThought(s, 'Unburied dead in the colony', -t.unburiedMoodPenalty, 60);
+    }
     const w = t.moodWeights;
     let target =
       s.needs.food * w.food + s.needs.rest * w.rest + s.needs.warmth * w.warmth +
@@ -764,11 +838,15 @@ export class Simulation {
           return;
         }
         if (!this.arrived(s)) this.step(s);
+        else if (s.needs.food < 20) this.consumeFood(s); // raids run long; nibble rations while hiding
         return;
       }
       case 'breakdown': {
         if (this.minute >= s.stateUntil) s.state = 'idle';
-        else this.wander(s);
+        else {
+          if (s.needs.food < 20) this.consumeFood(s); // even the broken still eat
+          this.wander(s);
+        }
         return;
       }
       case 'sleeping': {
@@ -792,14 +870,7 @@ export class Simulation {
       }
       case 'eating': {
         if (!this.arrived(s)) return this.step(s);
-        if (this.stock.meal > 0) {
-          this.stock.meal--;
-          s.needs.food = Math.min(100, s.needs.food + t.mealFoodValue);
-        } else if (this.stock.grain > 0) {
-          this.stock.grain--;
-          s.needs.food = Math.min(100, s.needs.food + t.rawGrainFoodValue);
-          this.addThought(s, 'Ate raw grain', -4, MINUTES_PER_DAY);
-        }
+        this.consumeFood(s);
         s.state = 'idle';
         return;
       }
@@ -837,22 +908,22 @@ export class Simulation {
 
   private decide(s: Settler): void {
     const night = this.hour >= 22 || this.hour < 6;
-    if (s.health < TUNING.bedRestThreshold) return this.goSleep(s); // bed rest
-    if (s.needs.rest < 25 || (night && s.needs.rest < 80)) return this.goSleep(s);
+    // Hunger comes before everything — bed rest and sleep used to outrank it,
+    // and settlers starved in bed beside a stocked larder (0.1 death-spiral fix).
     if (s.needs.food < 30 && (this.stock.meal > 0 || this.stock.grain > 0)) {
       const sp = this.builtOf('storage')[0];
-      if (sp) {
-        s.state = 'eating';
-        this.setDestination(s, this.buildingCenter(sp));
-        return;
-      }
+      if (sp) this.setDestination(s, this.buildingCenter(sp));
+      s.state = 'eating'; // if the walk fails, eat where you stand rather than starve
+      return;
     }
+    if (s.health < TUNING.bedRestThreshold) return this.goSleep(s); // bed rest
+    if (s.needs.rest < 25 || (night && s.needs.rest < 80)) return this.goSleep(s);
     if (s.needs.warmth < 25) {
-      const shelter = this.builtOf('sleep')[0] ?? this.builtOf('recreation')[0];
-      if (shelter) {
+      const warm = this.nearestWarmSpot(s);
+      if (warm) {
         s.state = 'warming';
         s.stateUntil = this.minute + 12 * 60;
-        this.setDestination(s, this.buildingCenter(shelter));
+        this.setDestination(s, warm);
         return;
       }
     }
@@ -943,6 +1014,20 @@ export class Simulation {
     if (kitchen && this.stock.grain > 0 && this.stock.meal < this.settlers.length * 3) {
       push({ kind: 'cook', x: kitchen.x, y: kitchen.y, buildingId: kitchen.id, workLeft: TUNING.cookWorkPerMeal * TUNING.cookBatch, label: 'cook meals' }, 'cook');
     }
+    // Weave clothes while anyone goes threadbare — but never eat the seed grain.
+    const tailorShop = this.builtOf('craft')[0];
+    const threadbare = this.settlers.filter((p) => p.clothedUntil <= this.minute).length;
+    if (tailorShop && this.stock.clothes < threadbare &&
+        this.stock.grain >= TUNING.clothesGrainCost + this.settlers.length) {
+      push({ kind: 'craft', x: tailorShop.x, y: tailorShop.y, buildingId: tailorShop.id, workLeft: TUNING.craftWorkPerClothes, label: 'sew clothes' }, 'craft');
+    }
+    // Lay the dead to rest — needs a burial ground with a free plot; until
+    // then the bodies lie in camp and weigh on everyone.
+    if (this.graveSite()) {
+      for (const c of this.corpses) {
+        push({ kind: 'bury', x: c.x, y: c.y, itemId: c.id, workLeft: TUNING.buryWork, label: `bury ${c.name.split(' ')[0]}` }, 'bury');
+      }
+    }
     // Treat the wounded, infected, and feverish.
     for (const p of this.settlers) {
       if (p.id === s.id) continue;
@@ -973,7 +1058,8 @@ export class Simulation {
     }
     const sickMult = s.sickUntil > this.minute ? TUNING.sickWorkMult : 1;
     const sky = this.weatherToday().sky;
-    const outdoorWork = task.kind === 'farm' || task.kind === 'chop' || task.kind === 'build' || task.kind === 'haul';
+    const outdoorWork =
+      task.kind === 'farm' || task.kind === 'chop' || task.kind === 'build' || task.kind === 'haul' || task.kind === 'bury';
     const rainMult = outdoorWork && (sky === 'rain' || sky === 'storm' || sky === 'snow') ? 0.85 : 1;
     const speed =
       (0.5 + s.skills[task.kind] * 0.1) * this.traitMult(s, 'workSpeed') * this.softCapWorkMult() * sickMult * rainMult;
@@ -1115,6 +1201,43 @@ export class Simulation {
         if (task.workLeft <= 0 || this.stock.grain <= 0) this.finishTask(s);
         return;
       }
+      case 'craft': {
+        const shop = this.building(task.buildingId);
+        if (!shop?.built || this.stock.grain < TUNING.clothesGrainCost) return this.finishTask(s);
+        task.workLeft -= work;
+        if (task.workLeft <= 0) {
+          this.stock.grain -= TUNING.clothesGrainCost;
+          this.stock.clothes++;
+          this.finishTask(s);
+        }
+        return;
+      }
+      case 'bury': {
+        const c = this.corpses.find((o) => o.id === task.itemId);
+        if (!c) return this.finishTask(s);
+        // Two legs: reach the body where it fell, then dig at the burial ground.
+        // The body stays put until the grave is done, so an interrupted burial
+        // leaves it (and the grief it causes) in camp.
+        if (task.buildingId === undefined) {
+          const site = this.graveSite();
+          if (!site) return this.finishTask(s); // the yards filled up meanwhile
+          task.buildingId = site.yard.id;
+          s.state = 'moving';
+          this.setDestination(s, site.at);
+          return;
+        }
+        task.workLeft -= work;
+        if (task.workLeft <= 0) {
+          const site = this.graveSite();
+          if (!site) return this.finishTask(s);
+          this.corpses = this.corpses.filter((o) => o !== c);
+          this.graves.push({ id: this.nextId++, name: c.name, x: site.at.x, y: site.at.y });
+          this.addThought(s, `Laid ${c.name.split(' ')[0]} to rest`, 2, MINUTES_PER_DAY);
+          this.addLog(`${c.name} was laid to rest in the burial ground.`, 'info');
+          this.finishTask(s);
+        }
+        return;
+      }
     }
   }
 
@@ -1212,9 +1335,58 @@ export class Simulation {
       ? this.world.at(Math.round(s.pos.x), Math.round(s.pos.y))
       : null;
     const b = this.building(tile?.buildingId);
-    const indoors = b?.built && ['sleep', 'cook', 'recreation'].includes(buildingDef(b.defId).provides);
-    // Hearths keep interiors livable even in deep winter.
-    return indoors ? Math.max(this.temperature() + INDOOR_BONUS_C, 14) : this.temperature();
+    const indoors = b?.built && ['sleep', 'cook', 'recreation', 'craft'].includes(buildingDef(b.defId).provides);
+    if (indoors) return Math.max(this.temperature() + INDOOR_BONUS_C, 14);
+    // An open hearth warms the tiles around it — winter survivable by design.
+    for (const h of this.builtOf('warmth')) {
+      if (Math.hypot(h.x - s.pos.x, h.y - s.pos.y) <= TUNING.hearthRadius) {
+        return Math.max(this.temperature() + INDOOR_BONUS_C, 16);
+      }
+    }
+    return this.temperature();
+  }
+
+  /** Eat one unit from the stores; raw grain costs a little mood. */
+  private consumeFood(s: Settler): void {
+    if (this.stock.meal > 0) {
+      this.stock.meal--;
+      s.needs.food = Math.min(100, s.needs.food + TUNING.mealFoodValue);
+    } else if (this.stock.grain > 0) {
+      this.stock.grain--;
+      s.needs.food = Math.min(100, s.needs.food + TUNING.rawGrainFoodValue);
+      this.addThought(s, 'Ate raw grain', -4, MINUTES_PER_DAY);
+    }
+  }
+
+  /** Where to thaw out: the nearest hearth, else any heated shelter. */
+  private nearestWarmSpot(s: Settler): Vec | null {
+    let best: Vec | null = null;
+    let bd = Infinity;
+    for (const h of this.builtOf('warmth')) {
+      const d = Math.hypot(h.x - s.pos.x, h.y - s.pos.y);
+      if (d < bd) {
+        bd = d;
+        best = { x: h.x, y: h.y };
+      }
+    }
+    if (best) return best;
+    const shelter = this.builtOf('sleep')[0] ?? this.builtOf('recreation')[0];
+    return shelter ? this.buildingCenter(shelter) : null;
+  }
+
+  /** First free plot in any built burial ground, or null when the yards are full. */
+  graveSite(): { yard: Building; at: Vec } | null {
+    for (const yard of this.builtOf('burial')) {
+      const def = buildingDef(yard.defId);
+      for (let dy = 0; dy < def.h; dy++) {
+        for (let dx = 0; dx < def.w; dx++) {
+          const gx = yard.x + dx;
+          const gy = yard.y + dy;
+          if (!this.graves.some((gr) => gr.x === gx && gr.y === gy)) return { yard, at: { x: gx, y: gy } };
+        }
+      }
+    }
+    return null;
   }
 
   private traitMult(s: Settler, key: 'workSpeed' | 'warmthDecay' | 'foodDecay'): number {
@@ -1234,6 +1406,13 @@ export class Simulation {
 
   addThought(s: Settler, label: string, delta: number, durationMin: number): void {
     s.thoughts.push({ label, delta, expiresAt: this.minute + durationMin });
+  }
+
+  /** Keep an ongoing thought alive without stacking duplicates of it. */
+  private refreshThought(s: Settler, label: string, delta: number, durationMin: number): void {
+    const th = s.thoughts.find((o) => o.label === label);
+    if (th) th.expiresAt = this.minute + durationMin;
+    else this.addThought(s, label, delta, durationMin);
   }
 
   // ---- relationships ----
@@ -1259,6 +1438,10 @@ export class Simulation {
   private kill(s: Settler, cause: string): void {
     this.settlers = this.settlers.filter((o) => o !== s);
     this.releaseTask(s);
+    this.corpses.push({
+      id: this.nextId++, name: s.name,
+      x: Math.round(s.pos.x), y: Math.round(s.pos.y), diedAt: this.minute,
+    });
     this.addLog(`${s.name} has died of ${cause}.`, 'bad');
     for (const o of this.settlers) {
       const friend = this.opinionBetween(s, o) >= TUNING.friendThreshold;

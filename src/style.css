@@ -239,6 +239,54 @@ body {
   cursor: pointer;
 }
 
+.gameover {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 6, 8, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.gameover-box {
+  width: 560px;
+  background: #1c1812;
+  border: 4px solid #ff5544;
+  padding: 28px;
+  text-align: center;
+  box-shadow: 0 0 0 4px #1c1812, 0 0 0 6px #6e2a1f;
+}
+
+.gameover-box h1 {
+  color: #ff5544;
+  font-size: 64px;
+  letter-spacing: 8px;
+  text-shadow: 4px 4px 0 #5d1a12, 8px 8px 0 #2a0c08;
+  margin-bottom: 14px;
+}
+
+.gameover-box p {
+  color: #dfe6ee;
+  margin-bottom: 18px;
+  line-height: 1.5;
+}
+
+#go-restart {
+  background: #5d2a1e;
+  color: #ffd27a;
+  border: 2px solid #ff5544;
+  font-family: inherit;
+  font-size: 18px;
+  letter-spacing: 3px;
+  padding: 10px 34px;
+  cursor: pointer;
+}
+
+#go-restart:hover {
+  background: #7a3a28;
+}
+
 .inspector {
   position: fixed;
   right: 8px;

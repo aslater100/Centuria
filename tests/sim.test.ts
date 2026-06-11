@@ -112,6 +112,88 @@ describe('Simulation', () => {
     expect(someFriendship).toBe(true);
   });
 
+  it('a badly hurt settler still eats: bed rest never outranks a stocked larder', () => {
+    // Regression (0.1 A1): bed-rest/sleep checks used to run before the food
+    // check, so a settler below the bed-rest health threshold ping-ponged
+    // sleep→idle→sleep and starved to death with meals in stock.
+    const sim = new Simulation(42);
+    sim.stock.meal = 500;
+    for (const s of sim.settlers) {
+      s.health = 30; // below bedRestThreshold
+      s.needs.food = 10;
+    }
+    runDays(sim, 2);
+    expect(sim.settlers).toHaveLength(12); // nobody starved
+    expect(sim.settlers.every((s) => s.needs.food > 15)).toBe(true);
+  });
+
+  it('raid size never outgrows the population it preys on', () => {
+    const sim = new Simulation(42);
+    sim.stock.meal = 5000; // rich and late-game: wealth/time caps far above pop cap
+    sim.stock.wood = 5000;
+    sim.minute = 60 * MINUTES_PER_DAY;
+    const fullPopRaid = sim.raidSize();
+    sim.settlers.splice(3); // the colony has withered to three
+    expect(sim.raidSize()).toBeLessThanOrEqual(2);
+    expect(sim.raidSize()).toBeLessThan(fullPopRaid);
+  });
+
+  it('a fed colony recovers population through immigration and births', () => {
+    const sim = new Simulation(42);
+    sim.stock.meal = 1000;
+    sim.stock.grain = 500;
+    sim.settlers.splice(4); // tragedy strikes: only four remain
+    runDays(sim, 30);
+    expect(sim.settlers.length).toBeGreaterThan(4);
+  });
+
+  it('the dead grieve the living until buried in a burial ground', () => {
+    const sim = new Simulation(42);
+    sim.placeBuilding('graveyard', 24, 28, true);
+    const victim = sim.settlers[0];
+    victim.needs.food = 0;
+    victim.health = 0.01;
+    sim.tick(); // starvation claims them
+    expect(sim.corpses).toHaveLength(1);
+    sim.tick();
+    expect(sim.settlers.some((s) => s.thoughts.some((t) => t.label.includes('Unburied')))).toBe(true);
+    runDays(sim, 2);
+    expect(sim.corpses).toHaveLength(0);
+    expect(sim.graves).toHaveLength(1);
+  });
+
+  it('without a burial ground the dead lie in camp and the grief persists', () => {
+    const sim = new Simulation(42);
+    const victim = sim.settlers[0];
+    victim.needs.food = 0;
+    victim.health = 0.01;
+    sim.tick();
+    runDays(sim, 2);
+    expect(sim.corpses).toHaveLength(1); // nowhere to bury them
+    expect(sim.settlers.some((s) => s.thoughts.some((t) => t.label.includes('Unburied')))).toBe(true);
+  });
+
+  it('a hearth keeps settlers alive through a cold snap with no other shelter', () => {
+    const sim = new Simulation(42);
+    // tear down the cabins so the fire is the only warmth
+    for (const b of sim.buildings.filter((o) => o.defId === 'house')) {
+      for (const t of sim.world.tiles) if (t.buildingId === b.id) t.buildingId = null;
+    }
+    sim.buildings = sim.buildings.filter((o) => o.defId !== 'house');
+    sim.placeBuilding('hearth', 31, 33, true);
+    sim.coldSnapUntil = Number.MAX_SAFE_INTEGER;
+    runDays(sim, 3);
+    expect(sim.settlers.length).toBeGreaterThanOrEqual(12); // nobody froze (immigrants may arrive)
+  });
+
+  it('the clothes maker outfits threadbare settlers against the cold', () => {
+    const sim = new Simulation(42);
+    sim.placeBuilding('tailor', 24, 30, true);
+    sim.stock.grain = 200;
+    runDays(sim, 4);
+    expect(sim.settlers.some((s) => s.clothedUntil > sim.minute)).toBe(true);
+  });
+
   it('colony survives 60 days with basic infrastructure on default seeds', () => {
     const sim = new Simulation(1001);
     sim.placeBuilding('farm', 24, 36);

@@ -4,10 +4,11 @@ import namesJson from '../data/names.json';
 
 /** All content defs load from JSON so they are moddable without touching code (GDD §8.8). */
 
-export type ResourceKind = 'wood' | 'grain' | 'meal' | 'stone';
-export type Provides = 'storage' | 'sleep' | 'farm' | 'cook' | 'recreation' | 'wall';
-export type WorkKind = 'build' | 'farm' | 'chop' | 'cook' | 'haul' | 'medic';
-export const WORK_KINDS: WorkKind[] = ['build', 'farm', 'chop', 'cook', 'haul', 'medic'];
+export type ResourceKind = 'wood' | 'grain' | 'meal' | 'stone' | 'clothes';
+export type Provides =
+  'storage' | 'sleep' | 'farm' | 'cook' | 'recreation' | 'wall' | 'warmth' | 'craft' | 'burial';
+export type WorkKind = 'build' | 'farm' | 'chop' | 'cook' | 'haul' | 'medic' | 'craft' | 'bury';
+export const WORK_KINDS: WorkKind[] = ['build', 'farm', 'chop', 'cook', 'haul', 'medic', 'craft', 'bury'];
 
 export interface BuildingDef {
   id: string;
@@ -91,12 +92,30 @@ export const TUNING = {
   softCapWorkPenaltyPer: 0.0075,
   softCapMoodPenaltyPer10: 1,
   hardCapPop: 150,
+  // Population flows: a fed colony recovers its losses (0.1 death-spiral fix)
+  immigrantFoodPerCapita: 8, // stores per settler before word spreads
+  immigrantChancePerDay: 0.15,
+  firstImmigrantDay: 12, // no arrivals until the colony has survived its first weeks
+  immigrantStopPop: 100, // GDD §2.3: "wagons stop arriving — no room"
+  birthChancePerCoupleDay: 0.006,
+  birthMinPop: 4,
+  // Burial
+  buryWork: 45,
+  unburiedMoodPenalty: 6,
+  // Warmth: hearths and clothing make winter survivable by design
+  hearthRadius: 5,
+  warmthRegenWarmPerHour: 15, // beside a fire or indoors (≥16°C effective)
+  clothesGrainCost: 2, // flax and straw, woven
+  craftWorkPerClothes: 60,
+  clothesWarmthC: 8,
+  clothesWearDays: 30,
   // Raids & combat
   firstRaidDay: 11,
   raidIntervalDays: 8,
   raidWealthPerRaider: 400,
   raidMaxRaiders: 9,
   raidRampDays: 15, // raid size cap grows by 1 per this many days
+  raidPopFactor: 0.5, // raiders never exceed half the living settlers
   raidTimeoutHours: 18,
   raiderHealth: 55,
   combatDamagePerHour: 30, // + combat skill × 6
