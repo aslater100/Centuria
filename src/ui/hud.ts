@@ -8,6 +8,7 @@ import type { ResourceKind, WorkKind } from '../sim/defs';
 import type { Camera } from './render';
 import type { PaintKind } from '../sim/world';
 import type { Sfx } from './audio';
+import type { Music } from './music';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, parent: HTMLElement): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -42,7 +43,7 @@ export class Hud {
   /** last innerHTML per panel — skip DOM writes when nothing changed */
   private htmlCache = new Map<HTMLElement, string>();
 
-  constructor(root: HTMLElement, private sim: Simulation, private cam: Camera, private sfx?: Sfx) {
+  constructor(root: HTMLElement, private sim: Simulation, private cam: Camera, private sfx?: Sfx, private music?: Music) {
     this.topBar = el('div', 'topbar', root);
     this.palette = el('div', 'palette', root);
     this.inspector = el('div', 'inspector', root);
@@ -66,6 +67,11 @@ export class Hud {
         case 'menu-load': this.onLoad?.(); break;
         case 'menu-mute':
           this.sfx?.toggleMuted();
+          this.renderMenu();
+          break;
+        case 'menu-music':
+          this.music?.toggle();
+          this.music?.unlock();
           this.renderMenu();
           break;
         case 'menu-restart':
@@ -243,6 +249,7 @@ export class Hud {
       `<button id="menu-save"${canSave ? '' : ' disabled title="Saving works on the town map"'}>Save Game</button>` +
       `<button id="menu-load"${canLoad ? '' : ' disabled title="No saved game yet"'}>Load Game</button>` +
       `<button id="menu-mute">${this.sfx?.muted ? 'Sound: OFF' : 'Sound: ON'}</button>` +
+      `<button id="menu-music">${this.music?.enabled ? 'Music: ON' : 'Music: OFF'}</button>` +
       `<button id="menu-restart">Restart Colony</button>` +
       `</div>`);
   }
