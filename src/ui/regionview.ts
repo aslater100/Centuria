@@ -63,15 +63,29 @@ export class RegionView {
     g.fillRect(0, 0, W, H);
     this.drawTerrain(W, H);
 
-    // Routes between settlements (dotted)
-    g.fillStyle = 'rgba(220,210,170,0.35)';
+    // Routes along their actual corridors (M6b): dotted trails, solid
+    // roads; line brightness is the route's condition.
     const ss = region.settlements;
-    for (let i = 1; i < ss.length; i++) {
-      const a = this.toPx(ss[0].x, ss[0].y);
-      const b = this.toPx(ss[i].x, ss[i].y);
-      const steps = Math.floor(Math.hypot(b.px - a.px, b.py - a.py) / 10);
-      for (let k = 0; k <= steps; k++) {
-        g.fillRect(Math.round(a.px + ((b.px - a.px) * k) / steps), Math.round(a.py + ((b.py - a.py) * k) / steps), 2, 2);
+    for (const r of region.routes) {
+      const alpha = 0.2 + 0.6 * (r.condition / 100);
+      if (r.kind === 'trail') {
+        g.fillStyle = `rgba(220,210,170,${alpha})`;
+        for (let i = 0; i < r.path.length; i += 2) {
+          const c = region.map.cellToCoord(r.path[i].x, r.path[i].y);
+          const p = this.toPx(c.rx, c.ry);
+          g.fillRect(Math.round(p.px) - 1, Math.round(p.py) - 1, 2, 2);
+        }
+      } else {
+        g.strokeStyle = `rgba(216,180,106,${alpha})`;
+        g.lineWidth = 2;
+        g.beginPath();
+        for (let i = 0; i < r.path.length; i++) {
+          const c = region.map.cellToCoord(r.path[i].x, r.path[i].y);
+          const p = this.toPx(c.rx, c.ry);
+          if (i === 0) g.moveTo(p.px, p.py);
+          else g.lineTo(p.px, p.py);
+        }
+        g.stroke();
       }
     }
 
@@ -134,7 +148,8 @@ export class RegionView {
         ? 'The Charter is drafted — the towns await your proclamation.'
         : region.charterEligible()
           ? `Regional Charter being drafted… ${Math.floor(region.charterProgress)}%`
-          : `Toward Statehood: ${region.settlements.length}/3 towns · ${region.totalPop()}/500 citizens`;
+          : `Toward Statehood: ${region.settlements.length}/3 towns · ${region.totalPop()}/500 citizens` +
+            (region.connectedToAll() ? '' : ' · towns unconnected!');
       g.fillText(need, W / 2 - 220, H - 23);
     } else {
       g.fillStyle = 'rgba(110,74,47,0.92)';
@@ -276,7 +291,8 @@ export class RegionView {
       `<input id="tax-slider" type="range" min="0" max="30" value="${Math.round(r.taxRate * 100)}">` +
       `<p>services: <b>${lvl(r.servicesLevel)}</b> <button class="mini" id="svc-up">+</button><button class="mini" id="svc-dn">−</button></p>` +
       `<p>militia: <b>${lvl(r.militiaLevel)}</b> <button class="mini" id="mil-up">+</button><button class="mini" id="mil-dn">−</button></p>` +
-      `<p class="insp-skills">high taxes breed strikes; services cost £ but save lives</p>`;
+      `<p class="insp-skills">high taxes breed strikes; services cost £ but save lives</p>` +
+      this.freightHtml();
     this.statePanel.querySelector<HTMLInputElement>('#tax-slider')!.oninput = (e) => {
       r.taxRate = Number((e.target as HTMLInputElement).value) / 100;
     };
@@ -294,6 +310,19 @@ export class RegionView {
     };
   }
 
+  /** Freight overlay (M6b): what the caravans actually moved, per route. */
+  private freightHtml(): string {
+    const r = this.region;
+    const name = (id: number) => r.settlement(id)?.name ?? '?';
+    const lines = r.routes
+      .filter((rt) => rt.freight > 0.5)
+      .sort((a, b) => b.freight - a.freight)
+      .slice(0, 5)
+      .map((rt) => `<p class="insp-skills">${name(rt.a)} ↔ ${name(rt.b)}: ${Math.round(rt.freight)} food</p>`)
+      .join('');
+    return `<p class="insp-skills">FREIGHT (last caravans)</p>` + (lines || `<p class="insp-skills">no caravan traffic</p>`);
+  }
+
   private drawPanel(): void {
     const t = this.region.settlements.find((s) => s.id === this.selectedId);
     if (!t) {
@@ -308,6 +337,35 @@ export class RegionView {
         this.region.foundTown(t.id);
       };
     }
+    for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.road-btn')) {
+      rb.onclick = () => {
+        this.region.buildRoad(t.id, Number(rb.dataset.to));
+      };
+    }
+  }
+
+  /** Route list to every other town, with the terrain-priced build button. */
+  private routesHtml(t: Settlement): string {
+    const r = this.region;
+    const rows = r.settlements
+      .filter((o) => o.id !== t.id)
+      .map((o) => {
+        const route = r.routeBetween(t.id, o.id);
+        const status = route ? `${route.kind} · ${Math.round(route.condition)}%` : 'no route';
+        let btn = '';
+        if (r.stateProclaimed && (!route || route.kind !== 'road')) {
+          const cost = r.roadCost(t.id, o.id);
+          if (cost) {
+            const afford = r.treasury >= cost.total;
+            btn = ` <button class="mini road-btn" data-to="${o.id}" ${afford ? '' : 'disabled'} ` +
+              `title="£${cost.total}: ${cost.breakdown}">road £${cost.total}</button>`;
+          }
+        }
+        return `<li>${o.name} — <span class="insp-skills">${status}</span>${btn}</li>`;
+      })
+      .join('');
+    if (!rows) return '';
+    return `<p class="insp-skills">ROUTES</p><ul class="thoughts">${rows}</ul>`;
   }
 
   private panelHtml(t: Settlement): string {
@@ -333,6 +391,7 @@ export class RegionView {
         t.site.roughness > 0.5 ? 'rough country' : '',
         t.site.fertility > 1.05 ? 'rich soil' : t.site.fertility < 0.7 ? 'poor soil' : '',
       ].filter(Boolean).join(' · ') || 'open plains'}</p>` +
+      this.routesHtml(t) +
       `<p class="insp-skills">COHORTS</p>` + bands +
       (notables ? `<p class="insp-skills">NOTABLES</p><ul class="thoughts">${notables}</ul>` : '') +
       `<button id="found-btn" ${can.ok ? '' : 'disabled'} title="${can.reason}">Found new town (8 pop, 80 food, 80 wood)</button>` +

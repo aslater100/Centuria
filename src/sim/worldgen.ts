@@ -274,6 +274,107 @@ export class RegionMap {
     return best ? this.siteAt(best.x, best.y) : null;
   }
 
+  /** Per-cell corridor cost for region routes: the terrain writes the
+   *  network's shape (plains cheap, mountains dear). River cells carry a
+   *  +2 bridge surcharge; open water takes no roads — ferries are a
+   *  later era's problem. */
+  cellCost(x: number, y: number): number {
+    const c = this.at(x, y);
+    switch (c.biome) {
+      case 'sea':
+      case 'lake': return Infinity;
+      case 'river': return 3; // 1 + 2: the crossing needs a bridge
+      case 'marsh': return 2.2;
+      case 'mountains': return 3.5;
+      case 'hills': return 1.8;
+      case 'forest': return 1.3;
+      default: return 1; // plains
+    }
+  }
+
+  /**
+   * A* corridor between two cells — pass-finding through valleys emerges
+   * from the cost field rather than from script. Returns the full cell
+   * path (both ends included) and its summed terrain cost, or null when
+   * open water separates the endpoints.
+   */
+  corridor(ax: number, ay: number, bx: number, by: number): { path: { x: number; y: number }[]; cost: number } | null {
+    const N = REGION_N;
+    const key = (x: number, y: number) => y * N + x;
+    const prev = new Int32Array(N * N).fill(-1);
+    // Float64 on purpose: mixed-precision distance comparisons killed the
+    // town-tier A* once already (see world.ts).
+    const dist = new Float64Array(N * N).fill(Infinity);
+    const startK = key(ax, ay);
+    const targetK = key(bx, by);
+    dist[startK] = 0;
+    prev[startK] = startK;
+    // admissible heuristic: manhattan × cheapest possible cell (plains = 1)
+    const hCost = (k: number) => Math.abs((k % N) - bx) + Math.abs(Math.floor(k / N) - by);
+    const heap: { k: number; d: number; f: number }[] = [{ k: startK, d: 0, f: hCost(startK) }];
+    const push = (item: { k: number; d: number; f: number }) => {
+      heap.push(item);
+      let i = heap.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (heap[p].f <= heap[i].f) break;
+        [heap[p], heap[i]] = [heap[i], heap[p]];
+        i = p;
+      }
+    };
+    const pop = (): { k: number; d: number; f: number } => {
+      const top = heap[0];
+      const last = heap.pop()!;
+      if (heap.length > 0) {
+        heap[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = i * 2 + 1;
+          const r = l + 1;
+          let m = i;
+          if (l < heap.length && heap[l].f < heap[m].f) m = l;
+          if (r < heap.length && heap[r].f < heap[m].f) m = r;
+          if (m === i) break;
+          [heap[m], heap[i]] = [heap[i], heap[m]];
+          i = m;
+        }
+      }
+      return top;
+    };
+    while (heap.length > 0) {
+      const cur = pop();
+      if (cur.d > dist[cur.k]) continue;
+      if (cur.k === targetK) {
+        const path: { x: number; y: number }[] = [];
+        let k = targetK;
+        while (k !== startK) {
+          path.push({ x: k % N, y: Math.floor(k / N) });
+          k = prev[k];
+        }
+        path.push({ x: ax, y: ay });
+        path.reverse();
+        return { path, cost: dist[targetK] };
+      }
+      const cx = cur.k % N;
+      const cy = Math.floor(cur.k / N);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+        const step = this.cellCost(nx, ny);
+        if (!isFinite(step)) continue;
+        const nd = cur.d + step;
+        const nk = key(nx, ny);
+        if (nd < dist[nk]) {
+          dist[nk] = nd;
+          prev[nk] = cur.k;
+          push({ k: nk, d: nd, f: nd + hCost(nk) });
+        }
+      }
+    }
+    return null;
+  }
+
   /** Travel cost between two cells: rough country and water crossings are slow. */
   travelDays(ax: number, ay: number, bx: number, by: number): number {
     const dist = Math.hypot(bx - ax, by - ay);

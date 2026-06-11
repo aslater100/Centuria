@@ -1,31 +1,30 @@
-# Session Handoff — 2026-06-11 (post-PR C)
-
-The PR A → B → B2 → C roadmap is complete. Delete this file once the
-release below has shipped.
+# Session Handoff — 2026-06-11 (post-M6b)
 
 ## Where things stand
 
 - **Merged:** PR A (0.1 stabilization), PR B (tile-paint zones), PR #10
   (Electron desktop app + release pipeline), PR #11 / B2 (economy
-  buildings).
-- **This PR (C):** gates, armed pawns, deer/wolves with real hunting,
-  palette hotkeys, in-game menu with save/load, WebAudio SFX. Version
-  bumped to 0.3.0.
+  buildings), PR #12 / C (gates, wildlife, armed pawns, menu, save/load,
+  SFX — v0.3.0).
+- **This PR (M6b):** region routes — A* corridors over the terrain,
+  trail/road Route objects with condition & maintenance, capacity-clamped
+  caravans, the charter's "all towns connected" gate made real, route
+  rendering + build UI. Version bumped to 0.4.0. Spec:
+  docs/specs/06-region-routes.md.
 
 ## Release (pending — needs the user)
 
 No `v*` tag has ever been pushed, so no desktop release exists yet. The
-session tooling cannot push tags (403) or dispatch workflows (403), so
-after merging this PR, the user should either:
+session tooling cannot push tags (403) or dispatch workflows (403). After
+merging this PR, either:
 
-- `git tag v0.3.0 main && git push origin v0.3.0`, or
+- `git tag v0.4.0 main && git push origin v0.4.0`, or
 - run the **Release** workflow on `main` via workflow_dispatch.
 
-That builds Windows/macOS/Linux installers and publishes a GitHub
-Release; installed copies then auto-update (Windows/Linux). `v0.2.0` was
-never tagged and is superseded — one `v0.3.0` release covers everything.
+One `v0.4.0` release supersedes everything earlier (0.2/0.3 were never
+tagged).
 
-## Ship loop from now on
+## Ship loop
 
 After each merged gameplay PR: bump `package.json` version in the PR,
 then push the matching `v*` tag after merge.
@@ -37,38 +36,35 @@ then push the matching `v*` tag after merge.
   local tests when diagnosing.
 - Goal: "fully fleshed out game based on everything planned."
 
-## What might come next (no committed roadmap)
+## The plan from here
 
-Ideas consistent with the GDD: combat polish (ranged weapons, a
-smithy), animal husbandry (tamed deer → pasture), fishing on river
-sites, region-tier save/load (the in-game menu disables saving after
-the flip), music/ambience beyond SFX, more event variety.
+**Next committed milestone: 6c** (docs/design/transportation.md §6) —
+rail era (tech gate ~1912, stations, art), the storm-damage/repair event
+loop, militia-response bonus over connected routes. After 6c the
+transportation design is complete and the field is open again; ideas
+consistent with the GDD: combat polish (ranged weapons, a smithy),
+animal husbandry, town-tier fishing jobs, region-tier save/load (the
+in-game menu disables saving after the flip), music/ambience, more event
+variety.
 
-## Architecture notes for the new systems (PR C)
+## Architecture notes for M6b
 
-- Gates: `Tile.gate`/`gatePlan`, shared `wallHp` (`TUNING.gateMaxHp`).
-  `World.passable(x, y, hostile)` / `findPath(..., hostile)` — raiders,
-  wolves and deer path with `hostile = true`; raiders bash the nearest
-  wall *or* gate via `nearestBarrier()`.
-- Animals: `sim.animals: Animal[]` (deer/wolf), updated in
-  `updateAnimals()`. Deer flee inside `deerFleeRadius` (3) which is
-  deliberately < `huntRange` (4.5) so hunters shoot without spooking;
-  the hunt task stalks `task.animalId`, kills, and the hunter carries
-  meals back. Empty woods fall back to the old abstract trip. Wolves
-  prey on close settlers (who counterattack) or deer, and leave after
-  `wolfStayDays` or when mauled.
-- Armed: `Settler.armed` — fighters spend `spearWoodCost` wood at raid
-  start; `settlerDamagePerHour()` adds `spearDamageBonus`.
-- Save/load: `sim.serialize()` / `Simulation.deserialize()` — seed
-  rebuilds RegionMap/Weather/worldgen; everything mutable (tiles,
-  agents, stocks, schedules, RNG word via `Rng.get/setState`) is
-  captured; `reserved` rebuilds from in-flight tasks. The menu stores
-  to localStorage `centuria-save`; loading sets a sessionStorage flag
-  and reloads (see `bootSim()` in main.ts). Determinism after load is
-  covered by a test.
-- Hotkeys live in `Hud.handleKey()`; menu in `Hud.openMenu()` (pauses
-  while open). SFX: `src/ui/audio.ts`, driven by palette clicks and a
-  log watcher in main.ts (`playLogSounds`).
-- Test note: deer spawn at founding shifts every seed's RNG sequence —
-  all 52 tests were re-run locally and pass, including the 60-day
-  survival test.
+- `RegionMap.cellCost` / `RegionMap.corridor` (worldgen.ts): A* over
+  region cells, Float64 distances (the 6a precision lesson). Water is
+  impassable; river cells cost 3 (bridge surcharge).
+- `RegionSim.routes: Route[]`; specs in `ROUTE_SPECS` (region.ts). Trails
+  auto-blaze in `updateExpeditions` via `blazeTrail`; roads via
+  `roadCost`/`buildRoad` (State + treasury gated). Corridors memoized in
+  `corridorBetween` — the panel prices roads every frame.
+- Effective capacity = capacity × condition/100, floor 15. Daily wear in
+  `weatherRoutes` (storms), monthly upkeep in `maintainRoutes` (called
+  from `monthlyEconomy`).
+- `caravans()` is now **public** (tests drive a caravan season directly)
+  and clamps to min remaining capacity along the BFS hop-path
+  (`routePath`); no-route fallback is 30%. `migrate()` checks
+  connectivity. `charterEligible()` requires `connectedToAll()`.
+- Region tier still has no save/load — `sim.serialize()` is town-tier
+  only; the in-game menu disables saving after the flip.
+- Test note: route logs consume RNG draws, so region RNG sequences
+  shifted vs. 0.3.0 — full suite (61 tests) re-run and green, including
+  the 60-day survival test.
