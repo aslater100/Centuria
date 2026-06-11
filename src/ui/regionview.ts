@@ -4,7 +4,7 @@
  * markers, routes, expedition wagons; DOM panel for the selected settlement.
  */
 import type { RegionSim, Settlement, GovLean } from '../sim/region';
-import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, RAIL_ERA_YEAR, TECH_TREE } from '../sim/region';
+import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, RAIL_ERA_YEAR, TECH_TREE, REGION_LAWS } from '../sim/region';
 
 export class RegionView {
   selectedId: number | null = null;
@@ -382,6 +382,7 @@ export class RegionView {
           ? 'RAILWORKS chartered — lay rail from any town panel'
           : `railworks expected ~${RAIL_ERA_YEAR}`}</p>` +
       `<p><button class="mini" id="research-toggle">${this.researchOpen ? '▲ research' : '▼ research'}</button> <span class="insp-skills">${researchLabel}</span></p>` +
+      this.politicsHtml() +
       this.freightHtml();
     this.statePanel.querySelector<HTMLInputElement>('#tax-slider')!.oninput = (e) => {
       r.taxRate = Number((e.target as HTMLInputElement).value) / 100;
@@ -401,6 +402,55 @@ export class RegionView {
     this.statePanel.querySelector<HTMLButtonElement>('#research-toggle')!.onclick = () => {
       this.researchOpen = !this.researchOpen;
     };
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.law-btn')) {
+      btn.onclick = () => r.enactLaw(btn.dataset.id!);
+    }
+  }
+
+  /** Politics section: political capital, elections, faction bars, law cards. */
+  private politicsHtml(): string {
+    const r = this.region;
+    if (!r.has('universal_suffrage')) {
+      return `<p class="insp-skills">POLITICS — universal suffrage not yet achieved</p>`;
+    }
+    const electionLine = r.nextElectionDay < 0
+      ? `<p class="insp-skills">first election: ~4 years after suffrage is enacted</p>`
+      : `<p class="insp-skills">next election in <b>${Math.max(0, r.nextElectionDay - r.day)}</b> days` +
+        (r.lastElectionYear > 0 ? ` · last: ${r.lastElectionYear}` : '') + `</p>`;
+
+    const factionBars = r.factions.length > 0
+      ? r.factions.map((f) => {
+          const suppPct = Math.round(f.support);
+          const pwrPct = Math.round(f.power);
+          const col = f.support >= 60 ? '#4e9' : f.support >= 40 ? '#ca4' : '#e55';
+          return `<div class="bar-row" title="${f.name}: power ${pwrPct}%, support ${suppPct}% — ${f.demand}">` +
+            `<span style="width:70px;display:inline-block">${f.name}</span>` +
+            `<div class="bar" style="flex:1"><div class="bar-fill" style="width:${suppPct}%;background:${col}"></div></div>` +
+            `<span>${suppPct}%</span></div>`;
+        }).join('')
+      : `<p class="insp-skills">factions form next month</p>`;
+
+    const laws = r.availableLaws();
+    const lawButtons = laws.length > 0
+      ? `<p class="insp-skills">LAWS (costs political capital)</p>` +
+        laws.map((l) =>
+          `<p><button class="mini law-btn" data-id="${l.id}" ${l.canAfford ? '' : 'disabled'} ` +
+          `title="${l.desc}">${l.name} (${l.cost} PC)</button></p>`,
+        ).join('')
+      : r.passedLaws.length > 0
+        ? `<p class="insp-skills">all available laws enacted</p>`
+        : '';
+    const enacted = r.passedLaws.length > 0
+      ? `<p class="insp-skills">enacted: ${r.passedLaws.map((id) => REGION_LAWS.find((l) => l.id === id)?.name ?? id).join(', ')}</p>`
+      : '';
+
+    return `<p class="insp-skills">POLITICS</p>` +
+      `<p>political capital: <b>${r.politicalCapital} PC</b></p>` +
+      electionLine +
+      `<p class="insp-skills">FACTIONS (support bar)</p>` +
+      factionBars +
+      lawButtons +
+      enacted;
   }
 
   /** Freight overlay (M6b): what the caravans actually moved, per route. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Simulation } from '../src/sim/sim';
-import { RegionSim, REGION_MINUTES_PER_TICK } from '../src/sim/region';
+import { RegionSim, REGION_MINUTES_PER_TICK, REGION_LAWS } from '../src/sim/region';
 import { MINUTES_PER_DAY } from '../src/sim/defs';
 
 const ticksPerDay = MINUTES_PER_DAY / REGION_MINUTES_PER_TICK;
@@ -280,5 +280,159 @@ describe('Region save/load', () => {
     expect(r2.treasury).toBe(r.treasury);
     expect(r2.routeBetween(a.id, b.id)!.kind).toBe('road');
     expect(r2.charterProgress).toBe(r.charterProgress);
+  });
+});
+
+describe('Elections & faction politics (v0.14.0)', () => {
+  function stateReady(): RegionSim {
+    const sim = new Simulation(42);
+    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    sim.stock.wood = 200;
+    sim.stock.meal = 200;
+    const r = RegionSim.fromTown(sim, 8, 80, 80);
+    runDays(r, 5); // town #2 arrives
+    r.stateProclaimed = true;
+    r.stateName = 'Testonia';
+    r.govLean = 'council';
+    r.treasury = 200;
+    return r;
+  }
+
+  it('elections are not scheduled until universal_suffrage is researched', () => {
+    const r = stateReady();
+    runDays(r, 10);
+    expect(r.nextElectionDay).toBe(-1);
+    expect(r.politicalCapital).toBe(0);
+  });
+
+  it('elections schedule once suffrage is researched and state exists', () => {
+    const r = stateReady();
+    r.researched.push('universal_suffrage');
+    runDays(r, 1);
+    expect(r.nextElectionDay).toBeGreaterThan(0);
+  });
+
+  it('election awards political capital proportional to satisfaction', () => {
+    const r = stateReady();
+    r.researched.push('universal_suffrage');
+    // Set all towns to 80% satisfaction
+    for (const t of r.settlements) t.satisfaction = 80;
+    // Force election today
+    r.nextElectionDay = r.day;
+    runDays(r, 1);
+    expect(r.politicalCapital).toBeGreaterThan(0);
+    expect(r.log.some((l) => l.text.includes('ELECTION'))).toBe(true);
+    expect(r.lastElectionYear).toBe(r.year);
+  });
+
+  it('low-approval election logs LOST and awards less capital', () => {
+    const r = stateReady();
+    r.researched.push('universal_suffrage');
+    for (const t of r.settlements) t.satisfaction = 15;
+    r.nextElectionDay = r.day;
+    runDays(r, 1);
+    const entry = r.log.find((l) => l.text.includes('ELECTION'));
+    expect(entry).toBeDefined();
+    expect(entry!.text).toContain('LOST');
+    expect(r.politicalCapital).toBeLessThan(40); // low mandate
+  });
+
+  it('factions are computed after state is proclaimed', () => {
+    const r = stateReady();
+    expect(r.factions).toHaveLength(0); // not yet computed
+    runDays(r, 31); // triggers a monthly update
+    expect(r.factions).toHaveLength(3);
+    const ids = r.factions.map((f) => f.id);
+    expect(ids).toContain('workers');
+    expect(ids).toContain('landowners');
+    expect(ids).toContain('merchants');
+  });
+
+  it('worker support rises with higher services', () => {
+    const r = stateReady();
+    r.servicesLevel = 0;
+    runDays(r, 31);
+    const lowSupport = r.factions.find((f) => f.id === 'workers')!.support;
+    r.servicesLevel = 2;
+    runDays(r, 31);
+    const highSupport = r.factions.find((f) => f.id === 'workers')!.support;
+    expect(highSupport).toBeGreaterThan(lowSupport);
+  });
+
+  it('enactLaw fails with insufficient PC', () => {
+    const r = stateReady();
+    r.politicalCapital = 0;
+    const ok = r.enactLaw('workers_charter');
+    expect(ok).toBe(false);
+    expect(r.passedLaws).not.toContain('workers_charter');
+  });
+
+  it('enactLaw succeeds and spends PC', () => {
+    const r = stateReady();
+    r.politicalCapital = 50;
+    const law = REGION_LAWS.find((l) => l.id === 'workers_charter')!;
+    const ok = r.enactLaw('workers_charter');
+    expect(ok).toBe(true);
+    expect(r.passedLaws).toContain('workers_charter');
+    expect(r.politicalCapital).toBe(50 - law.cost);
+    expect(r.servicesLevel).toBeGreaterThan(0);
+  });
+
+  it('Workers Charter raises services and shows in enacted list', () => {
+    const r = stateReady();
+    r.servicesLevel = 0;
+    r.politicalCapital = 100;
+    r.enactLaw('workers_charter');
+    expect(r.servicesLevel).toBe(1);
+    expect(r.passedLaws.includes('workers_charter')).toBe(true);
+  });
+
+  it("Merchants' Charter reduces the trade levy", () => {
+    const r = stateReady();
+    r.politicalCapital = 100;
+    expect(r.tradeLevyRate).toBe(0.05);
+    r.enactLaw('merchants_charter');
+    expect(r.tradeLevyRate).toBe(0.03);
+  });
+
+  it('estate_tax requires income_tax research', () => {
+    const r = stateReady();
+    r.politicalCapital = 100;
+    expect(r.enactLaw('estate_tax')).toBe(false); // prereq not met
+    r.researched.push('income_tax');
+    expect(r.enactLaw('estate_tax')).toBe(true);
+    expect(r.estateTaxActive).toBe(true);
+  });
+
+  it('estate tax adds monthly income', () => {
+    const r = stateReady();
+    r.politicalCapital = 100;
+    r.researched.push('income_tax');
+    r.enactLaw('estate_tax');
+    r.treasury = 0;
+    runDays(r, 30); // one monthly economy cycle
+    expect(r.treasury).toBeGreaterThan(0);
+  });
+
+  it('politics fields survive save/load round-trip', () => {
+    const sim = new Simulation(42);
+    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    sim.stock.wood = 200;
+    sim.stock.meal = 200;
+    const r = RegionSim.fromTown(sim, 8, 80, 80);
+    r.stateProclaimed = true;
+    r.politicalCapital = 45;
+    r.nextElectionDay = 300;
+    r.lastElectionYear = 1924;
+    r.passedLaws = ['conscription_act'];
+    r.tradeLevyRate = 0.03;
+    r.estateTaxActive = true;
+    const r2 = RegionSim.deserialize(r.serialize(), sim);
+    expect(r2.politicalCapital).toBe(45);
+    expect(r2.nextElectionDay).toBe(300);
+    expect(r2.lastElectionYear).toBe(1924);
+    expect(r2.passedLaws).toContain('conscription_act');
+    expect(r2.tradeLevyRate).toBe(0.03);
+    expect(r2.estateTaxActive).toBe(true);
   });
 });
