@@ -29,22 +29,31 @@ minimapCtx.imageSmoothingEnabled = false;
 const SAVE_KEY = 'centuria-save';
 
 // Booting after "Load Game": the menu sets a one-shot flag and reloads, and
-// we resume from the snapshot instead of seeding a fresh colony.
-function bootSim(): Simulation {
+// we resume from the snapshot instead of seeding a fresh colony. Saves are
+// either a bare town snapshot (v1) or a combined town+region one (v2).
+function bootSim(): { sim: Simulation; region: RegionSim | null } {
   try {
     const pending = sessionStorage.getItem('centuria-load-on-boot');
     if (pending) {
       sessionStorage.removeItem('centuria-load-on-boot');
       const data = localStorage.getItem(SAVE_KEY);
-      if (data) return Simulation.deserialize(data);
+      if (data) {
+        const d = JSON.parse(data);
+        if (d.v === 2 && d.mode === 'region') {
+          const town = Simulation.deserialize(d.town);
+          return { sim: town, region: RegionSim.deserialize(d.region, town) };
+        }
+        return { sim: Simulation.deserialize(data), region: null };
+      }
     }
   } catch (err) {
     console.error('load failed, starting fresh:', err);
   }
-  return new Simulation(Date.now() % 100000);
+  return { sim: new Simulation(Date.now() % 100000), region: null };
 }
 
-const sim = bootSim();
+const boot = bootSim();
+const sim = boot.sim;
 // Debug/automation hook (used by headless smoke tests; harmless in play)
 (window as unknown as { sim: Simulation }).sim = sim;
 const cam: Camera = {
@@ -118,16 +127,31 @@ let regionView: RegionView | null = null;
 // A lost colony offers a clean slate: reload re-seeds from the clock.
 hud.onRestart = () => location.reload();
 
-hud.onFoundTown = () => {
-  region = RegionSim.fromTown(sim, 8, 80, 80);
-  (window as unknown as { region: RegionSim }).region = region;
-  regionView = new RegionView(canvas, region, root);
+/** Shared by the flip and the load path: hand the screen to the region. */
+function enterRegionMode(r: RegionSim): void {
+  region = r;
+  (window as unknown as { region: RegionSim }).region = r;
+  regionView = new RegionView(canvas, r, root);
   mode = 'region';
   dioramaOpen = false;
   hud.closeMenu();
-  hud.onSave = null; // the region sim has no snapshots yet — town-tier only
+  // Region saves bundle the town snapshot too — the diorama keeps it alive.
+  hud.onSave = () => {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+        v: 2, mode: 'region', town: sim.serialize(), region: r.serialize(),
+      }));
+      return true;
+    } catch (err) {
+      console.error('save failed:', err);
+      return false;
+    }
+  };
   hud.setRegionMode(true);
-};
+}
+
+hud.onFoundTown = () => enterRegionMode(RegionSim.fromTown(sim, 8, 80, 80));
+if (boot.region) enterRegionMode(boot.region);
 
 // ---- input ----
 const keys = new Set<string>();
@@ -144,6 +168,10 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (hud.menuOpen) {
       hud.closeMenu();
+      return;
+    }
+    if (mode === 'region') {
+      if (!regionView?.ceremonyOpen) hud.openMenu();
       return;
     }
     // First escape clears whatever tool/selection is live; a bare escape

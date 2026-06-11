@@ -132,3 +132,66 @@ describe('RegionSim (aggregate model)', () => {
     expect(a.settlements.map((s) => s.name)).toEqual(b.settlements.map((s) => s.name));
   });
 });
+
+describe('Region save/load', () => {
+  function flippedPair(seed: number): { sim: Simulation; r: RegionSim } {
+    const sim = new Simulation(seed);
+    grow(sim);
+    const r = RegionSim.fromTown(sim, 8, 80, 80);
+    runDays(r, 200); // a few years of history: towns, trails, events
+    return { sim, r };
+  }
+
+  /** save + load: deserialize atop a restored town sim, as the menu does */
+  function roundTrip(sim: Simulation, r: RegionSim): RegionSim {
+    const town = Simulation.deserialize(sim.serialize());
+    return RegionSim.deserialize(r.serialize(), town);
+  }
+
+  it('round-trips the region exactly', () => {
+    const { sim, r } = flippedPair(42);
+    const r2 = roundTrip(sim, r);
+    expect(r2.day).toBe(r.day);
+    expect(r2.totalPop()).toBe(r.totalPop());
+    expect(r2.settlements.map((s) => s.name)).toEqual(r.settlements.map((s) => s.name));
+    expect(r2.settlements.map((s) => s.food)).toEqual(r.settlements.map((s) => s.food));
+    expect(r2.notables.map((n) => [n.name, n.role, n.alive])).toEqual(
+      r.notables.map((n) => [n.name, n.role, n.alive]));
+    expect(r2.routes.map((rt) => [rt.a, rt.b, rt.kind, rt.condition])).toEqual(
+      r.routes.map((rt) => [rt.a, rt.b, rt.kind, rt.condition]));
+  });
+
+  it('a loaded region continues deterministically — same history unfolds', () => {
+    const { sim, r } = flippedPair(42);
+    const r2 = roundTrip(sim, r);
+    runDays(r, 150);
+    runDays(r2, 150);
+    expect(r2.totalPop()).toBe(r.totalPop());
+    expect(r2.settlements.map((s) => s.food)).toEqual(r.settlements.map((s) => s.food));
+    expect(r2.log[r2.log.length - 1]).toEqual(r.log[r.log.length - 1]);
+  });
+
+  it('preserves the State: name, lean, treasury, and built routes', () => {
+    const { sim, r } = flippedPair(42);
+    for (let year = 0; year < 18 && !r.ceremonyPending; year++) {
+      runDays(r, 60);
+      for (const t of r.settlements) {
+        if (r.settlements.length + r.expeditions.length < 4 && r.canFoundTown(t.id).ok) {
+          r.foundTown(t.id);
+          break;
+        }
+      }
+    }
+    r.completeIncorporation('Testonia', 'mayor');
+    r.treasury = 5000;
+    const [a, b] = r.settlements;
+    expect(r.buildRoad(a.id, b.id)).toBe(true);
+    const r2 = roundTrip(sim, r);
+    expect(r2.stateProclaimed).toBe(true);
+    expect(r2.stateName).toBe('Testonia');
+    expect(r2.govLean).toBe('mayor');
+    expect(r2.treasury).toBe(r.treasury);
+    expect(r2.routeBetween(a.id, b.id)!.kind).toBe('road');
+    expect(r2.charterProgress).toBe(r.charterProgress);
+  });
+});

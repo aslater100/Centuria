@@ -998,6 +998,73 @@ export class RegionSim {
     for (let i = 0; i < t.cohorts.bands.length; i++) t.cohorts.bands[i] *= 1 - frac;
   }
 
+  // ---- save & load (region tier) ----
+  /**
+   * Snapshot the region as JSON. The map and weather are seed-derived and
+   * shared with the town sim (one truth), so they rebuild from the town
+   * snapshot; everything mutable here — settlements, Notables, routes,
+   * the State's books, the RNG word — is captured verbatim.
+   */
+  serialize(): string {
+    return JSON.stringify({
+      v: 1,
+      rng: this.rng.getState(),
+      minute: this.minute,
+      settlements: this.settlements,
+      notables: this.notables,
+      expeditions: this.expeditions,
+      routes: this.routes,
+      log: this.log,
+      stateProclaimed: this.stateProclaimed,
+      ceremonyPending: this.ceremonyPending,
+      charterProgress: this.charterProgress,
+      stateName: this.stateName,
+      govLean: this.govLean,
+      treasury: this.treasury,
+      taxRate: this.taxRate,
+      servicesLevel: this.servicesLevel,
+      militiaLevel: this.militiaLevel,
+      gdpLastMonth: this.gdpLastMonth,
+      gameOver: this.gameOver,
+      droughtAnnounced: this.droughtAnnounced,
+      railAnnounced: this.railAnnounced,
+      nextId: this.nextId,
+      nextEventDay: this.nextEventDay,
+      townNamePool: this.townNamePool,
+    });
+  }
+
+  /** Rebuild from a snapshot atop a restored town sim — the region keeps
+   *  sharing its rng, map, and weather (the corridor cache refills lazily). */
+  static deserialize(json: string, sim: Simulation): RegionSim {
+    const d = JSON.parse(json);
+    const r = new RegionSim(sim.rng, d.minute, sim.regionMap, sim.weather);
+    r.settlements = d.settlements;
+    r.notables = d.notables;
+    r.expeditions = d.expeditions;
+    r.routes = d.routes;
+    r.log = d.log;
+    r.stateProclaimed = d.stateProclaimed;
+    r.ceremonyPending = d.ceremonyPending;
+    r.charterProgress = d.charterProgress;
+    r.stateName = d.stateName;
+    r.govLean = d.govLean;
+    r.treasury = d.treasury;
+    r.taxRate = d.taxRate;
+    r.servicesLevel = d.servicesLevel;
+    r.militiaLevel = d.militiaLevel;
+    r.gdpLastMonth = d.gdpLastMonth;
+    r.gameOver = d.gameOver;
+    r.droughtAnnounced = d.droughtAnnounced;
+    r.railAnnounced = d.railAnnounced;
+    r.nextId = d.nextId;
+    r.nextEventDay = d.nextEventDay;
+    r.townNamePool = d.townNamePool;
+    // last: the constructor consumed a draw scheduling its event day
+    r.rng.setState(d.rng);
+    return r;
+  }
+
   addLog(text: string, kind: LogEntry['kind']): void {
     this.log.push({ day: this.day, text, kind });
     if (this.log.length > 200) this.log.shift();
