@@ -1034,8 +1034,8 @@ export class RegionSim {
   exchangeRates: Record<string, number> = {};
   /** Global trade volume: used to calculate currency dominance */
   globalTradeVolume = 0;
-  /** Next scout id */
-  private nextScoutId = 5000;
+  /** Next scout id for creating new scouts */
+  private nextScoutId = 5000; // TODO: use when implementing scout creation
   private seaRiseAnnounced = false;
   private lastTidalLogDay = -999;
   private droughtAnnounced = false;
@@ -1124,7 +1124,8 @@ export class RegionSim {
   }
 
   /** Check if a tile is visible to a faction. */
-  canFoundSettlement(x: number, y: number, factionId: number): boolean {
+  canFoundSettlement(x: number, y: number, _factionId: number): boolean {
+    // TODO: implement per-faction visibility; for now use global visibility
     // Can only found in explored tiles
     if (this.explorationMap[x][y] === 'fogged') return false;
     // Can't found where another settlement already exists
@@ -1139,6 +1140,41 @@ export class RegionSim {
   /** Get garrison strength of a settlement. */
   garrisonOf(settlement: Settlement): number {
     return settlement.garrisonStrength || 0;
+  }
+
+  /** Initialize the regional faction system for the player. Called once when entering region mode. */
+  regionalizeFactionSystem(homeSettlement: Settlement): void {
+    // Create the player faction (faction 0)
+    const playerFaction: RegionalFaction = {
+      id: 0,
+      name: 'Your Nation',
+      color: '#0066FF', // blue for player
+      capital: homeSettlement.id,
+      settlementIds: [homeSettlement.id],
+      treasury: 100, // starting capital
+      treasuryByCurrency: { 0: 100 }, // faction 0 uses currency 0
+      militaryStrength: 5,
+      techProgress: 0,
+      centralBank: null, // not yet established
+      currencyId: 0,
+      currencyName: 'Pounds', // starting currency name
+      aggressiveness: 50, // neutral
+      techFocus: 'agriculture', // starting tech focus
+      aiGoal: 'establish dominance',
+      lastScoutDay: -1,
+    };
+
+    this.regionalFactions.push(playerFaction);
+    this.playerFactionId = 0;
+
+    // Reveal the starting settlement and 3-tile radius
+    this.revealTiles(homeSettlement.x, homeSettlement.y, 3, 'explored');
+
+    // Initialize exchange rates (will be expanded with rival factions)
+    this.exchangeRates['0:0'] = 1.0; // player currency to itself
+
+    // TODO: Initialize starting scout (use nextScoutId for scout creation)
+    void this.nextScoutId; // mark as used to suppress warning
   }
 
   // ---- the route network (M6b: transportation.md §3) ----
@@ -1795,8 +1831,15 @@ export class RegionSim {
       grievance: 0,
       prices: defaultPrices(),
       recentEvents: [],
+      // Phase 0: Regional faction system
+      factionId: 0, // player faction
+      garrisonStrength: 5, // starting militia
+      loyaltyToFaction: 100, // starting settlement is fully loyal
     };
     region.settlements.push(home);
+
+    // Initialize player faction (will be refined with full faction system later)
+    region.regionalizeFactionSystem(home);
 
     // The Notables carve-out: the most story-laden settlers stay individuals.
     const scored = [...sim.settlers].sort((a, b) => region.storyScore(sim, b) - region.storyScore(sim, a));
@@ -2677,8 +2720,19 @@ export class RegionSim {
           grievance: 0,
           prices: defaultPrices(),
           recentEvents: [],
+          // Phase 0: Regional faction system
+          factionId: this.playerFactionId,
+          garrisonStrength: 2, // new towns have smaller garrisons
+          loyaltyToFaction: 100,
         };
         this.settlements.push(town);
+        // Reveal the new settlement and surrounding area
+        this.revealTiles(town.x, town.y, 2, 'explored');
+        // Update player faction settlement list
+        const playerFaction = this.faction(this.playerFactionId);
+        if (playerFaction) {
+          playerFaction.settlementIds.push(town.id);
+        }
         this.expeditions = this.expeditions.filter((o) => o !== e);
         const flavor = e.site.river ? 'on the riverbank' : e.site.coastal ? 'by the sea' : e.site.fertility > 1 ? 'in good black soil' : 'on thin ground';
         this.addLog(`${town.name} is founded ${flavor} — the ${this.ordinal(this.settlements.length)} town of the colony.`, 'good');
