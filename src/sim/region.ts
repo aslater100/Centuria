@@ -60,6 +60,13 @@ export interface Settlement {
   seaWall?: boolean;
   /** Per-town growth/event log: last 12 entries, newest first. */
   recentEvents: { day: number; text: string; kind: 'good' | 'bad' | 'info' }[];
+  // ---- Phase 0: Regional Gameplay Expansion ----
+  /** Which faction controls this settlement (faction id) */
+  factionId: number;
+  /** Military garrison strength (abstract: militia count) */
+  garrisonStrength: number;
+  /** Loyalty to controlling faction (0–100); affects labor productivity and revolt risk */
+  loyaltyToFaction: number;
 }
 
 /** Local markets (GDD §5.2, first slice): each town prices the two goods
@@ -477,6 +484,56 @@ export const MAX_POLICY_RATE = 0.15;
 export const CREDIT_RATING_SPREADS: Record<CreditRating, number> = {
   AAA: 0, AA: 0.005, A: 0.01, BBB: 0.02, BB: 0.04, B: 0.07, CCC: 0.12, D: 0.25,
 };
+
+// ---- Fog of War & Regional Exploration (Phase 0: Region Gameplay Expansion) ----
+
+/** Tile visibility state: 'fogged' = unknown, 'explored' = discovered, 'scouted' = visible this turn. */
+export type TileVisibility = 'fogged' | 'explored' | 'scouted';
+
+/** A scout unit: mobile unit owned by a faction that explores the map. */
+export interface Scout {
+  id: number;
+  factionId: number; // which faction owns this scout
+  x: number; // region coords 0..100
+  y: number;
+  health: number; // 0–100; dies when reaches 0 (from enemy scouts, etc.)
+  maintenanceCost: number; // gold per tick to keep alive
+  createdDay: number;
+}
+
+/** Central Bank: tracks currency systems, reserves, and monetary policy. */
+export interface CentralBank {
+  factionId: number;
+  foundedDay: number;
+  /** Reserves of each currency (as forex reserves): { currencyId: amount } */
+  reserves: Record<number, number>;
+  /** Annual interest rate policy: 0.01 (1%) to 0.15 (15%); neutral at 0.05 (5%) */
+  interestRate: number;
+  /** Annual inflation rate; increases with money printing, decreases with high interest rates */
+  inflationRate: number;
+}
+
+/** Regional Faction: competes with the player for control of settlements and resources. */
+export interface RegionalFaction {
+  id: number;
+  name: string;
+  color: string; // hex color for map display (e.g., '#FF0000' for red)
+  capital: number; // settlement id
+  settlementIds: number[]; // settlements controlled by this faction
+  treasury: number; // gold reserves
+  treasuryByCurrency: Record<number, number>; // multi-currency reserves
+  militaryStrength: number; // abstract: sum of garrison strengths
+  techProgress: number; // how far along the tech tree
+  centralBank: CentralBank | null; // null until established
+  currencyId: number; // unique id for this faction's currency
+  currencyName: string; // e.g., "Dollars", "Francs"
+  /** AI personality: -100 (passive) to +100 (aggressive) */
+  aggressiveness: number;
+  /** AI tech focus: what the AI prioritizes researching */
+  techFocus: string;
+  aiGoal: string; // current strategic goal (for logging/UI)
+  lastScoutDay: number; // day the AI last sent out scouts
+}
 
 // Rivals run richer regimes than the player's four (GDD §6.3: "the 1930s
 // should produce at least one neighboring autocracy organically"). Blocs are
@@ -964,6 +1021,21 @@ export class RegionSim {
   exchangeRate = 1.0;
   /** Prevents the 1929-analog crash from firing twice. */
   private crashFired = false;
+  // ---- Phase 0: Regional Gameplay Expansion ----
+  /** 100×100 grid tracking tile visibility: fogged/explored/scouted */
+  explorationMap: TileVisibility[][] = [];
+  /** Scout units exploring the map */
+  scouts: Scout[] = [];
+  /** Regional factions competing for dominance (includes player faction) */
+  regionalFactions: RegionalFaction[] = [];
+  /** Player faction id (always 0 or first in list) */
+  playerFactionId = 0;
+  /** Currency exchange rates: { from:factionId:to:factionId => rate } */
+  exchangeRates: Record<string, number> = {};
+  /** Global trade volume: used to calculate currency dominance */
+  globalTradeVolume = 0;
+  /** Next scout id */
+  private nextScoutId = 5000;
   private seaRiseAnnounced = false;
   private lastTidalLogDay = -999;
   private droughtAnnounced = false;
@@ -981,6 +1053,10 @@ export class RegionSim {
     this.weather = weather;
     this.nextEventDay = this.day + 4 + rng.int(4);
     this.townNamePool = [...TOWN_NAMES];
+    // Initialize fog of war: 100×100 grid of fogged tiles
+    this.explorationMap = Array.from({ length: 100 }, () =>
+      Array.from({ length: 100 }, () => 'fogged' as TileVisibility)
+    );
   }
 
   // ---- time (mirrors town sim) ----
@@ -1026,6 +1102,43 @@ export class RegionSim {
 
   private roleMult(t: Settlement, role: NotableRole): number {
     return this.notablesAt(t.id).some((n) => n.role === role) ? 1 : 0;
+  }
+
+  // ---- Phase 0: Exploration & Fog of War ----
+
+  /** Reveal tiles in a circular radius around a point. */
+  revealTiles(centerX: number, centerY: number, radius: number, type: TileVisibility = 'explored'): void {
+    const radiusSq = radius * radius;
+    for (let x = 0; x < 100; x++) {
+      for (let y = 0; y < 100; y++) {
+        const dx = x - centerX;
+        const dy = y - centerY;
+        if (dx * dx + dy * dy <= radiusSq) {
+          // Only upgrade visibility, never downgrade
+          if (type === 'scouted' || this.explorationMap[x][y] === 'fogged') {
+            this.explorationMap[x][y] = type;
+          }
+        }
+      }
+    }
+  }
+
+  /** Check if a tile is visible to a faction. */
+  canFoundSettlement(x: number, y: number, factionId: number): boolean {
+    // Can only found in explored tiles
+    if (this.explorationMap[x][y] === 'fogged') return false;
+    // Can't found where another settlement already exists
+    return !this.settlements.some((s) => Math.abs(s.x - x) < 4 && Math.abs(s.y - y) < 4);
+  }
+
+  /** Get the faction object by id. */
+  faction(id: number): RegionalFaction | undefined {
+    return this.regionalFactions.find((f) => f.id === id);
+  }
+
+  /** Get garrison strength of a settlement. */
+  garrisonOf(settlement: Settlement): number {
+    return settlement.garrisonStrength || 0;
   }
 
   // ---- the route network (M6b: transportation.md §3) ----
