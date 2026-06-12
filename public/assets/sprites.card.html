@@ -1,4 +1,4 @@
-<!-- @dsCard group="Assets" viewport="1200x1400" name="Sprite Gallery & Animation" -->
+<!-- @dsCard group="Assets" viewport="1200x1600" name="Sprite Gallery & Animation" subtitle="Procedural pixel-art sprites v2" -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -14,11 +14,7 @@
       font-family: 'Courier New', monospace;
       overflow-y: auto;
     }
-    h1 {
-      font-size: 20px;
-      color: #e8d27a;
-      margin-bottom: 20px;
-    }
+    h1 { font-size: 20px; color: #e8d27a; margin-bottom: 8px; }
     h2 {
       font-size: 13px;
       color: #c2a14d;
@@ -28,98 +24,76 @@
     }
     .gallery {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
+      grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+      gap: 12px;
+      margin-bottom: 8px;
     }
     .sprite-item {
       background: rgba(42, 38, 32, 0.3);
       border: 1px solid #6e4a2f;
-      padding: 12px;
-      text-align: center;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
     }
-    .sprite-canvas {
-      width: 100%;
-      height: auto;
-      background: rgba(0, 0, 0, 0.2);
-      border: 1px dashed #4d3320;
-      margin-bottom: 8px;
+    .sprite-frame {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px;
+      background: repeating-conic-gradient(#1b212c 0% 25%, #151a24 0% 50%) 0 0 / 16px 16px;
+      border: 1px solid #3a3024;
+    }
+    .sprite-frame canvas {
       image-rendering: pixelated;
       image-rendering: crisp-edges;
+      display: block;
     }
     .sprite-label {
       font-size: 10px;
       color: #998c6e;
+      text-align: center;
       word-break: break-word;
     }
-    .animation-section {
+    .anim-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px;
+    }
+    .anim-item {
       background: rgba(42, 38, 32, 0.3);
       border: 1px solid #6e4a2f;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-    .animation-display {
+      padding: 10px;
       display: flex;
-      gap: 12px;
+      flex-direction: column;
       align-items: center;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-    .animation-canvas {
-      width: 64px;
-      height: 64px;
-      background: rgba(0, 0, 0, 0.2);
-      border: 1px dashed #4d3320;
-      image-rendering: pixelated;
-      image-rendering: crisp-edges;
-    }
-    .animation-info {
-      font-size: 11px;
-      color: #9ab0c4;
-      flex: 1;
-      min-width: 200px;
-    }
-    .control-panel {
-      display: flex;
       gap: 8px;
-      margin-top: 12px;
     }
-    button {
-      padding: 4px 8px;
-      background: #6e4a2f;
-      color: #dfe6ee;
-      border: 1px solid #8b6f47;
-      cursor: pointer;
-      font-family: 'Courier New', monospace;
-      font-size: 10px;
-    }
-    button:hover {
-      background: #8b6f47;
-    }
-    .stats {
-      font-size: 10px;
-      color: #998c6e;
-      margin-top: 8px;
-    }
+    .anim-meta { font-size: 9px; color: #6e6452; }
+    .intro { color: #9ab0c4; font-size: 11px; margin-bottom: 12px; max-width: 760px; line-height: 1.5; }
   </style>
 </head>
 <body>
-  <h1>🎨 Sprite Library & Animation</h1>
-  <p style="color: #9ab0c4; font-size: 11px; margin-bottom: 20px;">
-    Procedurally-generated sprites with animations. RimWorld-inspired gritty realism.
-    Canvas-based generation allows infinite variations via seed & parameters.
+  <h1>⚒ SPRITE LIBRARY</h1>
+  <p class="intro">
+    Procedurally-generated pixel art: color-ramp shading, auto-outlines, ground shadows,
+    transparent backgrounds, seeded variation. Shown at 2× on checkerboard.
   </p>
 
-  <h2>🌱 Terrain Tiles</h2>
+  <h2>🟩 Terrain Tiles</h2>
   <div class="gallery" id="terrain-gallery"></div>
 
   <h2>🌾 Plants & Vegetation</h2>
   <div class="gallery" id="plants-gallery"></div>
 
-  <h2>🐄 Animals</h2>
-  <div class="gallery" id="animals-gallery"></div>
+  <h2>🐄 Livestock</h2>
+  <div class="gallery" id="livestock-gallery"></div>
 
-  <h2>👤 NPCs & Settlers</h2>
+  <h2>🦌 Wild Animals</h2>
+  <div class="gallery" id="wild-gallery"></div>
+
+  <h2>👤 Settlers</h2>
   <div class="gallery" id="npcs-gallery"></div>
 
   <h2>🏠 Structures</h2>
@@ -128,186 +102,172 @@
   <h2>📦 Items & Resources</h2>
   <div class="gallery" id="items-gallery"></div>
 
-  <h2>⚡ Animations</h2>
-  <div id="animations-container"></div>
+  <h2>🌧 Weather Overlays</h2>
+  <div class="gallery" id="weather-gallery"></div>
+
+  <h2>⚡ Animations (live)</h2>
+  <div class="anim-grid" id="animations-container"></div>
 
   <script src="./sprite-generator.js"></script>
   <script src="./sprite-animator.js"></script>
   <script>
     const gen = new SpriteGenerator();
+    const animator = new SpriteAnimator(gen);
+    const SCALE = 2;
 
-    // Terrain
-    const terrains = [
-      { name: 'Grass 1', fn: () => gen.grassTile(0) },
-      { name: 'Grass 2', fn: () => gen.grassTile(1) },
-      { name: 'Grass 3', fn: () => gen.grassTile(2) },
-      { name: 'Soil 1', fn: () => gen.soilTile(0) },
-      { name: 'Soil 2', fn: () => gen.soilTile(1) },
-      { name: 'Water 1', fn: () => gen.waterTile(0) },
-      { name: 'Water 2', fn: () => gen.waterTile(2) },
-      { name: 'Stone 1', fn: () => gen.stoneTile(0) },
-      { name: 'Stone 2', fn: () => gen.stoneTile(1) },
-    ];
-
-    // Plants
-    const plants = [
-      { name: 'Grain Stage 1', fn: () => gen.grainPlant(1) },
-      { name: 'Grain Stage 2', fn: () => gen.grainPlant(2) },
-      { name: 'Grain Stage 3', fn: () => gen.grainPlant(3) },
-      { name: 'Tree Young', fn: () => gen.tree(1, 0) },
-      { name: 'Tree Growth', fn: () => gen.tree(2, 1) },
-      { name: 'Tree Mature', fn: () => gen.tree(3, 0) },
-    ];
-
-    // Animals
-    const animals = [
-      { name: 'Cow', fn: () => gen.livestock('cow', 0) },
-      { name: 'Pig', fn: () => gen.livestock('pig', 1) },
-      { name: 'Sheep', fn: () => gen.livestock('sheep', 2) },
-      { name: 'Deer', fn: () => gen.wildAnimal('deer', 0) },
-      { name: 'Wolf', fn: () => gen.wildAnimal('wolf', 1) },
-      { name: 'Boar', fn: () => gen.wildAnimal('boar', 0) },
-    ];
-
-    // NPCs
-    const npcs = [
-      { name: 'Male 1', fn: () => gen.settler('male', 0, 0) },
-      { name: 'Male 2', fn: () => gen.settler('male', 1, 1) },
-      { name: 'Female 1', fn: () => gen.settler('female', 2, 2) },
-      { name: 'Female 2', fn: () => gen.settler('female', 3, 3) },
-    ];
-
-    // Structures
-    const structures = [
-      { name: 'House 1', fn: () => gen.house('#8b4a3a') },
-      { name: 'House 2', fn: () => gen.house('#4a5a3a') },
-    ];
-
-    // Items
-    const items = [
-      { name: 'Grain', fn: () => gen.resource('grain') },
-      { name: 'Wood', fn: () => gen.resource('wood') },
-      { name: 'Stone', fn: () => gen.resource('stone') },
-      { name: 'Tool', fn: () => gen.resource('tool') },
-      { name: 'Food', fn: () => gen.resource('food') },
-      { name: 'Weapon', fn: () => gen.resource('weapon') },
-    ];
-
-    function renderGallery(container, items) {
-      container.innerHTML = '';
-      items.forEach(item => {
-        const canvas = item.fn();
-        const div = document.createElement('div');
-        div.className = 'sprite-item';
-        div.appendChild(canvas);
-        canvas.className = 'sprite-canvas';
-        const label = document.createElement('div');
-        label.className = 'sprite-label';
-        label.textContent = item.name;
-        div.appendChild(label);
-        container.appendChild(div);
-      });
+    function spriteItem(name, canvas) {
+      const item = document.createElement('div');
+      item.className = 'sprite-item';
+      const frame = document.createElement('div');
+      frame.className = 'sprite-frame';
+      canvas.style.width = (canvas.width * SCALE) + 'px';
+      canvas.style.height = (canvas.height * SCALE) + 'px';
+      frame.appendChild(canvas);
+      item.appendChild(frame);
+      const label = document.createElement('div');
+      label.className = 'sprite-label';
+      label.textContent = name;
+      item.appendChild(label);
+      return item;
     }
 
-    renderGallery(document.getElementById('terrain-gallery'), terrains);
-    renderGallery(document.getElementById('plants-gallery'), plants);
-    renderGallery(document.getElementById('animals-gallery'), animals);
-    renderGallery(document.getElementById('npcs-gallery'), npcs);
-    renderGallery(document.getElementById('structures-gallery'), structures);
-    renderGallery(document.getElementById('items-gallery'), items);
+    function renderGallery(id, entries) {
+      const el = document.getElementById(id);
+      entries.forEach(([name, fn]) => el.appendChild(spriteItem(name, fn())));
+    }
 
-    // Animations
-    const animator = new SpriteAnimator(gen);
+    renderGallery('terrain-gallery', [
+      ['Grass A', () => gen.grassTile(0)],
+      ['Grass B', () => gen.grassTile(1)],
+      ['Meadow', () => gen.grassTile(2)],
+      ['Soil', () => gen.soilTile(0)],
+      ['Soil (wet)', () => gen.soilTile(1)],
+      ['Sand', () => gen.sandTile(0)],
+      ['Water', () => gen.waterTile(0)],
+      ['Flagstone A', () => gen.stoneTile(0)],
+      ['Flagstone B', () => gen.stoneTile(1)],
+      ['Flagstone C', () => gen.stoneTile(2)],
+    ]);
+
+    renderGallery('plants-gallery', [
+      ['Wheat (shoots)', () => gen.grainPlant(1)],
+      ['Wheat (green)', () => gen.grainPlant(2)],
+      ['Wheat (ripe)', () => gen.grainPlant(3)],
+      ['Oak sapling', () => gen.tree(1, 0)],
+      ['Oak young', () => gen.tree(2, 0)],
+      ['Oak mature', () => gen.tree(3, 0)],
+      ['Autumn oak', () => gen.tree(3, 2)],
+      ['Pine', () => gen.pine(3)],
+      ['Pine young', () => gen.pine(2)],
+      ['Shrub', () => gen.shrub(0)],
+      ['Berry bush', () => gen.shrub(1)],
+    ]);
+
+    renderGallery('livestock-gallery', [
+      ['Cow (white)', () => gen.livestock('cow', 0)],
+      ['Cow (brown)', () => gen.livestock('cow', 1)],
+      ['Pig', () => gen.livestock('pig', 0)],
+      ['Sheep', () => gen.livestock('sheep', 0)],
+      ['Chicken', () => gen.livestock('chicken', 0)],
+    ]);
+
+    renderGallery('wild-gallery', [
+      ['Deer (buck)', () => gen.wildAnimal('deer', 0)],
+      ['Deer (doe)', () => gen.wildAnimal('deer', 1)],
+      ['Wolf', () => gen.wildAnimal('wolf', 0)],
+      ['Boar', () => gen.wildAnimal('boar', 0)],
+      ['Fox', () => gen.wildAnimal('fox', 0)],
+    ]);
+
+    renderGallery('npcs-gallery', [
+      ['Settler 1', () => gen.settler('male', 0, 0)],
+      ['Settler 2', () => gen.settler('male', 1, 2)],
+      ['Settler 3', () => gen.settler('female', 2, 1)],
+      ['Settler 4', () => gen.settler('female', 3, 3)],
+      ['Settler 5', () => gen.settler('male', 2, 1)],
+      ['Settler 6', () => gen.settler('female', 0, 3)],
+    ]);
+
+    renderGallery('structures-gallery', [
+      ['House (red roof)', () => gen.house()],
+      ['House (green roof)', () => gen.house('green')],
+    ]);
+
+    renderGallery('items-gallery', [
+      ['Wheat sheaf', () => gen.resource('grain')],
+      ['Logs', () => gen.resource('wood')],
+      ['Stone', () => gen.resource('stone')],
+      ['Hatchet', () => gen.resource('tool')],
+      ['Bread', () => gen.resource('food')],
+      ['Sword', () => gen.resource('weapon')],
+    ]);
+
+    renderGallery('weather-gallery', [
+      ['Rain', () => gen.rainEffect(1.5)],
+      ['Snow', () => gen.snowEffect(1.5)],
+      ['Dust', () => gen.dustEffect(1.5)],
+    ]);
+
+    // ---- Live animations (autoplay) ----
     const animations = [
-      { name: 'Settler Idle', type: 'settler', fn: () => animator.idleAnimation('settler', { gender: 'male', skin: 0, hair: 0 }) },
-      { name: 'Settler Walk', type: 'settler', fn: () => animator.movementAnimation('walk') },
-      { name: 'Settler Farming', type: 'settler', fn: () => animator.workAnimation('farming') },
-      { name: 'Settler Mining', type: 'settler', fn: () => animator.workAnimation('mining') },
-      { name: 'Grain Growth', type: 'plant', fn: () => animator.idleAnimation('grainPlant') },
-      { name: 'Tree Growth', type: 'plant', fn: () => animator.idleAnimation('tree', { variant: 0 }) },
-      { name: 'Livestock Idle', type: 'animal', fn: () => animator.idleAnimation('livestock', { type: 'cow' }) },
+      ['Settler idle', animator.idleAnimation('settler', { gender: 'male' })],
+      ['Settler walk', animator.movementAnimation('walk')],
+      ['Farming', animator.workAnimation('farming', { skin: 1, hair: 1 })],
+      ['Mining', animator.workAnimation('mining', { skin: 2, hair: 2 })],
+      ['Cow idle', animator.idleAnimation('livestock', { type: 'cow' })],
+      ['Chicken pecking', animator.idleAnimation('livestock', { type: 'chicken' })],
+      ['Deer idle', animator.idleAnimation('wildAnimal', { type: 'deer' })],
+      ['Wolf idle', animator.idleAnimation('wildAnimal', { type: 'wolf' })],
+      ['Wheat growth', animator.idleAnimation('grainPlant')],
+      ['Oak growth', animator.idleAnimation('tree')],
+      ['Water', animator.idleAnimation('water')],
     ];
 
-    const container = document.getElementById('animations-container');
-    animations.forEach(anim => {
-      const section = document.createElement('div');
-      section.className = 'animation-section';
+    const animContainer = document.getElementById('animations-container');
+    const tickers = [];
 
-      const title = document.createElement('div');
-      title.style.fontSize = '12px';
-      title.style.color = '#e8d27a';
-      title.style.marginBottom = '12px';
-      title.textContent = anim.name;
-      section.appendChild(title);
+    animations.forEach(([name, anim]) => {
+      if (!anim.frames.length) return;
+      const item = document.createElement('div');
+      item.className = 'anim-item';
 
-      const display = document.createElement('div');
-      display.className = 'animation-display';
+      const frame0 = anim.frames[0];
+      const c = document.createElement('canvas');
+      c.width = frame0.width * SCALE;
+      c.height = frame0.height * SCALE;
+      const cx = c.getContext('2d');
+      cx.imageSmoothingEnabled = false;
 
-      let frameIndex = 0;
-      const animation = anim.fn();
+      const wrap = document.createElement('div');
+      wrap.className = 'sprite-frame';
+      c.style.imageRendering = 'pixelated';
+      wrap.appendChild(c);
+      item.appendChild(wrap);
 
-      function updateFrame() {
-        const canvas = animation.frames[frameIndex];
-        if (canvas) {
-          const ctx = display.querySelector('canvas');
-          if (ctx) ctx.remove();
-          const cloned = canvas.cloneNode();
-          cloned.className = 'animation-canvas';
-          display.appendChild(cloned);
-        }
-      }
+      const label = document.createElement('div');
+      label.className = 'sprite-label';
+      label.textContent = name;
+      item.appendChild(label);
 
-      updateFrame();
+      const meta = document.createElement('div');
+      meta.className = 'anim-meta';
+      meta.textContent = anim.frames.length + ' frames · ' + anim.frameRate + ' fps';
+      item.appendChild(meta);
 
-      const info = document.createElement('div');
-      info.className = 'animation-info';
-      info.innerHTML = `
-        <div>Frames: ${animation.frames.length}</div>
-        <div>FPS: ${animation.frameRate}</div>
-        <div>Duration: ${((animation.frames.length / animation.frameRate) * 1000).toFixed(0)}ms</div>
-      `;
-      display.appendChild(info);
-
-      const controls = document.createElement('div');
-      controls.className = 'control-panel';
-
-      const playBtn = document.createElement('button');
-      playBtn.textContent = '▶ Play';
-      let animating = false;
-      let startTime = 0;
-
-      playBtn.onclick = () => {
-        animating = !animating;
-        playBtn.textContent = animating ? '⏸ Pause' : '▶ Play';
-        startTime = Date.now();
-
-        function animate() {
-          if (animating) {
-            const elapsed = Date.now() - startTime;
-            frameIndex = Math.floor((elapsed / 1000) * animation.frameRate) % animation.frames.length;
-            updateFrame();
-            requestAnimationFrame(animate);
-          }
-        }
-
-        if (animating) animate();
-      };
-
-      const resetBtn = document.createElement('button');
-      resetBtn.textContent = '↻ Reset';
-      resetBtn.onclick = () => {
-        frameIndex = 0;
-        animating = false;
-        playBtn.textContent = '▶ Play';
-        updateFrame();
-      };
-
-      controls.appendChild(playBtn);
-      controls.appendChild(resetBtn);
-      section.appendChild(display);
-      section.appendChild(controls);
-      container.appendChild(section);
+      animContainer.appendChild(item);
+      tickers.push((t) => {
+        const fr = animator.render(anim, t);
+        if (!fr) return;
+        cx.clearRect(0, 0, c.width, c.height);
+        cx.drawImage(fr, 0, 0, c.width, c.height);
+      });
     });
+
+    function loop(t) {
+      tickers.forEach(fn => fn(t));
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
   </script>
 </body>
 </html>
