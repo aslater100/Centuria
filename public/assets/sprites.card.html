@@ -1,0 +1,313 @@
+<!-- @dsCard group="Assets" viewport="1200x1400" name="Sprite Gallery & Animation" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sprite Gallery</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #12161f;
+      color: #dfe6ee;
+      padding: 20px;
+      font-family: 'Courier New', monospace;
+      overflow-y: auto;
+    }
+    h1 {
+      font-size: 20px;
+      color: #e8d27a;
+      margin-bottom: 20px;
+    }
+    h2 {
+      font-size: 13px;
+      color: #c2a14d;
+      margin: 24px 0 12px;
+      border-bottom: 1px solid #6e4a2f;
+      padding-bottom: 6px;
+    }
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .sprite-item {
+      background: rgba(42, 38, 32, 0.3);
+      border: 1px solid #6e4a2f;
+      padding: 12px;
+      text-align: center;
+    }
+    .sprite-canvas {
+      width: 100%;
+      height: auto;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px dashed #4d3320;
+      margin-bottom: 8px;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    .sprite-label {
+      font-size: 10px;
+      color: #998c6e;
+      word-break: break-word;
+    }
+    .animation-section {
+      background: rgba(42, 38, 32, 0.3);
+      border: 1px solid #6e4a2f;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .animation-display {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .animation-canvas {
+      width: 64px;
+      height: 64px;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px dashed #4d3320;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    .animation-info {
+      font-size: 11px;
+      color: #9ab0c4;
+      flex: 1;
+      min-width: 200px;
+    }
+    .control-panel {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    button {
+      padding: 4px 8px;
+      background: #6e4a2f;
+      color: #dfe6ee;
+      border: 1px solid #8b6f47;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+    }
+    button:hover {
+      background: #8b6f47;
+    }
+    .stats {
+      font-size: 10px;
+      color: #998c6e;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎨 Sprite Library & Animation</h1>
+  <p style="color: #9ab0c4; font-size: 11px; margin-bottom: 20px;">
+    Procedurally-generated sprites with animations. RimWorld-inspired gritty realism.
+    Canvas-based generation allows infinite variations via seed & parameters.
+  </p>
+
+  <h2>🌱 Terrain Tiles</h2>
+  <div class="gallery" id="terrain-gallery"></div>
+
+  <h2>🌾 Plants & Vegetation</h2>
+  <div class="gallery" id="plants-gallery"></div>
+
+  <h2>🐄 Animals</h2>
+  <div class="gallery" id="animals-gallery"></div>
+
+  <h2>👤 NPCs & Settlers</h2>
+  <div class="gallery" id="npcs-gallery"></div>
+
+  <h2>🏠 Structures</h2>
+  <div class="gallery" id="structures-gallery"></div>
+
+  <h2>📦 Items & Resources</h2>
+  <div class="gallery" id="items-gallery"></div>
+
+  <h2>⚡ Animations</h2>
+  <div id="animations-container"></div>
+
+  <script src="./sprite-generator.js"></script>
+  <script src="./sprite-animator.js"></script>
+  <script>
+    const gen = new SpriteGenerator();
+
+    // Terrain
+    const terrains = [
+      { name: 'Grass 1', fn: () => gen.grassTile(0) },
+      { name: 'Grass 2', fn: () => gen.grassTile(1) },
+      { name: 'Grass 3', fn: () => gen.grassTile(2) },
+      { name: 'Soil 1', fn: () => gen.soilTile(0) },
+      { name: 'Soil 2', fn: () => gen.soilTile(1) },
+      { name: 'Water 1', fn: () => gen.waterTile(0) },
+      { name: 'Water 2', fn: () => gen.waterTile(2) },
+      { name: 'Stone 1', fn: () => gen.stoneTile(0) },
+      { name: 'Stone 2', fn: () => gen.stoneTile(1) },
+    ];
+
+    // Plants
+    const plants = [
+      { name: 'Grain Stage 1', fn: () => gen.grainPlant(1) },
+      { name: 'Grain Stage 2', fn: () => gen.grainPlant(2) },
+      { name: 'Grain Stage 3', fn: () => gen.grainPlant(3) },
+      { name: 'Tree Young', fn: () => gen.tree(1, 0) },
+      { name: 'Tree Growth', fn: () => gen.tree(2, 1) },
+      { name: 'Tree Mature', fn: () => gen.tree(3, 0) },
+    ];
+
+    // Animals
+    const animals = [
+      { name: 'Cow', fn: () => gen.livestock('cow', 0) },
+      { name: 'Pig', fn: () => gen.livestock('pig', 1) },
+      { name: 'Sheep', fn: () => gen.livestock('sheep', 2) },
+      { name: 'Deer', fn: () => gen.wildAnimal('deer', 0) },
+      { name: 'Wolf', fn: () => gen.wildAnimal('wolf', 1) },
+      { name: 'Boar', fn: () => gen.wildAnimal('boar', 0) },
+    ];
+
+    // NPCs
+    const npcs = [
+      { name: 'Male 1', fn: () => gen.settler('male', 0, 0) },
+      { name: 'Male 2', fn: () => gen.settler('male', 1, 1) },
+      { name: 'Female 1', fn: () => gen.settler('female', 2, 2) },
+      { name: 'Female 2', fn: () => gen.settler('female', 3, 3) },
+    ];
+
+    // Structures
+    const structures = [
+      { name: 'House 1', fn: () => gen.house('#8b4a3a') },
+      { name: 'House 2', fn: () => gen.house('#4a5a3a') },
+    ];
+
+    // Items
+    const items = [
+      { name: 'Grain', fn: () => gen.resource('grain') },
+      { name: 'Wood', fn: () => gen.resource('wood') },
+      { name: 'Stone', fn: () => gen.resource('stone') },
+      { name: 'Tool', fn: () => gen.resource('tool') },
+      { name: 'Food', fn: () => gen.resource('food') },
+      { name: 'Weapon', fn: () => gen.resource('weapon') },
+    ];
+
+    function renderGallery(container, items) {
+      container.innerHTML = '';
+      items.forEach(item => {
+        const canvas = item.fn();
+        const div = document.createElement('div');
+        div.className = 'sprite-item';
+        div.appendChild(canvas);
+        canvas.className = 'sprite-canvas';
+        const label = document.createElement('div');
+        label.className = 'sprite-label';
+        label.textContent = item.name;
+        div.appendChild(label);
+        container.appendChild(div);
+      });
+    }
+
+    renderGallery(document.getElementById('terrain-gallery'), terrains);
+    renderGallery(document.getElementById('plants-gallery'), plants);
+    renderGallery(document.getElementById('animals-gallery'), animals);
+    renderGallery(document.getElementById('npcs-gallery'), npcs);
+    renderGallery(document.getElementById('structures-gallery'), structures);
+    renderGallery(document.getElementById('items-gallery'), items);
+
+    // Animations
+    const animator = new SpriteAnimator(gen);
+    const animations = [
+      { name: 'Settler Idle', type: 'settler', fn: () => animator.idleAnimation('settler', { gender: 'male', skin: 0, hair: 0 }) },
+      { name: 'Settler Walk', type: 'settler', fn: () => animator.movementAnimation('walk') },
+      { name: 'Settler Farming', type: 'settler', fn: () => animator.workAnimation('farming') },
+      { name: 'Settler Mining', type: 'settler', fn: () => animator.workAnimation('mining') },
+      { name: 'Grain Growth', type: 'plant', fn: () => animator.idleAnimation('grainPlant') },
+      { name: 'Tree Growth', type: 'plant', fn: () => animator.idleAnimation('tree', { variant: 0 }) },
+      { name: 'Livestock Idle', type: 'animal', fn: () => animator.idleAnimation('livestock', { type: 'cow' }) },
+    ];
+
+    const container = document.getElementById('animations-container');
+    animations.forEach(anim => {
+      const section = document.createElement('div');
+      section.className = 'animation-section';
+
+      const title = document.createElement('div');
+      title.style.fontSize = '12px';
+      title.style.color = '#e8d27a';
+      title.style.marginBottom = '12px';
+      title.textContent = anim.name;
+      section.appendChild(title);
+
+      const display = document.createElement('div');
+      display.className = 'animation-display';
+
+      let frameIndex = 0;
+      const animation = anim.fn();
+
+      function updateFrame() {
+        const canvas = animation.frames[frameIndex];
+        if (canvas) {
+          const ctx = display.querySelector('canvas');
+          if (ctx) ctx.remove();
+          const cloned = canvas.cloneNode();
+          cloned.className = 'animation-canvas';
+          display.appendChild(cloned);
+        }
+      }
+
+      updateFrame();
+
+      const info = document.createElement('div');
+      info.className = 'animation-info';
+      info.innerHTML = `
+        <div>Frames: ${animation.frames.length}</div>
+        <div>FPS: ${animation.frameRate}</div>
+        <div>Duration: ${((animation.frames.length / animation.frameRate) * 1000).toFixed(0)}ms</div>
+      `;
+      display.appendChild(info);
+
+      const controls = document.createElement('div');
+      controls.className = 'control-panel';
+
+      const playBtn = document.createElement('button');
+      playBtn.textContent = '▶ Play';
+      let animating = false;
+      let startTime = 0;
+
+      playBtn.onclick = () => {
+        animating = !animating;
+        playBtn.textContent = animating ? '⏸ Pause' : '▶ Play';
+        startTime = Date.now();
+
+        function animate() {
+          if (animating) {
+            const elapsed = Date.now() - startTime;
+            frameIndex = Math.floor((elapsed / 1000) * animation.frameRate) % animation.frames.length;
+            updateFrame();
+            requestAnimationFrame(animate);
+          }
+        }
+
+        if (animating) animate();
+      };
+
+      const resetBtn = document.createElement('button');
+      resetBtn.textContent = '↻ Reset';
+      resetBtn.onclick = () => {
+        frameIndex = 0;
+        animating = false;
+        playBtn.textContent = '▶ Play';
+        updateFrame();
+      };
+
+      controls.appendChild(playBtn);
+      controls.appendChild(resetBtn);
+      section.appendChild(display);
+      section.appendChild(controls);
+      container.appendChild(section);
+    });
+  </script>
+</body>
+</html>
