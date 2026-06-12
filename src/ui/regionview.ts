@@ -33,6 +33,8 @@ export class RegionView {
   private centuryModal: HTMLElement;
   private centuryDismissed = false;
   private frame = 0;
+  private lastPanelBuildFrame = -999;
+  private lastPanelBuildId: number | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private region: RegionSim, root: HTMLElement) {
     this.g = canvas.getContext('2d')!;
@@ -1243,54 +1245,58 @@ export class RegionView {
     return `<p class="insp-skills">FREIGHT (last caravans)</p>` + (lines || `<p class="insp-skills">no caravan traffic</p>`);
   }
 
+  /** Force the panel to rebuild its HTML on the next frame (called after game actions). */
+  private refreshPanel(): void {
+    this.lastPanelBuildFrame = -999;
+  }
+
   private drawPanel(): void {
     const t = this.region.settlements.find((s) => s.id === this.selectedId);
     if (!t) {
       this.panel.classList.add('hidden');
+      this.lastPanelBuildId = null;
       return;
     }
     this.panel.classList.remove('hidden');
+
+    // Only rebuild innerHTML when selection changes or once per second (~60 frames).
+    // Rebuilding every frame destroys the button DOM node between mousedown and click,
+    // so the click event fires on the panel div instead of the button.
+    const needsRebuild = this.lastPanelBuildId !== t.id || this.frame - this.lastPanelBuildFrame >= 60;
+    if (!needsRebuild) return;
+
+    this.lastPanelBuildId = t.id;
+    this.lastPanelBuildFrame = this.frame;
+
     this.panel.innerHTML = this.panelHtml(t);
     const btn = this.panel.querySelector<HTMLButtonElement>('#found-btn');
     if (btn) {
-      btn.onclick = () => {
-        this.region.foundTown(t.id);
-      };
+      btn.onclick = () => { this.region.foundTown(t.id); this.refreshPanel(); };
     }
     const renameBtn = this.panel.querySelector<HTMLButtonElement>('#rename-btn');
     if (renameBtn) {
       renameBtn.onclick = () => {
         const name = prompt('Rename town:', t.name);
-        if (name && name.trim()) t.name = name.trim();
+        if (name && name.trim()) { t.name = name.trim(); this.refreshPanel(); }
       };
     }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.road-btn')) {
-      rb.onclick = () => {
-        this.region.buildRoad(t.id, Number(rb.dataset.to));
-      };
+      rb.onclick = () => { this.region.buildRoad(t.id, Number(rb.dataset.to)); this.refreshPanel(); };
     }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.rail-btn')) {
-      rb.onclick = () => {
-        this.region.buildRail(t.id, Number(rb.dataset.to));
-      };
+      rb.onclick = () => { this.region.buildRail(t.id, Number(rb.dataset.to)); this.refreshPanel(); };
     }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.hwy-btn')) {
-      rb.onclick = () => {
-        this.region.buildHighway(t.id, Number(rb.dataset.to));
-      };
+      rb.onclick = () => { this.region.buildHighway(t.id, Number(rb.dataset.to)); this.refreshPanel(); };
     }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.mag-btn')) {
-      rb.onclick = () => {
-        this.region.buildMaglev(t.id, Number(rb.dataset.to));
-      };
+      rb.onclick = () => { this.region.buildMaglev(t.id, Number(rb.dataset.to)); this.refreshPanel(); };
     }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.repair-btn')) {
-      rb.onclick = () => {
-        this.region.repairRoute(t.id, Number(rb.dataset.to));
-      };
+      rb.onclick = () => { this.region.repairRoute(t.id, Number(rb.dataset.to)); this.refreshPanel(); };
     }
     const sw = this.panel.querySelector<HTMLButtonElement>('#seawall-btn');
-    if (sw) sw.onclick = () => this.region.buildSeaWall(t.id);
+    if (sw) sw.onclick = () => { this.region.buildSeaWall(t.id); this.refreshPanel(); };
   }
 
   /** Route list to every other town, with terrain-priced build/repair buttons. */

@@ -79,6 +79,30 @@ const P = {
   gravelB: '#76716a',
   rutBrown: '#6e5a40',
   rutDark: '#5a4830',
+  // building-specific extras
+  wallLight: '#a08068',    // lighter warm wall (cabin, hall)
+  wallLightDk: '#7a6050',
+  wallCream: '#c4c0b0',    // clinic / clean stone
+  wallCreamDk: '#a0a098',
+  wallBrick: '#a07060',    // bakery stone
+  wallBrickDk: '#806050',
+  roofRed: '#5a3a28',      // cabin shingles
+  roofRedLt: '#7a5040',
+  roofSlate: '#4a5060',    // tailor
+  roofSlateLt: '#6a7080',
+  roofForest: '#3e4c2c',   // forester
+  roofForestLt: '#5e6c4c',
+  roofThatch: '#7a5820',   // granary
+  roofThatchLt: '#9a7830',
+  roofTerra: '#7c4a3c',    // market terracotta
+  roofTerraLt: '#9c6a58',
+  winGold: '#d8c460',      // residential window glow
+  winOrange: '#e8a030',    // kitchen/bakery warmth
+  winBlue: '#a0c8e8',      // clinic blue
+  winGreen: '#a8c888',     // forester green
+  winAmber: '#c8a840',     // lodge amber
+  awningRed: '#b84040',    // market stripe
+  awningCream: '#e8e0c0',
 };
 
 export interface SpriteSet {
@@ -336,124 +360,286 @@ function buildingSprite(defId: string, w: number, h: number, ghost: boolean): HT
   const g = c.getContext('2d')!;
   const W = w * TILE;
   const H = h * TILE;
-  const a = ghost ? 0.5 : 1;
-  g.globalAlpha = a;
-  // drop shadow to the lower-right
+  g.globalAlpha = ghost ? 0.5 : 1;
+
   if (!ghost) {
     g.fillStyle = P.shadow;
     g.fillRect(3, 3, W, H);
   }
-  const wall = ghost ? '#7a93ab' : P.wall;
-  const wallD = ghost ? '#5d7690' : P.wallDark;
-  const roof = ghost ? '#8aa3bb' : P.roofWood;
-  const roofL = ghost ? '#9ab3c8' : P.roofLight;
+
+  // ghost overrides
+  const gW = ghost ? '#7a93ab' : null;
+  const gWd = ghost ? '#5d7690' : null;
+  const gR = ghost ? '#8aa3bb' : null;
+  const gRl = ghost ? '#9ab3c8' : null;
 
   g.fillStyle = P.outline;
   g.fillRect(0, 0, W, H);
+
   if (defId === 'palisade') {
-    g.fillStyle = wallD;
+    // Pointed wooden stakes with horizontal binding rails
+    g.fillStyle = gWd ?? P.woodDark;
     g.fillRect(1, 1, W - 2, H - 2);
-    g.fillStyle = wall;
-    for (let x = 2; x < W - 2; x += 5) {
-      g.fillRect(x, 3, 3, H - 4);
-      g.fillRect(x + 1, 1, 1, 2);
-    }
+    g.fillStyle = gW ?? P.wood;
+    for (let x = 2; x < W - 2; x += 4) g.fillRect(x, 2, 2, H - 4);
+    // sharpen tops
+    g.fillStyle = P.outline;
+    for (let x = 3; x < W - 2; x += 4) g.fillRect(x, 1, 1, 1);
+    // binding rails
+    g.fillStyle = gWd ?? P.trunk;
+    g.fillRect(1, Math.floor(H * 0.33), W - 2, 2);
+    g.fillRect(1, Math.floor(H * 0.66), W - 2, 2);
+
   } else if (defId === 'stockpile') {
+    // Open storage yard with crates and grain sacks
     g.fillStyle = P.floor;
     g.fillRect(1, 1, W - 2, H - 2);
-    g.fillStyle = P.woodDark;
+    g.fillStyle = gWd ?? P.woodDark;
     g.fillRect(1, 1, W - 2, 2);
     g.fillRect(1, H - 3, W - 2, 2);
-    g.fillStyle = P.wood;
-    for (let i = 0; i < 3; i++) g.fillRect(4 + i * 14, 6, 9, 6); // crates
-    g.fillStyle = P.grain;
-    g.fillRect(8, 14, 7, 5);
+    g.fillRect(1, 1, 2, H - 2);
+    g.fillRect(W - 3, 1, 2, H - 2);
+    // two crates side by side
+    const cw = Math.floor((W - 10) / 2);
+    for (let ci = 0; ci < 2; ci++) {
+      const cx = 4 + ci * (cw + 2);
+      g.fillStyle = gW ?? P.wood;
+      g.fillRect(cx, 3, cw, 8);
+      g.fillStyle = gWd ?? P.woodDark;
+      g.fillRect(cx, 3, cw, 1);
+      g.fillRect(cx + Math.floor(cw / 2), 3, 1, 8);
+    }
+    // grain sack
+    g.fillStyle = gRl ?? P.grain;
+    g.fillRect(4, 13, W - 8, H - 17);
+    g.fillStyle = gR ?? '#c29030';
+    g.fillRect(5, 13, W - 10, 1);
+
   } else if (defId === 'farm') {
+    // Plowed soil with crop rows
     g.fillStyle = P.soil;
     g.fillRect(1, 1, W - 2, H - 2);
     g.fillStyle = P.soilDark;
-    for (let y = 3; y < H; y += 5) g.fillRect(1, y, W - 2, 2);
+    for (let y = 3; y < H - 1; y += 5) g.fillRect(1, y, W - 2, 2);
+    if (!ghost) {
+      g.fillStyle = P.crop;
+      for (let y = 4; y < H - 2; y += 5)
+        for (let x = 3; x < W - 2; x += 5) g.fillRect(x, y - 1, 2, 3);
+    }
+
   } else if (defId === 'hearth') {
-    // stone fire ring with a live flame
+    // Stone fire ring with a live flame
     g.fillStyle = P.grassB;
     g.fillRect(1, 1, W - 2, H - 2);
-    g.fillStyle = P.rockDark;
+    g.fillStyle = gWd ?? P.rockDark;
     g.fillRect(3, 3, W - 6, H - 6);
-    g.fillStyle = P.rock;
-    g.fillRect(3, 3, 3, 3);
-    g.fillRect(W - 6, 3, 3, 3);
-    g.fillRect(3, H - 6, 3, 3);
-    g.fillRect(W - 6, H - 6, 3, 3);
+    g.fillStyle = gW ?? P.rock;
+    g.fillRect(3, 3, 3, 3); g.fillRect(W - 6, 3, 3, 3);
+    g.fillRect(3, H - 6, 3, 3); g.fillRect(W - 6, H - 6, 3, 3);
+    g.fillStyle = '#1e1810';
+    g.fillRect(5, 5, W - 10, H - 10);
     if (!ghost) {
-      g.fillStyle = '#c25b2e';
-      g.fillRect(6, 6, 4, 5);
-      g.fillStyle = '#e8a44a';
-      g.fillRect(7, 5, 2, 4);
-      g.fillStyle = '#f0d060';
-      g.fillRect(7, 7, 1, 2);
+      g.fillStyle = '#c25b2e'; g.fillRect(6, 6, 4, 5);
+      g.fillStyle = '#e8a44a'; g.fillRect(7, 5, 2, 4);
+      g.fillStyle = '#f0d060'; g.fillRect(7, 7, 1, 2);
     }
+
   } else if (defId === 'graveyard') {
-    // fenced earth plot
+    // Fenced burial plot with headstones
     g.fillStyle = P.grassC;
     g.fillRect(1, 1, W - 2, H - 2);
     g.fillStyle = P.soilDark;
-    g.fillRect(3, 3, W - 6, H - 6);
-    g.fillStyle = wallD;
+    g.fillRect(4, 4, W - 8, H - 8);
+    // fence rails
+    g.fillStyle = gRl ?? '#b0a890';
+    g.fillRect(1, 3, W - 2, 1);
+    g.fillRect(1, H - 4, W - 2, 1);
+    // fence posts
+    g.fillStyle = gW ?? '#8a806a';
     for (let x = 1; x < W - 1; x += 4) {
-      g.fillRect(x, 1, 1, 3);
-      g.fillRect(x, H - 4, 1, 3);
+      g.fillRect(x, 1, 2, 4);
+      g.fillRect(x, H - 5, 2, 4);
     }
-    for (let y = 1; y < H - 1; y += 4) {
+    for (let y = 4; y < H - 4; y += 4) {
       g.fillRect(1, y, 3, 1);
       g.fillRect(W - 4, y, 3, 1);
     }
+    // headstones
+    if (!ghost) {
+      g.fillStyle = P.rock;
+      for (let ci = 0; ci < w; ci++) {
+        for (let ri = 0; ri < h; ri++) {
+          const sx = 6 + ci * Math.floor((W - 12) / Math.max(1, w));
+          const sy = 5 + ri * Math.floor((H - 12) / Math.max(1, h));
+          if (sx + 4 < W - 4 && sy + 5 < H - 4) {
+            g.fillRect(sx, sy, 4, 5);
+            g.fillStyle = P.rockLight; g.fillRect(sx, sy, 4, 1);
+            g.fillStyle = P.rock;
+          }
+        }
+      }
+    }
+
   } else if (defId === 'fishing_dock') {
-    // wooden planks over teal water — a simple jetty
+    // Wooden jetty planks over water
     g.fillStyle = P.water1;
     g.fillRect(1, H - 6, W - 2, 5);
     g.fillStyle = P.water2;
-    g.fillRect(3, H - 5, 4, 2);
-    g.fillRect(W - 7, H - 5, 4, 2);
-    g.fillStyle = P.plank;
+    g.fillRect(3, H - 5, 4, 2); g.fillRect(W - 7, H - 5, 4, 2);
+    g.fillStyle = gW ?? P.plank;
     g.fillRect(1, 1, W - 2, H - 6);
-    g.fillStyle = P.plankDark;
+    g.fillStyle = gWd ?? P.plankDark;
     for (let x = 3; x < W - 2; x += 5) g.fillRect(x, 1, 1, H - 6);
     g.fillRect(1, H - 7, W - 2, 1);
-    g.fillStyle = P.woodDark;
+    g.fillStyle = gWd ?? P.woodDark;
     g.fillRect(1, 1, W - 2, 1);
-    // dock posts at the water edge
-    g.fillStyle = P.trunk;
-    g.fillRect(2, H - 6, 2, 5);
-    g.fillRect(W - 4, H - 6, 2, 5);
+    g.fillStyle = gR ?? P.trunk;
+    g.fillRect(2, H - 6, 2, 5); g.fillRect(W - 4, H - 6, 2, 5);
+
   } else {
-    // walls visible at the base, roof above — reads as a structure, not a blob
+    // Residential/workshop buildings: roof at top, front wall + door below.
+    // Each building type has a distinct colour scheme and optional extras.
     const roofH = Math.floor(H * 0.55);
-    g.fillStyle = wall;
-    g.fillRect(1, roofH, W - 2, H - roofH - 1);
-    g.fillStyle = wallD;
-    g.fillRect(1, roofH, W - 2, 2);
-    g.fillStyle = roof;
-    g.fillRect(1, 1, W - 2, roofH);
-    g.fillStyle = roofL;
-    for (let x = 3; x < W - 3; x += 5) g.fillRect(x, 2, 2, roofH - 3); // shingle rows
-    g.fillRect(1, 1, W - 2, 1);
-    // door
-    g.fillStyle = P.outline;
-    g.fillRect(Math.floor(W / 2) - 3, H - 9, 7, 8);
-    g.fillStyle = wallD;
-    g.fillRect(Math.floor(W / 2) - 2, H - 8, 5, 7);
-    if (defId === 'kitchen' || defId === 'bakery') {
-      g.fillStyle = P.rock;
-      g.fillRect(W - 8, 1, 5, 7); // chimney
-      g.fillStyle = P.rockLight;
-      g.fillRect(W - 7, 1, 3, 2);
+
+    // Defaults (overridden per type when !ghost)
+    let roofBase = gR ?? P.roofWood;
+    let roofHigh = gRl ?? P.roofLight;
+    let wallBase = gW ?? P.wall;
+    let wallBase2 = gWd ?? P.wallDark;
+    let winColor: string | null = null;
+    let rightChimney = false;
+    let leftChimney = false;
+    let special: string | null = null;
+
+    if (!ghost) {
+      switch (defId) {
+        case 'house':
+          roofBase = P.roofRed; roofHigh = P.roofRedLt;
+          wallBase = P.wallLight; wallBase2 = P.wallLightDk;
+          winColor = P.winGold; break;
+        case 'kitchen':
+          roofBase = '#4a3a2a'; roofHigh = '#6a5238';
+          wallBase = '#9a7858'; wallBase2 = '#7a5c40';
+          winColor = P.winOrange; rightChimney = true; break;
+        case 'hall':
+          roofBase = '#5c3e28'; roofHigh = '#7c5840';
+          wallBase = P.wallLight; wallBase2 = P.wallLightDk;
+          winColor = P.winGold; break;
+        case 'tailor':
+          roofBase = P.roofSlate; roofHigh = P.roofSlateLt;
+          wallBase = '#8a8878'; wallBase2 = '#6a6858';
+          winColor = P.winBlue; break;
+        case 'bakery':
+          roofBase = '#6a3c2a'; roofHigh = '#8a5840';
+          wallBase = P.wallBrick; wallBase2 = P.wallBrickDk;
+          winColor = P.winOrange;
+          leftChimney = true; rightChimney = true; break;
+        case 'lodge':
+          roofBase = '#3c3428'; roofHigh = '#5a4c38';
+          wallBase = '#7a6040'; wallBase2 = '#5a4428';
+          winColor = P.winAmber; break;
+        case 'market':
+          roofBase = P.roofTerra; roofHigh = P.roofTerraLt;
+          wallBase = '#b8a478'; wallBase2 = '#9a8660';
+          special = 'market'; break;
+        case 'forester':
+          roofBase = P.roofForest; roofHigh = P.roofForestLt;
+          wallBase = '#8a7a54'; wallBase2 = '#6a5c3c';
+          winColor = P.winGreen; break;
+        case 'granary':
+          roofBase = P.roofThatch; roofHigh = P.roofThatchLt;
+          wallBase = '#c0a870'; wallBase2 = '#a08850';
+          special = 'granary'; break;
+        case 'clinic':
+          roofBase = '#3c4c5e'; roofHigh = '#5c6c7e';
+          wallBase = P.wallCream; wallBase2 = P.wallCreamDk;
+          winColor = P.winBlue; special = 'clinic'; break;
+      }
     }
-    if (defId === 'hall') {
-      g.fillStyle = '#d8c478';
-      g.fillRect(5, roofH + 4, 4, 4);
-      g.fillRect(W - 9, roofH + 4, 4, 4); // lit windows
+
+    // Chimneys drawn before roof so the roof face overlaps the chimney base
+    const drawChimney = (cx: number) => {
+      g.fillStyle = P.rockDark;
+      g.fillRect(cx, 0, 5, roofH + 2);
+      g.fillStyle = P.rock;
+      g.fillRect(cx + 1, 0, 3, roofH + 1);
+      g.fillStyle = P.rockLight;
+      g.fillRect(cx + 1, 0, 3, 2);
+    };
+    if (rightChimney) drawChimney(W - 9);
+    if (leftChimney) drawChimney(3);
+
+    // Wall
+    g.fillStyle = wallBase;
+    g.fillRect(1, roofH, W - 2, H - roofH - 1);
+    g.fillStyle = wallBase2;
+    g.fillRect(1, roofH, W - 2, 2);
+
+    // Door
+    const dw = defId === 'hall' ? 7 : 5;
+    const dh = Math.min(8, H - roofH - 3);
+    const dx = Math.floor(W / 2) - Math.floor(dw / 2);
+    g.fillStyle = P.outline;
+    g.fillRect(dx, H - dh - 1, dw, dh + 1);
+    g.fillStyle = wallBase2;
+    g.fillRect(dx + 1, H - dh, dw - 2, dh);
+    if (!ghost) {
+      // door-knob pixel
+      g.fillStyle = P.grain;
+      g.fillRect(dx + dw - 2, H - Math.floor(dh * 0.5) - 1, 1, 1);
+    }
+
+    // Windows on either side of the door
+    if (winColor) {
+      const wh = Math.min(4, H - roofH - dh - 4);
+      const wy = roofH + 3;
+      if (wh >= 2) {
+        const positions: number[] = [];
+        if (dx >= 7) positions.push(3);
+        if (W - dx - dw >= 7) positions.push(W - 8);
+        if (W >= 44 && dx >= 15) positions.push(dx - 9);
+        if (W >= 44 && W - dx - dw >= 15) positions.push(dx + dw + 3);
+        for (const wx of positions) {
+          if (wx >= 2 && wx + 5 <= W - 2) {
+            g.fillStyle = P.outline;
+            g.fillRect(wx, wy, 5, wh + 1);
+            g.fillStyle = winColor;
+            g.fillRect(wx + 1, wy + 1, 3, wh - 1);
+          }
+        }
+      }
+    }
+
+    // Roof with shingle texture
+    g.fillStyle = roofBase;
+    g.fillRect(1, 1, W - 2, roofH);
+    g.fillStyle = roofHigh;
+    g.fillRect(1, 1, W - 2, 2);                                // ridge highlight
+    for (let x = 3; x < W - 3; x += 5) g.fillRect(x, 3, 2, roofH - 5);  // shingle rows
+    g.fillStyle = '#20180e';
+    g.fillRect(1, roofH - 2, W - 2, 2);                        // eave shadow
+
+    // Per-building special features (drawn on top)
+    if (special === 'market' && !ghost) {
+      // Red/cream awning stripes across the wall top
+      for (let x = 1; x < W - 1; x += 4) {
+        g.fillStyle = P.awningRed;   g.fillRect(x, roofH, 2, 3);
+        g.fillStyle = P.awningCream; g.fillRect(x + 2, roofH, 2, 3);
+      }
+    } else if (special === 'granary') {
+      // Horizontal band lines on roof (silo ribs)
+      g.fillStyle = roofHigh;
+      for (let y = 4; y < roofH - 2; y += 3) g.fillRect(2, y, W - 4, 1);
+    } else if (special === 'clinic' && !ghost) {
+      // Red cross on front wall
+      const cx = Math.floor(W / 2);
+      const cy = roofH + Math.floor((H - roofH) / 2);
+      g.fillStyle = '#cc3333';
+      g.fillRect(cx - 1, cy - 3, 2, 6);
+      g.fillRect(cx - 3, cy - 1, 6, 2);
     }
   }
+
   g.globalAlpha = 1;
   return c;
 }
