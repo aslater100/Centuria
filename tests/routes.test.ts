@@ -26,6 +26,11 @@ function flipped(seed: number): RegionSim {
 }
 
 function toStatehood(r: RegionSim): void {
+  // Ensure charter requirements are met: treasury and garrison
+  r.treasury = 50000; // Charter requires £50k
+  for (const t of r.settlements) {
+    t.garrisonStrength = 5; // Charter requires 10+ total garrison
+  }
   for (let year = 0; year < 30 && !r.ceremonyPending; year++) {
     runDays(r, 60);
     for (const t of r.settlements) {
