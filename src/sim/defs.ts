@@ -366,3 +366,24 @@ export const TUNING = {
   festivalMoodBonus: 15,
   festivalMoodDays: 3,
 };
+
+// ---- Game Design Presets ----
+export const DESIGN_PRESETS = {
+  town: {
+    easy: { foundCost: 1000, startCash: 800, softCapPop: 80, hardCapPop: 240 },
+    normal: { foundCost: 1500, startCash: 500, softCapPop: 60, hardCapPop: 200 },
+    hard: { foundCost: 2500, startCash: 200, softCapPop: 50, hardCapPop: 160 },
+  },
+  region: {
+    agricultural: { sectors: { agriculture: 0.50, industry: 0.20, services: 0.20, information: 0.10 }, taxDefault: 0.12 },
+    industrial: { sectors: { agriculture: 0.15, industry: 0.45, services: 0.25, information: 0.15 }, taxDefault: 0.18 },
+    commercial: { sectors: { agriculture: 0.10, industry: 0.20, services: 0.35, information: 0.35 }, taxDefault: 0.20 },
+    balanced: { sectors: { agriculture: 0.30, industry: 0.30, services: 0.25, information: 0.15 }, taxDefault: 0.15 },
+  },
+  nation: {
+    federal: { militaryBonus: 1.0, economyBonus: 1.1, cultureBonus: 1.2 },
+    centralized: { militaryBonus: 1.4, economyBonus: 1.2, cultureBonus: 0.8 },
+    'merchant-republic': { militaryBonus: 0.8, economyBonus: 1.5, cultureBonus: 1.1 },
+    balanced: { militaryBonus: 1.0, economyBonus: 1.0, cultureBonus: 1.0 },
+  },
+} as const;
