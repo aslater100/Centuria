@@ -294,7 +294,7 @@ export class Simulation {
     for (let i = 0; i < 12; i++) {
       this.spawnSettler(cx - 3 + (i % 6), cy + 3 + Math.floor(i / 6));
     }
-    this.world.revealAround(cx, cy, 10);
+    this.world.revealAround(cx, cy, 12);
     this.addLog('Twelve settlers step off the wagon. Spring, 1900.', 'info');
   }
 
@@ -529,6 +529,7 @@ export class Simulation {
     const t = this.world.at(x, y);
     if (t.roadPlan === kind) {
       t.roadPlan = null; // toggle off
+      if (kind === 'bridge') this.world.invalidatePathCache();
       return true;
     }
     if (t.road === kind || t.wall || t.wallPlan || t.gate || t.gatePlan || t.buildingId !== null) return false;
@@ -538,6 +539,7 @@ export class Simulation {
       return false;
     }
     t.roadPlan = kind;
+    if (kind === 'bridge') this.world.invalidatePathCache();
     return true;
   }
 
@@ -570,19 +572,23 @@ export class Simulation {
     } else if (kind === 'wall') {
       if (t.wallPlan) {
         t.wallPlan = false;
+        this.world.invalidatePathCache();
         return true;
       }
       if (t.kind === 'water' || t.buildingId !== null || t.wall || t.gate || t.gatePlan) return false;
       t.wallPlan = true;
+      this.world.invalidatePathCache();
       return true;
     } else if (kind === 'gate') {
       if (t.gatePlan) {
         t.gatePlan = false;
+        this.world.invalidatePathCache();
         return true;
       }
       if (t.kind === 'water' || t.kind === 'rock' || t.kind === 'tree') return false;
       if (t.buildingId !== null || t.wall || t.wallPlan || t.gate) return false;
       t.gatePlan = true;
+      this.world.invalidatePathCache();
       return true;
     } else if (kind === 'trap') {
       if (t.trapZone) { t.trapZone = false; this.stock.wood += TUNING.trapWoodCost; return true; }
@@ -605,10 +611,12 @@ export class Simulation {
     }
     if (t.wallPlan) {
       t.wallPlan = false;
+      this.world.invalidatePathCache();
       return;
     }
     if (t.gatePlan) {
       t.gatePlan = false;
+      this.world.invalidatePathCache();
       return;
     }
     if (t.sapling) {
@@ -632,11 +640,13 @@ export class Simulation {
     if (t.wall) {
       t.wall = false;
       t.wallHp = 0;
+      this.world.invalidatePathCache();
       return;
     }
     if (t.gate) {
       t.gate = false;
       t.wallHp = 0;
+      this.world.invalidatePathCache();
       return;
     }
     if (t.trapZone) {
@@ -1082,6 +1092,7 @@ export class Simulation {
               wt.wall = false;
               wt.gate = false;
               wt.wallHp = 0;
+              this.world.invalidatePathCache();
             }
             continue;
           }
@@ -1734,6 +1745,7 @@ export class Simulation {
           const wasRock = tile.kind === 'rock';
           tile.kind = 'grass';
           tile.marked = false;
+          this.world.invalidatePathCache();
           if (wasRock) this.dropItem('stone', TUNING.rockStone, task.x, task.y);
           else this.dropItem('wood', TUNING.treeWood, task.x, task.y);
           this.finishTask(s);
@@ -1786,6 +1798,7 @@ export class Simulation {
             tile.wall = true;
             tile.wallPlan = false;
             tile.wallHp = TUNING.wallMaxHp;
+            this.world.invalidatePathCache();
             this.finishTask(s);
           }
           return;
@@ -1802,6 +1815,7 @@ export class Simulation {
             tile.gate = true;
             tile.gatePlan = false;
             tile.wallHp = TUNING.gateMaxHp;
+            this.world.invalidatePathCache();
             this.finishTask(s);
           }
           return;
@@ -1821,6 +1835,7 @@ export class Simulation {
             this.stock.stone -= cost.stone ?? 0;
             tile.road = plan;
             tile.roadPlan = null;
+            if (plan === 'bridge') this.world.invalidatePathCache();
             this.finishTask(s);
           }
           return;
