@@ -177,7 +177,7 @@ export const REGION_LAWS: RegionLaw[] = [
     requiresState: true,
     requiresNation: true,
     domain: 'economic',
-    desc: 'A national bank holds reserves and smooths the boom-bust. Treasury earns 0.5% interest/month.',
+    desc: 'A national bank holds reserves and smooths the boom-bust. Unlocks policy rate, bond issuance, credit cycle, and FX regime controls.',
   },
   {
     id: 'military_reform',
@@ -405,6 +405,10 @@ export const RIVAL_ARCHETYPES: Record<RivalArchetype, { name: string; weights: R
 
 export type TreatyKind = 'non_aggression' | 'trade_agreement' | 'defensive_pact' | 'climate_accord';
 
+// ---- Monetary system types (GDD §5.1) ----
+export type CreditRating = 'AAA' | 'AA' | 'A' | 'BBB' | 'BB' | 'B' | 'CCC' | 'D';
+export type MonetaryRegime = 'float' | 'peg' | 'print';
+
 /** First slice of the GDD §5.4 treaty table. `baseAsk` is the relations
  *  level the rival wants before personality adjusts the price. */
 export const TREATY_DEFS: Record<TreatyKind, { name: string; baseAsk: number; desc: string }> = {
@@ -461,6 +465,18 @@ export interface DealCounter {
 /** £ → diplomatic points: the chancery's exchange rate. */
 export const GOLD_PER_POINT = 8;
 export const DEAL_COUNTER_DAYS = 90;
+
+// ---- Monetary system constants (GDD §5.1) ----
+/** Credit-neutral policy rate; below this leverage builds, above it contracts. */
+const NEUTRAL_RATE = 0.05;
+/** Debt-service/GDP above which the credit cycle becomes fragile. */
+const LEVERAGE_FRAGILITY = 0.18;
+export const MIN_POLICY_RATE = 0.01;
+export const MAX_POLICY_RATE = 0.15;
+/** Credit spreads over policy rate by rating tier. */
+export const CREDIT_RATING_SPREADS: Record<CreditRating, number> = {
+  AAA: 0, AA: 0.005, A: 0.01, BBB: 0.02, BB: 0.04, B: 0.07, CCC: 0.12, D: 0.25,
+};
 
 // Rivals run richer regimes than the player's four (GDD §6.3: "the 1930s
 // should produce at least one neighboring autocracy organically"). Blocs are
@@ -929,6 +945,25 @@ export class RegionSim {
   geoDeployed = false;
   /** Day the aerosols were injected; used to phase the cooling. */
   geoDeployDay = -1;
+  // ---- Monetary system (GDD §5.1): central bank, credit cycle, FX ----
+  /** Annual policy rate (1–15%); player-adjustable once central_bank_charter enacted. */
+  policyRate = NEUTRAL_RATE;
+  /** Private sector credit as fraction of monthly GDP; grows at low rates. */
+  privateLeverage = 0.0;
+  /** 0–100 market confidence: below 30 triggers deleveraging crisis. */
+  confidence = 70;
+  /** Annual inflation rate; driven by credit expansion and money printing. */
+  inflationRate = 0.02;
+  /** float = market-driven; peg = fixed rate (drains reserves); print = money creation. */
+  monetaryRegime: MonetaryRegime = 'float';
+  /** Outstanding sovereign bond debt (£). */
+  nationalDebt = 0;
+  /** Derived from debt/GDP, inflation, and stability — updated monthly. */
+  creditRating: CreditRating = 'AA';
+  /** Domestic currency value (1.0 = par; < 1.0 = devalued). */
+  exchangeRate = 1.0;
+  /** Prevents the 1929-analog crash from firing twice. */
+  private crashFired = false;
   private seaRiseAnnounced = false;
   private lastTidalLogDay = -999;
   private droughtAnnounced = false;
@@ -1905,6 +1940,7 @@ export class RegionSim {
     if (this.stateProclaimed) this.updateFactions();
     this.updateDiplomacy();
     this.tickClimate(); // the ledger runs from the first decade (GDD §8.2)
+    if (this.passedLaws.includes('central_bank_charter')) this.tickMonetary();
   }
 
   // ---- local markets & trade (GDD §5.2, first slice) ----
@@ -2036,6 +2072,13 @@ export class RegionSim {
     if (warMob) gdp *= warMob.gdpMult;
     // The neon century (era 8 dystopia branch): the economy roars — at a price paid in grievance
     if (this.eraBranch === 'dystopia') gdp *= 1.08;
+    // Credit cycle (GDD §5.1): boom raises GDP, confidence collapse contracts it
+    if (this.passedLaws.includes('central_bank_charter')) {
+      const boom = Math.max(0, (this.confidence - 50) * 0.002);
+      const bust = this.confidence < 30 ? (30 - this.confidence) * 0.004 : 0;
+      const inflDrag = Math.max(0, (this.inflationRate - 0.08) * 2.0);
+      gdp *= Math.max(0.5, (1 + boom - bust) * (1 - inflDrag));
+    }
     this.gdpLastMonth = gdp;
     // Treasury Secretary bonus: +10% tax collection (GDD §8.7)
     const treasuryMult = this.ministerFor('treasury') ? 1.1 : 1;
@@ -2057,17 +2100,19 @@ export class RegionSim {
     const progressiveTaxBonus = this.passedLaws.includes('progressive_tax') ? this.gdpLastMonth * 0.02 : 0;
     // Protectionism policy: tariff wall adds flat £3/month
     const protectionismBonus = this.policyActive('protectionism') ? 3 : 0;
-    // Central Bank Charter law: treasury reserves earn 0.5% interest/month
-    const bankInterest = this.passedLaws.includes('central_bank_charter') ? this.treasury * 0.005 : 0;
+    // Central Bank Charter: treasury earns interest at the policy rate
+    const bankInterest = this.passedLaws.includes('central_bank_charter') ? this.treasury * (this.policyRate / 12) : 0;
     // Carbon Levy law: the smoke pays 1% of GDP into the treasury
     const carbonLevyBonus = this.passedLaws.includes('carbon_levy') ? this.gdpLastMonth * 0.01 : 0;
     // Trade agreements (GDD §5.4): export earnings per signed rival, scaled to
     // GDP and the rival's commerce appetite. Foreign wars make buyers pay more.
+    // FX boost (GDD §5.1): a devalued currency makes exports cheaper for buyers.
     const warBoom = this.day < this.warBoomUntil ? 1.5 : 1;
+    const fxBoost = this.passedLaws.includes('central_bank_charter') ? 1 / Math.max(0.5, this.exchangeRate) : 1;
     this.exportEarningsLastMonth = this.rivals.reduce(
       (s, rv) =>
         rv.treaties.includes('trade_agreement')
-          ? s + Math.min(12, this.gdpLastMonth * 0.025) * (0.5 + rv.weights.commerce / 10) * warBoom
+          ? s + Math.min(12, this.gdpLastMonth * 0.025) * (0.5 + rv.weights.commerce / 10) * warBoom * fxBoost
           : s,
       0,
     );
@@ -2091,6 +2136,144 @@ export class RegionSim {
         t.strikeUntil = this.day + 15;
         t.grievance -= 40; // the strike itself is the release valve
         this.addLog(`Strike in ${t.name}! Workers down tools over taxes and conditions.`, 'bad');
+      }
+    }
+  }
+
+  // ---- Monetary system (GDD §5.1): central bank, credit cycle, FX ----
+
+  /** Bond coupon = policy rate + credit-rating spread. */
+  get bondRate(): number {
+    return this.policyRate + CREDIT_RATING_SPREADS[this.creditRating];
+  }
+
+  /** Issue sovereign bonds into the treasury. Returns false if the rating or
+   *  debt ceiling blocks issuance. */
+  issueBonds(amount: number): boolean {
+    if (!this.nationProclaimed || !this.passedLaws.includes('central_bank_charter')) return false;
+    if (this.creditRating === 'D') return false;
+    const ceiling = Math.max(1, this.gdpLastMonth * 12) * 2.0;
+    if (this.nationalDebt + amount > ceiling) return false;
+    this.nationalDebt += amount;
+    this.treasury += amount;
+    this.creditRating = this.computeCreditRating();
+    this.addLog(`Issued £${Math.floor(amount)} in bonds at ${(this.bondRate * 100).toFixed(1)}% (${this.creditRating}).`, 'info');
+    return true;
+  }
+
+  setMonetaryRegime(regime: MonetaryRegime): void {
+    if (this.monetaryRegime === regime) return;
+    this.monetaryRegime = regime;
+    const labels: Record<MonetaryRegime, string> = {
+      float: 'floating exchange rate',
+      peg: 'fixed exchange rate peg',
+      print: 'money printing',
+    };
+    this.addLog(`Monetary regime: ${labels[regime]}.`, 'info');
+  }
+
+  private computeCreditRating(): CreditRating {
+    const annualGDP = Math.max(1, this.gdpLastMonth * 12);
+    const debtRatio = this.nationalDebt / annualGDP;
+    let score = 6; // default AA
+    if (debtRatio < 0.30) score = Math.min(score + 1, 7); // low debt → AAA
+    if (debtRatio > 0.60) score--;
+    if (debtRatio > 1.00) score--;
+    if (debtRatio > 1.50) score--;
+    if (debtRatio > 2.00) score--;
+    if (this.inflationRate > 0.08) score--;
+    if (this.inflationRate > 0.15) score--;
+    if (this.confidence < 30) score--;
+    if (this.nationProclaimed && this.legitimacy < 25) score--;
+    const ratings: CreditRating[] = ['D', 'CCC', 'B', 'BB', 'BBB', 'A', 'AA', 'AAA'];
+    return ratings[Math.max(0, Math.min(7, score))];
+  }
+
+  /** Monthly tick of the credit cycle, inflation, FX, and bond service. */
+  private tickMonetary(): void {
+    const gdp = Math.max(1, this.gdpLastMonth);
+
+    // 1. Credit cycle: leverage grows below neutral rate, shrinks above it
+    const dLeverage = (NEUTRAL_RATE - this.policyRate) * 0.5 * (1 - this.privateLeverage / 5.0);
+    this.privateLeverage = Math.max(0, this.privateLeverage + dLeverage);
+
+    // 2. Inflation: credit expansion + money printing
+    const leverageInflation = Math.max(0, dLeverage) * 0.08;
+    const printInflation = this.monetaryRegime === 'print' ? 0.010 : 0;
+    const inflTarget = 0.02 + leverageInflation + printInflation;
+    this.inflationRate += (inflTarget - this.inflationRate) * 0.15;
+    this.inflationRate = Math.max(0, Math.min(0.50, this.inflationRate));
+
+    // 3. Confidence: mean-reverts to 70, falls when debt service or inflation is high
+    const debtService = this.privateLeverage * this.policyRate; // annual fraction
+    const leveragePressure = Math.max(0, debtService - LEVERAGE_FRAGILITY) * 80;
+    const inflPressure = Math.max(0, this.inflationRate - 0.08) * 40;
+    const confTarget = Math.max(5, 70 - leveragePressure - inflPressure);
+    this.confidence += (confTarget - this.confidence) * 0.12;
+    this.confidence = Math.max(0, Math.min(100, this.confidence));
+
+    // 4. Deleveraging bust: confidence crash forces rapid credit contraction
+    if (this.confidence < 30 && this.privateLeverage > 0.5) {
+      this.privateLeverage *= (1 - (0.05 + (30 - this.confidence) * 0.002));
+      if (this.rng.chance(0.2)) {
+        this.addLog('Credit markets freeze — banks call in loans as confidence breaks.', 'bad');
+      }
+    }
+
+    // 5. 1929-analog crash: fires once when leverage is fragile in the historic window
+    if (!this.crashFired && this.year >= 1927 && this.year <= 1936) {
+      if (this.privateLeverage * this.policyRate > 0.12 && this.confidence < 55) {
+        this.crashFired = true;
+        this.confidence = Math.max(5, this.confidence - 40);
+        this.privateLeverage *= 0.65;
+        this.addLog('THE CRASH — credit markets seize. The world has not seen this before. A generation will remember.', 'bad');
+      }
+    }
+
+    // 6. FX dynamics
+    if (this.monetaryRegime === 'peg') {
+      // Peg: hold exchange rate; drain reserves if trade is unfavorable
+      const deficit = Math.max(0, this.totalPop() * 0.025 - this.exportEarningsLastMonth);
+      this.treasury -= deficit * 0.12;
+      if (this.treasury < gdp * 0.25 && this.rng.chance(0.25)) {
+        this.monetaryRegime = 'float';
+        this.confidence = Math.max(5, this.confidence - 25);
+        this.exchangeRate = Math.max(this.exchangeRate * 0.82, 0.30);
+        this.addLog('The currency peg breaks — reserves exhausted. The exchange rate is in freefall.', 'bad');
+      }
+    } else {
+      // Float/print: market-driven exchange rate
+      const tradeUp = this.exportEarningsLastMonth > this.totalPop() * 0.025;
+      const rateDiff = (this.policyRate - NEUTRAL_RATE) * 0.04;
+      const confFlow = (this.confidence - 50) * 0.0003;
+      const printDrag = this.monetaryRegime === 'print' ? -0.012 : 0;
+      this.exchangeRate += (tradeUp ? 0.003 : -0.003) + rateDiff + confFlow + printDrag;
+      this.exchangeRate = Math.max(0.30, Math.min(2.0, this.exchangeRate));
+    }
+
+    // 7. Print regime: money creation boosts treasury
+    if (this.monetaryRegime === 'print') {
+      this.treasury += gdp * 0.018;
+    }
+
+    // 8. Bond debt service
+    if (this.nationalDebt > 0) {
+      const service = this.nationalDebt * this.bondRate / 12;
+      this.treasury -= service;
+      if (this.treasury < 0) {
+        this.nationalDebt -= this.treasury; // unpaid interest compounds into debt
+        this.treasury = 0;
+      }
+    }
+
+    // 9. Update credit rating
+    this.creditRating = this.computeCreditRating();
+
+    // 10. Inflation erodes satisfaction
+    if (this.inflationRate > 0.05) {
+      const drag = (this.inflationRate - 0.05) * 30;
+      for (const t of this.settlements) {
+        t.satisfaction = Math.max(0, t.satisfaction - drag);
       }
     }
   }
@@ -3821,6 +4004,15 @@ export class RegionSim {
       accordCompliance: this.accordCompliance,
       geoDeployed: this.geoDeployed,
       geoDeployDay: this.geoDeployDay,
+      policyRate: this.policyRate,
+      privateLeverage: this.privateLeverage,
+      confidence: this.confidence,
+      inflationRate: this.inflationRate,
+      monetaryRegime: this.monetaryRegime,
+      nationalDebt: this.nationalDebt,
+      creditRating: this.creditRating,
+      exchangeRate: this.exchangeRate,
+      crashFired: this.crashFired,
       nextId: this.nextId,
       nextEventDay: this.nextEventDay,
       townNamePool: this.townNamePool,
@@ -3903,6 +4095,15 @@ export class RegionSim {
     r.accordCompliance = d.accordCompliance ?? {};
     r.geoDeployed = d.geoDeployed ?? false;
     r.geoDeployDay = d.geoDeployDay ?? -1;
+    r.policyRate = d.policyRate ?? NEUTRAL_RATE;
+    r.privateLeverage = d.privateLeverage ?? 0;
+    r.confidence = d.confidence ?? 70;
+    r.inflationRate = d.inflationRate ?? 0.02;
+    r.monetaryRegime = d.monetaryRegime ?? 'float';
+    r.nationalDebt = d.nationalDebt ?? 0;
+    r.creditRating = d.creditRating ?? 'AA';
+    r.exchangeRate = d.exchangeRate ?? 1.0;
+    r.crashFired = d.crashFired ?? false;
     r.nextId = d.nextId;
     r.nextEventDay = d.nextEventDay;
     r.townNamePool = d.townNamePool;
