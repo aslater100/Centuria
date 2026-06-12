@@ -13,13 +13,13 @@ describe('Roads (Milestone 6a)', () => {
   it('pathfinding prefers a road over open ground', () => {
     const sim = new Simulation(42);
     // straight gravel road through the clearing
-    for (let x = 22; x <= 42; x++) sim.world.at(x, 30).road = 'gravel';
-    const path = sim.world.findPath({ x: 22, y: 30 }, { x: 42, y: 30 })!;
+    for (let x = 38; x <= 58; x++) sim.world.at(x, 46).road = 'gravel';
+    const path = sim.world.findPath({ x: 38, y: 46 }, { x: 58, y: 46 })!;
     expect(path).not.toBeNull();
     const onRoad = path.filter((p) => sim.world.at(p.x, p.y).road === 'gravel').length;
     expect(onRoad / path.length).toBeGreaterThan(0.85);
     // a parallel trip one row off still detours onto the road when it pays
-    const detour = sim.world.findPath({ x: 22, y: 33 }, { x: 42, y: 33 })!;
+    const detour = sim.world.findPath({ x: 38, y: 47 }, { x: 58, y: 47 })!;
     expect(detour.some((p) => sim.world.at(p.x, p.y).road === 'gravel')).toBe(true);
   });
 
@@ -49,31 +49,32 @@ describe('Roads (Milestone 6a)', () => {
   it('settlers quarry marked rock into stone', () => {
     const sim = new Simulation(42);
     // place a rock in the clearing and mark it
-    sim.world.at(26, 26).kind = 'rock';
-    sim.markTree(26, 26);
-    expect(sim.world.at(26, 26).marked).toBe(true);
+    sim.world.at(42, 42).kind = 'rock';
+    sim.markTree(42, 42);
+    expect(sim.world.at(42, 42).marked).toBe(true);
     runDays(sim, 3);
     expect(sim.stock.stone).toBeGreaterThan(0);
   });
 
   it('planned roads get built by settlers and speed movement', () => {
     const sim = new Simulation(42);
-    for (let x = 24; x <= 34; x++) sim.planRoad('dirt', x, 28);
+    for (let x = 40; x <= 50; x++) sim.planRoad('dirt', x, 44);
     runDays(sim, 4);
     const built = [];
-    for (let x = 24; x <= 34; x++) if (sim.world.at(x, 28).road === 'dirt') built.push(x);
+    for (let x = 40; x <= 50; x++) if (sim.world.at(x, 44).road === 'dirt') built.push(x);
     expect(built.length).toBeGreaterThan(6);
-    expect(sim.world.speedMult(built[0], 28, false)).toBeCloseTo(1.3);
-    expect(sim.world.speedMult(built[0], 28, true)).toBe(1); // mud in rain
+    expect(sim.world.speedMult(built[0], 44, false)).toBeCloseTo(1.3);
+    expect(sim.world.speedMult(built[0], 44, true)).toBe(1); // mud in rain
   });
 
   it('plank roads consume wood from the stockpile', () => {
     const sim = new Simulation(42);
+    (sim as any).nextEventDay = Number.MAX_SAFE_INTEGER; // suppress random events that add wood
     const woodBefore = sim.stock.wood;
-    for (let x = 24; x <= 31; x++) sim.planRoad('plank', x, 27);
+    for (let x = 40; x <= 47; x++) sim.planRoad('plank', x, 43);
     runDays(sim, 4);
     const built = [];
-    for (let x = 24; x <= 31; x++) if (sim.world.at(x, 27).road === 'plank') built.push(x);
+    for (let x = 40; x <= 47; x++) if (sim.world.at(x, 43).road === 'plank') built.push(x);
     expect(built.length).toBeGreaterThan(4);
     expect(sim.stock.wood).toBeLessThan(woodBefore);
   });

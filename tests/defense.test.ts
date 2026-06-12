@@ -19,30 +19,30 @@ function paintFarm(sim: Simulation, x: number, y: number, w: number, h: number):
 describe('defense & game feel (PR C)', () => {
   it('gates let settlers pass but block raiders and beasts', () => {
     const sim = new Simulation(42);
-    expect(sim.planZone('gate', 32, 26)).toBe(true);
-    expect(sim.world.at(32, 26).gatePlan).toBe(true);
-    expect(sim.planZone('gate', 32, 26)).toBe(true); // paint again toggles off
-    expect(sim.world.at(32, 26).gatePlan).toBe(false);
-    sim.planZone('gate', 32, 26);
+    expect(sim.planZone('gate', 48, 42)).toBe(true);
+    expect(sim.world.at(48, 42).gatePlan).toBe(true);
+    expect(sim.planZone('gate', 48, 42)).toBe(true); // paint again toggles off
+    expect(sim.world.at(48, 42).gatePlan).toBe(false);
+    sim.planZone('gate', 48, 42);
     // simulate finished construction: plan becomes gate
-    const t = sim.world.at(32, 26);
+    const t = sim.world.at(48, 42);
     t.gatePlan = false;
     t.gate = true;
     t.wallHp = TUNING.gateMaxHp;
-    expect(sim.world.passable(32, 26)).toBe(true); // settlers walk through
-    expect(sim.world.passable(32, 26, true)).toBe(false); // hostiles do not
-    const friendly = sim.world.findPath({ x: 32, y: 25 }, { x: 32, y: 27 });
-    expect(friendly?.some((p) => p.x === 32 && p.y === 26)).toBe(true); // straight through the gate
-    const hostile = sim.world.findPath({ x: 32, y: 25 }, { x: 32, y: 27 }, true);
-    expect(hostile === null || !hostile.some((p) => p.x === 32 && p.y === 26)).toBe(true);
+    expect(sim.world.passable(48, 42)).toBe(true); // settlers walk through
+    expect(sim.world.passable(48, 42, true)).toBe(false); // hostiles do not
+    const friendly = sim.world.findPath({ x: 48, y: 41 }, { x: 48, y: 43 });
+    expect(friendly?.some((p) => p.x === 48 && p.y === 42)).toBe(true); // straight through the gate
+    const hostile = sim.world.findPath({ x: 48, y: 41 }, { x: 48, y: 43 }, true);
+    expect(hostile === null || !hostile.some((p) => p.x === 48 && p.y === 42)).toBe(true);
   });
 
   it('builders construct a planned gate from wood', () => {
     const sim = new Simulation(42);
     sim.stock.wood = 100;
-    sim.planZone('gate', 33, 30);
+    sim.planZone('gate', 49, 46);
     runDays(sim, 1);
-    const t = sim.world.at(33, 30);
+    const t = sim.world.at(49, 46);
     expect(t.gate).toBe(true);
     expect(t.gatePlan).toBe(false);
     expect(t.wallHp).toBe(TUNING.gateMaxHp);
@@ -69,13 +69,13 @@ describe('defense & game feel (PR C)', () => {
   it('deer roam from day one and hunters bring real kills to the stockpile', () => {
     const sim = new Simulation(42);
     expect(sim.animals.filter((a) => a.kind === 'deer').length).toBe(TUNING.deerStartCount);
-    sim.placeBuilding('lodge', 38, 32, true);
+    sim.placeBuilding('lodge', 54, 48, true);
     sim.stock.meal = 0;
     sim.stock.grain = 0;
     for (const s of sim.settlers) s.needs.food = 100; // nobody eats the take mid-test
     const deerBefore = sim.animals.filter((a) => a.kind === 'deer').length;
-    runDays(sim, 2);
-    expect(sim.stock.meal).toBeGreaterThanOrEqual(TUNING.huntMealYield);
+    runDays(sim, 1);
+    expect(sim.stock.game_meal).toBeGreaterThanOrEqual(TUNING.huntMealYield);
     expect(sim.animals.filter((a) => a.kind === 'deer').length).toBeLessThan(deerBefore + 2);
   });
 
@@ -91,8 +91,8 @@ describe('defense & game feel (PR C)', () => {
 
   it('save and load round-trips the sim and stays deterministic', () => {
     const a = new Simulation(7);
-    paintFarm(a, 24, 36, 3, 3);
-    a.placeBuilding('kitchen', 38, 32);
+    paintFarm(a, 40, 52, 3, 3);
+    a.placeBuilding('kitchen', 54, 48);
     runDays(a, 3);
     const snapshot = a.serialize();
     const b = Simulation.deserialize(snapshot);

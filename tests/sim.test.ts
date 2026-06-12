@@ -47,10 +47,10 @@ describe('Simulation', () => {
 
   it('farms sown in spring sustain the colony past the wagon provisions', () => {
     const sim = new Simulation(42);
-    paintFarm(sim, 24, 36, 3, 3);
-    paintFarm(sim, 28, 36, 3, 3);
-    paintFarm(sim, 32, 36, 3, 3);
-    sim.placeBuilding('kitchen', 38, 32);
+    paintFarm(sim, 40, 52, 3, 3);
+    paintFarm(sim, 44, 52, 3, 3);
+    paintFarm(sim, 48, 52, 3, 3);
+    sim.placeBuilding('kitchen', 54, 48);
     runDays(sim, TUNING.farmGrowDays + 14);
     expect(sim.world.tiles.some((t) => t.kind === 'soil')).toBe(true);
     expect(sim.gameOver).toBe(false);
@@ -66,7 +66,7 @@ describe('Simulation', () => {
   it('soft population ceiling reduces work efficiency above the cap', () => {
     const sim = new Simulation(42);
     expect(sim.softCapWorkMult()).toBe(1);
-    for (let i = 0; i < 70; i++) sim.spawnSettler(32, 32);
+    for (let i = 0; i < 70; i++) sim.spawnSettler(48, 48);
     expect(sim.settlers.length).toBeGreaterThan(TUNING.softCapPop);
     expect(sim.softCapWorkMult()).toBeLessThan(1);
     expect(sim.softCapMoodPenalty()).toBeGreaterThan(0);
@@ -74,10 +74,10 @@ describe('Simulation', () => {
 
   it('raids arrive, are fought off or leave, and the colony endures', () => {
     const sim = new Simulation(42);
-    paintFarm(sim, 24, 36, 3, 3);
-    paintFarm(sim, 28, 36, 3, 3);
-    paintFarm(sim, 32, 36, 3, 3);
-    sim.placeBuilding('kitchen', 38, 32);
+    paintFarm(sim, 40, 52, 3, 3);
+    paintFarm(sim, 44, 52, 3, 3);
+    paintFarm(sim, 48, 52, 3, 3);
+    sim.placeBuilding('kitchen', 54, 48);
     runDays(sim, 30); // past firstRaidDay window (11–15)
     const raidLogged = sim.log.some((l) => l.text.startsWith('RAID!'));
     expect(raidLogged).toBe(true);
@@ -89,14 +89,14 @@ describe('Simulation', () => {
 
   it('palisades block pathing until destroyed', () => {
     const sim = new Simulation(42);
-    sim.planZone('wall', 32, 26);
-    expect(sim.world.passable(32, 26)).toBe(false); // plans block pathing too
+    sim.planZone('wall', 48, 42);
+    expect(sim.world.passable(48, 42)).toBe(false); // plans block pathing too
     // simulate finished construction: plan becomes wall
-    sim.world.at(32, 26).wallPlan = false;
-    sim.world.at(32, 26).wall = true;
-    expect(sim.world.passable(32, 26)).toBe(false);
-    sim.world.at(32, 26).wall = false; // raiders broke through
-    expect(sim.world.passable(32, 26)).toBe(true);
+    sim.world.at(48, 42).wallPlan = false;
+    sim.world.at(48, 42).wall = true;
+    expect(sim.world.passable(48, 42)).toBe(false);
+    sim.world.at(48, 42).wall = false; // raiders broke through
+    expect(sim.world.passable(48, 42)).toBe(true);
   });
 
   it('a medic treats wounds, clearing infection risk', () => {
@@ -115,11 +115,11 @@ describe('Simulation', () => {
 
   it('settlers recreating together become friends, deepening grief', () => {
     const sim = new Simulation(42);
-    paintFarm(sim, 24, 36, 3, 3);
-    paintFarm(sim, 28, 36, 3, 3);
-    paintFarm(sim, 32, 36, 3, 3);
-    sim.placeBuilding('kitchen', 38, 32);
-    sim.placeBuilding('hall', 24, 28);
+    paintFarm(sim, 40, 52, 3, 3);
+    paintFarm(sim, 44, 52, 3, 3);
+    paintFarm(sim, 48, 52, 3, 3);
+    sim.placeBuilding('kitchen', 54, 48);
+    sim.placeBuilding('hall', 40, 44);
     runDays(sim, 25);
     const someFriendship = sim.settlers.some((s) => sim.friendsOf(s).length > 0);
     expect(someFriendship).toBe(true);
@@ -162,7 +162,7 @@ describe('Simulation', () => {
 
   it('the dead grieve the living until buried in a burial ground', () => {
     const sim = new Simulation(42);
-    sim.placeBuilding('graveyard', 24, 28, true);
+    sim.placeBuilding('graveyard', 40, 44, true);
     const victim = sim.settlers[0];
     victim.needs.food = 0;
     victim.health = 0.01;
@@ -193,7 +193,7 @@ describe('Simulation', () => {
       for (const t of sim.world.tiles) if (t.buildingId === b.id) t.buildingId = null;
     }
     sim.buildings = sim.buildings.filter((o) => o.defId !== 'house');
-    sim.placeBuilding('hearth', 31, 33, true);
+    sim.placeBuilding('hearth', 47, 49, true);
     sim.coldSnapUntil = Number.MAX_SAFE_INTEGER;
     runDays(sim, 3);
     expect(sim.settlers.length).toBeGreaterThanOrEqual(12); // nobody froze (immigrants may arrive)
@@ -201,7 +201,7 @@ describe('Simulation', () => {
 
   it('the clothes maker outfits threadbare settlers against the cold', () => {
     const sim = new Simulation(42);
-    sim.placeBuilding('tailor', 24, 30, true);
+    sim.placeBuilding('tailor', 40, 46, true);
     sim.stock.grain = 200;
     runDays(sim, 4);
     expect(sim.settlers.some((s) => s.clothedUntil > sim.minute)).toBe(true);
@@ -209,16 +209,18 @@ describe('Simulation', () => {
 
   it('colony survives 60 days with basic infrastructure on default seeds', () => {
     const sim = new Simulation(1001);
-    paintFarm(sim, 24, 36, 3, 3);
-    paintFarm(sim, 28, 36, 3, 3);
-    paintFarm(sim, 24, 40, 3, 3);
-    paintFarm(sim, 28, 40, 3, 3);
-    sim.placeBuilding('kitchen', 38, 32);
-    sim.placeBuilding('house', 23, 28);
-    sim.placeBuilding('house', 40, 28);
-    for (let y = 0; y < 64; y++) {
-      for (let x = 0; x < 64; x++) {
-        if (sim.world.at(x, y).kind === 'tree') sim.markTree(x, y);
+    paintFarm(sim, 40, 52, 3, 3);
+    paintFarm(sim, 44, 52, 3, 3);
+    paintFarm(sim, 40, 56, 3, 3);
+    paintFarm(sim, 44, 56, 3, 3);
+    sim.placeBuilding('kitchen', 54, 48);
+    sim.placeBuilding('house', 39, 44);
+    sim.placeBuilding('house', 56, 44);
+    // Mark only trees within foraging radius of the colony so settlers don't wander far
+    const cx = 48, cy = 48;
+    for (let y = cy - 18; y < cy + 18; y++) {
+      for (let x = cx - 18; x < cx + 18; x++) {
+        if (x >= 0 && y >= 0 && sim.world.at(x, y).kind === 'tree') sim.markTree(x, y);
       }
     }
     runDays(sim, 60);
@@ -230,7 +232,7 @@ describe('Simulation', () => {
 describe('Town-tier event variety', () => {
   it('evtBumperHarvest adds grain (more with farm tiles)', () => {
     const sim = new Simulation(42);
-    sim.planZone('farm', 28, 36);
+    sim.planZone('farm', 44, 52);
     const before = sim.stock.grain;
     (sim as any).evtBumperHarvest();
     expect(sim.stock.grain).toBeGreaterThan(before);

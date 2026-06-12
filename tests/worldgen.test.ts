@@ -92,9 +92,9 @@ describe('Terrain → town integration', () => {
   it('the wagon clearing is always buildable', () => {
     for (const seed of [1, 42, 777, 31337]) {
       const sim = new Simulation(seed);
-      expect(sim.planZone('farm', 24, 36)).toBe(true);
-      expect(sim.canPlace('kitchen', 38, 32)).toBe(true);
-      expect(sim.canPlace('house', 23, 28)).toBe(true);
+      expect(sim.planZone('farm', 40, 52)).toBe(true);
+      expect(sim.canPlace('kitchen', 54, 48)).toBe(true);
+      expect(sim.canPlace('house', 39, 44)).toBe(true);
     }
   });
 });

@@ -7,7 +7,7 @@ const ticksPerDay = MINUTES_PER_DAY / REGION_MINUTES_PER_TICK;
 
 function makeRegion(): RegionSim {
   const sim = new Simulation(42);
-  while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+  while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
   sim.stock.wood = 200;
   sim.stock.meal = 200;
   return RegionSim.fromTown(sim, 8, 80, 80);
@@ -19,7 +19,7 @@ function runDays(r: RegionSim, days: number): void {
 
 describe('Tech tree: node definitions', () => {
   it('has the expected number of nodes', () => {
-    expect(TECH_TREE.length).toBe(20);
+    expect(TECH_TREE.length).toBe(21);
   });
 
   it('start nodes have zero cost and no prereqs', () => {
@@ -274,6 +274,8 @@ describe('Tech tree: gameplay effects', () => {
     r.stateName = 'Test State';
     r.govLean = 'council';
     r.taxRate = 0.1;
+    // Boost workers so GDP-driven revenue > admin overhead (2 towns × £5 = £10/month)
+    for (const t of r.settlements) t.cohorts.bands[2] += 100;
     r.gdpLastMonth = 100;
     r.treasury = 0;
 
@@ -283,6 +285,7 @@ describe('Tech tree: gameplay effects', () => {
     r2.stateName = 'Test State';
     r2.govLean = 'council';
     r2.taxRate = 0.1;
+    for (const t of r2.settlements) t.cohorts.bands[2] += 100;
     r2.gdpLastMonth = 100;
     r2.treasury = 0;
 
@@ -298,7 +301,7 @@ describe('Tech tree: gameplay effects', () => {
 describe('Tech tree: save/load round-trip', () => {
   it('research state survives serialize/deserialize', () => {
     const sim = new Simulation(42);
-    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
@@ -316,7 +319,7 @@ describe('Tech tree: save/load round-trip', () => {
 
   it('old saves without research fields load with defaults', () => {
     const sim = new Simulation(42);
-    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);

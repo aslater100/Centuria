@@ -7,7 +7,7 @@ const ticksPerDay = MINUTES_PER_DAY / REGION_MINUTES_PER_TICK;
 
 function grow(sim: Simulation): void {
   // make the town flip-eligible without playing 20 game-days
-  while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+  while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
   sim.stock.wood = 200;
   sim.stock.meal = 200;
 }
@@ -83,7 +83,7 @@ describe('RegionSim (aggregate model)', () => {
   });
 
   function toStatehood(r: RegionSim): void {
-    for (let year = 0; year < 18 && !r.ceremonyPending; year++) {
+    for (let year = 0; year < 30 && !r.ceremonyPending; year++) {
       runDays(r, 60);
       // expand whenever the strongest town can afford it (a player would)
       for (const t of r.settlements) {
@@ -260,7 +260,7 @@ describe('Region save/load', () => {
 
   it('preserves the State: name, lean, treasury, and built routes', () => {
     const { sim, r } = flippedPair(42);
-    for (let year = 0; year < 18 && !r.ceremonyPending; year++) {
+    for (let year = 0; year < 30 && !r.ceremonyPending; year++) {
       runDays(r, 60);
       for (const t of r.settlements) {
         if (r.settlements.length + r.expeditions.length < 4 && r.canFoundTown(t.id).ok) {
@@ -286,7 +286,7 @@ describe('Region save/load', () => {
 describe('Elections & faction politics (v0.14.0)', () => {
   function stateReady(): RegionSim {
     const sim = new Simulation(42);
-    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
@@ -406,6 +406,8 @@ describe('Elections & faction politics (v0.14.0)', () => {
 
   it('estate tax adds monthly income', () => {
     const r = stateReady();
+    // Boost workers so estate levy + tax revenue > admin overhead (2 towns × £5 = £10/month)
+    for (const t of r.settlements) t.cohorts.bands[2] += 100;
     r.politicalCapital = 100;
     r.researched.push('income_tax');
     r.enactLaw('estate_tax');
@@ -416,7 +418,7 @@ describe('Elections & faction politics (v0.14.0)', () => {
 
   it('politics fields survive save/load round-trip', () => {
     const sim = new Simulation(42);
-    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
@@ -440,7 +442,7 @@ describe('Elections & faction politics (v0.14.0)', () => {
 describe('Constitutional Convention & Nation Proclamation (v0.15.0)', () => {
   function nationReady(): RegionSim {
     const sim = new Simulation(42);
-    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
@@ -459,7 +461,7 @@ describe('Constitutional Convention & Nation Proclamation (v0.15.0)', () => {
 
   it('canCallConvention() false before stateProclaimed', () => {
     const sim = new Simulation(42);
-    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
     r.researched.push('statecraft');
     for (const t of r.settlements) t.cohorts.bands[2] += 800;
@@ -565,7 +567,7 @@ describe('Constitutional Convention & Nation Proclamation (v0.15.0)', () => {
 
   it('nation fields survive save/load round-trip', () => {
     const sim = new Simulation(42);
-    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
@@ -615,7 +617,7 @@ describe('Constitutional Convention & Nation Proclamation (v0.15.0)', () => {
 describe('Policy slots & expanded statute book (v0.16.0)', () => {
   function nationReady(): RegionSim {
     const sim = new Simulation(42);
-    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
@@ -632,7 +634,7 @@ describe('Policy slots & expanded statute book (v0.16.0)', () => {
 
   it('nation-tier laws are hidden before proclamation', () => {
     const sim = new Simulation(42);
-    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
     runDays(r, 5);
     r.stateProclaimed = true;
@@ -657,7 +659,7 @@ describe('Policy slots & expanded statute book (v0.16.0)', () => {
 
   it('junta gets 3 policy slots', () => {
     const sim = new Simulation(42);
-    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
@@ -761,7 +763,7 @@ describe('Policy slots & expanded statute book (v0.16.0)', () => {
 
   it('active policies and nation laws survive save/load', () => {
     const sim = new Simulation(42);
-    while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+    while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = nationReady();

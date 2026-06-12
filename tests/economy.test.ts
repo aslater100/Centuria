@@ -11,8 +11,8 @@ function runDays(sim: Simulation, days: number): void {
 describe('economy buildings (PR B2)', () => {
   it('a bakery cooks grain into meals, preferred over the cookhouse', () => {
     const sim = new Simulation(42);
-    const bakery = sim.placeBuilding('bakery', 38, 32, true)!;
-    sim.placeBuilding('kitchen', 24, 30, true);
+    const bakery = sim.placeBuilding('bakery', 54, 48, true)!;
+    sim.placeBuilding('kitchen', 40, 46, true);
     sim.stock.grain = 200;
     sim.stock.meal = 0;
     runDays(sim, 1);
@@ -25,18 +25,18 @@ describe('economy buildings (PR B2)', () => {
 
   it('a hunting lodge brings in meals without grain', () => {
     const sim = new Simulation(42);
-    sim.placeBuilding('lodge', 38, 32, true);
+    sim.placeBuilding('lodge', 54, 48, true);
     sim.stock.meal = 0;
     sim.stock.grain = 0;
     for (const s of sim.settlers) s.needs.food = 100; // nobody eats the take mid-test
     runDays(sim, 1);
-    expect(sim.stock.meal).toBeGreaterThanOrEqual(TUNING.huntMealYield);
+    expect(sim.stock.game_meal).toBeGreaterThanOrEqual(TUNING.huntMealYield);
   });
 
   it('a market barters at fixed rates, and only once built', () => {
     const sim = new Simulation(42);
     expect(sim.trade('wood', 'grain')).toBe(false); // no market yet
-    sim.placeBuilding('market', 37, 31, true);
+    sim.placeBuilding('market', 53, 47, true);
     const wood = sim.stock.wood;
     const grain = sim.stock.grain;
     expect(sim.trade('wood', 'grain')).toBe(true);
@@ -49,7 +49,7 @@ describe('economy buildings (PR B2)', () => {
 
   it('a forester plants saplings nearby that mature into trees', () => {
     const sim = new Simulation(42);
-    sim.placeBuilding('forester', 38, 32, true);
+    sim.placeBuilding('forester', 54, 48, true);
     runDays(sim, 2);
     const saplings = sim.world.tiles.filter((t) => t.sapling);
     expect(saplings.length).toBeGreaterThan(0);
@@ -65,7 +65,7 @@ describe('economy buildings (PR B2)', () => {
     runDays(sim, 1);
     expect(sim.stock.meal).toBeLessThanOrEqual(TUNING.mealCapBase);
     expect(sim.log.some((l) => l.text.includes('spoiled'))).toBe(true);
-    sim.placeBuilding('granary', 38, 32, true);
+    sim.placeBuilding('granary', 54, 48, true);
     expect(sim.mealCap()).toBe(TUNING.mealCapBase + TUNING.mealCapPerGranary);
     sim.stock.meal = sim.mealCap() + 100;
     runDays(sim, 1);
@@ -75,7 +75,7 @@ describe('economy buildings (PR B2)', () => {
 
   it('the badly hurt take a clinic cot and heal at double rate', () => {
     const sim = new Simulation(42);
-    const clinic = sim.placeBuilding('clinic', 38, 31, true)!;
+    const clinic = sim.placeBuilding('clinic', 54, 47, true)!;
     sim.stock.meal = 500;
     const hurt = sim.settlers[0];
     hurt.health = 30; // below bedRestThreshold

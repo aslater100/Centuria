@@ -2823,6 +2823,7 @@ export class Simulation {
         t.sapling = false;
         t.growth = 0;
         t.kind = 'tree';
+        this.world.invalidatePathCache();
       }
     }
   }
@@ -2840,7 +2841,7 @@ export class Simulation {
    * so a loaded game continues exactly where it left off.
    */
   serialize(): string {
-    return JSON.stringify({
+    const snapshot = JSON.stringify({
       v: 3,
       seed: this.seed,
       rng: this.rng.getState(),
@@ -2879,6 +2880,10 @@ export class Simulation {
       pendingChoice: this.pendingChoice,
       mayorNotableId: this.mayorNotableId,
     });
+    // Path cache is not serialized; clear it so the original sim (a) and
+    // the loaded sim (b) both recompute paths from scratch, staying in sync.
+    this.world.invalidatePathCache();
+    return snapshot;
   }
 
   static deserialize(json: string): Simulation {
