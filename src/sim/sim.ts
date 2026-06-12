@@ -1904,11 +1904,13 @@ export class Simulation {
         push({ kind: 'forge', x: a.x, y: a.y, buildingId: a.id, workLeft: TUNING.forgeWorkPerWeapon, label: 'forge weapon' }, 'forge');
       }
     }
-    // Weave clothes while anyone goes threadbare — but never eat the seed grain.
+    // Weave clothes while anyone goes threadbare — spin flax if we farm it,
+    // otherwise spare grain (but never eat the seed grain).
     const tailorShop = this.builtOf('craft')[0];
     const threadbare = this.settlers.filter((p) => p.clothedUntil <= this.minute).length;
-    if (tailorShop && this.stock.clothes < threadbare &&
-        this.stock.grain >= TUNING.clothesGrainCost + this.settlers.length) {
+    const canSpinFlax = this.hasTech('textile_farming') && this.stock.flax >= 1;
+    const canSpinGrain = this.stock.grain >= TUNING.clothesGrainCost + this.settlers.length;
+    if (tailorShop && this.stock.clothes < threadbare && (canSpinFlax || canSpinGrain)) {
       push({ kind: 'craft', x: tailorShop.x, y: tailorShop.y, buildingId: tailorShop.id, workLeft: TUNING.craftWorkPerClothes, label: 'sew clothes' }, 'craft');
     }
     // Lay the dead to rest — needs a burial ground with a free plot; until

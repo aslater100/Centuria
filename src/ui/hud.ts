@@ -131,8 +131,8 @@ const BUILD_CATEGORIES: BuildCategory[] = [
       { kind: 'zone', id: 'farm', label: 'Farm [F]', cost: 'free', hotkey: 'f', desc: 'Paint farmable soil tiles.' },
       { kind: 'zone', id: 'stockpile', label: 'Stockpile [T]', cost: 'free', hotkey: 't', desc: 'Settlers haul resources here.' },
       { kind: 'zone', id: 'flax', label: 'Flax [Z]', cost: 'free', hotkey: 'z', desc: 'Paint flax tiles — harvest yields 3 flax. Replaces grain for clothes. Needs Textile Farming tech.' },
-      { kind: 'zone', id: 'pasture', label: 'Pasture [P]', cost: 'free', hotkey: 'p', desc: 'Grazing land for livestock near an Animal Pen. Needs Animal Husbandry tech.' },
-      { kind: 'zone', id: 'mine', label: 'Mine Zone [M]', cost: 'free', hotkey: 'm', desc: 'Paint on rock tiles — settlers extract clay and ore. Needs Prospecting tech.' },
+      { kind: 'zone', id: 'pasture', label: 'Pasture [B]', cost: 'free', hotkey: 'b', desc: 'Grazing land for livestock near an Animal Pen. Needs Animal Husbandry tech.' },
+      { kind: 'zone', id: 'mine', label: 'Mine Zone [N]', cost: 'free', hotkey: 'n', desc: 'Paint on rock tiles — settlers extract clay and ore. Needs Prospecting tech.' },
       { kind: 'tool', id: 'chop', label: 'Chop [C]', hotkey: 'c', desc: 'Mark trees and rock for harvesting.' },
     ],
   },
@@ -410,7 +410,7 @@ export class Hud {
     const zoneMap: Record<string, PaintKind> = {
       f: 'farm', t: 'stockpile', l: 'wall', g: 'gate', x: 'trap',
       '4': 'dirt', '5': 'plank', '6': 'gravel', '7': 'bridge',
-      z: 'flax', p: 'pasture', m: 'mine',
+      z: 'flax', b: 'pasture', n: 'mine',
     };
     if (zoneMap[k]) {
       this.cam.placingZone = this.cam.placingZone === zoneMap[k] ? null : zoneMap[k];
@@ -436,7 +436,8 @@ export class Hud {
     }
     if (k === 'k') { this.techPanel.toggle(); return true; }
     if (k === 'o') { this.cam.overlay = this.cam.overlay === 'traffic' ? 'none' : 'traffic'; return true; }
-    if (k === 'escape') { this.toggleMenu(); return true; }
+    if (k === 'p') { this.togglePriorities(); return true; }
+    if (k === 'm') { this.toggleMenu(); return true; }
     return false;
   }
 
