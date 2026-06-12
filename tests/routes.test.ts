@@ -390,6 +390,11 @@ describe('The charter rides the network (GDD §2.2)', () => {
       path: [{ x: 0, y: 0 }, { x: 1, y: 0 }], terrainCost: 2, freight: 0,
     });
     expect(r.connectedToAll()).toBe(true);
+    // Set up charter requirements: treasury and garrison
+    r.treasury = 50000;
+    for (const t of r.settlements) {
+      t.garrisonStrength = 5;
+    }
     expect(r.charterEligible()).toBe(true);
   });
 });
