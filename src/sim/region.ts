@@ -8,7 +8,9 @@
  */
 import { Rng } from './rng';
 import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, formatCurrency, setCurrencySymbol } from './defs';
-import type { CurrencySymbol } from './defs';
+import type { CurrencySymbol, RegionDesign, NationDesign } from './defs';
+import { computePenalty, transitionEfficiency, ANNOUNCE_LEAD_DAYS } from './currency';
+import type { CurrencyChangeCause, CurrencyAnnouncement, CurrencyTransition } from './currency';
 import type { Simulation, Settler, LogEntry } from './sim';
 import { RegionMap } from './worldgen';
 import type { TownSite } from './worldgen';
@@ -1174,6 +1176,16 @@ export class RegionSim {
   loans: Loan[] = [];
   currencySymbol: CurrencySymbol = '$';
   marketDisruptionEnd = 0;
+  /** A telegraphed future switch; softens the shock if 6+ months old. */
+  currencyAnnouncement: CurrencyAnnouncement | null = null;
+  /** In-progress currency transition; output recovers linearly to endDay. */
+  currencyTransition: CurrencyTransition | null = null;
+  // ---- Design-screen choices (region flip / nation flip) ----
+  expansionSpeed: 'cautious' | 'steady' | 'aggressive' = 'steady';
+  tradeOpenness: 'protectionist' | 'balanced' | 'free-trade' = 'balanced';
+  economicSystem: 'laissez-faire' | 'mixed' | 'planned' = 'mixed';
+  militaryDoctrine: 'defensive' | 'professional' | 'expansionist' = 'professional';
+  allianceStance: 'isolationist' | 'opportunist' | 'coalition-builder' = 'opportunist';
   // ---- Phase 0: Regional Gameplay Expansion ----
   /** 100×100 grid tracking tile visibility: fogged/explored/scouted */
   explorationMap: TileVisibility[][] = [];
@@ -2764,10 +2776,13 @@ export class RegionSim {
       const perWorker = SECTOR_BASE_OUTPUT[id] * this.sectorProductivity(id) * landTerm * (1 + this.buildingBonus(t, id));
       // Phase 4: active event modifiers (disasters reduce, windfalls boost)
       const eventMult = this.eventOutputMult(t, id);
-      s.output = workers * s.share * perWorker * strike * loyalty * eventMult * svcMult * taxMult;
+      // Currency transition dents output until markets stabilize; the economic
+      // system (design choice at nation flip) sets the steady-state multiplier.
+      const fxMult = this.currencyEfficiency() * this.economyOutputMult();
+      s.output = workers * s.share * perWorker * strike * loyalty * eventMult * svcMult * taxMult * fxMult;
       // Phase 5: wage policy adjusts the migration signal without affecting output
       const wagePolicyMult = t.policies.wagePolicy === 'low' ? 0.85 : t.policies.wagePolicy === 'high' ? 1.20 : 1.0;
-      s.wage = perWorker * strike * loyalty * eventMult * svcMult * wagePolicyMult;
+      s.wage = perWorker * strike * loyalty * eventMult * svcMult * wagePolicyMult * fxMult;
     }
   }
 
@@ -3063,7 +3078,9 @@ export class RegionSim {
     const relief = this.reliefLine(t);
     // A Defensive Pact (GDD §5.4) puts allied arms behind the militia
     const pact = this.rivals.some((rv) => rv.treaties.includes('defensive_pact'));
-    const militia = this.workersOf(t) * 0.12 * captain * funded * (relief ? 1.25 : 1) * (pact ? 1.15 : 1);
+    // Defensive doctrine (nation design): the homeland is where the drills pay
+    const doctrine = this.militaryDoctrine === 'defensive' ? 1.2 : 1;
+    const militia = this.workersOf(t) * 0.12 * captain * funded * (relief ? 1.25 : 1) * (pact ? 1.15 : 1) * doctrine;
     t.lastRaidDay = this.day;
     const foreignArms = sponsored ? ` The dead carried rifles of foreign make — ${sponsor!.name}'s hand, deniably.` : '';
     if (militia >= strength) {
@@ -3202,9 +3219,11 @@ export class RegionSim {
     if (this.settlements.length + this.expeditions.length >= MAX_SETTLEMENTS) {
       return { ok: false, reason: 'region fully settled (see map-scale design)' };
     }
-    if (this.popOf(t) < 24) return { ok: false, reason: `needs 24 pop (has ${Math.floor(this.popOf(t))})` };
-    if (t.food < 80) return { ok: false, reason: `needs 80 food (has ${Math.floor(t.food)})` };
-    if (t.wood < 80) return { ok: false, reason: `needs 80 wood (has ${Math.floor(t.wood)})` };
+    const m = this.expansionCostMult();
+    const needPop = Math.round(24 * m), needFood = Math.round(80 * m), needWood = Math.round(80 * m);
+    if (this.popOf(t) < needPop) return { ok: false, reason: `needs ${needPop} pop (has ${Math.floor(this.popOf(t))})` };
+    if (t.food < needFood) return { ok: false, reason: `needs ${needFood} food (has ${Math.floor(t.food)})` };
+    if (t.wood < needWood) return { ok: false, reason: `needs ${needWood} wood (has ${Math.floor(t.wood)})` };
     const fromCell = this.map.coordToCell(t.x, t.y);
     const claimed = this.settlements
       .map((s) => this.map.coordToCell(s.x, s.y))
@@ -3219,10 +3238,12 @@ export class RegionSim {
     const check = this.canFoundTown(fromId);
     const t = this.settlement(fromId);
     if (!check.ok || !t) return false;
-    if (!this.launchExpedition(t, 8, 80, 80)) return false;
+    const m = this.expansionCostMult();
+    const food = Math.round(80 * m), wood = Math.round(80 * m);
+    if (!this.launchExpedition(t, 8, food, wood)) return false;
     this.removePop(t, 8);
-    t.food -= 80;
-    t.wood -= 80;
+    t.food -= food;
+    t.wood -= wood;
     const e = this.expeditions[this.expeditions.length - 1];
     const days = e.arrivesDay - this.day;
     this.addLog(
@@ -3772,6 +3793,10 @@ export class RegionSim {
     if (kind === 'non_aggression') ask -= 10 - rv.weights.risk; // the cautious want fences
     if (kind === 'defensive_pact') ask -= rv.weights.honor * 1.5;
     if (kind === 'climate_accord') ask += rv.weights.expansion * 2 - rv.weights.commerce * 1.5;
+    // Alliance stance (nation design): a coalition-builder's word is easier
+    // to take; an isolationist's signature is worth less to everyone.
+    if (this.allianceStance === 'coalition-builder') ask -= 5;
+    else if (this.allianceStance === 'isolationist') ask += 5;
     return Math.round(ask);
   }
 
@@ -3965,7 +3990,9 @@ export class RegionSim {
     if (this.day - rv.lastEnvoyDay < ENVOY_COOLDOWN_DAYS) return false;
     this.treasury -= ENVOY_COST;
     rv.lastEnvoyDay = this.day;
-    const gain = 4 + Math.round(rv.weights.commerce * 0.3);
+    // Alliance stance (nation design): coalition-builders' letters land warmer
+    const stanceBonus = this.allianceStance === 'coalition-builder' ? 2 : this.allianceStance === 'isolationist' ? -2 : 0;
+    const gain = Math.max(1, 4 + Math.round(rv.weights.commerce * 0.3) + stanceBonus);
     rv.relations = this.clampRel(rv.relations + gain);
     this.addLog(`An envoy rides for ${rv.name} with letters and samples of the valley's grain — relations warm (+${gain}).`, 'good');
     return true;
@@ -4323,7 +4350,10 @@ export class RegionSim {
       (1 + 0.25 * this.militiaLevel + (this.policyActive('standing_army') ? 0.5 : 0)) *
       (this.ministerFor('defence') ? 1.2 : 1) *
       (this.passedLaws.includes('military_reform') ? 1.2 : 1) *
-      (this.govType === 'junta' ? 1.15 : 1);
+      (this.govType === 'junta' ? 1.15 : 1) *
+      // Doctrine (nation design): expansionists drill for the offensive,
+      // defensive doctrines trade punch for cheaper, homeland-bound garrisons.
+      (this.militaryDoctrine === 'expansionist' ? 1.15 : this.militaryDoctrine === 'defensive' ? 0.9 : 1);
     const mob = this.playerWar ? MOBILIZATION_DEFS[this.playerWar.mobilization].power : 1;
     // Defensive pacts put allied arms on your front (GDD §5.4); a called
     // co-belligerent commits its army, not just its sympathy (GDD §7.3)
@@ -4798,6 +4828,13 @@ export class RegionSim {
       loans: this.loans,
       currencySymbol: this.currencySymbol,
       marketDisruptionEnd: this.marketDisruptionEnd,
+      currencyAnnouncement: this.currencyAnnouncement,
+      currencyTransition: this.currencyTransition,
+      expansionSpeed: this.expansionSpeed,
+      tradeOpenness: this.tradeOpenness,
+      economicSystem: this.economicSystem,
+      militaryDoctrine: this.militaryDoctrine,
+      allianceStance: this.allianceStance,
     });
   }
 
@@ -4905,6 +4942,13 @@ export class RegionSim {
     r.loans = d.loans ?? [];
     r.currencySymbol = d.currencySymbol ?? '$';
     r.marketDisruptionEnd = d.marketDisruptionEnd ?? 0;
+    r.currencyAnnouncement = d.currencyAnnouncement ?? null;
+    r.currencyTransition = d.currencyTransition ?? null;
+    r.expansionSpeed = d.expansionSpeed ?? 'steady';
+    r.tradeOpenness = d.tradeOpenness ?? 'balanced';
+    r.economicSystem = d.economicSystem ?? 'mixed';
+    r.militaryDoctrine = d.militaryDoctrine ?? 'professional';
+    r.allianceStance = d.allianceStance ?? 'opportunist';
     r.nextId = d.nextId;
     r.nextEventDay = d.nextEventDay;
     r.townNamePool = d.townNamePool;
@@ -5100,19 +5144,102 @@ export class RegionSim {
     return (totalWageMonth / totalWorkers) / 30;
   }
 
-  changeCurrency(newSymbol: CurrencySymbol): { ok: boolean; reason: string } {
+  /**
+   * Announce a future currency switch. Telegraphing the change 6+ months
+   * ahead reads as deliberate policy and softens the eventual shock by 25%.
+   */
+  announceCurrencyChange(newSymbol: CurrencySymbol): { ok: boolean; reason: string } {
+    if (newSymbol === this.currencySymbol) return { ok: false, reason: 'Already on that standard' };
+    this.currencyAnnouncement = { newSymbol, announcedDay: this.day };
+    this.addLog(
+      `The treasury signals an intent to adopt the ${newSymbol} standard. Markets begin pricing it in.`,
+      'info',
+    );
+    return { ok: true, reason: '' };
+  }
+
+  /**
+   * Switch currency standards. The penalty depends on WHY (GDD §5.1 ext):
+   * crisis-forced switches are forgiven, political ones tolerated, arbitrary
+   * ones punished. Advance announcement and deep reserves both soften it.
+   */
+  changeCurrency(newSymbol: CurrencySymbol, cause: CurrencyChangeCause = 'strategic'): { ok: boolean; reason: string } {
     if (newSymbol === this.currencySymbol) return { ok: false, reason: 'No change' };
 
-    // Apply penalty: 20% inflation + 10% treasury loss + market disruption flag
-    this.addLog(`Currency shift to ${newSymbol}: transaction costs (10% treasury)`, 'bad');
-    this.treasury = Math.floor(this.treasury * 0.9);
+    const announced =
+      this.currencyAnnouncement?.newSymbol === newSymbol &&
+      this.day - this.currencyAnnouncement.announcedDay >= ANNOUNCE_LEAD_DAYS;
+    const reserveRatio = this.gdpLastMonth > 0 ? this.treasury / this.gdpLastMonth : 0;
+    const penalty = computePenalty(cause, announced, reserveRatio);
+
+    const flight = Math.floor(this.treasury * penalty.capitalFlightFrac);
+    this.treasury -= flight;
     this.currencySymbol = newSymbol;
     setCurrencySymbol(newSymbol);
+    this.currencyAnnouncement = null;
+    this.currencyTransition = {
+      newSymbol,
+      cause,
+      startDay: this.day,
+      endDay: this.day + penalty.recoveryDays,
+      startEfficiencyMult: penalty.efficiencyMult,
+    };
+    this.marketDisruptionEnd = this.day + penalty.recoveryDays;
 
-    // Mark market as "disrupted" for ~90 days (affects prices)
-    this.marketDisruptionEnd = this.day + 90;
-
+    this.addLog(
+      `The ${newSymbol} standard is adopted. ${penalty.narrative} ` +
+        `Capital flight: ` + formatCurrency(flight) + `. ` +
+        `Markets expect ~${Math.round(penalty.recoveryDays / 30)} months to stabilize.` +
+        (announced ? ' The advance notice cushioned the blow.' : ''),
+      cause === 'crisis' ? 'info' : 'bad',
+    );
     return { ok: true, reason: '' };
+  }
+
+  /** Output multiplier from an in-progress currency transition (1 = stable). */
+  currencyEfficiency(): number {
+    return transitionEfficiency(this.currencyTransition, this.day);
+  }
+
+  /** The region-flip design screen: doctrine for the new tier. */
+  applyRegionDesign(d: RegionDesign): void {
+    this.expansionSpeed = d.expansionSpeed;
+    this.tradeOpenness = d.tradeOpenness;
+    this.taxRate = Math.min(0.3, Math.max(0.05, d.taxRate));
+    this.servicesLevel = d.servicesLevel;
+    this.tradeLevyRate = d.tradeOpenness === 'protectionist' ? 0.08 : d.tradeOpenness === 'free-trade' ? 0.03 : 0.05;
+    this.addLog(
+      `The region sets its course: ${d.expansionSpeed} expansion, ${d.tradeOpenness} trade, ` +
+        `${Math.round(d.taxRate * 100)}% levy.`,
+      'info',
+    );
+  }
+
+  /** The nation-flip design screen: national identity, and the one sanctioned
+   *  chance to re-pick the currency (a political-cause transition, not free). */
+  applyNationDesign(d: NationDesign): void {
+    this.economicSystem = d.economicSystem;
+    this.militaryDoctrine = d.militaryDoctrine;
+    this.allianceStance = d.allianceStance;
+    this.addLog(
+      `The constitution enshrines a ${d.economicSystem} economy, a ${d.militaryDoctrine} military, ` +
+        `and a ${d.allianceStance.replace('-', ' ')} foreign policy.`,
+      'info',
+    );
+    if (d.currencySymbol && d.currencySymbol !== this.currencySymbol) {
+      this.changeCurrency(d.currencySymbol, 'political');
+    }
+  }
+
+  /** Expedition requirements scale with the expansion doctrine. */
+  expansionCostMult(): number {
+    return this.expansionSpeed === 'aggressive' ? 0.75 : this.expansionSpeed === 'cautious' ? 1.25 : 1;
+  }
+
+  /** Steady-state output multiplier from the economic system. Markets squeeze
+   *  more from each hand; planning trades a slice of output for stability. */
+  economyOutputMult(): number {
+    return this.economicSystem === 'laissez-faire' ? 1.10 : this.economicSystem === 'planned' ? 0.92 : 1;
   }
 
   /**

@@ -8,9 +8,9 @@ import type { DayWeather } from './weather';
 import {
   BUILDING_DEFS, buildingDef, traitDef, FIRST_NAMES, LAST_NAMES, TRAIT_DEFS,
   MINUTES_PER_TICK, MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR,
-  TUNING, WORK_KINDS, TOWN_TECH_DEFS, setCurrencySymbol, formatCurrency,
+  TUNING, WORK_KINDS, TOWN_TECH_DEFS, setCurrencySymbol, formatCurrency, DIFFICULTY_PRESETS,
 } from './defs';
-import type { ResourceKind, WorkKind, TownFocus, TradeOrder, TradeRecord, PendingEvent, CurrencySymbol } from './defs';
+import type { ResourceKind, WorkKind, TownFocus, TradeOrder, TradeRecord, PendingEvent, CurrencySymbol, TownDesign } from './defs';
 import type { EconomyData } from './economy';
 import { createTownEconomy, getMarketPrice } from './economy';
 
@@ -222,20 +222,33 @@ export class Simulation {
 
   readonly seed: number;
 
-  constructor(seed: number) {
+  constructor(seed: number, design?: TownDesign) {
     this.seed = seed;
     this.rng = new Rng(seed);
     // The world precedes the colony: one seeded region, and the best
-    // river-valley cell in it is where the wagon stops (GDD: terrain first).
+    // cell matching the player's site preference is where the wagon stops.
     this.regionMap = new RegionMap(seed);
-    this.site = this.regionMap.startSite();
+    this.site = this.regionMap.startSite(design?.location ?? 'river-valley');
     this.weather = new Weather(seed);
     this.world = new World(this.rng, this.site);
     this.nextEventDay = 4 + this.rng.int(3);
     this.nextRaidDay = TUNING.firstRaidDay + this.rng.int(5);
-    this.foundColony();
+    if (design) this.applyTownDesign(design);
+    this.foundColony(design?.startingPop ?? 12);
     // The woods were never empty: game animals range the map from day one.
     for (let i = 0; i < TUNING.deerStartCount; i++) this.spawnDeer();
+  }
+
+  /** Difficulty scales the founding stores and seed money; currency is set
+   *  here once, penalty-free — later switches go through changeCurrency(). */
+  private applyTownDesign(design: TownDesign): void {
+    const preset = DIFFICULTY_PRESETS[design.difficulty];
+    this.stock.wood = Math.round(this.stock.wood * preset.stockMult);
+    this.stock.grain = Math.round(this.stock.grain * preset.stockMult);
+    this.stock.meal = Math.round(this.stock.meal * preset.stockMult);
+    this.economy.cash = preset.startCash;
+    this.currencySymbol = design.currencySymbol;
+    setCurrencySymbol(design.currencySymbol);
   }
 
   weatherToday(): DayWeather {
@@ -292,7 +305,7 @@ export class Simulation {
   }
 
   // ---- setup ----
-  private foundColony(): void {
+  private foundColony(startingPop = 12): void {
     const cx = Math.floor(MAP_W / 2);
     const cy = Math.floor(MAP_H / 2);
     for (let dy = 0; dy < 2; dy++) {
@@ -302,11 +315,12 @@ export class Simulation {
     }
     this.placeBuilding('house', cx - 5, cy - 2, 0, true);
     this.placeBuilding('house', cx + 3, cy - 2, 0, true);
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < startingPop; i++) {
       this.spawnSettler(cx - 3 + (i % 6), cy + 3 + Math.floor(i / 6));
     }
     this.world.revealAround(cx, cy, 12);
-    this.addLog('Twelve settlers step off the wagon. Spring, 1900.', 'info');
+    const words: Record<number, string> = { 8: 'Eight', 12: 'Twelve', 16: 'Sixteen' };
+    this.addLog(`${words[startingPop] ?? startingPop} settlers step off the wagon. Spring, 1900.`, 'info');
   }
 
   spawnSettler(x: number, y: number): Settler {

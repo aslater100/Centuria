@@ -46,12 +46,17 @@ export type TownFocus = 'balanced' | 'agricultural' | 'military' | 'trade' | 'in
 export type CurrencySymbol = '$' | '£' | '€' | 'CA$' | 'A$';
 export const CURRENCY_SYMBOLS: CurrencySymbol[] = ['$', '£', '€', 'CA$', 'A$'];
 
+// Headless harness (vitest/node) has no localStorage; fall back to a module var.
+let currencyFallback: CurrencySymbol = '$';
+
 export function getCurrencySymbol(): CurrencySymbol {
+  if (typeof localStorage === 'undefined') return currencyFallback;
   return (localStorage.getItem('centuria-currency') ?? '$') as CurrencySymbol;
 }
 
 export function setCurrencySymbol(sym: CurrencySymbol): void {
-  localStorage.setItem('centuria-currency', sym);
+  currencyFallback = sym;
+  if (typeof localStorage !== 'undefined') localStorage.setItem('centuria-currency', sym);
 }
 
 export function formatCurrency(amount: number, decimals?: number): string {
@@ -60,6 +65,37 @@ export function formatCurrency(amount: number, decimals?: number): string {
   }
   return `${getCurrencySymbol()}${Math.round(amount)}`;
 }
+
+// ---- Design screens (game start / region flip / nation flip) ----
+export interface TownDesign {
+  currencySymbol: CurrencySymbol;
+  difficulty: 'easy' | 'normal' | 'hard';
+  /** Map site preference; worldgen picks the best matching start. */
+  location: 'river-valley' | 'coastal' | 'highlands' | 'surprise';
+  startingPop: 8 | 12 | 16;
+}
+
+export interface RegionDesign {
+  expansionSpeed: 'cautious' | 'steady' | 'aggressive';
+  tradeOpenness: 'protectionist' | 'balanced' | 'free-trade';
+  taxRate: number; // 0.05–0.30
+  servicesLevel: 0 | 1 | 2;
+}
+
+export interface NationDesign {
+  economicSystem: 'laissez-faire' | 'mixed' | 'planned';
+  militaryDoctrine: 'defensive' | 'professional' | 'expansionist';
+  allianceStance: 'isolationist' | 'opportunist' | 'coalition-builder';
+  /** If set and different from current, triggers a currency transition. */
+  currencySymbol?: CurrencySymbol;
+}
+
+/** Difficulty scales the founding stores and seed money. */
+export const DIFFICULTY_PRESETS = {
+  easy: { stockMult: 1.5, startCash: 800 },
+  normal: { stockMult: 1.0, startCash: 500 },
+  hard: { stockMult: 0.6, startCash: 200 },
+} as const;
 
 // ---- Market automation ----
 export interface TradeOrder {
@@ -366,24 +402,3 @@ export const TUNING = {
   festivalMoodBonus: 15,
   festivalMoodDays: 3,
 };
-
-// ---- Game Design Presets ----
-export const DESIGN_PRESETS = {
-  town: {
-    easy: { foundCost: 1000, startCash: 800, softCapPop: 80, hardCapPop: 240 },
-    normal: { foundCost: 1500, startCash: 500, softCapPop: 60, hardCapPop: 200 },
-    hard: { foundCost: 2500, startCash: 200, softCapPop: 50, hardCapPop: 160 },
-  },
-  region: {
-    agricultural: { sectors: { agriculture: 0.50, industry: 0.20, services: 0.20, information: 0.10 }, taxDefault: 0.12 },
-    industrial: { sectors: { agriculture: 0.15, industry: 0.45, services: 0.25, information: 0.15 }, taxDefault: 0.18 },
-    commercial: { sectors: { agriculture: 0.10, industry: 0.20, services: 0.35, information: 0.35 }, taxDefault: 0.20 },
-    balanced: { sectors: { agriculture: 0.30, industry: 0.30, services: 0.25, information: 0.15 }, taxDefault: 0.15 },
-  },
-  nation: {
-    federal: { militaryBonus: 1.0, economyBonus: 1.1, cultureBonus: 1.2 },
-    centralized: { militaryBonus: 1.4, economyBonus: 1.2, cultureBonus: 0.8 },
-    'merchant-republic': { militaryBonus: 0.8, economyBonus: 1.5, cultureBonus: 1.1 },
-    balanced: { militaryBonus: 1.0, economyBonus: 1.0, cultureBonus: 1.0 },
-  },
-} as const;

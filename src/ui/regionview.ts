@@ -5,7 +5,10 @@
  */
 import type { RegionSim, Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, TownFocus, WagePolicy } from '../sim/region';
 import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, DEFAULT_CITY_POLICIES } from '../sim/region';
-import { formatCurrency } from '../sim/defs';
+import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS } from '../sim/defs';
+import type { CurrencySymbol } from '../sim/defs';
+import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
+import { DesignScreen } from './designscreen';
 
 export class RegionView {
   selectedId: number | null = null;
@@ -679,6 +682,11 @@ export class RegionView {
       r.proclaimNation(name, gov, assignments);
       this.conventionOpen = false;
       this.convention.classList.add('hidden');
+      // The nation design screen follows the proclamation: economic system,
+      // military doctrine, alliances — and the one sanctioned currency re-pick.
+      if (r.nationProclaimed) {
+        new DesignScreen().showNationDesign(r.currencySymbol, (design) => r.applyNationDesign(design));
+      }
     };
     this.convention.querySelector<HTMLButtonElement>('#convention-cancel-btn')!.onclick = () => {
       this.conventionOpen = false;
@@ -739,7 +747,12 @@ export class RegionView {
         ? GOV_TYPES.find((g) => g.id === r.govType)!.name
         : r.govLean ? GOV_LEANS[r.govLean].name : ''}</p>` +
       (r.nationProclaimed ? this.nationHtml() : '') +
-      `<p>treasury ` + formatCurrency(Math.floor(r.treasury)) + `</p>` +
+      `<p>treasury ` + formatCurrency(Math.floor(r.treasury)) + ` · coin ${r.currencySymbol}</p>` +
+      (r.currencyTransition && r.day < r.currencyTransition.endDay
+        ? `<p style="color:#e0a040" title="The currency switch is still settling: output runs at ${Math.round(r.currencyEfficiency() * 100)}% and prices swing until markets stabilize.">` +
+          `⚠ currency transition — output ${Math.round(r.currencyEfficiency() * 100)}%, ` +
+          `${Math.max(1, Math.round((r.currencyTransition.endDay - r.day) / 30))}mo to stabilize</p>`
+        : '') +
       `<p>GDP ` + formatCurrency(Math.floor(r.gdpLastMonth)) + `/mo · avg wage ${formatCurrency(r.avgDailyWage())}/d</p>` +
       `<p title="The global ledger (GDD §8.2): every chimney on earth, projected to 2100. The verdict is read in 2040.">` +
       `CO₂ ${Math.round(r.co2ppm)} ppm · +${r.warmingC.toFixed(1)}°C` +
@@ -756,7 +769,7 @@ export class RegionView {
       `<input id="tax-slider" type="range" min="0" max="30" value="${Math.round(r.taxRate * 100)}">` +
       `<p>services: <b>${lvl(r.servicesLevel)}</b> <button class="mini" id="svc-up">+</button><button class="mini" id="svc-dn">−</button></p>` +
       `<p>militia: <b>${lvl(r.militiaLevel)}</b> <button class="mini" id="mil-up">+</button><button class="mini" id="mil-dn">−</button></p>` +
-      `<p class="insp-skills">high taxes breed strikes; services cost £ but save lives</p>` +
+      `<p class="insp-skills">high taxes breed strikes; services cost coin but save lives</p>` +
       `<p class="insp-skills">${r.maglevUnlocked()
         ? 'THE FLOATING FREIGHT — maglev guideways from any town panel'
         : r.highwayUnlocked()
@@ -785,6 +798,23 @@ export class RegionView {
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.cb-bond-btn')) {
       btn.onclick = () => r.issueBonds(Number(btn.dataset.amount));
+    }
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.cb-cur-announce')) {
+      btn.onclick = () => r.announceCurrencyChange(btn.dataset.sym as CurrencySymbol);
+    }
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.cb-cur-switch')) {
+      btn.onclick = () => {
+        const sym = btn.dataset.sym as CurrencySymbol;
+        // A switch made under duress reads as necessity; one made in calm
+        // waters reads as caprice — and markets price each accordingly.
+        const cause = r.confidence < 30 ? 'crisis' : 'strategic';
+        const verdict = cause === 'crisis'
+          ? 'Markets are already in crisis — they will understand this move.'
+          : 'Markets see no reason for this. Expect heavy capital flight and years of friction.';
+        if (confirm(`Switch the currency standard to ${sym}?\n\n${verdict}\n\nAnnounced switches (${ANNOUNCE_LEAD_DAYS}+ days notice) and deep treasury reserves soften the blow.`)) {
+          r.changeCurrency(sym, cause);
+        }
+      };
     }
     this.statePanel.querySelector<HTMLButtonElement>('#svc-up')!.onclick = () => {
       r.servicesLevel = Math.min(2, r.servicesLevel + 1);
@@ -1260,8 +1290,8 @@ export class RegionView {
       `<p class="insp-skills">${RIVAL_ARCHETYPES[rv.archetype].name} · relations ${Math.round(rv.relations)} · ` +
       `every item is priced from their situation and personality (GDD §6.3)</p>` +
       treatyRows + borderRow +
-      `<p><label>£ to them <input type="number" id="deal-gold-them" min="0" step="5" value="${this.dealGoldToThem}" style="width:70px"></label> ` +
-      `<label>£ asked of them <input type="number" id="deal-gold-you" min="0" step="5" value="${this.dealGoldToYou}" style="width:70px"></label> ` +
+      `<p><label>${getCurrencySymbol()} to them <input type="number" id="deal-gold-them" min="0" step="5" value="${this.dealGoldToThem}" style="width:70px"></label> ` +
+      `<label>${getCurrencySymbol()} asked of them <input type="number" id="deal-gold-you" min="0" step="5" value="${this.dealGoldToYou}" style="width:70px"></label> ` +
       `<span class="insp-skills">(treasury ` + formatCurrency(Math.floor(r.treasury)) + `)</span></p>` +
       `<p id="deal-verdict" class="insp-skills">${this.dealVerdictLine()}</p>` +
       `<p><button id="deal-propose-btn" ${r.treasury >= this.dealGoldToThem ? '' : 'disabled'}>Put it on the table</button> ` +
@@ -1345,11 +1375,31 @@ export class RegionView {
       `${(r.bondRate * 100).toFixed(1)}% coupon</p>` +
       (r.nationProclaimed
         ? `<p>` +
-          `<button class="mini cb-bond-btn" data-amount="50" ${canBond(50) ? '' : 'disabled'}>bonds +£50</button> ` +
-          `<button class="mini cb-bond-btn" data-amount="100" ${canBond(100) ? '' : 'disabled'}>+£100</button> ` +
-          `<button class="mini cb-bond-btn" data-amount="250" ${canBond(250) ? '' : 'disabled'}>+£250</button>` +
+          `<button class="mini cb-bond-btn" data-amount="50" ${canBond(50) ? '' : 'disabled'}>bonds +${formatCurrency(50)}</button> ` +
+          `<button class="mini cb-bond-btn" data-amount="100" ${canBond(100) ? '' : 'disabled'}>+${formatCurrency(100)}</button> ` +
+          `<button class="mini cb-bond-btn" data-amount="250" ${canBond(250) ? '' : 'disabled'}>+${formatCurrency(250)}</button>` +
           `</p>`
-        : '');
+        : '') +
+      this.currencyHtml();
+  }
+
+  /** Currency standard controls: announce ahead to soften the eventual switch,
+   *  or switch cold and let the markets say what they think of caprice. */
+  private currencyHtml(): string {
+    const r = this.region;
+    const others = CURRENCY_SYMBOLS.filter((s) => s !== r.currencySymbol);
+    const announced = r.currencyAnnouncement;
+    const announceRow = announced
+      ? `<p class="insp-skills">announced ${announced.newSymbol} ` +
+        `(${r.day - announced.announcedDay >= ANNOUNCE_LEAD_DAYS
+          ? 'markets are ready — switch is cushioned'
+          : `${ANNOUNCE_LEAD_DAYS - (r.day - announced.announcedDay)}d until markets price it in`})</p>`
+      : `<p class="insp-skills" title="Telegraphing a switch ${ANNOUNCE_LEAD_DAYS}+ days ahead softens the penalties by 25%.">` +
+        `announce: ${others.map((s) => `<button class="mini cb-cur-announce" data-sym="${s}">${s}</button>`).join(' ')}</p>`;
+    return `<p class="insp-skills" title="Switching the currency standard costs capital flight and an efficiency dip. Crisis-driven switches are forgiven faster; whims are punished. Reserves and advance notice both soften it.">` +
+      `CURRENCY STANDARD: ${r.currencySymbol}</p>` +
+      announceRow +
+      `<p class="insp-skills">switch: ${others.map((s) => `<button class="mini cb-cur-switch" data-sym="${s}">${s}</button>`).join(' ')}</p>`;
   }
 
   private lendersHtml(): string {
@@ -1755,7 +1805,7 @@ export class RegionView {
 
     const maxBorrow = Math.min(lender.maxLoan, lender.liquidCash);
     const amountStr = prompt(
-      `${lender.name}\nMax loan: ` + formatCurrency(maxBorrow) + `\nInterest rate: ${(lender.interestRate * 100).toFixed(1)}% annual\n\nBorrow amount (£):`,
+      `${lender.name}\nMax loan: ` + formatCurrency(maxBorrow) + `\nInterest rate: ${(lender.interestRate * 100).toFixed(1)}% annual\n\nBorrow amount (${getCurrencySymbol()}):`,
       String(Math.min(1000, maxBorrow / 2)),
     );
     if (!amountStr) return;
@@ -1797,7 +1847,7 @@ export class RegionView {
     const suggested = Math.min(r.treasury, owing);
 
     const amountStr = prompt(
-      `Repay loan\nOwing: ` + formatCurrency(owing) + `\nMax can pay: ` + formatCurrency(suggested) + `\nMin payment: ` + formatCurrency(minPayment) + `\n\nRepay amount (£):`,
+      `Repay loan\nOwing: ` + formatCurrency(owing) + `\nMax can pay: ` + formatCurrency(suggested) + `\nMin payment: ` + formatCurrency(minPayment) + `\n\nRepay amount (${getCurrencySymbol()}):`,
       String(minPayment),
     );
     if (!amountStr) return;

@@ -1,274 +1,283 @@
 /**
- * Design screens for game start and tier transitions.
- * Player customizes: currency, difficulty, region template, nation government.
+ * Design screens: the player shapes the colony at each tier transition.
+ *  - Game start: town characteristics (size, currency, location, difficulty)
+ *  - Region flip: regional doctrine (expansion, trade, policy levers)
+ *  - Nation flip: national identity (economic system, military doctrine,
+ *    alliances) — and the one sanctioned chance to re-pick the currency.
  */
-import type { CurrencySymbol } from '../sim/defs';
+import type { CurrencySymbol, TownDesign, RegionDesign, NationDesign } from '../sim/defs';
 import { CURRENCY_SYMBOLS } from '../sim/defs';
-import type { SectorId } from '../sim/region';
 
-export interface TownDesign {
-  currencySymbol: CurrencySymbol;
-  difficulty: 'easy' | 'normal' | 'hard';
-  populationLimit: 'small' | 'medium' | 'large';
+export type { TownDesign, RegionDesign, NationDesign };
+
+interface Choice<T extends string> {
+  value: T;
+  label: string;
+  desc: string;
 }
 
-export interface RegionDesign {
-  template: 'agricultural' | 'industrial' | 'commercial' | 'balanced';
-  primarySector: SectorId;
-  taxRate: number; // 0.1–0.3
-}
+const TOWN_DIFFICULTY: Choice<TownDesign['difficulty']>[] = [
+  { value: 'easy', label: 'Homesteader', desc: 'More settlers, fuller stores, gentler raids.' },
+  { value: 'normal', label: 'Pioneer', desc: 'The intended experience.' },
+  { value: 'hard', label: 'Survivor', desc: 'Fewer hands, thin stores, the frontier bites.' },
+];
 
-export interface NationDesign {
-  template: 'federal' | 'centralized' | 'merchant-republic' | 'balanced';
-  currencySymbol?: CurrencySymbol;
-  primaryFocus: 'military' | 'economy' | 'culture' | 'balanced';
-}
+const TOWN_LOCATION: Choice<TownDesign['location']>[] = [
+  { value: 'river-valley', label: 'River Valley', desc: 'Fertile soil, fresh water, classic start.' },
+  { value: 'coastal', label: 'Coast', desc: 'Fishing and future ports; thinner soil.' },
+  { value: 'highlands', label: 'Highlands', desc: 'Stone and ore nearby; harsher winters.' },
+  { value: 'surprise', label: 'Surprise Me', desc: 'The map decides.' },
+];
 
+const REGION_EXPANSION: Choice<RegionDesign['expansionSpeed']>[] = [
+  { value: 'cautious', label: 'Cautious', desc: 'Slow settlement, stable satisfaction.' },
+  { value: 'steady', label: 'Steady', desc: 'Balanced growth.' },
+  { value: 'aggressive', label: 'Aggressive', desc: 'Fast expansion, higher grievance risk.' },
+];
+
+const REGION_TRADE: Choice<RegionDesign['tradeOpenness']>[] = [
+  { value: 'protectionist', label: 'Protectionist', desc: 'Higher levies, shielded industries.' },
+  { value: 'balanced', label: 'Balanced', desc: 'Standard tariffs.' },
+  { value: 'free-trade', label: 'Free Trade', desc: 'Low levies, more trade volume.' },
+];
+
+const NATION_ECONOMY: Choice<NationDesign['economicSystem']>[] = [
+  { value: 'laissez-faire', label: 'Laissez-Faire', desc: 'Markets lead. GDP +10%, services cost more.' },
+  { value: 'mixed', label: 'Mixed Economy', desc: 'Pragmatic balance of market and state.' },
+  { value: 'planned', label: 'Planned Economy', desc: 'State directs industry. Stability up, dynamism down.' },
+];
+
+const NATION_MILITARY: Choice<NationDesign['militaryDoctrine']>[] = [
+  { value: 'defensive', label: 'Defensive', desc: 'Cheaper garrisons, no first strikes.' },
+  { value: 'professional', label: 'Professional', desc: 'Balanced standing force.' },
+  { value: 'expansionist', label: 'Expansionist', desc: 'Stronger offense, costlier upkeep, nervous neighbors.' },
+];
+
+const NATION_ALLIANCE: Choice<NationDesign['allianceStance']>[] = [
+  { value: 'isolationist', label: 'Isolationist', desc: 'Few entanglements, slower diplomacy.' },
+  { value: 'opportunist', label: 'Opportunist', desc: 'Deals when they pay.' },
+  { value: 'coalition-builder', label: 'Coalition Builder', desc: 'Easier treaties, shared obligations.' },
+];
+
+/**
+ * Full-screen modal. One instance per showing; removes itself on confirm.
+ * Selection state lives in closures (no globals), buttons re-render on click.
+ */
 export class DesignScreen {
-  private container: HTMLElement;
+  private overlay: HTMLElement;
+  private box: HTMLElement;
 
   constructor() {
-    this.container = document.createElement('div');
-    this.container.id = 'design-screen';
-    this.container.style.position = 'fixed';
-    this.container.style.inset = '0';
-    this.container.style.backgroundColor = 'rgba(0,0,0,0.8)';
-    this.container.style.zIndex = '10000';
-    this.container.style.display = 'flex';
-    this.container.style.alignItems = 'center';
-    this.container.style.justifyContent = 'center';
-    this.container.style.fontFamily = 'monospace';
-    document.body.appendChild(this.container);
+    this.overlay = document.createElement('div');
+    this.overlay.className = 'design-overlay';
+    this.overlay.style.cssText =
+      'position:fixed;inset:0;background:rgba(8,10,14,0.88);z-index:10000;' +
+      'display:flex;align-items:center;justify-content:center;font-family:monospace;';
+    this.box = document.createElement('div');
+    this.box.style.cssText =
+      'background:#1a1d24;color:#cfd4e0;padding:28px 32px;max-width:620px;width:90%;' +
+      'max-height:90vh;overflow-y:auto;border:2px solid #5a6378;';
+    this.overlay.appendChild(this.box);
   }
 
-  showTownDesign(callback: (design: TownDesign) => void): void {
-    let currency: CurrencySymbol = '$';
-    let difficulty: 'easy' | 'normal' | 'hard' = 'normal';
-    let populationLimit: 'small' | 'medium' | 'large' = 'medium';
-
-    this.container.innerHTML = `
-      <div style="background: #222; color: #ccc; padding: 40px; max-width: 500px; border: 2px solid #666;">
-        <h2 style="text-align: center; margin-top: 0;">TOWN DESIGN</h2>
-
-        <div style="margin: 20px 0;">
-          <p><strong>Currency</strong></p>
-          <div id="currency-buttons" style="display: flex; gap: 10px; flex-wrap: wrap;">
-            ${CURRENCY_SYMBOLS.map(sym => `
-              <button style="padding: 8px 16px; background: ${currency === sym ? '#444' : '#333'}; color: #ccc; border: 1px solid #666; cursor: pointer;"
-                      onclick="window.designCurrency = '${sym}'">
-                ${sym}
-              </button>
-            `).join('')}
-          </div>
-        </div>
-
-        <div style="margin: 20px 0;">
-          <p><strong>Difficulty</strong></p>
-          <div id="difficulty-buttons" style="display: flex; gap: 10px;">
-            ${(['easy', 'normal', 'hard'] as const).map(d => `
-              <button style="padding: 8px 16px; background: ${difficulty === d ? '#444' : '#333'}; color: #ccc; border: 1px solid #666; cursor: pointer; flex: 1;"
-                      onclick="window.designDifficulty = '${d}'; this.parentElement.querySelectorAll('button').forEach(b => b.style.background = '#333'); this.style.background = '#444';">
-                ${d.charAt(0).toUpperCase() + d.slice(1)}
-              </button>
-            `).join('')}
-          </div>
-          <p style="font-size: 12px; color: #999;">Easy: ↓30% costs, ↑60% starting gold. Hard: ↑50% costs, ↓75% starting gold.</p>
-        </div>
-
-        <div style="margin: 20px 0;">
-          <p><strong>Population Limit</strong></p>
-          <div id="population-buttons" style="display: flex; gap: 10px;">
-            ${(['small', 'medium', 'large'] as const).map(p => `
-              <button style="padding: 8px 16px; background: ${populationLimit === p ? '#444' : '#333'}; color: #ccc; border: 1px solid #666; cursor: pointer; flex: 1;"
-                      onclick="window.designPopLimit = '${p}'; this.parentElement.querySelectorAll('button').forEach(b => b.style.background = '#333'); this.style.background = '#444';">
-                ${p === 'small' ? '150' : p === 'medium' ? '200' : '250'}
-              </button>
-            `).join('')}
-          </div>
-        </div>
-
-        <button id="town-design-confirm" style="width: 100%; padding: 12px; margin-top: 30px; background: #444; color: #ccc; border: 1px solid #666; cursor: pointer; font-size: 16px;">
-          BEGIN
-        </button>
-      </div>
-    `;
-
-    (window as any).designCurrency = currency;
-    (window as any).designDifficulty = difficulty;
-    (window as any).designPopLimit = populationLimit;
-
-    const confirmBtn = this.container.querySelector('#town-design-confirm') as HTMLButtonElement;
-    confirmBtn.addEventListener('click', () => {
-      currency = (window as any).designCurrency || '$';
-      difficulty = (window as any).designDifficulty || 'normal';
-      populationLimit = (window as any).designPopLimit || 'medium';
-
-      this.container.innerHTML = '';
-      this.container.remove();
-      callback({ currencySymbol: currency, difficulty, populationLimit });
-    });
+  private open(): void {
+    document.body.appendChild(this.overlay);
   }
 
-  showRegionDesign(callback: (design: RegionDesign) => void): void {
-    let template: 'agricultural' | 'industrial' | 'commercial' | 'balanced' = 'balanced';
-    let primarySector: SectorId = 'agriculture';
-    let taxRate = 0.15;
+  private close(): void {
+    this.overlay.remove();
+  }
 
-    const templates = {
-      agricultural: { desc: 'Focus: food & stability', sectors: ['agriculture', 'services'] },
-      industrial: { desc: 'Focus: production & growth', sectors: ['industry', 'information'] },
-      commercial: { desc: 'Focus: trade & wealth', sectors: ['services', 'information'] },
-      balanced: { desc: 'All sectors equal', sectors: ['agriculture', 'industry'] },
+  /** A titled row of mutually-exclusive choice buttons. Returns a getter. */
+  private choiceRow<T extends string>(title: string, choices: Choice<T>[], initial: T): { el: HTMLElement; get: () => T } {
+    let selected = initial;
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'margin:14px 0;';
+    const h = document.createElement('p');
+    h.innerHTML = `<strong>${title}</strong>`;
+    h.style.cssText = 'margin:0 0 6px 0;';
+    wrap.appendChild(h);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid;gap:6px;';
+    const buttons: HTMLButtonElement[] = [];
+    const desc = document.createElement('p');
+    desc.style.cssText = 'margin:6px 0 0 0;font-size:11px;color:#8a93a6;min-height:14px;';
+    const paint = () => {
+      buttons.forEach((b, i) => {
+        const on = choices[i].value === selected;
+        b.style.background = on ? '#39435a' : '#242936';
+        b.style.borderColor = on ? '#7f8db0' : '#444c5e';
+        if (on) desc.textContent = choices[i].desc;
+      });
     };
-
-    this.container.innerHTML = `
-      <div style="background: #222; color: #ccc; padding: 40px; max-width: 600px; border: 2px solid #666;">
-        <h2 style="text-align: center; margin-top: 0;">REGIONAL CHARTER</h2>
-
-        <div style="margin: 20px 0;">
-          <p><strong>Template</strong></p>
-          <div id="template-buttons" style="display: grid; gap: 10px;">
-            ${(Object.entries(templates) as Array<[typeof template, any]>).map(([t, info]) => `
-              <button style="padding: 12px; text-align: left; background: ${template === t ? '#444' : '#333'}; color: #ccc; border: 1px solid #666; cursor: pointer;"
-                      onclick="window.designTemplate = '${t}'; this.parentElement.querySelectorAll('button').forEach(b => b.style.background = '#333'); this.style.background = '#444';">
-                <strong>${t.charAt(0).toUpperCase() + t.slice(1)}</strong> — ${info.desc}
-              </button>
-            `).join('')}
-          </div>
-        </div>
-
-        <div style="margin: 20px 0;">
-          <p><strong>Primary Sector</strong></p>
-          <p style="font-size: 12px; color: #999;">Workers drift toward high-paying sectors. Set primary to give it a boost.</p>
-          <div id="sector-buttons" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-            ${(['agriculture', 'industry', 'services', 'information'] as const).map(s => `
-              <button style="padding: 8px; background: ${primarySector === s ? '#444' : '#333'}; color: #ccc; border: 1px solid #666; cursor: pointer;"
-                      onclick="window.designPrimarySector = '${s}'; this.parentElement.querySelectorAll('button').forEach(b => b.style.background = '#333'); this.style.background = '#444';">
-                ${s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            `).join('')}
-          </div>
-        </div>
-
-        <div style="margin: 20px 0;">
-          <p><strong>Tax Rate: <span id="tax-display">${(taxRate * 100).toFixed(0)}%</span></strong></p>
-          <input type="range" id="tax-slider" min="10" max="30" value="${taxRate * 100}" style="width: 100%;" />
-          <p style="font-size: 12px; color: #999;">Higher taxes fund services but reduce satisfaction. Lower taxes boost morale but treasury suffers.</p>
-        </div>
-
-        <button id="region-design-confirm" style="width: 100%; padding: 12px; margin-top: 30px; background: #444; color: #ccc; border: 1px solid #666; cursor: pointer; font-size: 16px;">
-          ESTABLISH CHARTER
-        </button>
-      </div>
-    `;
-
-    (window as any).designTemplate = template;
-    (window as any).designPrimarySector = primarySector;
-
-    const taxSlider = this.container.querySelector('#tax-slider') as HTMLInputElement;
-    const taxDisplay = this.container.querySelector('#tax-display') as HTMLElement;
-    taxSlider.addEventListener('input', (e) => {
-      taxRate = parseInt((e.target as HTMLInputElement).value) / 100;
-      taxDisplay.textContent = `${(taxRate * 100).toFixed(0)}%`;
-    });
-
-    const confirmBtn = this.container.querySelector('#region-design-confirm') as HTMLButtonElement;
-    confirmBtn.addEventListener('click', () => {
-      template = (window as any).designTemplate || 'balanced';
-      primarySector = (window as any).designPrimarySector || 'agriculture';
-
-      this.container.innerHTML = '';
-      this.container.remove();
-      callback({ template, primarySector, taxRate });
-    });
+    for (const c of choices) {
+      const b = document.createElement('button');
+      b.textContent = c.label;
+      b.style.cssText =
+        'padding:8px 12px;color:#cfd4e0;border:1px solid #444c5e;cursor:pointer;' +
+        'text-align:left;font-family:monospace;font-size:13px;background:#242936;';
+      b.addEventListener('click', () => { selected = c.value; paint(); });
+      buttons.push(b);
+      row.appendChild(b);
+    }
+    wrap.appendChild(row);
+    wrap.appendChild(desc);
+    paint();
+    return { el: wrap, get: () => selected };
   }
 
-  showNationDesign(currentCurrency: CurrencySymbol, callback: (design: NationDesign) => void): void {
-    let template: 'federal' | 'centralized' | 'merchant-republic' | 'balanced' = 'balanced';
-    let newCurrency: CurrencySymbol | undefined = undefined;
-    let primaryFocus: 'military' | 'economy' | 'culture' | 'balanced' = 'balanced';
+  private confirmButton(label: string, onClick: () => void): HTMLElement {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.style.cssText =
+      'width:100%;padding:12px;margin-top:20px;background:#39435a;color:#e8ecf4;' +
+      'border:1px solid #7f8db0;cursor:pointer;font-family:monospace;font-size:15px;';
+    b.addEventListener('click', onClick);
+    return b;
+  }
 
-    const templates = {
-      federal: { desc: 'Distributed power, consensus-building. Trade agreements +20%. War morale +10%.' },
-      centralized: { desc: 'Rapid decision-making. Tech research +25%. War morale +25%.' },
-      'merchant-republic': { desc: 'Commerce-driven. Trade revenue +30%. Militaria cost +15%.' },
-      balanced: { desc: 'All aspects equal.' },
-    };
+  private title(text: string, sub: string): void {
+    this.box.innerHTML = '';
+    const h = document.createElement('h2');
+    h.textContent = text;
+    h.style.cssText = 'text-align:center;margin:0 0 4px 0;letter-spacing:2px;';
+    const p = document.createElement('p');
+    p.textContent = sub;
+    p.style.cssText = 'text-align:center;margin:0 0 12px 0;font-size:12px;color:#8a93a6;';
+    this.box.appendChild(h);
+    this.box.appendChild(p);
+  }
 
-    this.container.innerHTML = `
-      <div style="background: #222; color: #ccc; padding: 40px; max-width: 600px; border: 2px solid #666; max-height: 90vh; overflow-y: auto;">
-        <h2 style="text-align: center; margin-top: 0;">CONSTITUTIONAL CONVENTION</h2>
+  showTownDesign(cb: (d: TownDesign) => void): void {
+    this.title('FOUND A COLONY', 'Shape the settlement before the wagons roll.');
 
-        <div style="margin: 20px 0;">
-          <p><strong>Government Form</strong></p>
-          <div id="gov-buttons" style="display: grid; gap: 10px;">
-            ${(Object.entries(templates) as Array<[typeof template, any]>).map(([t, info]) => `
-              <button style="padding: 12px; text-align: left; background: ${template === t ? '#444' : '#333'}; color: #ccc; border: 1px solid #666; cursor: pointer;"
-                      onclick="window.designGovTemplate = '${t}'; this.parentElement.querySelectorAll('button').forEach(b => b.style.background = '#333'); this.style.background = '#444';">
-                <strong>${t.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}</strong> — ${info.desc}
-              </button>
-            `).join('')}
-          </div>
-        </div>
+    const currency = this.choiceRow(
+      'Currency',
+      CURRENCY_SYMBOLS.map((s) => ({ value: s, label: s, desc: 'The coin your ledgers are kept in.' })),
+      '$' as CurrencySymbol,
+    );
+    const location = this.choiceRow('Location', TOWN_LOCATION, 'river-valley');
+    const pop = this.choiceRow(
+      'Founding Party',
+      [
+        { value: '8', label: '8 settlers', desc: 'A hard core. Slow start, tight food.' },
+        { value: '12', label: '12 settlers', desc: 'The standard wagon train.' },
+        { value: '16', label: '16 settlers', desc: 'A crowd. Fast hands, hungry mouths.' },
+      ],
+      '12',
+    );
+    const difficulty = this.choiceRow('Difficulty', TOWN_DIFFICULTY, 'normal');
 
-        <div style="margin: 20px 0; padding: 15px; background: #333; border: 1px solid #666;">
-          <p style="margin: 0 0 10px 0;"><strong>⚠ Currency Change Penalties</strong></p>
-          <p style="font-size: 12px; color: #999; margin: 0;">Switching from ${currentCurrency} will trigger:</p>
-          <ul style="margin: 10px 0; font-size: 12px; color: #999;">
-            <li>10% treasury loss (transaction fees)</li>
-            <li>20% inflation (temporary price spike)</li>
-            <li>90-day market disruption (price volatility ±15%)</li>
-          </ul>
-        </div>
+    this.box.appendChild(currency.el);
+    this.box.appendChild(location.el);
+    this.box.appendChild(pop.el);
+    this.box.appendChild(difficulty.el);
+    this.box.appendChild(
+      this.confirmButton('BEGIN', () => {
+        this.close();
+        cb({
+          currencySymbol: currency.get(),
+          location: location.get(),
+          startingPop: parseInt(pop.get()) as TownDesign['startingPop'],
+          difficulty: difficulty.get(),
+        });
+      }),
+    );
+    this.open();
+  }
 
-        <div style="margin: 20px 0;">
-          <p><strong>Currency Standard</strong></p>
-          <p style="font-size: 12px; color: #999;">Current: <strong>${currentCurrency}</strong>. ${newCurrency ? `Switching to: <strong>${newCurrency}</strong>` : 'Keep current.'}</p>
-          <div id="currency-buttons" style="display: flex; gap: 10px; flex-wrap: wrap;">
-            <button style="padding: 8px 16px; background: #444; color: #ccc; border: 1px solid #666; cursor: pointer;"
-                    onclick="window.designNewCurrency = undefined; this.parentElement.querySelectorAll('button').forEach(b => b.style.background = '#333'); this.style.background = '#444';">
-              Keep ${currentCurrency}
-            </button>
-            ${CURRENCY_SYMBOLS.filter(s => s !== currentCurrency).map(sym => `
-              <button style="padding: 8px 16px; background: #333; color: #ccc; border: 1px solid #666; cursor: pointer;"
-                      onclick="window.designNewCurrency = '${sym}'; this.parentElement.querySelectorAll('button').forEach(b => b.style.background = '#333'); this.style.background = '#444';">
-                Switch to ${sym}
-              </button>
-            `).join('')}
-          </div>
-        </div>
+  showRegionDesign(cb: (d: RegionDesign) => void): void {
+    this.title('REGIONAL CHARTER', 'Town #2 is founded. Set the region\'s course.');
 
-        <div style="margin: 20px 0;">
-          <p><strong>Primary Focus</strong></p>
-          <div id="focus-buttons" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-            ${(['military', 'economy', 'culture', 'balanced'] as const).map(f => `
-              <button style="padding: 8px; background: ${primaryFocus === f ? '#444' : '#333'}; color: #ccc; border: 1px solid #666; cursor: pointer;"
-                      onclick="window.designPrimaryFocus = '${f}'; this.parentElement.querySelectorAll('button').forEach(b => b.style.background = '#333'); this.style.background = '#444';">
-                ${f.charAt(0).toUpperCase() + f.slice(1)}
-              </button>
-            `).join('')}
-          </div>
-        </div>
+    const expansion = this.choiceRow('Expansion', REGION_EXPANSION, 'steady');
+    const trade = this.choiceRow('Trade Posture', REGION_TRADE, 'balanced');
+    const services = this.choiceRow(
+      'Services Funding',
+      [
+        { value: '0', label: 'Minimal', desc: 'Low cost, higher mortality and unrest.' },
+        { value: '1', label: 'Standard', desc: 'Clinics and schools at par.' },
+        { value: '2', label: 'Generous', desc: 'Costs more; people live longer and complain less.' },
+      ],
+      '1',
+    );
 
-        <button id="nation-design-confirm" style="width: 100%; padding: 12px; margin-top: 30px; background: #444; color: #ccc; border: 1px solid #666; cursor: pointer; font-size: 16px;">
-          PROCLAIM NATION
-        </button>
-      </div>
-    `;
-
-    (window as any).designGovTemplate = template;
-    (window as any).designNewCurrency = newCurrency;
-    (window as any).designPrimaryFocus = primaryFocus;
-
-    const confirmBtn = this.container.querySelector('#nation-design-confirm') as HTMLButtonElement;
-    confirmBtn.addEventListener('click', () => {
-      template = (window as any).designGovTemplate || 'balanced';
-      newCurrency = (window as any).designNewCurrency;
-      primaryFocus = (window as any).designPrimaryFocus || 'balanced';
-
-      this.container.innerHTML = '';
-      this.container.remove();
-      callback({ template, currencySymbol: newCurrency, primaryFocus });
+    let taxRate = 0.10;
+    const taxWrap = document.createElement('div');
+    taxWrap.style.cssText = 'margin:14px 0;';
+    taxWrap.innerHTML = `<p style="margin:0 0 6px 0;"><strong>Tax Rate: <span id="ds-tax">10%</span></strong></p>`;
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '5';
+    slider.max = '30';
+    slider.value = '10';
+    slider.style.cssText = 'width:100%;';
+    slider.addEventListener('input', () => {
+      taxRate = parseInt(slider.value) / 100;
+      const span = taxWrap.querySelector('#ds-tax')!;
+      span.textContent = `${slider.value}%`;
     });
+    taxWrap.appendChild(slider);
+
+    this.box.appendChild(expansion.el);
+    this.box.appendChild(trade.el);
+    this.box.appendChild(taxWrap);
+    this.box.appendChild(services.el);
+    this.box.appendChild(
+      this.confirmButton('ESTABLISH CHARTER', () => {
+        this.close();
+        cb({
+          expansionSpeed: expansion.get(),
+          tradeOpenness: trade.get(),
+          taxRate,
+          servicesLevel: parseInt(services.get()) as RegionDesign['servicesLevel'],
+        });
+      }),
+    );
+    this.open();
+  }
+
+  showNationDesign(currentCurrency: CurrencySymbol, cb: (d: NationDesign) => void): void {
+    this.title('CONSTITUTIONAL CONVENTION', 'A nation takes its shape — and its coin.');
+
+    const economy = this.choiceRow('Economic System', NATION_ECONOMY, 'mixed');
+    const military = this.choiceRow('Military Doctrine', NATION_MILITARY, 'professional');
+    const alliance = this.choiceRow('Alliance Stance', NATION_ALLIANCE, 'opportunist');
+
+    const KEEP = '__keep__';
+    const currencyChoices: Choice<string>[] = [
+      { value: KEEP, label: `Keep ${currentCurrency}`, desc: 'No disruption. Markets stay calm.' },
+      ...CURRENCY_SYMBOLS.filter((s) => s !== currentCurrency).map((s) => ({
+        value: s as string,
+        label: `Switch to ${s}`,
+        desc: 'Capital flight, efficiency dip, months of volatility. Announcing ahead and deep reserves soften it.',
+      })),
+    ];
+    const currency = this.choiceRow('Currency Standard', currencyChoices, KEEP);
+
+    const warn = document.createElement('div');
+    warn.style.cssText = 'margin:14px 0;padding:10px 12px;background:#2a2230;border:1px solid #6a5a78;font-size:11px;color:#b0a0c0;';
+    warn.innerHTML =
+      '<strong>⚠ Currency changes carry penalties.</strong> A switch without cause reads as caprice: ' +
+      'expect 20–30% efficiency loss and 10–15% capital flight, recovering over 2–3 years. ' +
+      'Crisis-driven or well-telegraphed switches are forgiven faster.';
+
+    this.box.appendChild(economy.el);
+    this.box.appendChild(military.el);
+    this.box.appendChild(alliance.el);
+    this.box.appendChild(warn);
+    this.box.appendChild(currency.el);
+    this.box.appendChild(
+      this.confirmButton('PROCLAIM THE NATION', () => {
+        this.close();
+        const cur = currency.get();
+        cb({
+          economicSystem: economy.get(),
+          militaryDoctrine: military.get(),
+          allianceStance: alliance.get(),
+          currencySymbol: cur === KEEP ? undefined : (cur as CurrencySymbol),
+        });
+      }),
+    );
+    this.open();
   }
 }
