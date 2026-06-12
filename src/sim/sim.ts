@@ -344,7 +344,10 @@ export class Simulation {
       armed: false,
       lastFoodType: null,
       foodLog: [],
-      housingPreference: null,
+      housingPreference: traits.reduce<'private' | 'communal' | 'military' | null>(
+        (pref, id) => pref ?? traitDef(id).housingPreference ?? null,
+        null,
+      ),
     };
     this.settlers.push(s);
     return s;
@@ -1527,7 +1530,11 @@ export class Simulation {
         // Bed rest: the badly hurt stay down until they're out of danger.
         if (s.health < t.bedRestThreshold) return;
         if (s.needs.rest >= 95 || (this.hour >= 6 && this.hour < 22 && s.needs.rest > 55)) {
-          if (!inBed) this.addThought(s, 'Slept on the ground', -6, MINUTES_PER_DAY);
+          if (!inBed) {
+            this.addThought(s, 'Slept on the ground', -6, MINUTES_PER_DAY);
+          } else {
+            this.applyHousingThought(s);
+          }
           s.bedId = null;
           s.state = 'idle';
         }
@@ -2287,7 +2294,10 @@ export class Simulation {
         }
       }
     }
-    const houses = this.builtOf('sleep');
+    // Sort sleep buildings: preferred home type first, then others.
+    const houses = this.builtOf('sleep').sort((a, b) => {
+      return this.homeSortScore(b, s) - this.homeSortScore(a, s);
+    });
     for (const h of houses) {
       const cap = this.buildingEffectiveCapacity(h);
       const used = this.settlers.filter((o) => o.bedId === h.id).length;
@@ -2303,6 +2313,33 @@ export class Simulation {
     s.state = 'sleeping';
     const shelter = houses[0] ?? this.builtOf('recreation')[0];
     if (shelter) this.setDestination(s, this.buildingCenter(shelter));
+  }
+
+  /** Priority score for sorting sleep buildings to match a settler's housing preference. */
+  private homeSortScore(b: Building, s: Settler): number {
+    if (!s.housingPreference) return 0;
+    const ht = buildingDef(b.defId).homeType;
+    if (!ht || ht === 'neutral') return 0;
+    if (s.housingPreference === 'military' && (ht === 'military' || ht === 'communal')) return 2;
+    if (ht === s.housingPreference) return 2;
+    return -1;
+  }
+
+  /** Add a housing match/mismatch thought when a settler wakes from a bed. */
+  private applyHousingThought(s: Settler): void {
+    if (!s.housingPreference || s.bedId === null) return;
+    const bed = this.building(s.bedId);
+    if (!bed) return;
+    const ht = buildingDef(bed.defId).homeType;
+    if (!ht || ht === 'neutral') return;
+    const match =
+      ht === s.housingPreference ||
+      (s.housingPreference === 'military' && ht === 'communal');
+    if (match) {
+      this.refreshThought(s, 'Good fit housing', 5, 2 * MINUTES_PER_DAY);
+    } else {
+      this.refreshThought(s, 'Wrong type of housing', -5, 2 * MINUTES_PER_DAY);
+    }
   }
 
   // ---- helpers ----
