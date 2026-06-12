@@ -8,9 +8,9 @@ import type { DayWeather } from './weather';
 import {
   BUILDING_DEFS, buildingDef, traitDef, FIRST_NAMES, LAST_NAMES, TRAIT_DEFS,
   MINUTES_PER_TICK, MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR,
-  TUNING, WORK_KINDS, TOWN_TECH_DEFS,
+  TUNING, WORK_KINDS, TOWN_TECH_DEFS, setCurrencySymbol, formatCurrency,
 } from './defs';
-import type { ResourceKind, WorkKind, TownFocus, TradeOrder, TradeRecord, PendingEvent } from './defs';
+import type { ResourceKind, WorkKind, TownFocus, TradeOrder, TradeRecord, PendingEvent, CurrencySymbol } from './defs';
 import type { EconomyData } from './economy';
 import { createTownEconomy, getMarketPrice } from './economy';
 
@@ -216,6 +216,9 @@ export class Simulation {
   pendingChoice: PendingEvent | null = null;
   /** Notable id designated as mayor post-flip; null while player is in direct control */
   mayorNotableId: number | null = null;
+
+  currencySymbol: CurrencySymbol = '$';
+  marketDisruptionEnd = 0;
 
   readonly seed: number;
 
@@ -809,9 +812,25 @@ export class Simulation {
       return { ok: false, reason: `needs 120 food (has ${this.stock.meal + this.stock.grain})` };
     }
     if (this.economy.cash < t.townFoundingMinCash) {
-      return { ok: false, reason: `needs £${t.townFoundingMinCash} cash (has £${Math.round(this.economy.cash)})` };
+      return { ok: false, reason: `needs ${formatCurrency(t.townFoundingMinCash)} cash (has ${formatCurrency(this.economy.cash)})` };
     }
     if (this.raidActive) return { ok: false, reason: 'not during a raid' };
+    return { ok: true, reason: '' };
+  }
+
+  changeCurrency(newSymbol: CurrencySymbol): { ok: boolean; reason: string } {
+    if (newSymbol === this.currencySymbol) return { ok: false, reason: 'No change' };
+
+    // Apply penalty: 20% inflation + 10% treasury loss + market disruption flag
+    this.addLog(`Currency shift to ${newSymbol}: transaction costs (10% treasury)`, 'bad');
+    this.economy.cash = Math.floor(this.economy.cash * 0.9);
+    this.currencySymbol = newSymbol;
+    setCurrencySymbol(newSymbol);
+
+    // Mark market as "disrupted" for ~90 days (affects prices)
+    const ticksPerDay = (24 * 60) / (MINUTES_PER_TICK / 1);
+    this.marketDisruptionEnd = this.minute + (90 * ticksPerDay);
+
     return { ok: true, reason: '' };
   }
 
@@ -994,7 +1013,7 @@ export class Simulation {
     const cash = pricePerUnit * quantity;
     this.stock[resource] -= quantity;
     this.economy.cash += cash;
-    this.addLog(`Sold ${quantity} ${resource} for £${cash}.`, 'good');
+    this.addLog(`Sold ${quantity} ${resource} for ${formatCurrency(cash)}.`, 'good');
     return cash;
   }
 
@@ -1012,7 +1031,7 @@ export class Simulation {
     }
     this.stock[resource] += quantity;
     this.economy.cash -= cost;
-    this.addLog(`Bought ${quantity} ${resource} for £${cost}.`, 'info');
+    this.addLog(`Bought ${quantity} ${resource} for ${formatCurrency(cost)}.`, 'info');
     return quantity;
   }
 
@@ -2933,6 +2952,8 @@ export class Simulation {
       tradeHistory: this.tradeHistory,
       pendingChoice: this.pendingChoice,
       mayorNotableId: this.mayorNotableId,
+      currencySymbol: this.currencySymbol,
+      marketDisruptionEnd: this.marketDisruptionEnd,
     });
     // Path cache is not serialized; clear it so the original sim (a) and
     // the loaded sim (b) both recompute paths from scratch, staying in sync.
@@ -3022,6 +3043,8 @@ export class Simulation {
     sim.tradeHistory = d.tradeHistory ?? [];
     sim.pendingChoice = d.pendingChoice ?? null;
     sim.mayorNotableId = d.mayorNotableId ?? null;
+    sim.currencySymbol = d.currencySymbol ?? '$';
+    sim.marketDisruptionEnd = d.marketDisruptionEnd ?? 0;
     // Task reservations aren't saved; rebuild them from in-flight tasks.
     sim.reserved = new Set(sim.settlers.filter((s) => s.task).map((s) => sim.taskKey(s.task!)));
     return sim;

@@ -7,7 +7,8 @@
  * performance answer that lets the game scale to a State and beyond.
  */
 import { Rng } from './rng';
-import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR } from './defs';
+import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, formatCurrency, setCurrencySymbol } from './defs';
+import type { CurrencySymbol } from './defs';
 import type { Simulation, Settler, LogEntry } from './sim';
 import { RegionMap } from './worldgen';
 import type { TownSite } from './worldgen';
@@ -131,7 +132,7 @@ const SECTOR_BASE_SHARES: Record<SectorId, number> = {
  *  so that a 200-worker region earns ~£2,400/mo GDP (taxes cover services at
  *  10% rate). Richer sectors pay more — the wage gap pulls labor off the land. */
 const SECTOR_BASE_OUTPUT: Record<SectorId, number> = {
-  agriculture: 10.0, industry: 14.0, services: 13.0, information: 18.0,
+  agriculture: 10.0, industry: 14.0, services: 13.0, information: 30.0,
 };
 
 export function defaultSectors(): Sectors {
@@ -1171,6 +1172,8 @@ export class RegionSim {
   lenders: Lender[] = [];
   /** Player's active loans from lenders. */
   loans: Loan[] = [];
+  currencySymbol: CurrencySymbol = '$';
+  marketDisruptionEnd = 0;
   // ---- Phase 0: Regional Gameplay Expansion ----
   /** 100×100 grid tracking tile visibility: fogged/explored/scouted */
   explorationMap: TileVisibility[][] = [];
@@ -1750,7 +1753,7 @@ export class RegionSim {
     this.treasury -= cost;
     t.seaWall = true;
     this.addLog(
-      `The sea wall at ${t.name} tops out — £${cost} of granite and pumps between the town and the tide.`,
+      `The sea wall at ${t.name} tops out — ` + formatCurrency(cost) + ` of granite and pumps between the town and the tide.`,
       'good',
     );
     return true;
@@ -1826,12 +1829,12 @@ export class RegionSim {
     }
     this.addLog(
       kind === 'road'
-        ? `A wagon road opens between ${a.name} and ${b.name} — £${cost.total} of grading and bridgework.`
+        ? `A wagon road opens between ${a.name} and ${b.name} — ` + formatCurrency(cost.total) + ` of grading and bridgework.`
         : kind === 'rail'
-          ? `Steel rails link ${a.name} and ${b.name} — £${cost.total} of cuttings, trestles, and track. The whistle carries for miles.`
+          ? `Steel rails link ${a.name} and ${b.name} — ` + formatCurrency(cost.total) + ` of cuttings, trestles, and track. The whistle carries for miles.`
           : kind === 'highway'
-            ? `Fresh asphalt runs from ${a.name} to ${b.name} — £${cost.total} of paving${wasRail ? '. The old rail bed goes quiet' : ''}.`
-            : `A maglev guideway hums between ${a.name} and ${b.name} — £${cost.total} of pylons and superconductors. The freight drives itself now.`,
+            ? `Fresh asphalt runs from ${a.name} to ${b.name} — ` + formatCurrency(cost.total) + ` of paving${wasRail ? '. The old rail bed goes quiet' : ''}.`
+            : `A maglev guideway hums between ${a.name} and ${b.name} — ` + formatCurrency(cost.total) + ` of pylons and superconductors. The freight drives itself now.`,
       'good',
     );
     return true;
@@ -1871,7 +1874,7 @@ export class RegionSim {
     r.condition = 100;
     const a = this.settlement(aId)?.name ?? '?';
     const b = this.settlement(bId)?.name ?? '?';
-    this.addLog(`Repair gangs put the ${r.kind} between ${a} and ${b} back in order — £${cost}.`, 'good');
+    this.addLog(`Repair gangs put the ${r.kind} between ${a} and ${b} back in order — ` + formatCurrency(cost) + `.`, 'good');
     return true;
   }
 
@@ -1955,7 +1958,7 @@ export class RegionSim {
         const b = this.settlement(r.b)?.name ?? '?';
         this.addLog(
           `Storm washout: the ${r.kind} between ${a} and ${b} is cut — ` +
-          `${r.kind === 'rail' ? 'a trestle is down' : r.kind === 'maglev' ? 'a guideway pylon is down' : 'a bridge is out'}. Repairs would cost £${this.repairCost(r)}.`,
+          `${r.kind === 'rail' ? 'a trestle is down' : r.kind === 'maglev' ? 'a guideway pylon is down' : 'a bridge is out'}. Repairs would cost ` + formatCurrency(this.repairCost(r)) + `.`,
           'bad',
         );
       }
@@ -1997,6 +2000,8 @@ export class RegionSim {
     region.log = [...sim.log];
     // Transfer town's cash to regional treasury
     region.treasury = Math.max(0, Math.round(sim.economy.cash));
+    // Inherit the town's currency symbol
+    region.currencySymbol = sim.currencySymbol;
 
     // Town #1 cohortifies: real settler ages, minus those leaving on the expedition.
     const stayers = sim.settlers.length - expeditionPop;
@@ -2535,7 +2540,7 @@ export class RegionSim {
     this.nationalDebt += amount;
     this.treasury += amount;
     this.creditRating = this.computeCreditRating();
-    this.addLog(`Issued £${Math.floor(amount)} in bonds at ${(this.bondRate * 100).toFixed(1)}% (${this.creditRating}).`, 'info');
+    this.addLog(`Issued ` + formatCurrency(Math.floor(amount)) + ` in bonds at ${(this.bondRate * 100).toFixed(1)}% (${this.creditRating}).`, 'info');
     return true;
   }
 
@@ -2686,30 +2691,30 @@ export class RegionSim {
     const boost = (node: string, mult: number) => { if (this.has(node)) m *= mult; };
     switch (id) {
       case 'agriculture':
-        boost('electrical_grid', 1.2);     // electrified irrigation and tools
-        boost('combustion_engine', 1.4);   // tractors replace the horse
-        boost('mass_production', 1.8);     // industrialised farming at scale
-        boost('renewables', 1.4);          // precision agriculture, sustainable yields
+        boost('electrical_grid', 1.5);     // electrified irrigation and tools
+        boost('combustion_engine', 2.5);   // tractors replace the horse
+        boost('mass_production', 3.5);     // industrialised farming at scale
+        boost('renewables', 2.0);          // precision agriculture, sustainable yields
         break;
       case 'industry':
-        boost('steel_industry', 1.6);      // steel mills and heavy equipment
-        boost('electrical_grid', 1.5);     // electrified factories
-        boost('mass_production', 2.0);     // assembly lines, Fordism
-        boost('atomic_age', 1.4);          // nuclear power drives heavy industry
-        boost('automated_logistics', 1.3); // robotic supply chains
+        boost('steel_industry', 2.0);      // steel mills and heavy equipment
+        boost('electrical_grid', 2.0);     // electrified factories
+        boost('mass_production', 4.0);     // assembly lines, Fordism
+        boost('atomic_age', 2.5);          // nuclear power drives heavy industry
+        boost('automated_logistics', 2.5); // robotic supply chains
         break;
       case 'services':
-        boost('free_press', 1.2);          // literacy drives commerce
-        boost('labor_law', 1.1);           // protected workers are productive workers
-        boost('electrical_grid', 1.4);     // electrified retail, refrigeration
-        boost('asphalt', 1.4);             // road mobility multiplies trade
-        boost('computing', 2.0);           // the productivity leap of the office PC
+        boost('free_press', 1.5);          // literacy drives commerce
+        boost('labor_law', 1.3);           // protected workers are productive workers
+        boost('electrical_grid', 2.0);     // electrified retail, refrigeration
+        boost('asphalt', 2.0);             // road mobility multiplies trade
+        boost('computing', 8.0);           // the productivity leap of the office PC
         break;
       case 'information':
-        boost('free_press', 1.5);          // free information accelerates learning
-        boost('computing', 3.0);           // digital revolution, internet economy
-        boost('automated_logistics', 2.0); // global information networks
-        boost('maglev', 1.3);              // ultra-fast connectivity
+        boost('free_press', 2.0);          // free information accelerates learning
+        boost('computing', 10.0);          // digital revolution, internet economy
+        boost('automated_logistics', 5.0); // global information networks
+        boost('maglev', 2.0);              // ultra-fast connectivity
         break;
     }
     return m;
@@ -2817,7 +2822,7 @@ export class RegionSim {
       return { ok: false, reason: `requires ${node?.name ?? def.prereq}` };
     }
     if (this.buildingCount(t, def.id) >= def.max) return { ok: false, reason: 'already built' };
-    if (this.treasury < def.cost) return { ok: false, reason: `needs £${def.cost}` };
+    if (this.treasury < def.cost) return { ok: false, reason: `needs ` + formatCurrency(def.cost) + `` };
     return { ok: true, reason: '' };
   }
 
@@ -2829,7 +2834,7 @@ export class RegionSim {
     if (!t || !def || !this.cityBuildCheck(t, def).ok) return false;
     this.treasury -= def.cost;
     t.construction = { id: def.id, doneDay: this.day + def.days };
-    this.addLog(`Ground is broken for the ${def.name} at ${t.name} — £${def.cost}, ${def.days} days.`, 'info');
+    this.addLog(`Ground is broken for the ${def.name} at ${t.name} — ` + formatCurrency(def.cost) + `, ${def.days} days.`, 'info');
     return true;
   }
 
@@ -3182,7 +3187,7 @@ export class RegionSim {
     if (this.stateProclaimed) {
       const find = 15 + this.rng.int(20);
       this.treasury += find;
-      this.addLog(`Prospectors file a claim in the hills above ${t.name} — £${find} in fees and assay to the treasury.`, 'good');
+      this.addLog(`Prospectors file a claim in the hills above ${t.name} — ` + formatCurrency(find) + ` in fees and assay to the treasury.`, 'good');
     } else {
       const timber = 20 + this.rng.int(15);
       t.wood += timber;
@@ -3368,7 +3373,7 @@ export class RegionSim {
     this.addLog(
       `INCORPORATION: with ${this.settlements.length} towns and ${this.totalPop()} citizens, ` +
       `${mayor ? mayor.name + ' signs' : 'the council signs'} the Regional Charter under the banner of ` +
-      `${GOV_LEANS[lean].name}. Charter ceremony costs £${charterCost}. ${this.stateName} is proclaimed — Tier 2 begins here.`,
+      `${GOV_LEANS[lean].name}. Charter ceremony costs ` + formatCurrency(charterCost) + `. ${this.stateName} is proclaimed — Tier 2 begins here.`,
       'good',
     );
     if (mayor) mayor.bio.push(`Signed the Regional Charter of ${this.stateName}, ${this.year}.`);
@@ -3596,7 +3601,7 @@ export class RegionSim {
     this.treasury = Math.max(5000, this.treasury - convocationCost);
     this.addLog(
       `THE PROCLAMATION OF ${name.toUpperCase()}: The Constitutional Convention has spoken. ` +
-      `${def.name} — the form of government is set. Constitutional expenses: £${convocationCost}. A new era begins.`,
+      `${def.name} — the form of government is set. Constitutional expenses: ` + formatCurrency(convocationCost) + `. A new era begins.`,
       'good',
     );
   }
@@ -3916,8 +3921,8 @@ export class RegionSim {
   basketLabel(b: DealBasket): string {
     const parts = b.treaties.map((k) => TREATY_DEFS[k].name);
     if (b.borderSettlement) parts.push('Border Settlement');
-    if (b.goldToThem > 0) parts.push(`£${b.goldToThem} to them`);
-    if (b.goldToYou > 0) parts.push(`£${b.goldToYou} to you`);
+    if (b.goldToThem > 0) parts.push(`` + formatCurrency(b.goldToThem) + ` to them`);
+    if (b.goldToYou > 0) parts.push(`` + formatCurrency(b.goldToYou) + ` to you`);
     return parts.join(' + ') || 'nothing';
   }
 
@@ -4099,7 +4104,7 @@ export class RegionSim {
         } else {
           const toll = Math.min(this.treasury, 5 + this.rng.int(10));
           this.treasury -= toll;
-          this.addLog(`${rv.name}'s customs men shake down caravans at the frontier — £${toll} in seized goods and bribes.`, 'bad');
+          this.addLog(`${rv.name}'s customs men shake down caravans at the frontier — ` + formatCurrency(toll) + ` in seized goods and bribes.`, 'bad');
         }
       }
       // Beyond mischief (GDD §7.1): an emboldened hostile power declares war outright
@@ -4528,7 +4533,7 @@ export class RegionSim {
         this.treasury += tranche;
         rv.relations = this.clampRel(rv.relations - 10);
         this.noteHistory(rv, `Paid reparations to ${nation} after defeat, ${this.year}.`);
-        this.addLog(`PEACE: ${rv.name} signs — and pays. £${tranche} in reparations reaches the treasury.`, 'good');
+        this.addLog(`PEACE: ${rv.name} signs — and pays. ` + formatCurrency(tranche) + ` in reparations reaches the treasury.`, 'good');
         break;
       }
       case 'border_province': {
@@ -4789,6 +4794,10 @@ export class RegionSim {
       exchangeRates: this.exchangeRates,
       globalTradeVolume: this.globalTradeVolume,
       nextScoutId: this.nextScoutId,
+      lenders: this.lenders,
+      loans: this.loans,
+      currencySymbol: this.currencySymbol,
+      marketDisruptionEnd: this.marketDisruptionEnd,
     });
   }
 
@@ -4894,6 +4903,8 @@ export class RegionSim {
     // Lender system: initialize lenders if not in save, or load existing ones
     r.lenders = d.lenders ?? createInitialLenders();
     r.loans = d.loans ?? [];
+    r.currencySymbol = d.currencySymbol ?? '$';
+    r.marketDisruptionEnd = d.marketDisruptionEnd ?? 0;
     r.nextId = d.nextId;
     r.nextEventDay = d.nextEventDay;
     r.townNamePool = d.townNamePool;
@@ -4951,10 +4962,10 @@ export class RegionSim {
 
     // Check lender's availability and capacity
     if (amount > lender.maxLoan) {
-      return { ok: false, reason: `This lender can only offer up to £${lender.maxLoan}` };
+      return { ok: false, reason: `This lender can only offer up to ` + formatCurrency(lender.maxLoan) + `` };
     }
     if (amount > lender.liquidCash) {
-      return { ok: false, reason: `This lender currently has only £${lender.liquidCash} available` };
+      return { ok: false, reason: `This lender currently has only ` + formatCurrency(lender.liquidCash) + ` available` };
     }
 
     // Create and record the loan
@@ -4975,7 +4986,7 @@ export class RegionSim {
     this.treasury += amount; // treasury receives the loan proceeds
 
     this.addLog(
-      `Borrowed £${amount} from ${lender.name} at ${(lender.interestRate * 100).toFixed(1)}% annual interest, due in ${termMonths} months.`,
+      `Borrowed ` + formatCurrency(amount) + ` from ${lender.name} at ${(lender.interestRate * 100).toFixed(1)}% annual interest, due in ${termMonths} months.`,
       'info',
     );
 
@@ -5020,7 +5031,7 @@ export class RegionSim {
     }
 
     this.addLog(
-      `Paid £${paymentAmount} toward outstanding loan. Remaining: £${Math.round(loan.borrowed)}`,
+      `Paid ` + formatCurrency(paymentAmount) + ` toward outstanding loan. Remaining: ` + formatCurrency(Math.round(loan.borrowed)) + ``,
       'info',
     );
 
@@ -5075,7 +5086,7 @@ export class RegionSim {
 
   /**
    * Employment-weighted average daily wage across all settlements.
-   * Scales with tech era: £0.33/d at 1900 → £7+/d at full info-age tech.
+   * Scales with tech era: $0.33/d at 1900 → $200+/d at full info-age tech.
    */
   avgDailyWage(): number {
     let totalWorkers = 0;
@@ -5087,6 +5098,21 @@ export class RegionSim {
     }
     if (totalWorkers === 0) return 0;
     return (totalWageMonth / totalWorkers) / 30;
+  }
+
+  changeCurrency(newSymbol: CurrencySymbol): { ok: boolean; reason: string } {
+    if (newSymbol === this.currencySymbol) return { ok: false, reason: 'No change' };
+
+    // Apply penalty: 20% inflation + 10% treasury loss + market disruption flag
+    this.addLog(`Currency shift to ${newSymbol}: transaction costs (10% treasury)`, 'bad');
+    this.treasury = Math.floor(this.treasury * 0.9);
+    this.currencySymbol = newSymbol;
+    setCurrencySymbol(newSymbol);
+
+    // Mark market as "disrupted" for ~90 days (affects prices)
+    this.marketDisruptionEnd = this.day + 90;
+
+    return { ok: true, reason: '' };
   }
 
   /**

@@ -5,6 +5,7 @@
  */
 import type { RegionSim, Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, TownFocus, WagePolicy } from '../sim/region';
 import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, DEFAULT_CITY_POLICIES } from '../sim/region';
+import { formatCurrency } from '../sim/defs';
 
 export class RegionView {
   selectedId: number | null = null;
@@ -706,7 +707,7 @@ export class RegionView {
       `<p class="insp-skills">${branchTitle}</p>` +
       `<p>${rep.verdict}</p>` +
       `<p>population <b>${rep.pop.toLocaleString()}</b> across <b>${rep.towns}</b> towns · ` +
-      `GDP £${rep.gdp}/mo · treasury £${rep.treasury}</p>` +
+      `GDP ` + formatCurrency(rep.gdp) + `/mo · treasury ` + formatCurrency(rep.treasury) + `</p>` +
       `<p>CO₂ <b>${rep.co2ppm} ppm</b> · warming <b>+${rep.warmingC}°C</b> · ` +
       `${rep.techs} discoveries · ${rep.laws} statutes · legitimacy ${rep.legitimacy}</p>` +
       `<p>stewardship <b>${g.stewardship}</b> · prosperity <b>${g.prosperity}</b> · ` +
@@ -738,8 +739,8 @@ export class RegionView {
         ? GOV_TYPES.find((g) => g.id === r.govType)!.name
         : r.govLean ? GOV_LEANS[r.govLean].name : ''}</p>` +
       (r.nationProclaimed ? this.nationHtml() : '') +
-      `<p>treasury £${Math.floor(r.treasury)}</p>` +
-      `<p>GDP £${Math.floor(r.gdpLastMonth)}/mo · avg wage £${r.avgDailyWage().toFixed(2)}/d</p>` +
+      `<p>treasury ` + formatCurrency(Math.floor(r.treasury)) + `</p>` +
+      `<p>GDP ` + formatCurrency(Math.floor(r.gdpLastMonth)) + `/mo · avg wage ${formatCurrency(r.avgDailyWage())}/d</p>` +
       `<p title="The global ledger (GDD §8.2): every chimney on earth, projected to 2100. The verdict is read in 2040.">` +
       `CO₂ ${Math.round(r.co2ppm)} ppm · +${r.warmingC.toFixed(1)}°C` +
       `${r.eraBranch ? ` · <b>${r.eraBranch.toUpperCase()}</b>` : ` (→ +${r.projectedWarming().toFixed(1)}°C by 2100)`}` +
@@ -748,7 +749,7 @@ export class RegionView {
       (r.has('geoengineering') && !r.geoDeployed && r.nationProclaimed
         ? `<p><button class="mini" id="geo-deploy-btn" title="Deploy stratospheric aerosols: −${GEOENGINEER_COOLING}°C over 2 years, but all rivals lose 15 relations (one-time)">⚗ deploy geoengineering</button></p>`
         : '') +
-      `<p>trade £${Math.floor(r.tradeValueLastMonth)}/mo turnover</p>` +
+      `<p>trade ` + formatCurrency(Math.floor(r.tradeValueLastMonth)) + `/mo turnover</p>` +
       this.monetaryHtml() +
       this.lendersHtml() +
       `<p>tax <span id="tax-val">${Math.round(r.taxRate * 100)}%</span></p>` +
@@ -944,9 +945,9 @@ export class RegionView {
       const verbs = r.playerWar?.rivalId === rv.id
         ? `<p class="insp-skills">⚔ AT WAR — terms are set at the peace table above</p>`
         : `<p><button class="mini dip-envoy-btn" data-rival="${rv.id}" ${canEnvoy ? '' : 'disabled'} ` +
-          `title="A paid mission to warm relations (${ENVOY_COOLDOWN_DAYS}-day turnaround)">envoy £${ENVOY_COST}</button> ` +
+          `title="A paid mission to warm relations (${ENVOY_COOLDOWN_DAYS}-day turnaround)">envoy ` + formatCurrency(ENVOY_COST) + `</button> ` +
           `<button class="mini dip-gift-btn" data-rival="${rv.id}" ${canGift ? '' : 'disabled'} ` +
-          `title="A state gift — dearer, faster">gift £${GIFT_COST}</button> ` +
+          `title="A state gift — dearer, faster">gift ` + formatCurrency(GIFT_COST) + `</button> ` +
           `<button class="mini dip-deal-btn" data-rival="${rv.id}" ` +
           `title="Open the bargaining table: compose a multi-item basket (GDD §6.3)">negotiate</button> ` +
           proposals + warBtn + `</p>`;
@@ -971,7 +972,7 @@ export class RegionView {
       .join('');
     const world = wars || pacts ? `<p class="insp-skills">WORLD AFFAIRS</p>` + wars + pacts : '';
     const boom = r.day < r.warBoomUntil ? `<p class="insp-skills">WAR ABROAD — export prices booming</p>` : '';
-    const exports = r.exportEarningsLastMonth > 0 ? `<p>exports £${Math.floor(r.exportEarningsLastMonth)}/mo</p>` : '';
+    const exports = r.exportEarningsLastMonth > 0 ? `<p>exports ` + formatCurrency(Math.floor(r.exportEarningsLastMonth)) + `/mo</p>` : '';
     return `<p class="insp-skills">DIPLOMACY (relations −100..+100)</p>` + this.warHtml() + boom + exports + rows + world;
   }
 
@@ -996,7 +997,7 @@ export class RegionView {
       `<button class="mini war-blockade-btn" ${w.blockade || canBlockade ? '' : 'disabled'} ` +
       `title="${w.blockade
         ? 'Lift the blockade: lanes reopen for both sides'
-        : `Close their lanes: their power −15%, score climbs — costs £${BLOCKADE_UPKEEP_PER_POP}/pop/mo and your own exports (needs funded militia or a standing army)`}">` +
+        : `Close their lanes: their power −15%, score climbs — costs ` + formatCurrency(BLOCKADE_UPKEEP_PER_POP) + `/pop/mo and your own exports (needs funded militia or a standing army)`}">` +
       `${w.blockade ? '⚓ lift blockade' : '⚓ blockade'}</button>`;
     // Co-belligerence (GDD §7.3): the pacts you can call to the colors
     const name = (id: number) => r.rival(id)?.name ?? '?';
@@ -1012,7 +1013,7 @@ export class RegionView {
     // Occupation (GDD §7.4): the marches the army administers
     const occ = w.occupied > 0
       ? `<p class="insp-skills">occupied marches ${w.occupied}/${MAX_OCCUPIED_MARCHES} · ` +
-        `yield £${w.occupied * (OCCUPATION_DEFS[w.occupationPolicy].yield - OCCUPATION_DEFS[w.occupationPolicy].garrison)}/mo net</p>` +
+        `yield ` + formatCurrency(w.occupied * (OCCUPATION_DEFS[w.occupationPolicy].yield - OCCUPATION_DEFS[w.occupationPolicy].garrison)) + `/mo net</p>` +
         `<div class="bar-row" title="Resistance in the occupied marches: past 50, partisans bleed the garrisons">` +
         `<span style="width:70px;display:inline-block">resistance</span>` +
         `<div class="bar" style="flex:1"><div class="bar-fill" style="width:${Math.round(w.resistance)}%;background:${w.resistance > 50 ? '#e55' : '#ca4'}"></div></div>` +
@@ -1131,7 +1132,7 @@ export class RegionView {
       const activeId = r.activePolicies[i] ?? null;
       const card = activeId ? POLICY_CARDS.find((c) => c.id === activeId) : null;
       const label = card ? card.name : `— empty —`;
-      const upkeepNote = card && card.upkeep > 0 ? ` (£${card.upkeep}/mo)` : '';
+      const upkeepNote = card && card.upkeep > 0 ? ` (` + formatCurrency(card.upkeep) + `/mo)` : '';
       const canSwap = !card || r.politicalCapital >= POLICY_SWAP_COST;
       return `<p><span class="insp-skills">${domain}: </span>` +
         `<button class="mini policy-slot-btn" data-slot="${i}" ${canSwap ? '' : 'disabled'} ` +
@@ -1161,7 +1162,7 @@ export class RegionView {
       const canAfford = !activeId || r.politicalCapital >= POLICY_SWAP_COST;
       return `<p><button class="policy-pick-btn${isActive ? ' active' : ''}" data-card="${c.id}" ` +
         `${canAfford ? '' : 'disabled'} title="${c.desc}">` +
-        `<b>${c.name}</b>${c.upkeep > 0 ? ` £${c.upkeep}/mo` : ''}` +
+        `<b>${c.name}</b>${c.upkeep > 0 ? ` ` + formatCurrency(c.upkeep) + `/mo` : ''}` +
         (isActive ? ' ✓' : '') + `</button>` +
         `<span class="insp-skills"> — ${c.desc}</span></p>`;
     }).join('');
@@ -1229,7 +1230,7 @@ export class RegionView {
     const v = r.evaluateDeal(rv, this.currentBasket());
     const ledger = `they value it ${v.get.toFixed(1)} pts against ${v.cost.toFixed(1)} asked`;
     if (v.accept) return `✓ Their envoy nods — ${ledger}. They would sign.`;
-    if (v.counter) return `± Close: ${ledger}. They would counter, asking £${v.counter.goldToThem - this.dealGoldToThem} more.`;
+    if (v.counter) return `± Close: ${ledger}. They would counter, asking ` + formatCurrency(v.counter.goldToThem - this.dealGoldToThem) + ` more.`;
     return `✗ ${ledger}. They would walk — "${v.reason}."`;
   }
 
@@ -1261,7 +1262,7 @@ export class RegionView {
       treatyRows + borderRow +
       `<p><label>£ to them <input type="number" id="deal-gold-them" min="0" step="5" value="${this.dealGoldToThem}" style="width:70px"></label> ` +
       `<label>£ asked of them <input type="number" id="deal-gold-you" min="0" step="5" value="${this.dealGoldToYou}" style="width:70px"></label> ` +
-      `<span class="insp-skills">(treasury £${Math.floor(r.treasury)})</span></p>` +
+      `<span class="insp-skills">(treasury ` + formatCurrency(Math.floor(r.treasury)) + `)</span></p>` +
       `<p id="deal-verdict" class="insp-skills">${this.dealVerdictLine()}</p>` +
       `<p><button id="deal-propose-btn" ${r.treasury >= this.dealGoldToThem ? '' : 'disabled'}>Put it on the table</button> ` +
       `<button id="deal-cancel-btn" class="mini">Withdraw</button></p>` +
@@ -1339,7 +1340,7 @@ export class RegionView {
       `title="Low rates: credit boom, GDP boost, then bust. High rates: credit contraction, inflation down.">` +
       `<p class="insp-skills">regime: ${regime('float', 'float')} ${regime('peg', 'peg')} ${regime('print', 'print')}</p>` +
       `<p class="insp-skills" title="Sovereign bonds: borrow against future tax receipts at the bond rate">` +
-      `debt £${Math.floor(r.nationalDebt)} (${debtPct}% GDP) · ` +
+      `debt ` + formatCurrency(Math.floor(r.nationalDebt)) + ` (${debtPct}% GDP) · ` +
       `<span style="color:${ratingCol}">${r.creditRating}</span> · ` +
       `${(r.bondRate * 100).toFixed(1)}% coupon</p>` +
       (r.nationProclaimed
@@ -1367,7 +1368,7 @@ export class RegionView {
       for (const lender of r.lenders) {
         const canBorrow = r.treasury > 0 && lender.liquidCash > 0;
         html += `<p style="margin:2px 0;font-size:10px">` +
-          `${lender.name} — max £${lender.maxLoan} @ ${(lender.interestRate * 100).toFixed(1)}% ` +
+          `${lender.name} — max ` + formatCurrency(lender.maxLoan) + ` @ ${(lender.interestRate * 100).toFixed(1)}% ` +
           (canBorrow ? `<button class="mini lender-btn" data-lender="${lender.id}">borrow</button>` : '') +
           `</p>`;
       }
@@ -1382,7 +1383,7 @@ export class RegionView {
         const owing = Math.round(loan.borrowed);
         const canRepay = r.treasury >= owing * 0.1; // can repay at least 10%
         html += `<p style="margin:2px 0;font-size:10px">` +
-          `${lender?.name ?? 'lender'} — £${owing} owing ` +
+          `${lender?.name ?? 'lender'} — ` + formatCurrency(owing) + ` owing ` +
           (canRepay ? `<button class="mini loan-repay-btn" data-loan="${loan.id}" data-lender="${loan.lenderId}">repay</button>` : '') +
           `</p>`;
       }
@@ -1478,7 +1479,7 @@ export class RegionView {
           if (cost) {
             const afford = r.treasury >= cost.total;
             btn += ` <button class="mini road-btn" data-to="${o.id}" ${afford ? '' : 'disabled'} ` +
-              `title="£${cost.total}: ${cost.breakdown}">road £${cost.total}</button>`;
+              `title="` + formatCurrency(cost.total) + `: ${cost.breakdown}">road ` + formatCurrency(cost.total) + `</button>`;
           }
         }
         if (r.railUnlocked() && (!route || (route.kind !== 'rail' && route.kind !== 'highway' && route.kind !== 'maglev'))) {
@@ -1486,7 +1487,7 @@ export class RegionView {
           if (cost) {
             const afford = r.treasury >= cost.total;
             btn += ` <button class="mini rail-btn" data-to="${o.id}" ${afford ? '' : 'disabled'} ` +
-              `title="£${cost.total}: ${cost.breakdown}">rail £${cost.total}</button>`;
+              `title="` + formatCurrency(cost.total) + `: ${cost.breakdown}">rail ` + formatCurrency(cost.total) + `</button>`;
           }
         }
         if (r.highwayUnlocked() && (!route || (route.kind !== 'highway' && route.kind !== 'maglev'))) {
@@ -1494,7 +1495,7 @@ export class RegionView {
           if (cost) {
             const afford = r.treasury >= cost.total;
             btn += ` <button class="mini hwy-btn" data-to="${o.id}" ${afford ? '' : 'disabled'} ` +
-              `title="£${cost.total}: ${cost.breakdown}${route?.kind === 'rail' ? ' — replaces the rail line' : ''}">highway £${cost.total}</button>`;
+              `title="` + formatCurrency(cost.total) + `: ${cost.breakdown}${route?.kind === 'rail' ? ' — replaces the rail line' : ''}">highway ` + formatCurrency(cost.total) + `</button>`;
           }
         }
         if (r.maglevUnlocked() && (!route || route.kind !== 'maglev')) {
@@ -1503,14 +1504,14 @@ export class RegionView {
             const afford = r.treasury >= cost.total;
             const replaces = route && route.kind !== 'trail' ? ` — replaces the ${route.kind}` : '';
             btn += ` <button class="mini mag-btn" data-to="${o.id}" ${afford ? '' : 'disabled'} ` +
-              `title="£${cost.total}: ${cost.breakdown}${replaces}">maglev £${cost.total}</button>`;
+              `title="` + formatCurrency(cost.total) + `: ${cost.breakdown}${replaces}">maglev ` + formatCurrency(cost.total) + `</button>`;
           }
         }
         if (r.stateProclaimed && route && route.kind !== 'trail' && route.condition < 85) {
           const cost = r.repairCost(route);
           const afford = r.treasury >= cost;
           btn += ` <button class="mini repair-btn" data-to="${o.id}" ${afford ? '' : 'disabled'} ` +
-            `title="restore to 100%">repair £${cost}</button>`;
+            `title="restore to 100%">repair ` + formatCurrency(cost) + `</button>`;
         }
         return `<li>${o.name} — <span class="insp-skills">${status}</span>${btn}</li>`;
       })
@@ -1544,7 +1545,7 @@ export class RegionView {
       .map((def) => {
         const check = r.cityBuildCheck(t, def);
         return `<li>${def.name} <button class="mini city-build-btn" data-b="${def.id}" ${check.ok ? '' : 'disabled'} ` +
-          `title="${def.desc}${check.ok ? '' : ' — ' + check.reason}">£${def.cost} · ${def.days}d</button></li>`;
+          `title="${def.desc}${check.ok ? '' : ' — ' + check.reason}">` + formatCurrency(def.cost) + ` · ${def.days}d</button></li>`;
       })
       .join('');
     const focusBtns = (['balanced', ...SECTOR_IDS] as TownFocus[])
@@ -1552,7 +1553,7 @@ export class RegionView {
         const label = f === 'balanced' ? 'balanced' : SECTOR_NAMES[f].toLowerCase();
         return t.focus === f
           ? `<b>${label}</b>`
-          : `<button class="mini focus-btn" data-f="${f}" title="Repaint the designation (£${FOCUS_CHANGE_COST}) — labor drifts toward it over the months">${label}</button>`;
+          : `<button class="mini focus-btn" data-f="${f}" title="Repaint the designation (` + formatCurrency(FOCUS_CHANGE_COST) + `) — labor drifts toward it over the months">${label}</button>`;
       })
       .join(' ');
     return (
@@ -1597,12 +1598,12 @@ export class RegionView {
         `<span style="min-width:28px;text-align:right">${pct}%</span>` +
         `<span class="${arrowClass}" style="min-width:12px;text-align:center">${arrow}</span>` +
         `<span class="insp-skills" style="min-width:52px;text-align:right">${s.output.toFixed(1)}/m</span>` +
-        `<span class="insp-skills" style="min-width:52px;text-align:right">£${(s.wage / 30).toFixed(2)}/d</span>` +
+        `<span class="insp-skills" style="min-width:52px;text-align:right">` + formatCurrency(s.wage / 30, 2) + `/d</span>` +
         evtBadge +
         `</div>`
       );
     }).join('');
-    const gdpNote = totalOutput > 0 ? `<span class="insp-skills">GDP contribution £${(totalOutput * 1.08).toFixed(1)}/month</span>` : '';
+    const gdpNote = totalOutput > 0 ? `<span class="insp-skills">GDP contribution ` + formatCurrency(totalOutput * 1.08, 1) + `/month</span>` : '';
     return `<p class="insp-skills">SECTORS${gdpNote ? ' · ' : ''}${gdpNote}</p>${rows}`;
   }
 
@@ -1642,7 +1643,7 @@ export class RegionView {
       `<p class="insp-skills">tax: ${taxBtns}${taxRevNote}</p>` +
       `<p class="insp-skills">wages: ${wageBtns}</p>` +
       `<p class="insp-skills">services: ${svcBtns}` +
-      (p.serviceLevel >= 2 ? ` <span class="insp-cond">(+£${(r.popOf(t) * 0.002).toFixed(1)}/month)</span>` : '') +
+      (p.serviceLevel >= 2 ? ` <span class="insp-cond">(+` + formatCurrency(r.popOf(t) * 0.002, 1) + `/month)</span>` : '') +
       `</p>`
     );
   }
@@ -1722,7 +1723,7 @@ export class RegionView {
         ? `<p class="${t.grievance > 50 ? 'insp-cond' : 'insp-skills'}">grievance ${Math.round(t.grievance)}${this.region.day < t.strikeUntil ? ' · ON STRIKE' : ''}</p>`
         : '') +
       `<p>food ${Math.floor(t.food)} · wood ${Math.floor(t.wood)} · land ${t.landQuality.toFixed(2)}</p>` +
-      `<p class="insp-skills">market: grain £${t.prices.food.toFixed(2)} · timber £${t.prices.wood.toFixed(2)} /unit</p>` +
+      `<p class="insp-skills">market: grain ` + formatCurrency(t.prices.food, 2) + ` · timber ` + formatCurrency(t.prices.wood, 2) + ` /unit</p>` +
       `<p class="insp-skills">${[
         t.site.river ? 'river (fishery, flood risk)' : '',
         t.site.coastal ? (t.seaWall ? 'coastal (sea wall raised)' : 'coastal (fishery)') : '',
@@ -1733,7 +1734,7 @@ export class RegionView {
       (t.site.coastal && !t.seaWall && r.stateProclaimed && r.year >= SEA_WALL_YEAR
         ? `<p><button class="mini" id="seawall-btn" ${r.treasury >= r.seaWallCost(t) ? '' : 'disabled'} ` +
           `title="Granite and pumps against the rising sea (GDD §8.2) — tidal flooding never touches a walled town">` +
-          `sea wall £${r.seaWallCost(t)}</button></p>`
+          `sea wall ` + formatCurrency(r.seaWallCost(t)) + `</button></p>`
         : '') +
       this.sectorsHtml(t) +
       this.policiesHtml(t) +
@@ -1754,7 +1755,7 @@ export class RegionView {
 
     const maxBorrow = Math.min(lender.maxLoan, lender.liquidCash);
     const amountStr = prompt(
-      `${lender.name}\nMax loan: £${maxBorrow}\nInterest rate: ${(lender.interestRate * 100).toFixed(1)}% annual\n\nBorrow amount (£):`,
+      `${lender.name}\nMax loan: ` + formatCurrency(maxBorrow) + `\nInterest rate: ${(lender.interestRate * 100).toFixed(1)}% annual\n\nBorrow amount (£):`,
       String(Math.min(1000, maxBorrow / 2)),
     );
     if (!amountStr) return;
@@ -1765,7 +1766,7 @@ export class RegionView {
       return;
     }
     if (amount > maxBorrow) {
-      alert(`Cannot borrow more than £${maxBorrow}`);
+      alert(`Cannot borrow more than ` + formatCurrency(maxBorrow) + ``);
       return;
     }
 
@@ -1796,7 +1797,7 @@ export class RegionView {
     const suggested = Math.min(r.treasury, owing);
 
     const amountStr = prompt(
-      `Repay loan\nOwing: £${owing}\nMax can pay: £${suggested}\nMin payment: £${minPayment}\n\nRepay amount (£):`,
+      `Repay loan\nOwing: ` + formatCurrency(owing) + `\nMax can pay: ` + formatCurrency(suggested) + `\nMin payment: ` + formatCurrency(minPayment) + `\n\nRepay amount (£):`,
       String(minPayment),
     );
     if (!amountStr) return;
@@ -1811,7 +1812,7 @@ export class RegionView {
       return;
     }
     if (amount < minPayment) {
-      alert(`Minimum payment is £${minPayment}`);
+      alert(`Minimum payment is ` + formatCurrency(minPayment) + ``);
       return;
     }
 

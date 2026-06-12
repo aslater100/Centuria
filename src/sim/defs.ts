@@ -42,6 +42,25 @@ export const WORK_KINDS: WorkKind[] = [
 // ---- Town focus (used by player and Notable Mayor post-flip) ----
 export type TownFocus = 'balanced' | 'agricultural' | 'military' | 'trade' | 'industrial' | 'cultural';
 
+// ---- Currency system ----
+export type CurrencySymbol = '$' | '£' | '€' | 'CA$' | 'A$';
+export const CURRENCY_SYMBOLS: CurrencySymbol[] = ['$', '£', '€', 'CA$', 'A$'];
+
+export function getCurrencySymbol(): CurrencySymbol {
+  return (localStorage.getItem('centuria-currency') ?? '$') as CurrencySymbol;
+}
+
+export function setCurrencySymbol(sym: CurrencySymbol): void {
+  localStorage.setItem('centuria-currency', sym);
+}
+
+export function formatCurrency(amount: number, decimals?: number): string {
+  if (decimals !== undefined) {
+    return `${getCurrencySymbol()}${amount.toFixed(decimals)}`;
+  }
+  return `${getCurrencySymbol()}${Math.round(amount)}`;
+}
+
 // ---- Market automation ----
 export interface TradeOrder {
   id: number;
