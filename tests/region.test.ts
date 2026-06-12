@@ -84,6 +84,11 @@ describe('RegionSim (aggregate model)', () => {
 
   function toStatehood(r: RegionSim): void {
     for (let year = 0; year < 30 && !r.ceremonyPending; year++) {
+      // keep the charter's economic and military gates satisfied as towns appear
+      r.treasury = Math.max(r.treasury, 50000);
+      for (const t of r.settlements) {
+        t.garrisonStrength = Math.max(t.garrisonStrength || 0, 5);
+      }
       runDays(r, 60);
       // expand whenever the strongest town can afford it (a player would)
       for (const t of r.settlements) {
@@ -261,6 +266,11 @@ describe('Region save/load', () => {
   it('preserves the State: name, lean, treasury, and built routes', () => {
     const { sim, r } = flippedPair(42);
     for (let year = 0; year < 30 && !r.ceremonyPending; year++) {
+      // keep the charter's economic and military gates satisfied as towns appear
+      r.treasury = Math.max(r.treasury, 50000);
+      for (const t of r.settlements) {
+        t.garrisonStrength = Math.max(t.garrisonStrength || 0, 5);
+      }
       runDays(r, 60);
       for (const t of r.settlements) {
         if (r.settlements.length + r.expeditions.length < 4 && r.canFoundTown(t.id).ok) {

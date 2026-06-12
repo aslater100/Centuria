@@ -5,6 +5,7 @@
 import type { Simulation, Settler, Building } from '../sim/sim';
 import { buildingDef, traitDef, WORK_KINDS, TUNING, TOWN_TECH_DEFS } from '../sim/defs';
 import type { ResourceKind, WorkKind } from '../sim/defs';
+import { getMarketPrice } from '../sim/economy';
 import type { Camera } from './render';
 import type { PaintKind } from '../sim/world';
 import type { Sfx } from './audio';
@@ -202,6 +203,11 @@ export class Hud {
       const trade = (e.target as HTMLElement).closest<HTMLElement>('.trade-btn');
       if (trade) {
         this.sim.trade(trade.dataset.give as ResourceKind, trade.dataset.get as ResourceKind);
+        return;
+      }
+      const sell = (e.target as HTMLElement).closest<HTMLElement>('.sell-cash-btn');
+      if (sell) {
+        this.sim.sellToMarket(sell.dataset.kind as ResourceKind, 5);
         return;
       }
       const btn = (e.target as HTMLElement).closest<HTMLElement>('button[data-action]');
@@ -657,7 +663,15 @@ export class Hud {
       const can = this.sim.stock[give as ResourceKind] >= r.give;
       return `<button class="trade-btn" data-give="${give}" data-get="${get}"${can ? '' : ' disabled'}>${r.give}${give[0]}→${r.get}${get[0]}</button>`;
     }).join(' ');
-    return `<p class="insp-skills">BARTER:</p><p>${offers}</p>`;
+    // Sell stock for coin: how the colony banks the cash that founding a town requires
+    const sellable: ResourceKind[] = ['wood', 'stone', 'grain', 'meal', 'clothes'];
+    const sells = sellable.map((kind) => {
+      const price = getMarketPrice(this.sim.economy, kind);
+      const can = this.sim.stock[kind] >= 5;
+      return `<button class="sell-cash-btn" data-kind="${kind}"${can ? '' : ' disabled'}>5 ${kind} → £${price * 5}</button>`;
+    }).join(' ');
+    return `<p class="insp-skills">BARTER:</p><p>${offers}</p>` +
+      `<p class="insp-skills">SELL FOR COIN (£${Math.round(this.sim.economy.cash)}):</p><p>${sells}</p>`;
   }
 
   private civicPanel(bid: number): string {
