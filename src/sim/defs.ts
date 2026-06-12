@@ -23,7 +23,8 @@ export type Provides =
   | 'hunt' | 'trade' | 'forestry' | 'granary' | 'medical' | 'fishing' | 'forge'
   // New — town expansion
   | 'civic' | 'ranching' | 'milling' | 'brewing' | 'preservation'
-  | 'smithing' | 'sawmill' | 'kiln' | 'well' | 'watchtower' | 'warehouse';
+  | 'smithing' | 'sawmill' | 'kiln' | 'well' | 'watchtower' | 'warehouse'
+  | 'herbalism' | 'apothecary' | 'mining' | 'education';
 
 export type WorkKind =
   // Existing
@@ -312,6 +313,28 @@ export const TUNING = {
   watchtowerWarningDays: 1,   // extra days of warning before raid arrives
   // Warehouse / storage
   warehouseBaseCap: 500,
+  // Production chains
+  flaxGrowDays: 8,
+  flaxYieldPerTile: 3,
+  sawmillWorkPerTimber: 90,
+  kilnWorkPerBrick: 90,
+  smeltWorkPerIron: 120,
+  smithWorkPerTools: 90,
+  mineWorkPerCharge: 120,
+  mineClayPerCharge: 3,
+  mineIronOrePerCharge: 2,
+  mineCoalPerCharge: 1,
+  mineChargesInit: 20,
+  // Herb and medicine
+  apothecaryHealMult: 1.5,
+  medicineHerbCost: 2,
+  medicineWorkCost: 90,
+  // Tech mechanics
+  cropRotationYieldBonus: 0.2,
+  combatTrainingBonus: 2,
+  repeatingArmsDamageBonus: 10,
+  literacySkillCapBonus: 2,
+  schoolhouseResearchBonus: 0.25,
   // Town identity
   prestigePerBuilding: 2,
   prestigePerRaidSurvived: 2,

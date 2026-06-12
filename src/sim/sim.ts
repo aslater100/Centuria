@@ -137,6 +137,8 @@ export interface Building {
   level: number; // 1-indexed upgrade level
   rotation: number; // 0-3 clockwise 90° turns
   workerLimit: number | null; // null = auto-assign
+  livestock?: number;      // animal pens: current head count
+  herbGrowthMinutes?: number; // herb_garden: minutes since last harvest
 }
 
 export interface GroundItem {
@@ -456,6 +458,8 @@ export class Simulation {
       level: 1,
       rotation,
       workerLimit: null,
+      livestock: 0,
+      herbGrowthMinutes: 0,
     };
     this.buildings.push(b);
     for (let dy = 0; dy < h; dy++) {
@@ -591,9 +595,12 @@ export class Simulation {
   private researchSpeedMult(): number {
     const hall = this.buildings.find((b) => b.defId === 'town_hall' && b.built);
     if (!hall) return 1;
-    if (hall.level >= 3) return 1.5;
-    if (hall.level >= 2) return 1.25;
-    return 1;
+    let mult = 1;
+    if (hall.level >= 3) mult = 1.5;
+    else if (hall.level >= 2) mult = 1.25;
+    const schools = this.builtOf('education').filter(b => b.built).length;
+    mult *= 1 + schools * TUNING.schoolhouseResearchBonus;
+    return mult;
   }
 
   markTree(x: number, y: number): void {
@@ -676,6 +683,30 @@ export class Simulation {
       this.stock.wood -= TUNING.trapWoodCost;
       t.trapZone = true;
       return true;
+    } else if (kind === 'flax') {
+      if (t.flaxZone) {
+        t.flaxZone = false;
+        if (!t.sown && t.growth === 0) t.kind = 'grass';
+        return true;
+      }
+      if (t.kind === 'water' || t.kind === 'rock' || t.kind === 'tree') return false;
+      if (t.buildingId !== null || t.wall || t.wallPlan || t.gate || t.gatePlan || t.farmZone) return false;
+      t.flaxZone = true;
+      t.kind = 'soil';
+      return true;
+    } else if (kind === 'pasture') {
+      if (t.pastureZone) { t.pastureZone = false; return true; }
+      if (t.kind === 'water' || t.kind === 'rock' || t.kind === 'tree') return false;
+      if (t.buildingId !== null || t.wall || t.wallPlan || t.gate || t.gatePlan) return false;
+      t.pastureZone = true;
+      return true;
+    } else if (kind === 'mine') {
+      if (t.mineZone) { t.mineZone = false; return true; }
+      if (t.kind !== 'rock') return false;
+      if (t.buildingId !== null) return false;
+      t.mineZone = true;
+      t.mineCharges = TUNING.mineChargesInit;
+      return true;
     }
     return false;
   }
@@ -733,6 +764,9 @@ export class Simulation {
       this.stock.wood += TUNING.trapWoodCost;
       return;
     }
+    if (t.flaxZone) { t.flaxZone = false; if (!t.sown && t.growth === 0) t.kind = 'grass'; return; }
+    if (t.pastureZone) { t.pastureZone = false; return; }
+    if (t.mineZone) { t.mineZone = false; return; }
   }
 
   /** Barter at a built market (HUD panel): fixed rates, lossy round-trip. */
@@ -814,6 +848,31 @@ export class Simulation {
   private dailyUpdate(): void {
     for (let i = 0; i < this.traffic.length; i++) this.traffic[i] *= 0.9; // overlay shows recent flow
     this.updatePopulationFlows();
+    // Animal pens produce dairy from livestock
+    for (const pen of this.builtOf('ranching').filter(b => b.defId === 'animal_pen' && b.built)) {
+      const livestock = pen.livestock ?? 0;
+      if (livestock > 0) {
+        const dairyMult = pen.level >= 3 ? 1.5 : 1;
+        const dairy = livestock * TUNING.dairyPerHeadPerDay * dairyMult;
+        if (dairy >= 1 || this.rng.chance(dairy)) {
+          this.stock.dairy += Math.max(1, Math.floor(dairy));
+        }
+      }
+    }
+    // Herb garden growth timer (increment once per day)
+    for (const hg of this.builtOf('herbalism')) {
+      if (hg.built) hg.herbGrowthMinutes = (hg.herbGrowthMinutes ?? 0) + MINUTES_PER_DAY;
+    }
+    // Watchtower: warn of approaching raids
+    if (this.builtOf('watchtower').some(b => b.built)) {
+      const warningDays = this.builtOf('watchtower').reduce((m, b) => {
+        return Math.max(m, b.built ? (b.level >= 2 ? 2 : TUNING.watchtowerWarningDays) : 0);
+      }, 0);
+      const daysUntilRaid = this.nextRaidDay - this.day;
+      if (daysUntilRaid === warningDays) {
+        this.addLog('Your watchmen have spotted raiders gathering in the distance!', 'bad');
+      }
+    }
     // Cooked food keeps only so long; granaries extend the larder. Grain is uncapped.
     const mealCap = this.mealCap();
     if (this.stock.meal > mealCap) {
@@ -841,7 +900,7 @@ export class Simulation {
     // Winter kills the standing crop.
     if (!this.growingSeason) {
       for (const t of this.world.tiles) {
-        if (t.kind === 'soil' && (t.sown || t.growth > 0)) {
+        if (t.kind === 'soil' && (t.sown || t.growth > 0) && !t.flaxZone) {
           t.sown = false;
           t.growth = 0;
         }
@@ -1234,7 +1293,9 @@ export class Simulation {
     const armedBonus = s.armed
       ? (armoury ? TUNING.forgedWeaponBonus + (armoury.level >= 3 ? 10 : 0) : TUNING.spearDamageBonus)
       : 0;
-    return TUNING.combatDamagePerHour + s.combat * TUNING.combatDamagePerSkill + armedBonus;
+    const trainingBonus = this.hasTech('militia_training') ? TUNING.combatTrainingBonus * TUNING.combatDamagePerSkill : 0;
+    const repeatingBonus = this.hasTech('repeating_arms') ? TUNING.repeatingArmsDamageBonus : 0;
+    return TUNING.combatDamagePerHour + s.combat * TUNING.combatDamagePerSkill + armedBonus + trainingBonus + repeatingBonus;
   }
 
   // ---- wildlife ----
@@ -1395,7 +1456,7 @@ export class Simulation {
         s.wound = null; // scarred over on its own
       } else if (!s.wound.infectionRolled && this.minute - s.wound.at > t.infectionWindowHours * 60) {
         s.wound.infectionRolled = true;
-        if (this.rng.chance(t.infectionChance)) {
+        if (this.rng.chance(t.infectionChance * this.infectionChanceMult())) {
           s.infection = true;
           this.addLog(`${s.name}'s wound has festered — they need treatment.`, 'bad');
         }
@@ -1406,7 +1467,11 @@ export class Simulation {
     if (s.needs.food > 30 && s.needs.warmth > 30 && s.health < 100) {
       const cot = this.building(s.bedId);
       const inClinic = s.state === 'sleeping' && cot?.built && buildingDef(cot.defId).provides === 'medical';
-      s.health = Math.min(100, s.health + t.healthRegenPerHour * (inClinic ? t.clinicRegenMult : 1) * hours);
+      const medBonus = inClinic && this.stock.medicine > 0 ? TUNING.apothecaryHealMult : 1;
+      s.health = Math.min(100, s.health + t.healthRegenPerHour * (inClinic ? t.clinicRegenMult : 1) * medBonus * hours);
+      if (inClinic && medBonus > 1 && s.health >= 100) {
+        this.stock.medicine = Math.max(0, this.stock.medicine - 1);
+      }
     }
     if (s.health <= 0) {
       const cause = s.infection ? 'infection' : s.sickUntil > this.minute ? 'fever'
@@ -1450,7 +1515,8 @@ export class Simulation {
     if (this.raidActive && !['fighting', 'fleeing', 'breakdown'].includes(s.state)) {
       this.releaseTask(s);
       s.bedId = null;
-      if (s.combat >= t.fightMinCombat && s.health > 50) {
+      const effectiveCombat = s.combat + (this.hasTech('militia_training') ? TUNING.combatTrainingBonus : 0);
+      if (effectiveCombat >= t.fightMinCombat && s.health > 50) {
         // Arm: draw a forged weapon first (better), fall back to improvised spear.
         if (!s.armed) {
           if (this.stock.weapons > 0) {
@@ -1702,6 +1768,15 @@ export class Simulation {
         }
       }
     }
+    // Flax zone: harvest when ripe
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        const tile = this.world.at(x, y);
+        if (tile.flaxZone && tile.growth >= 100) {
+          push({ kind: 'farm', x, y, workLeft: 10, label: 'harvest flax' }, 'farm');
+        }
+      }
+    }
     // Cook while there is grain and meals are short. A bakery outclasses the
     // cookhouse (faster, bigger batches), so it takes over when built.
     const cookShops = this.builtOf('cook');
@@ -1720,6 +1795,63 @@ export class Simulation {
     for (const brewery of this.builtOf('brewing')) {
       if (this.stock.grain >= TUNING.brewGrainPerAle && this.stock.ale < this.settlers.length) {
         push({ kind: 'cook', x: brewery.x, y: brewery.y, buildingId: brewery.id, workLeft: TUNING.cookWorkPerMeal * 2, label: 'brew ale' }, 'cook');
+      }
+    }
+    // Sawmill: convert wood to timber
+    for (const sm of this.builtOf('sawmill')) {
+      if (sm.built && this.stock.wood >= TUNING.sawmillWoodPerTimber + 10 && this.stock.timber < 20) {
+        push({ kind: 'craft', x: sm.x, y: sm.y, buildingId: sm.id, workLeft: TUNING.sawmillWorkPerTimber, label: 'saw timber' }, 'craft');
+      }
+    }
+    // Kiln: convert clay to bricks
+    for (const kiln of this.builtOf('kiln')) {
+      if (kiln.built && this.stock.clay >= TUNING.kilnClayPerBrick && this.stock.brick < 30) {
+        push({ kind: 'craft', x: kiln.x, y: kiln.y, buildingId: kiln.id, workLeft: TUNING.kilnWorkPerBrick, label: 'fire bricks' }, 'craft');
+      }
+    }
+    // Blacksmith: smelt iron ore + coal → iron, then iron → tools
+    for (const bs of this.builtOf('smithing')) {
+      if (!bs.built) continue;
+      if (this.hasTech('iron_smelting') && this.stock.iron_ore >= TUNING.smeltOrePerIron && this.stock.coal >= 1 && this.stock.iron < 20) {
+        push({ kind: 'smelt', x: bs.x, y: bs.y, buildingId: bs.id, workLeft: TUNING.smeltWorkPerIron, label: 'smelt iron' }, 'smelt');
+      } else if (this.stock.iron >= TUNING.smithIronPerTools && this.stock.tools < 10) {
+        push({ kind: 'smelt', x: bs.x, y: bs.y, buildingId: bs.id, workLeft: TUNING.smithWorkPerTools, label: 'smith tools' }, 'smelt');
+      }
+    }
+    // Mine: extract resources from mine zones
+    if (this.builtOf('mining').some(b => b.built)) {
+      for (let y = 0; y < MAP_H; y++) {
+        for (let x = 0; x < MAP_W; x++) {
+          const tile = this.world.at(x, y);
+          if (tile.mineZone && tile.mineCharges > 0) {
+            push({ kind: 'mine', x, y, workLeft: TUNING.mineWorkPerCharge, label: 'mine ore' }, 'mine');
+          }
+        }
+      }
+    }
+    // Kitchen garden: produce fresh vegetables periodically
+    for (const kg of this.builtOf('ranching').filter(b => b.defId === 'kitchen_garden')) {
+      if (kg.built && this.stock.produce < this.settlers.length * 2) {
+        push({ kind: 'ranch', x: kg.x, y: kg.y, buildingId: kg.id, workLeft: TUNING.tendWork, label: 'tend garden' }, 'ranch');
+      }
+    }
+    // Animal pen: grow livestock and produce dairy
+    for (const pen of this.builtOf('ranching').filter(b => b.defId === 'animal_pen')) {
+      if (pen.built) {
+        push({ kind: 'ranch', x: pen.x, y: pen.y, buildingId: pen.id, workLeft: TUNING.tendWork, label: 'tend livestock' }, 'ranch');
+      }
+    }
+    // Herb garden: harvest herbs when grown
+    for (const hg of this.builtOf('herbalism')) {
+      if (!hg.built) continue;
+      if ((hg.herbGrowthMinutes ?? 0) >= TUNING.herbGrowDays * MINUTES_PER_DAY) {
+        push({ kind: 'ranch', x: hg.x, y: hg.y, buildingId: hg.id, workLeft: TUNING.tendWork, label: 'harvest herbs' }, 'ranch');
+      }
+    }
+    // Apothecary: make medicine from herbs
+    for (const apo of this.builtOf('apothecary')) {
+      if (apo.built && this.stock.herbs >= TUNING.medicineHerbCost && this.stock.medicine < 10) {
+        push({ kind: 'craft', x: apo.x, y: apo.y, buildingId: apo.id, workLeft: TUNING.medicineWorkCost, label: 'make medicine' }, 'craft');
       }
     }
     // Hunting trips: one hunter per lodge (the lodge id reserves the task)
@@ -1839,7 +1971,7 @@ export class Simulation {
     const speed =
       (0.5 + s.skills[task.kind] * 0.1) * this.traitMult(s, 'workSpeed') * this.softCapWorkMult() * sickMult * rainMult;
     const work = hours * 60 * speed;
-    s.skills[task.kind] = Math.min(10, s.skills[task.kind] + hours * 0.06);
+    s.skills[task.kind] = Math.min(this.skillCap(), s.skills[task.kind] + hours * 0.06);
 
     switch (task.kind) {
       case 'chop': {
@@ -1864,8 +1996,12 @@ export class Simulation {
           if (tile.growth >= 100) {
             tile.growth = 0;
             tile.sown = false;
-            this.dropItem('grain', TUNING.farmYieldPerTile, task.x, task.y);
-          } else if (this.growingSeason) {
+            if (tile.flaxZone) {
+              this.dropItem('flax', TUNING.flaxYieldPerTile, task.x, task.y);
+            } else {
+              this.dropItem('grain', Math.round(TUNING.farmYieldPerTile * this.farmYieldMult()), task.x, task.y);
+            }
+          } else if (this.growingSeason && !tile.flaxZone) {
             tile.sown = true;
           }
           this.finishTask(s);
@@ -1964,7 +2100,7 @@ export class Simulation {
           s.carrying = null;
           return this.finishTask(s);
         }
-        b.buildLeft -= work;
+        b.buildLeft -= work * this.buildSpeedMult();
         if (b.buildLeft <= 0) {
           b.built = true;
           this.addLog(`${def.name} finished.`, 'good');
@@ -2123,12 +2259,139 @@ export class Simulation {
         }
         return;
       }
-      case 'craft': {
-        const shop = this.building(task.buildingId);
-        if (!shop?.built || this.stock.grain < TUNING.clothesGrainCost) return this.finishTask(s);
+      case 'smelt': {
+        const bs = this.building(task.buildingId);
+        if (!bs?.built) return this.finishTask(s);
+        if (task.label === 'smelt iron') {
+          if (this.stock.iron_ore < TUNING.smeltOrePerIron || this.stock.coal < 1) return this.finishTask(s);
+          task.workLeft -= work;
+          if (task.workLeft <= 0) {
+            this.stock.iron_ore -= TUNING.smeltOrePerIron;
+            this.stock.coal--;
+            this.stock.iron++;
+            this.finishTask(s);
+          }
+        } else if (task.label === 'smith tools') {
+          if (this.stock.iron < TUNING.smithIronPerTools) return this.finishTask(s);
+          task.workLeft -= work;
+          if (task.workLeft <= 0) {
+            this.stock.iron -= TUNING.smithIronPerTools;
+            this.stock.tools++;
+            if (this.stock.tools === 1) this.addLog('First batch of tools forged. Construction is 20% faster.', 'good');
+            this.finishTask(s);
+          }
+        } else {
+          this.finishTask(s);
+        }
+        return;
+      }
+      case 'mine': {
+        const tile = this.world.at(task.x, task.y);
+        if (!tile.mineZone || tile.mineCharges <= 0) return this.finishTask(s);
         task.workLeft -= work;
         if (task.workLeft <= 0) {
-          this.stock.grain -= TUNING.clothesGrainCost;
+          const mineBuilding = this.builtOf('mining')[0];
+          if (!mineBuilding?.built) return this.finishTask(s);
+          const yieldMult = mineBuilding.level >= 3 ? 1.5 : mineBuilding.level >= 2 ? 1.25 : 1;
+          tile.mineCharges--;
+          if (this.hasTech('iron_mining')) {
+            const roll = this.rng.next();
+            if (roll < 0.5) {
+              this.stock.clay += Math.round(TUNING.mineClayPerCharge * yieldMult);
+            } else if (roll < 0.8) {
+              this.stock.iron_ore += Math.round(TUNING.mineIronOrePerCharge * yieldMult);
+            } else {
+              this.stock.coal += Math.round(TUNING.mineCoalPerCharge * yieldMult);
+            }
+          } else {
+            this.stock.clay += Math.round(TUNING.mineClayPerCharge * yieldMult);
+          }
+          if (tile.mineCharges <= 0) {
+            tile.mineZone = false;
+            this.addLog('The mine vein is exhausted.', 'info');
+          }
+          this.finishTask(s);
+        }
+        return;
+      }
+      case 'ranch': {
+        const rb = this.building(task.buildingId);
+        if (!rb?.built) return this.finishTask(s);
+        task.workLeft -= work;
+        if (task.workLeft <= 0) {
+          if (rb.defId === 'herb_garden') {
+            const herbMult = rb.level >= 3 ? 2 : rb.level >= 2 ? 1.5 : 1;
+            this.stock.herbs += Math.round(TUNING.herbsPerHarvest * herbMult);
+            rb.herbGrowthMinutes = 0;
+            this.finishTask(s);
+            return;
+          }
+          if (rb.defId === 'kitchen_garden') {
+            this.stock.produce++;
+            this.finishTask(s);
+            return;
+          }
+          if (rb.defId === 'animal_pen') {
+            const pastureTiles = this.world.tiles.filter(t => t.pastureZone).length;
+            const maxLivestock = Math.min(
+              TUNING.livestockMaxPerBuilding + (rb.level >= 2 ? 4 : 0),
+              Math.max(0, pastureTiles * 2)
+            );
+            if ((rb.livestock ?? 0) < maxLivestock) {
+              rb.livestock = Math.min(maxLivestock, (rb.livestock ?? 0) + TUNING.livestockGrowthPerTend);
+            }
+            this.finishTask(s);
+            return;
+          }
+          this.finishTask(s);
+        }
+        return;
+      }
+      case 'craft': {
+        const shop = this.building(task.buildingId);
+        if (!shop?.built) return this.finishTask(s);
+        const shopDef = buildingDef(shop.defId);
+        if (shopDef.provides === 'sawmill') {
+          if (this.stock.wood < TUNING.sawmillWoodPerTimber) return this.finishTask(s);
+          task.workLeft -= work;
+          if (task.workLeft <= 0) {
+            this.stock.wood -= TUNING.sawmillWoodPerTimber;
+            this.stock.timber++;
+            this.finishTask(s);
+          }
+          return;
+        }
+        if (shopDef.provides === 'kiln') {
+          if (this.stock.clay < TUNING.kilnClayPerBrick) return this.finishTask(s);
+          task.workLeft -= work;
+          if (task.workLeft <= 0) {
+            this.stock.clay -= TUNING.kilnClayPerBrick;
+            this.stock.brick++;
+            this.finishTask(s);
+          }
+          return;
+        }
+        if (shopDef.provides === 'apothecary') {
+          if (this.stock.herbs < TUNING.medicineHerbCost) return this.finishTask(s);
+          task.workLeft -= work;
+          if (task.workLeft <= 0) {
+            this.stock.herbs -= TUNING.medicineHerbCost;
+            this.stock.medicine++;
+            this.finishTask(s);
+          }
+          return;
+        }
+        // Default: tailor makes clothes from flax (if available) or grain
+        const useFlax = this.hasTech('textile_farming') && this.stock.flax >= 1;
+        if (!useFlax && this.stock.grain < TUNING.clothesGrainCost) return this.finishTask(s);
+        if (useFlax && this.stock.flax < 1) return this.finishTask(s);
+        task.workLeft -= work;
+        if (task.workLeft <= 0) {
+          if (useFlax) {
+            this.stock.flax--;
+          } else {
+            this.stock.grain -= TUNING.clothesGrainCost;
+          }
           this.stock.clothes++;
           this.finishTask(s);
         }
@@ -2523,13 +2786,21 @@ export class Simulation {
   }
 
   private updateFarms(): void {
-    if (!this.growingSeason) return;
-    // The land and the sky set the pace: tile fertility × the water balance.
     const weatherMult = this.weather.growthMult(this.day);
-    const perTick = (100 / (TUNING.farmGrowDays * MINUTES_PER_DAY)) * MINUTES_PER_TICK * weatherMult;
+    // Crops only grow in season
+    if (this.growingSeason) {
+      const perTick = (100 / (TUNING.farmGrowDays * MINUTES_PER_DAY)) * MINUTES_PER_TICK * weatherMult;
+      for (const t of this.world.tiles) {
+        if (t.kind === 'soil' && t.farmZone && t.sown && t.growth < 100) {
+          t.growth = Math.min(100, t.growth + perTick * t.fertility);
+        }
+      }
+    }
+    // Flax grows year-round (perennial)
+    const flaxPerTick = (100 / (TUNING.flaxGrowDays * MINUTES_PER_DAY)) * MINUTES_PER_TICK;
     for (const t of this.world.tiles) {
-      if (t.kind === 'soil' && t.farmZone && t.sown && t.growth < 100) {
-        t.growth = Math.min(100, t.growth + perTick * t.fertility);
+      if (t.kind === 'soil' && t.flaxZone && t.growth < 100) {
+        t.growth = Math.min(100, t.growth + flaxPerTick);
       }
     }
   }
@@ -2638,6 +2909,8 @@ export class Simulation {
       level: b.level ?? 1,
       rotation: b.rotation ?? 0,
       workerLimit: b.workerLimit ?? null,
+      livestock: b.livestock ?? 0,
+      herbGrowthMinutes: b.herbGrowthMinutes ?? 0,
     }));
     sim.items = d.items;
     sim.corpses = d.corpses;
@@ -2684,6 +2957,26 @@ export class Simulation {
     // Task reservations aren't saved; rebuild them from in-flight tasks.
     sim.reserved = new Set(sim.settlers.filter((s) => s.task).map((s) => sim.taskKey(s.task!)));
     return sim;
+  }
+
+  private farmYieldMult(): number {
+    return 1 + (this.hasTech('crop_rotation') ? TUNING.cropRotationYieldBonus : 0);
+  }
+
+  private skillCap(): number {
+    const schoolBonus = this.hasTech('literacy') ? TUNING.literacySkillCapBonus : 0;
+    const academyBonus = this.builtOf('education').some(b => b.built && b.level >= 3) ? 2 : 0;
+    return 10 + schoolBonus + academyBonus;
+  }
+
+  private buildSpeedMult(): number {
+    return this.stock.tools > 0 ? 1 + TUNING.toolsBuildSpeedBonus : 1;
+  }
+
+  private infectionChanceMult(): number {
+    const wells = this.builtOf('well').filter(b => b.built).length;
+    const apoBonus = this.builtOf('apothecary').some(b => b.built && b.level >= 3) ? 0.5 : 0;
+    return Math.max(0.2, 1 - wells * TUNING.wellInfectionReduction - apoBonus);
   }
 }
 

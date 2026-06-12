@@ -44,6 +44,8 @@ const BUILD_CATEGORIES: BuildCategory[] = [
     items: [
       { kind: 'building', id: 'house', label: 'Cabin', cost: '20w', desc: 'Sleeping quarters for 3 settlers.' },
       { kind: 'building', id: 'clinic', label: 'Clinic', cost: '40w', desc: 'Two cots — the badly hurt heal here.' },
+      { kind: 'building', id: 'longhouse', label: 'Longhouse', cost: '40w+25s', desc: 'Houses 12 settlers. Communal types thrive here. Needs Stone Masonry tech.' },
+      { kind: 'building', id: 'schoolhouse', label: 'Schoolhouse', cost: '30w+10s', desc: '+25% research speed per building. Needs Schooling tech.' },
     ],
   },
   {
@@ -59,6 +61,9 @@ const BUILD_CATEGORIES: BuildCategory[] = [
       { kind: 'building', id: 'mill', label: 'Mill', cost: '40w+5s', desc: 'Grain→produce (variety food). Needs Milling tech.' },
       { kind: 'building', id: 'brewery', label: 'Brewery', cost: '30w', desc: 'Grain→ale for morale. Needs Fermentation tech.' },
       { kind: 'building', id: 'kitchen_garden', label: 'Kitchen Garden', cost: '15w', desc: 'Free produce over time. Needs Horticulture tech.' },
+      { kind: 'building', id: 'animal_pen', label: 'Animal Pen', cost: '35w', desc: 'Livestock on pasture zones → dairy daily. Needs Animal Husbandry tech.' },
+      { kind: 'building', id: 'herb_garden', label: 'Herb Garden', cost: '20w', desc: 'Tended herb garden yields herbs periodically. Needs Herbalism tech.' },
+      { kind: 'building', id: 'apothecary', label: 'Apothecary', cost: '35w+5s', desc: 'Herbs→medicine. Medicine speeds clinic healing. Needs Germ Theory tech.' },
     ],
   },
   {
@@ -68,6 +73,18 @@ const BUILD_CATEGORIES: BuildCategory[] = [
     items: [
       { kind: 'building', id: 'tailor', label: 'Tailor', cost: '25w', desc: 'Weaves clothing (2g/set).' },
       { kind: 'building', id: 'forester', label: 'Forester', cost: '25w', desc: 'Plants and harvests trees.' },
+    ],
+  },
+  {
+    id: 'industry',
+    icon: '⚒',
+    label: 'INDUSTRY',
+    items: [
+      { kind: 'building', id: 'sawmill', label: 'Sawmill', cost: '35w', desc: 'Wood→timber (2:1). Enables advanced buildings. Needs Carpentry tech.' },
+      { kind: 'building', id: 'kiln', label: 'Kiln', cost: '20w+5s', desc: 'Clay→brick (2:1). Masonry-grade construction. Needs Brickwork tech.' },
+      { kind: 'building', id: 'mine', label: 'Mine', cost: '30w', desc: 'Paint mine zones on rock tiles to extract clay and ore. Needs Prospecting tech.' },
+      { kind: 'building', id: 'blacksmith', label: 'Blacksmith', cost: '25w+10s', desc: 'Iron ore+coal→iron→tools. Tools speed construction +20%. Needs Blacksmithing tech.' },
+      { kind: 'building', id: 'warehouse', label: 'Warehouse', cost: '50w+10s', desc: '+500 raw goods storage. Needs Commerce tech.' },
     ],
   },
   {
@@ -91,6 +108,8 @@ const BUILD_CATEGORIES: BuildCategory[] = [
       { kind: 'zone', id: 'gate', label: 'Gate [G]', cost: '5w/tile', hotkey: 'g', desc: 'Settlers pass; raiders must break it.' },
       { kind: 'zone', id: 'trap', label: 'Spike Trap [X]', cost: '2w/tile', hotkey: 'x', desc: 'One-shot spike trap. Damages raiders on contact.' },
       { kind: 'building', id: 'armory', label: 'Armoury', cost: '30w', desc: 'Forges weapons from wood. Armed settlers deal more damage.' },
+      { kind: 'building', id: 'watchtower', label: 'Watchtower', cost: '25w', desc: 'Warns of raids 1 day early. Needs Fortification tech.' },
+      { kind: 'building', id: 'well', label: 'Well', cost: '10w+5s', desc: 'Reduces infection risk colony-wide. Needs First Aid tech.' },
     ],
   },
   {
@@ -111,6 +130,9 @@ const BUILD_CATEGORIES: BuildCategory[] = [
     items: [
       { kind: 'zone', id: 'farm', label: 'Farm [F]', cost: 'free', hotkey: 'f', desc: 'Paint farmable soil tiles.' },
       { kind: 'zone', id: 'stockpile', label: 'Stockpile [T]', cost: 'free', hotkey: 't', desc: 'Settlers haul resources here.' },
+      { kind: 'zone', id: 'flax', label: 'Flax [Z]', cost: 'free', hotkey: 'z', desc: 'Paint flax tiles — harvest yields 3 flax. Replaces grain for clothes. Needs Textile Farming tech.' },
+      { kind: 'zone', id: 'pasture', label: 'Pasture [P]', cost: 'free', hotkey: 'p', desc: 'Grazing land for livestock near an Animal Pen. Needs Animal Husbandry tech.' },
+      { kind: 'zone', id: 'mine', label: 'Mine Zone [M]', cost: 'free', hotkey: 'm', desc: 'Paint on rock tiles — settlers extract clay and ore. Needs Prospecting tech.' },
       { kind: 'tool', id: 'chop', label: 'Chop [C]', hotkey: 'c', desc: 'Mark trees and rock for harvesting.' },
     ],
   },
@@ -388,6 +410,7 @@ export class Hud {
     const zoneMap: Record<string, PaintKind> = {
       f: 'farm', t: 'stockpile', l: 'wall', g: 'gate', x: 'trap',
       '4': 'dirt', '5': 'plank', '6': 'gravel', '7': 'bridge',
+      z: 'flax', p: 'pasture', m: 'mine',
     };
     if (zoneMap[k]) {
       this.cam.placingZone = this.cam.placingZone === zoneMap[k] ? null : zoneMap[k];
@@ -398,7 +421,7 @@ export class Hud {
       const catForZone: Record<string, string> = {
         wall: 'defense', gate: 'defense', trap: 'defense',
         dirt: 'roads', plank: 'roads', gravel: 'roads', bridge: 'roads',
-        farm: 'zones', stockpile: 'zones',
+        farm: 'zones', stockpile: 'zones', flax: 'zones', pasture: 'zones', mine: 'zones',
       };
       const cat = catForZone[k] ?? catForZone[zoneMap[k]];
       if (cat && this.activeCat !== cat) this.toggleCategory(cat);
@@ -413,8 +436,7 @@ export class Hud {
     }
     if (k === 'k') { this.techPanel.toggle(); return true; }
     if (k === 'o') { this.cam.overlay = this.cam.overlay === 'traffic' ? 'none' : 'traffic'; return true; }
-    if (k === 'p') { this.togglePriorities(); return true; }
-    if (k === 'm') { this.toggleMenu(); return true; }
+    if (k === 'escape') { this.toggleMenu(); return true; }
     return false;
   }
 
