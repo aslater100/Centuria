@@ -60,6 +60,13 @@ export interface Settlement {
   seaWall?: boolean;
   /** Per-town growth/event log: last 12 entries, newest first. */
   recentEvents: { day: number; text: string; kind: 'good' | 'bad' | 'info' }[];
+  // ---- Phase 0: Regional Gameplay Expansion ----
+  /** Which faction controls this settlement (faction id) */
+  factionId: number;
+  /** Military garrison strength (abstract: militia count) */
+  garrisonStrength: number;
+  /** Loyalty to controlling faction (0–100); affects labor productivity and revolt risk */
+  loyaltyToFaction: number;
 }
 
 /** Local markets (GDD §5.2, first slice): each town prices the two goods
@@ -477,6 +484,56 @@ export const MAX_POLICY_RATE = 0.15;
 export const CREDIT_RATING_SPREADS: Record<CreditRating, number> = {
   AAA: 0, AA: 0.005, A: 0.01, BBB: 0.02, BB: 0.04, B: 0.07, CCC: 0.12, D: 0.25,
 };
+
+// ---- Fog of War & Regional Exploration (Phase 0: Region Gameplay Expansion) ----
+
+/** Tile visibility state: 'fogged' = unknown, 'explored' = discovered, 'scouted' = visible this turn. */
+export type TileVisibility = 'fogged' | 'explored' | 'scouted';
+
+/** A scout unit: mobile unit owned by a faction that explores the map. */
+export interface Scout {
+  id: number;
+  factionId: number; // which faction owns this scout
+  x: number; // region coords 0..100
+  y: number;
+  health: number; // 0–100; dies when reaches 0 (from enemy scouts, etc.)
+  maintenanceCost: number; // gold per tick to keep alive
+  createdDay: number;
+}
+
+/** Central Bank: tracks currency systems, reserves, and monetary policy. */
+export interface CentralBank {
+  factionId: number;
+  foundedDay: number;
+  /** Reserves of each currency (as forex reserves): { currencyId: amount } */
+  reserves: Record<number, number>;
+  /** Annual interest rate policy: 0.01 (1%) to 0.15 (15%); neutral at 0.05 (5%) */
+  interestRate: number;
+  /** Annual inflation rate; increases with money printing, decreases with high interest rates */
+  inflationRate: number;
+}
+
+/** Regional Faction: competes with the player for control of settlements and resources. */
+export interface RegionalFaction {
+  id: number;
+  name: string;
+  color: string; // hex color for map display (e.g., '#FF0000' for red)
+  capital: number; // settlement id
+  settlementIds: number[]; // settlements controlled by this faction
+  treasury: number; // gold reserves
+  treasuryByCurrency: Record<number, number>; // multi-currency reserves
+  militaryStrength: number; // abstract: sum of garrison strengths
+  techProgress: number; // how far along the tech tree
+  centralBank: CentralBank | null; // null until established
+  currencyId: number; // unique id for this faction's currency
+  currencyName: string; // e.g., "Dollars", "Francs"
+  /** AI personality: -100 (passive) to +100 (aggressive) */
+  aggressiveness: number;
+  /** AI tech focus: what the AI prioritizes researching */
+  techFocus: string;
+  aiGoal: string; // current strategic goal (for logging/UI)
+  lastScoutDay: number; // day the AI last sent out scouts
+}
 
 // Rivals run richer regimes than the player's four (GDD §6.3: "the 1930s
 // should produce at least one neighboring autocracy organically"). Blocs are
@@ -964,6 +1021,21 @@ export class RegionSim {
   exchangeRate = 1.0;
   /** Prevents the 1929-analog crash from firing twice. */
   private crashFired = false;
+  // ---- Phase 0: Regional Gameplay Expansion ----
+  /** 100×100 grid tracking tile visibility: fogged/explored/scouted */
+  explorationMap: TileVisibility[][] = [];
+  /** Scout units exploring the map */
+  scouts: Scout[] = [];
+  /** Regional factions competing for dominance (includes player faction) */
+  regionalFactions: RegionalFaction[] = [];
+  /** Player faction id (always 0 or first in list) */
+  playerFactionId = 0;
+  /** Currency exchange rates: { from:factionId:to:factionId => rate } */
+  exchangeRates: Record<string, number> = {};
+  /** Global trade volume: used to calculate currency dominance */
+  globalTradeVolume = 0;
+  /** Next scout id for creating new scouts */
+  private nextScoutId = 5000; // TODO: use when implementing scout creation
   private seaRiseAnnounced = false;
   private lastTidalLogDay = -999;
   private droughtAnnounced = false;
@@ -981,6 +1053,10 @@ export class RegionSim {
     this.weather = weather;
     this.nextEventDay = this.day + 4 + rng.int(4);
     this.townNamePool = [...TOWN_NAMES];
+    // Initialize fog of war: 100×100 grid of fogged tiles
+    this.explorationMap = Array.from({ length: 100 }, () =>
+      Array.from({ length: 100 }, () => 'fogged' as TileVisibility)
+    );
   }
 
   // ---- time (mirrors town sim) ----
@@ -1026,6 +1102,122 @@ export class RegionSim {
 
   private roleMult(t: Settlement, role: NotableRole): number {
     return this.notablesAt(t.id).some((n) => n.role === role) ? 1 : 0;
+  }
+
+  // ---- Phase 0: Exploration & Fog of War ----
+
+  /** Reveal tiles in a circular radius around a point. */
+  revealTiles(centerX: number, centerY: number, radius: number, type: TileVisibility = 'explored'): void {
+    const radiusSq = radius * radius;
+    for (let x = 0; x < 100; x++) {
+      for (let y = 0; y < 100; y++) {
+        const dx = x - centerX;
+        const dy = y - centerY;
+        if (dx * dx + dy * dy <= radiusSq) {
+          // Only upgrade visibility, never downgrade
+          if (type === 'scouted' || this.explorationMap[x][y] === 'fogged') {
+            this.explorationMap[x][y] = type;
+          }
+        }
+      }
+    }
+  }
+
+  /** Check if a tile is visible to a faction. */
+  canFoundSettlement(x: number, y: number, _factionId: number): boolean {
+    // TODO: implement per-faction visibility; for now use global visibility
+    // Can only found in explored tiles
+    if (this.explorationMap[x][y] === 'fogged') return false;
+    // Can't found where another settlement already exists
+    return !this.settlements.some((s) => Math.abs(s.x - x) < 4 && Math.abs(s.y - y) < 4);
+  }
+
+  /** Get the faction object by id. */
+  faction(id: number): RegionalFaction | undefined {
+    return this.regionalFactions.find((f) => f.id === id);
+  }
+
+  /** Get garrison strength of a settlement. */
+  garrisonOf(settlement: Settlement): number {
+    return settlement.garrisonStrength || 0;
+  }
+
+  /** Initialize the regional faction system for the player. Called once when entering region mode. */
+  regionalizeFactionSystem(homeSettlement: Settlement): void {
+    // Create the player faction (faction 0)
+    const playerFaction: RegionalFaction = {
+      id: 0,
+      name: 'Your Nation',
+      color: '#0066FF', // blue for player
+      capital: homeSettlement.id,
+      settlementIds: [homeSettlement.id],
+      treasury: 100, // starting capital
+      treasuryByCurrency: { 0: 100 }, // faction 0 uses currency 0
+      militaryStrength: 5,
+      techProgress: 0,
+      centralBank: null, // not yet established
+      currencyId: 0,
+      currencyName: 'Pounds', // starting currency name
+      aggressiveness: 50, // neutral
+      techFocus: 'agriculture', // starting tech focus
+      aiGoal: 'establish dominance',
+      lastScoutDay: -1,
+    };
+
+    this.regionalFactions.push(playerFaction);
+    this.playerFactionId = 0;
+
+    // Reveal the starting settlement and 3-tile radius
+    this.revealTiles(homeSettlement.x, homeSettlement.y, 3, 'explored');
+
+    // Initialize exchange rates (will be expanded with rival factions)
+    this.exchangeRates['0:0'] = 1.0; // player currency to itself
+
+    // TODO: Initialize starting scout (use nextScoutId for scout creation)
+    void this.nextScoutId; // mark as used to suppress warning
+
+    // Initialize rival factions (simplified: 2-3 rivals spawn on the map)
+    this.initializeRivalFactions();
+  }
+
+  /** Create initial rival factions competing for regional dominance. */
+  private initializeRivalFactions(): void {
+    // Simplified rival faction system: create 2-3 rival AI factions
+    const rivalNames = ['Northern Alliance', 'Eastern Confederacy', 'Southern League'];
+    const rivalColors = ['#FF0000', '#00AA00', '#FFAA00']; // red, green, orange
+    const numRivals = 2 + this.rng.int(2); // 2-3 rivals
+
+    for (let i = 0; i < numRivals; i++) {
+      const rivalId = i + 1; // ids 1, 2, 3, etc.
+      const faction: RegionalFaction = {
+        id: rivalId,
+        name: rivalNames[i] || `Rival Faction ${i}`,
+        color: rivalColors[i] || '#999999',
+        capital: -1, // no capital yet; will be set when they found a settlement
+        settlementIds: [],
+        treasury: 80 + this.rng.int(40), // 80-120 gold
+        treasuryByCurrency: { [rivalId]: 80 + this.rng.int(40) },
+        militaryStrength: 3 + this.rng.int(3), // 3-6
+        techProgress: 0,
+        centralBank: null,
+        currencyId: rivalId,
+        currencyName: ['Francs', 'Guilders', 'Crowns', 'Marks'][i] || 'Marks',
+        aggressiveness: 30 + this.rng.int(70), // 30-100 aggressiveness
+        techFocus: ['mining', 'forestry', 'farming'][this.rng.int(3)],
+        aiGoal: 'expand territory',
+        lastScoutDay: -1,
+      };
+
+      this.regionalFactions.push(faction);
+
+      // Initialize exchange rates for this rival
+      this.exchangeRates[`0:${rivalId}`] = 1.0; // start at parity
+      this.exchangeRates[`${rivalId}:0`] = 1.0;
+
+      // Each rival gets an initial settlement in an unexplored area
+      // This is simplified; in a full implementation, they'd have expedition logic
+      // For now, just mark that they exist and will expand as part of AI
+    }
   }
 
   // ---- the route network (M6b: transportation.md §3) ----
@@ -1682,8 +1874,15 @@ export class RegionSim {
       grievance: 0,
       prices: defaultPrices(),
       recentEvents: [],
+      // Phase 0: Regional faction system
+      factionId: 0, // player faction
+      garrisonStrength: 5, // starting militia
+      loyaltyToFaction: 100, // starting settlement is fully loyal
     };
     region.settlements.push(home);
+
+    // Initialize player faction (will be refined with full faction system later)
+    region.regionalizeFactionSystem(home);
 
     // The Notables carve-out: the most story-laden settlers stay individuals.
     const scored = [...sim.settlers].sort((a, b) => region.storyScore(sim, b) - region.storyScore(sim, a));
@@ -1883,6 +2082,7 @@ export class RegionSim {
     }
     this.updateExpeditions();
     this.updateCharter();
+    this.updateExploration(); // Phase 0: Update fog of war based on scouts and settlements
     if (this.totalPop() <= 0) {
       this.gameOver = true;
       this.addLog('The last settlement is empty. (Failure state: depopulation.)', 'bad');
@@ -2564,8 +2764,19 @@ export class RegionSim {
           grievance: 0,
           prices: defaultPrices(),
           recentEvents: [],
+          // Phase 0: Regional faction system
+          factionId: this.playerFactionId,
+          garrisonStrength: 2, // new towns have smaller garrisons
+          loyaltyToFaction: 100,
         };
         this.settlements.push(town);
+        // Reveal the new settlement and surrounding area
+        this.revealTiles(town.x, town.y, 2, 'explored');
+        // Update player faction settlement list
+        const playerFaction = this.faction(this.playerFactionId);
+        if (playerFaction) {
+          playerFaction.settlementIds.push(town.id);
+        }
         this.expeditions = this.expeditions.filter((o) => o !== e);
         const flavor = e.site.river ? 'on the riverbank' : e.site.coastal ? 'by the sea' : e.site.fertility > 1 ? 'in good black soil' : 'on thin ground';
         this.addLog(`${town.name} is founded ${flavor} — the ${this.ordinal(this.settlements.length)} town of the colony.`, 'good');
@@ -2598,6 +2809,45 @@ export class RegionSim {
       }
     } else {
       this.charterProgress = Math.max(0, this.charterProgress - 0.5);
+    }
+  }
+
+  // ---- Phase 0: Exploration & Fog of War ----
+
+  /** Update exploration visibility based on settlements and caravan routes. */
+  private updateExploration(): void {
+    // Settlements and routes automatically reveal tiles around them
+    for (const settlement of this.settlements) {
+      // Each settlement reveals a small radius based on local scouting
+      let sightRadius = 2; // base sight radius
+      // Technology improvements to sight range
+      if (this.has('telegraph')) sightRadius += 1;
+      if (this.has('radio')) sightRadius += 2;
+      if (this.has('satellite')) {
+        // Satellite tech reveals the entire map
+        for (let x = 0; x < 100; x++) {
+          for (let y = 0; y < 100; y++) {
+            this.explorationMap[x][y] = 'explored';
+          }
+        }
+        return; // early exit if satellite tech unlocked
+      }
+      this.revealTiles(settlement.x, settlement.y, sightRadius, 'explored');
+    }
+
+    // Routes also reveal tiles (caravans passively explore)
+    for (const route of this.routes) {
+      const a = this.settlement(route.a);
+      const b = this.settlement(route.b);
+      if (!a || !b) continue;
+      // Reveal a corridor along the route (simplified: just endpoints)
+      this.revealTiles(a.x, a.y, 1, 'explored');
+      this.revealTiles(b.x, b.y, 1, 'explored');
+    }
+
+    // Scout units reveal tiles
+    for (const scout of this.scouts) {
+      this.revealTiles(scout.x, scout.y, 5, 'explored');
     }
   }
 
