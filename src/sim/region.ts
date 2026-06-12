@@ -1175,6 +1175,49 @@ export class RegionSim {
 
     // TODO: Initialize starting scout (use nextScoutId for scout creation)
     void this.nextScoutId; // mark as used to suppress warning
+
+    // Initialize rival factions (simplified: 2-3 rivals spawn on the map)
+    this.initializeRivalFactions();
+  }
+
+  /** Create initial rival factions competing for regional dominance. */
+  private initializeRivalFactions(): void {
+    // Simplified rival faction system: create 2-3 rival AI factions
+    const rivalNames = ['Northern Alliance', 'Eastern Confederacy', 'Southern League'];
+    const rivalColors = ['#FF0000', '#00AA00', '#FFAA00']; // red, green, orange
+    const numRivals = 2 + this.rng.int(2); // 2-3 rivals
+
+    for (let i = 0; i < numRivals; i++) {
+      const rivalId = i + 1; // ids 1, 2, 3, etc.
+      const faction: RegionalFaction = {
+        id: rivalId,
+        name: rivalNames[i] || `Rival Faction ${i}`,
+        color: rivalColors[i] || '#999999',
+        capital: -1, // no capital yet; will be set when they found a settlement
+        settlementIds: [],
+        treasury: 80 + this.rng.int(40), // 80-120 gold
+        treasuryByCurrency: { [rivalId]: 80 + this.rng.int(40) },
+        militaryStrength: 3 + this.rng.int(3), // 3-6
+        techProgress: 0,
+        centralBank: null,
+        currencyId: rivalId,
+        currencyName: ['Francs', 'Guilders', 'Crowns', 'Marks'][i] || 'Marks',
+        aggressiveness: 30 + this.rng.int(70), // 30-100 aggressiveness
+        techFocus: ['mining', 'forestry', 'farming'][this.rng.int(3)],
+        aiGoal: 'expand territory',
+        lastScoutDay: -1,
+      };
+
+      this.regionalFactions.push(faction);
+
+      // Initialize exchange rates for this rival
+      this.exchangeRates[`0:${rivalId}`] = 1.0; // start at parity
+      this.exchangeRates[`${rivalId}:0`] = 1.0;
+
+      // Each rival gets an initial settlement in an unexplored area
+      // This is simplified; in a full implementation, they'd have expedition logic
+      // For now, just mark that they exist and will expand as part of AI
+    }
   }
 
   // ---- the route network (M6b: transportation.md §3) ----
