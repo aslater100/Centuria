@@ -85,6 +85,7 @@ export interface BuildingDef {
   cost: Partial<Record<ResourceKind, number>>;
   buildWork: number; // settler-minutes at skill 5
   provides: Provides;
+  homeType?: 'communal' | 'military' | 'private' | 'neutral';
   capacity?: number;
   maxHp?: number; // only damageable structures define this
   desc: string;
@@ -99,6 +100,7 @@ export interface TraitDef {
   moodBase?: number; // additive
   warmthDecay?: number; // multiplier
   foodDecay?: number; // multiplier
+  housingPreference?: 'private' | 'communal' | 'military';
 }
 
 export const BUILDING_DEFS: BuildingDef[] = buildingsJson.buildings as BuildingDef[];
