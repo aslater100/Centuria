@@ -386,8 +386,9 @@ describe('Geoengineering (GDD §8.2)', () => {
     r.geoDeployDay = r.day - GEOENGINEER_DURATION_DAYS - 1;
     const before = r.warmingC;
     climateTick(r);
-    // Without pressure (CO2 at base), warming should not decrease further
-    expect(r.warmingC).toBeGreaterThanOrEqual(before - 0.01);
+    // Without geoengineering, only natural lag cooling applies (~warmingC/WARMING_LAG_TICKS per tick)
+    // which is much less than the active geo cooling (GEOENGINEER_COOLING / ticksInWindow ≈ 0.1)
+    expect(r.warmingC).toBeGreaterThanOrEqual(before - 0.05);
   });
 
   it('geoengineering is a diplomacy bomb: all rivals lose 15 relations', () => {

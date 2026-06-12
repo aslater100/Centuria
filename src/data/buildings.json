@@ -284,6 +284,176 @@
         { "cost": { "wood": 20, "stone": 8 }, "capacityBonus": 0, "desc": "Stone anvil: weapons forged faster (+50% output)." },
         { "cost": { "wood": 30, "stone": 15 }, "capacityBonus": 0, "desc": "Armourer's guild: forged weapons deal +10 more damage." }
       ]
+    },
+    {
+      "id": "well",
+      "name": "Well",
+      "w": 1,
+      "h": 1,
+      "cost": { "wood": 10, "stone": 5 },
+      "buildWork": 180,
+      "provides": "well",
+      "desc": "Clean water source — reduces infection risk colony-wide. Requires First Aid tech.",
+      "upgrades": [
+        { "cost": { "stone": 10 }, "capacityBonus": 0, "desc": "Stone casing: infection reduction doubled." },
+        { "cost": { "stone": 20 }, "capacityBonus": 0, "desc": "Pump well: healing speed slightly increased." }
+      ]
+    },
+    {
+      "id": "watchtower",
+      "name": "Watchtower",
+      "w": 2,
+      "h": 2,
+      "cost": { "wood": 25 },
+      "buildWork": 360,
+      "provides": "watchtower",
+      "desc": "Scouts spot raiders early — logs a warning one day before arrival. Requires Fortification tech.",
+      "upgrades": [
+        { "cost": { "wood": 15, "stone": 8 }, "capacityBonus": 0, "desc": "Stone base: warning two days in advance." },
+        { "cost": { "stone": 20 }, "capacityBonus": 0, "desc": "Signal tower: fire beacons speed militia response." }
+      ]
+    },
+    {
+      "id": "warehouse",
+      "name": "Warehouse",
+      "w": 3,
+      "h": 2,
+      "cost": { "wood": 50, "stone": 10 },
+      "buildWork": 720,
+      "provides": "warehouse",
+      "desc": "Bulk dry storage — each warehouse adds 500 capacity for raw goods. Requires Commerce tech.",
+      "upgrades": [
+        { "cost": { "wood": 30 }, "capacityBonus": 0, "desc": "Organized shelving: +250 extra capacity." },
+        { "cost": { "stone": 20 }, "capacityBonus": 0, "desc": "Stone vault: fire-proof, +500 more capacity." }
+      ]
+    },
+    {
+      "id": "herb_garden",
+      "name": "Herb Garden",
+      "w": 2,
+      "h": 2,
+      "cost": { "wood": 20 },
+      "buildWork": 240,
+      "provides": "herbalism",
+      "desc": "Cultivated medicinal plants — a tended herb garden yields herbs periodically. Requires Herbalism tech.",
+      "upgrades": [
+        { "cost": { "wood": 15 }, "capacityBonus": 0, "desc": "Extended beds: herbs per harvest +50%." },
+        { "cost": { "wood": 20, "stone": 5 }, "capacityBonus": 0, "desc": "Glasshouse: harvest interval halved." }
+      ]
+    },
+    {
+      "id": "apothecary",
+      "name": "Apothecary",
+      "w": 2,
+      "h": 2,
+      "cost": { "wood": 35, "stone": 5 },
+      "buildWork": 480,
+      "provides": "apothecary",
+      "desc": "Compounds herbs into medicine (2 herbs → 1 medicine). Medicine in stock speeds clinic healing. Requires Germ Theory tech.",
+      "upgrades": [
+        { "cost": { "wood": 20, "stone": 8 }, "capacityBonus": 0, "desc": "Better compounds: medicine yield +50%." },
+        { "cost": { "stone": 20 }, "capacityBonus": 0, "desc": "Sterile lab: also reduces infection chance." }
+      ]
+    },
+    {
+      "id": "sawmill",
+      "name": "Sawmill",
+      "w": 2,
+      "h": 3,
+      "cost": { "wood": 35 },
+      "buildWork": 480,
+      "provides": "sawmill",
+      "desc": "Cuts wood into shaped timber (2 wood → 1 timber). Timber enables advanced stone-class buildings. Requires Carpentry tech.",
+      "upgrades": [
+        { "cost": { "wood": 25 }, "capacityBonus": 0, "desc": "Circular blade: sawing 30% faster." },
+        { "cost": { "stone": 15 }, "capacityBonus": 0, "desc": "Industrial mill: sawing 60% faster." }
+      ]
+    },
+    {
+      "id": "animal_pen",
+      "name": "Animal Pen",
+      "w": 3,
+      "h": 3,
+      "cost": { "wood": 35 },
+      "buildWork": 480,
+      "provides": "ranching",
+      "desc": "Livestock enclosure — livestock grow on adjacent pasture zones and produce dairy daily. Requires Animal Husbandry tech.",
+      "upgrades": [
+        { "cost": { "wood": 20 }, "capacityBonus": 0, "desc": "Larger pen: livestock cap +4." },
+        { "cost": { "wood": 30, "stone": 8 }, "capacityBonus": 0, "desc": "Barn: dairy yield +50%." }
+      ]
+    },
+    {
+      "id": "kiln",
+      "name": "Kiln",
+      "w": 2,
+      "h": 2,
+      "cost": { "wood": 20, "stone": 5 },
+      "buildWork": 300,
+      "provides": "kiln",
+      "desc": "Fires clay into bricks (2 clay → 1 brick). Bricks enable masonry-grade construction. Requires Brickwork tech.",
+      "upgrades": [
+        { "cost": { "stone": 10 }, "capacityBonus": 0, "desc": "Better draft: firing 30% faster." },
+        { "cost": { "stone": 20 }, "capacityBonus": 0, "desc": "Continuous kiln: brick yield +1 per batch." }
+      ]
+    },
+    {
+      "id": "mine",
+      "name": "Mine",
+      "w": 2,
+      "h": 2,
+      "cost": { "wood": 30 },
+      "buildWork": 420,
+      "provides": "mining",
+      "desc": "Opens a shaft — settlers extract clay from painted mine zones (rock tiles). Iron Mining tech also yields iron ore and coal. Requires Prospecting tech.",
+      "upgrades": [
+        { "cost": { "wood": 20, "stone": 8 }, "capacityBonus": 0, "desc": "Shoring timbers: +25% ore yield." },
+        { "cost": { "stone": 20 }, "capacityBonus": 0, "desc": "Deep shaft: +50% yield, accesses richer veins." }
+      ]
+    },
+    {
+      "id": "blacksmith",
+      "name": "Blacksmith",
+      "w": 2,
+      "h": 2,
+      "cost": { "wood": 25, "stone": 10 },
+      "buildWork": 420,
+      "provides": "smithing",
+      "desc": "Smelts iron ore + coal into iron, then iron into tools. Tools in stock speed all construction by 20%. Requires Blacksmithing tech.",
+      "upgrades": [
+        { "cost": { "stone": 15 }, "capacityBonus": 0, "desc": "Bellows: smelting 30% faster." },
+        { "cost": { "stone": 25 }, "capacityBonus": 0, "desc": "Industrial forge: tools output doubled." }
+      ]
+    },
+    {
+      "id": "longhouse",
+      "name": "Longhouse",
+      "w": 4,
+      "h": 3,
+      "cost": { "wood": 40, "stone": 25 },
+      "buildWork": 720,
+      "provides": "sleep",
+      "homeType": "communal",
+      "capacity": 12,
+      "desc": "A long stone hall — houses 12 settlers comfortably. Communal types thrive here. Requires Stone Masonry tech.",
+      "upgrades": [
+        { "cost": { "stone": 20 }, "capacityBonus": 4, "desc": "Wing added: houses 16 settlers." },
+        { "cost": { "stone": 30 }, "capacityBonus": 4, "desc": "Great hall: houses 20 settlers." }
+      ]
+    },
+    {
+      "id": "schoolhouse",
+      "name": "Schoolhouse",
+      "w": 2,
+      "h": 2,
+      "cost": { "wood": 30, "stone": 10 },
+      "buildWork": 480,
+      "provides": "education",
+      "desc": "Teaching and letters — each schoolhouse adds 25% to town research speed. Requires Schooling tech.",
+      "upgrades": [
+        { "cost": { "wood": 20, "stone": 10 }, "capacityBonus": 0, "desc": "Library wing: research bonus +40%." },
+        { "cost": { "stone": 20 }, "capacityBonus": 0, "desc": "Academy: research bonus +60%, skill cap +2." }
+      ]
     }
   ]
 }

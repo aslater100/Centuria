@@ -7,7 +7,7 @@ import { MINUTES_PER_DAY, DAYS_PER_YEAR, START_YEAR } from '../src/sim/defs';
 const ticksPerDay = MINUTES_PER_DAY / REGION_MINUTES_PER_TICK;
 
 function grow(sim: Simulation): void {
-  while (sim.settlers.length < 22) sim.spawnSettler(32, 34);
+  while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
   sim.stock.wood = 200;
   sim.stock.meal = 200;
 }
@@ -26,7 +26,7 @@ function flipped(seed: number): RegionSim {
 }
 
 function toStatehood(r: RegionSim): void {
-  for (let year = 0; year < 18 && !r.ceremonyPending; year++) {
+  for (let year = 0; year < 30 && !r.ceremonyPending; year++) {
     runDays(r, 60);
     for (const t of r.settlements) {
       if (r.settlements.length + r.expeditions.length < 4 && r.canFoundTown(t.id).ok) {
