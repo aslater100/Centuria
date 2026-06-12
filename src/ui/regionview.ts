@@ -3,8 +3,8 @@
  * operating altitude after the flip (GDD §2.5). Painterly backdrop, town
  * markers, routes, expedition wagons; DOM panel for the selected settlement.
  */
-import type { RegionSim, Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy } from '../sim/region';
-import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING } from '../sim/region';
+import type { RegionSim, Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime } from '../sim/region';
+import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE } from '../sim/region';
 
 export class RegionView {
   selectedId: number | null = null;
@@ -730,6 +730,7 @@ export class RegionView {
         ? `<p><button class="mini" id="geo-deploy-btn" title="Deploy stratospheric aerosols: −${GEOENGINEER_COOLING}°C over 2 years, but all rivals lose 15 relations (one-time)">⚗ deploy geoengineering</button></p>`
         : '') +
       `<p>trade £${Math.floor(r.tradeValueLastMonth)}/mo turnover</p>` +
+      this.monetaryHtml() +
       `<p>tax <span id="tax-val">${Math.round(r.taxRate * 100)}%</span></p>` +
       `<input id="tax-slider" type="range" min="0" max="30" value="${Math.round(r.taxRate * 100)}">` +
       `<p>services: <b>${lvl(r.servicesLevel)}</b> <button class="mini" id="svc-up">+</button><button class="mini" id="svc-dn">−</button></p>` +
@@ -750,6 +751,20 @@ export class RegionView {
     this.statePanel.querySelector<HTMLInputElement>('#tax-slider')!.oninput = (e) => {
       r.taxRate = Number((e.target as HTMLInputElement).value) / 100;
     };
+    const rateSlider = this.statePanel.querySelector<HTMLInputElement>('#rate-slider');
+    if (rateSlider) {
+      rateSlider.oninput = (e) => {
+        r.policyRate = Number((e.target as HTMLInputElement).value) / 100;
+        const rateVal = this.statePanel.querySelector<HTMLElement>('#rate-val');
+        if (rateVal) rateVal.textContent = `${Math.round(r.policyRate * 100)}%`;
+      };
+    }
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.cb-regime-btn')) {
+      btn.onclick = () => r.setMonetaryRegime(btn.dataset.regime as MonetaryRegime);
+    }
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.cb-bond-btn')) {
+      btn.onclick = () => r.issueBonds(Number(btn.dataset.amount));
+    }
     this.statePanel.querySelector<HTMLButtonElement>('#svc-up')!.onclick = () => {
       r.servicesLevel = Math.min(2, r.servicesLevel + 1);
     };
@@ -1268,6 +1283,46 @@ export class RegionView {
       .map((rt) => `<p class="insp-skills">${name(rt.a)} ↔ ${name(rt.b)}: ${Math.round(rt.freight)} food</p>`)
       .join('');
     return `<p class="insp-skills">FREIGHT (last caravans)</p>` + (lines || `<p class="insp-skills">no caravan traffic</p>`);
+  }
+
+  /** Central bank dashboard (GDD §5.1): policy rate, credit cycle, FX, bonds. */
+  private monetaryHtml(): string {
+    const r = this.region;
+    if (!r.passedLaws.includes('central_bank_charter')) return '';
+    const annualGDP = Math.max(1, r.gdpLastMonth * 12);
+    const debtPct = Math.round(r.nationalDebt / annualGDP * 100);
+    const leverPct = (r.privateLeverage * r.policyRate * 100).toFixed(0); // debt service %
+    const confCol = r.confidence >= 60 ? '#4e9' : r.confidence >= 30 ? '#ca4' : '#e55';
+    const ratingCol = ['AAA', 'AA', 'A'].includes(r.creditRating) ? '#4e9' : ['BBB', 'BB'].includes(r.creditRating) ? '#ca4' : '#e55';
+    const regime = (id: MonetaryRegime, label: string) =>
+      `<button class="mini cb-regime-btn" data-regime="${id}" ` +
+      `${r.monetaryRegime === id ? 'style="background:#4e9;color:#000"' : ''} ` +
+      `title="${id === 'float' ? 'Market-driven rate: adjusts with trade balance and confidence' : id === 'peg' ? 'Fix the rate — drains reserves if trade is unfavorable; can break spectacularly' : 'Print money: boosts treasury but drives inflation'}">` +
+      `${label}</button>`;
+    const canBond = (amt: number) => r.creditRating !== 'D' && r.nationalDebt + amt <= annualGDP * 2.0;
+    return `<p class="insp-skills">CENTRAL BANK</p>` +
+      `<div class="bar-row" title="Market confidence (0–100). Below 30 → deleveraging: credit contracts and GDP falls.">` +
+      `<span style="width:80px;display:inline-block">confidence</span>` +
+      `<div class="bar" style="flex:1"><div class="bar-fill" style="width:${r.confidence}%;background:${confCol}"></div></div>` +
+      `<span>${Math.round(r.confidence)}</span></div>` +
+      `<p class="insp-skills" title="Leverage: private debt service as % of GDP. Above 18% the cycle is fragile.">` +
+      `leverage ${leverPct}% debt svc · inflation ${(r.inflationRate * 100).toFixed(1)}% · FX ${r.exchangeRate.toFixed(2)}</p>` +
+      `<p>policy rate: <span id="rate-val">${(r.policyRate * 100).toFixed(0)}%</span></p>` +
+      `<input id="rate-slider" type="range" min="${Math.round(MIN_POLICY_RATE * 100)}" max="${Math.round(MAX_POLICY_RATE * 100)}" ` +
+      `value="${Math.round(r.policyRate * 100)}" ` +
+      `title="Low rates: credit boom, GDP boost, then bust. High rates: credit contraction, inflation down.">` +
+      `<p class="insp-skills">regime: ${regime('float', 'float')} ${regime('peg', 'peg')} ${regime('print', 'print')}</p>` +
+      `<p class="insp-skills" title="Sovereign bonds: borrow against future tax receipts at the bond rate">` +
+      `debt £${Math.floor(r.nationalDebt)} (${debtPct}% GDP) · ` +
+      `<span style="color:${ratingCol}">${r.creditRating}</span> · ` +
+      `${(r.bondRate * 100).toFixed(1)}% coupon</p>` +
+      (r.nationProclaimed
+        ? `<p>` +
+          `<button class="mini cb-bond-btn" data-amount="50" ${canBond(50) ? '' : 'disabled'}>bonds +£50</button> ` +
+          `<button class="mini cb-bond-btn" data-amount="100" ${canBond(100) ? '' : 'disabled'}>+£100</button> ` +
+          `<button class="mini cb-bond-btn" data-amount="250" ${canBond(250) ? '' : 'disabled'}>+£250</button>` +
+          `</p>`
+        : '');
   }
 
   /** Force the panel to rebuild its HTML on the next frame (called after game actions). */
