@@ -217,7 +217,7 @@
       "desc": "Settlers fish from the dock; meals without grain. Must be built near water.",
       "upgrades": [
         { "cost": { "wood": 15 }, "capacityBonus": 0, "desc": "Extended pier: fishing yield +1 meal." },
-        { "cost": { "wood": 20 }, "capacityBonus": 0, "desc": "Net fishing: yield +2 meals per trip." }
+        { "cost": { "wood": 20, "rope": 4 }, "capacityBonus": 0, "desc": "Net fishing: yield +2 meals per trip." }
       ]
     },
     {
@@ -318,7 +318,7 @@
       "desc": "Scouts spot raiders early — logs a warning one day before arrival. Requires Fortification tech.",
       "upgrades": [
         { "cost": { "wood": 15, "stone": 8, "brick": 5 }, "capacityBonus": 0, "desc": "Stone base: warning two days in advance." },
-        { "cost": { "stone": 20 }, "capacityBonus": 0, "desc": "Signal tower: fire beacons speed militia response." }
+        { "cost": { "stone": 20, "rope": 5 }, "capacityBonus": 0, "desc": "Signal tower: fire beacons speed militia response." }
       ]
     },
     {
@@ -332,7 +332,7 @@
       "requiredTech": "commerce",
       "desc": "Bulk dry storage — each warehouse adds 500 capacity for raw goods. Requires Commerce tech.",
       "upgrades": [
-        { "cost": { "wood": 30, "timber": 4 }, "capacityBonus": 0, "desc": "Organized shelving: +250 extra capacity." },
+        { "cost": { "wood": 30, "timber": 4, "rope": 4 }, "capacityBonus": 0, "desc": "Organized shelving: +250 extra capacity." },
         { "cost": { "stone": 20 }, "capacityBonus": 0, "desc": "Stone vault: fire-proof, +500 more capacity." }
       ]
     },

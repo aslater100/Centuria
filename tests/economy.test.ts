@@ -148,6 +148,27 @@ describe('dynamic supply/demand pricing', () => {
     }
   });
 
+  it('the tailor twists flax into rope once clothing demand is met (Textile Farming)', () => {
+    const sim = new Simulation(42);
+    sim.townTechsResearched.push('textile_farming');
+    sim.placeBuilding('tailor', 54, 48, true);
+    sim.stock.flax = 200;
+    sim.stock.clothes = 200; // nobody is threadbare → tailor spins rope instead
+    for (const s of sim.settlers) s.clothedUntil = sim.minute + 1e9;
+    runDays(sim, 2);
+    expect(sim.stock.rope).toBeGreaterThan(0);
+  });
+
+  it('cooks preserve surplus meals into shelf-stable rations (Food Preservation)', () => {
+    const sim = new Simulation(42);
+    sim.townTechsResearched.push('food_preservation');
+    sim.placeBuilding('kitchen', 54, 48, true);
+    sim.stock.meal = sim.mealCap(); // larder overflowing
+    for (const s of sim.settlers) s.needs.food = 100; // nobody eats it down
+    runDays(sim, 2);
+    expect(sim.stock.preserved).toBeGreaterThan(0);
+  });
+
   it('inflation stays at zero without the Banking tech, and builds with surplus cash once researched', () => {
     const sim = new Simulation(42);
     sim.economy.cash = 1_000_000; // huge cash hoard, but no banking yet

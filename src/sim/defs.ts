@@ -326,6 +326,14 @@ export const TUNING = {
   craftWorkPerClothes: 60,
   clothesWarmthC: 8,
   clothesWearDays: 30,
+  // Rope: flax fibre twisted at the tailor (textile_farming); feeds advanced upgrades
+  ropeFlaxCost: 2,
+  ropeWorkCost: 70,
+  ropeTarget: 12,        // tailor spins rope up to this stock when flax is plentiful
+  // Preserved food: surplus meals salted/smoked into shelf-stable rations (food_preservation tech)
+  preservedMealCost: 3,  // meals consumed per batch
+  preservedYield: 2,     // preserved produced per batch
+  preserveWorkCost: 60,
   // Raids & combat
   firstRaidDay: 11,
   raidIntervalDays: 8,

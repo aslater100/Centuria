@@ -2217,6 +2217,22 @@ export class Simulation {
     if (tailorShop && this.stock.clothes < threadbare && (canSpinFlax || canSpinGrain)) {
       push({ kind: 'craft', x: tailorShop.x, y: tailorShop.y, buildingId: tailorShop.id, workLeft: TUNING.craftWorkPerClothes, label: 'sew clothes' }, 'craft');
     }
+    // Rope: once clothing demand is met, the tailor twists spare flax fibre into
+    // rope — the cordage advanced upgrades (nets, rigging, scaffolding) call for.
+    if (tailorShop && this.hasTech('textile_farming') &&
+        this.stock.clothes >= threadbare &&
+        this.stock.flax >= TUNING.ropeFlaxCost && this.stock.rope < TUNING.ropeTarget) {
+      push({ kind: 'craft', x: tailorShop.x, y: tailorShop.y, buildingId: tailorShop.id, workLeft: TUNING.ropeWorkCost, label: 'spin rope' }, 'craft');
+    }
+    // Preserved food: cooks salt/smoke surplus meals into shelf-stable rations
+    // that never spoil — the strategic winter reserve (food_preservation tech).
+    if (this.hasTech('food_preservation') && this.stock.meal >= this.mealCap() * 0.7 &&
+        this.stock.preserved < this.settlers.length * 3) {
+      const cookShop = this.builtOf('cook')[0];
+      if (cookShop) {
+        push({ kind: 'craft', x: cookShop.x, y: cookShop.y, buildingId: cookShop.id, workLeft: TUNING.preserveWorkCost, label: 'preserve food' }, 'craft');
+      }
+    }
     // Lay the dead to rest — needs a burial ground with a free plot; until
     // then the bodies lie in camp and weigh on everyone.
     if (this.graveSite()) {
@@ -2748,6 +2764,28 @@ export class Simulation {
           if (task.workLeft <= 0) {
             this.stock.herbs -= TUNING.medicineHerbCost;
             this.stock.medicine++;
+            this.finishTask(s);
+          }
+          return;
+        }
+        // Rope: twist flax fibre into cordage (tailor, textile_farming).
+        if (task.label === 'spin rope') {
+          if (this.stock.flax < TUNING.ropeFlaxCost) return this.finishTask(s);
+          task.workLeft -= work;
+          if (task.workLeft <= 0) {
+            this.stock.flax -= TUNING.ropeFlaxCost;
+            this.stock.rope++;
+            this.finishTask(s);
+          }
+          return;
+        }
+        // Preserved food: salt/smoke surplus meals into shelf-stable rations.
+        if (task.label === 'preserve food') {
+          if (this.stock.meal < TUNING.preservedMealCost) return this.finishTask(s);
+          task.workLeft -= work;
+          if (task.workLeft <= 0) {
+            this.stock.meal -= TUNING.preservedMealCost;
+            this.stock.preserved += TUNING.preservedYield;
             this.finishTask(s);
           }
           return;
