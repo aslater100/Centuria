@@ -8,7 +8,7 @@ import type { DayWeather } from './weather';
 import {
   BUILDING_DEFS, buildingDef, traitDef, FIRST_NAMES, LAST_NAMES, TRAIT_DEFS,
   MINUTES_PER_TICK, MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR,
-  TUNING, WORK_KINDS, TOWN_TECH_DEFS, setCurrencySymbol, formatCurrency, DIFFICULTY_PRESETS,
+  TUNING, WORK_KINDS, SKILLED_WORK_KINDS, TOWN_TECH_DEFS, setCurrencySymbol, formatCurrency, DIFFICULTY_PRESETS,
 } from './defs';
 import type { ResourceKind, WorkKind, TownFocus, TradeOrder, TradeRecord, PendingEvent, CurrencySymbol, TownDesign } from './defs';
 import type { EconomyData } from './economy';
@@ -349,12 +349,19 @@ export class Simulation {
     }
     const skills = {} as Record<WorkKind, number>;
     const priorities = {} as Record<WorkKind, number>;
+    // Every work kind gets a priority slot so the scheduler can read it, but
+    // only real professions roll a starting skill. The contextual support jobs
+    // (market/guard/evacuate) default to 0 and consume no RNG draws — which
+    // keeps the seeded sequence stable and stops them being a phantom calling.
     for (const k of WORK_KINDS) {
-      skills[k] = this.rng.int(8);
+      skills[k] = 0;
       priorities[k] = 1;
     }
-    // Everyone leans into their best skill by default.
-    const best = WORK_KINDS.reduce((a, b) => (skills[a] >= skills[b] ? a : b));
+    for (const k of SKILLED_WORK_KINDS) {
+      skills[k] = this.rng.int(8);
+    }
+    // Everyone leans into their best profession by default.
+    const best = SKILLED_WORK_KINDS.reduce((a, b) => (skills[a] >= skills[b] ? a : b));
     priorities[best] = 3;
     const s: Settler = {
       id: this.nextId++,
@@ -1175,7 +1182,7 @@ export class Simulation {
   private evtSkillBreakthrough(): void {
     if (this.settlers.length === 0) return;
     const s = this.rng.pick(this.settlers);
-    const best = WORK_KINDS.reduce((a, b) => (s.skills[a] >= s.skills[b] ? a : b));
+    const best = SKILLED_WORK_KINDS.reduce((a, b) => (s.skills[a] >= s.skills[b] ? a : b));
     s.skills[best] = Math.min(10, s.skills[best] + 1 + this.rng.int(2));
     this.addThought(s, 'Breakthrough!', 10, 3 * MINUTES_PER_DAY);
     this.addLog(`${s.name.split(' ')[0]} has been studying hard — their ${best} improves.`, 'good');

@@ -42,6 +42,18 @@ export const WORK_KINDS: WorkKind[] = [
   'market', 'guard', 'evacuate',
 ];
 
+/** Jobs a settler trains into as a profession — rolled at birth and eligible to
+ *  be their primary calling. The economy/defense jobs (`market`, `guard`,
+ *  `evacuate`) are deliberately excluded: they're contextual work that only
+ *  exists with the right building or during a raid, so handing someone one as a
+ *  default profession would leave them idling on a phantom job. Keeping them out
+ *  of the birth roll also keeps the seeded RNG sequence stable. */
+export const SKILLED_WORK_KINDS: WorkKind[] = [
+  'build', 'farm', 'chop', 'cook', 'haul', 'medic', 'craft',
+  'bury', 'hunt', 'plant', 'fish', 'forge',
+  'research', 'ranch', 'mine', 'mill', 'smelt', 'store',
+];
+
 // ---- Town focus (used by player and Notable Mayor post-flip) ----
 export type TownFocus = 'balanced' | 'agricultural' | 'military' | 'trade' | 'industrial' | 'cultural';
 
