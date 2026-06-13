@@ -647,6 +647,8 @@ export interface Scout {
   health: number; // 0–100; dies when reaches 0 (from enemy scouts, etc.)
   maintenanceCost: number; // gold per tick to keep alive
   createdDay: number;
+  expireDay: number; // scout auto-removed when day >= expireDay (200 days lifespan)
+  targetMode: 'random' | 'objective'; // random walk or move toward goal objective
 }
 
 /** Central Bank: tracks currency systems, reserves, and monetary policy. */
@@ -2512,6 +2514,7 @@ export class RegionSim {
     if (this.stateProclaimed) this.updateFactions();
     this.updateDiplomacy();
     this.updateRivalAI(); // staggered AI updates for rivals (GDD §6.2)
+    this.updateScouts(); // update faction scouts: movement, spawning, expiry (GDD §6.2)
     this.tickClimate(); // the ledger runs from the first decade (GDD §8.2)
     if (this.passedLaws.includes('central_bank_charter')) this.tickMonetary();
     this.updateLoans(); // process loan interest and check for defaults
@@ -5537,6 +5540,17 @@ export class RegionSim {
   updateFactionAI(faction: RegionalFaction): void {
     // Generate or refresh goal (once per year)
     if (!faction.currentGoal || this.day - faction.lastGoalCheckDay >= 365) {
+      // Check if previous goal succeeded/failed
+      if (faction.currentGoal) {
+        const succeeded = faction.currentGoal.successCondition(faction, this);
+        if (succeeded) {
+          this.addLog(`${faction.name} achieves goal: "${faction.currentGoal.objective}".`, 'good');
+          faction.treasury += 100; // prestige bonus
+        } else if (this.day > faction.currentGoal.targetYear) {
+          this.addLog(`${faction.name} abandons goal: "${faction.currentGoal.objective}" (timeout).`, 'info');
+        }
+      }
+
       faction.currentGoal = this.generateFactionGoal(faction);
       faction.lastGoalCheckDay = this.day;
       if (faction.currentGoal) {
@@ -5558,10 +5572,21 @@ export class RegionSim {
     const techSpeed = faction.treasury * 0.0001 + factionPop * 0.00001;
     faction.techProgress += techSpeed * (faction.currentGoal?.sectorFocus === 'technology' ? 1.5 : 1);
 
-    // Settlement expansion: cheap Monte Carlo approach (5 random sites, pick best)
-    if (this.rng.chance(0.1) && faction.settlementIds.length < 6) {
-      // 10% chance per update to expand if below 6 settlements
-      // In full implementation, would place new settlement here
+    // Scout spawning: 10% chance per update to spawn if under limit
+    if (this.rng.chance(0.1) && faction.settlementIds.length > 0) {
+      this.spawnScout(faction);
+    }
+
+    // Settlement expansion: Monte Carlo approach (5 random sites, pick best)
+    if (this.rng.chance(0.1) && faction.settlementIds.length < 6 && faction.treasury >= 50) {
+      const site = this.findBestExpansionSite(faction, 5);
+      if (site && site.score > 0) {
+        const newSettlement = this.foundSettlement(faction, site.x, site.y);
+        if (newSettlement) {
+          this.addLog(`${faction.name} founds settlement ${newSettlement.name} at (${site.x}, ${site.y}).`, 'info');
+          faction.treasury -= 50; // founding cost
+        }
+      }
     }
 
     // Military scaling: garrison = pop * 0.01 * tech_mult
@@ -5579,5 +5604,294 @@ export class RegionSim {
         rival.lastEnvoyDay = this.day;
       }
     }
+  }
+
+  // ---- Scout System (GDD §6.2: exploratory units for faction AI) ----
+
+  /** Spawn scouts for a faction if it has budget and slots. Called during faction AI update. */
+  private spawnScout(faction: RegionalFaction): Scout | null {
+    if (faction.settlementIds.length === 0) return null;
+    const scoutCount = this.scouts.filter((s) => s.factionId === faction.id).length;
+    if (scoutCount >= 2) return null; // max 2 scouts per faction
+    if (faction.treasury < 5) return null; // costs 5 gold
+
+    // Spawn near random friendly settlement
+    const settlement = this.settlement(faction.settlementIds[this.rng.int(faction.settlementIds.length)]);
+    if (!settlement) return null;
+
+    const scout: Scout = {
+      id: this.nextScoutId++,
+      factionId: faction.id,
+      x: settlement.x + (this.rng.int(5) - 2),
+      y: settlement.y + (this.rng.int(5) - 2),
+      health: 100,
+      maintenanceCost: 5,
+      createdDay: this.day,
+      expireDay: this.day + 200, // 200-day lifespan
+      targetMode: faction.currentGoal ? 'objective' : 'random',
+    };
+
+    // Clamp to map bounds
+    scout.x = Math.max(0, Math.min(100, scout.x));
+    scout.y = Math.max(0, Math.min(100, scout.y));
+
+    this.scouts.push(scout);
+    faction.treasury -= 5;
+    return scout;
+  }
+
+  /** Move a single scout by 2-3 cells toward objective or random direction. */
+  private moveScout(scout: Scout): void {
+    const oldX = scout.x, oldY = scout.y;
+    const faction = this.faction(scout.factionId);
+    if (!faction || !faction.currentGoal) {
+      // Random walk
+      scout.x += this.rng.int(3) - 1;
+      scout.y += this.rng.int(3) - 1;
+    } else {
+      // Move toward unexplored tiles biased by goal
+      const target = this.scoutDestinationTile(scout, faction);
+      if (target) {
+        const dx = target.x - scout.x, dy = target.y - scout.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0) {
+          scout.x += (dx / dist) * 2.5;
+          scout.y += (dy / dist) * 2.5;
+        }
+      } else {
+        // Fallback: random walk
+        scout.x += this.rng.int(3) - 1;
+        scout.y += this.rng.int(3) - 1;
+      }
+    }
+
+    // Clamp to bounds
+    scout.x = Math.max(0, Math.min(100, scout.x));
+    scout.y = Math.max(0, Math.min(100, scout.y));
+
+    // Invalidate faction visibility if moved significantly
+    if (Math.abs(scout.x - oldX) > 0.1 || Math.abs(scout.y - oldY) > 0.1) {
+      // Would invalidate cache here in Phase 2c
+    }
+    void oldX; // suppress unused warning
+  }
+
+  /** Find best tile for scout to explore, biased by goal. Returns nearest unexplored tile. */
+  private scoutDestinationTile(_scout: Scout, faction: RegionalFaction): { x: number; y: number } | null {
+    // Pick random unexplored region, search toward it
+    const targetX = this.rng.int(100), targetY = this.rng.int(100);
+
+    // If goal has settlementBias, prefer tiles matching that type (Phase 2b)
+    if (faction.currentGoal?.settlementBias) {
+      // TODO Phase 2b: use bias to find matching site type
+      void faction.currentGoal.settlementBias;
+    }
+
+    return { x: targetX, y: targetY };
+  }
+
+  // ---- Settlement Expansion (Phase 2b: Monte Carlo placement) ----
+
+  /** Determine site characteristics: river, coastal, mountain, plains, forest. */
+  private siteType(x: number, y: number): string[] {
+    const site = this.map.siteAt(x, y);
+    if (!site) return [];
+    const types: string[] = [];
+    if (site.river || (x > 0 && y > 0 && this.map.siteAt(x - 1, y)?.river)) types.push('river');
+    if (site.coastal || x < 5 || x > 95 || y < 5 || y > 95) types.push('coastal');
+    if (site.roughness > 0.4) types.push('mountain');
+    if (site.fertility > 0.9 && site.roughness < 0.2) types.push('plains');
+    if (site.forest > 0.5) types.push('forest');
+    return types;
+  }
+
+  /** Find best settlement expansion site using Monte Carlo sampling (5 random sites). */
+  private findBestExpansionSite(faction: RegionalFaction, samples: number = 5): { x: number; y: number; score: number } | null {
+    let bestSite: { x: number; y: number; score: number } | null = null;
+    const bias = faction.currentGoal?.settlementBias ?? [];
+
+    for (let i = 0; i < samples; i++) {
+      const x = this.rng.int(100), y = this.rng.int(100);
+      const siteTypes = this.siteType(x, y);
+
+      // Score calculation
+      let score = 50;
+
+      // Penalty: too close to existing settlement
+      for (const settlementId of faction.settlementIds) {
+        const s = this.settlement(settlementId);
+        if (s && Math.abs(s.x - x) < 4 && Math.abs(s.y - y) < 4) {
+          score -= 100; // too close
+          break;
+        }
+      }
+
+      // Bias matching: +20 per matching type
+      for (const b of bias) {
+        if (siteTypes.includes(b)) score += 20;
+      }
+
+      // Terrain bonuses
+      if (siteTypes.includes('coastal')) score += 5;
+      if (siteTypes.includes('river')) score += 3;
+      if (siteTypes.includes('mountain')) score += 2;
+
+      // Noise for variety
+      score += this.rng.int(11) - 5;
+
+      if (score > 0 && (!bestSite || score > bestSite.score)) {
+        bestSite = { x: Math.round(x), y: Math.round(y), score };
+      }
+    }
+
+    return bestSite;
+  }
+
+  /** Found a new settlement for a faction at the given coordinates. */
+  private foundSettlement(faction: RegionalFaction, x: number, y: number): Settlement | null {
+    // Check if placement is valid
+    if (x < 0 || x > 100 || y < 0 || y > 100) return null;
+
+    // Don't found where another settlement exists
+    if (this.settlements.some((s) => Math.abs(s.x - x) < 4 && Math.abs(s.y - y) < 4)) {
+      return null;
+    }
+
+    // Create new settlement
+    const site = this.map.siteAt(Math.round(x), Math.round(y));
+    if (!site) return null;
+
+    const settlement: Settlement = {
+      id: this.nextId++,
+      name: `${faction.name}'s Outpost`, // TODO: better naming
+      x: Math.round(x),
+      y: Math.round(y),
+      foundedDay: this.day,
+      cohorts: { bands: [5, 10, 8, 4, 1] }, // starting population ~28
+      food: 50,
+      wood: 30,
+      satisfaction: 60,
+      housing: 15,
+      landQuality: site.fertility,
+      site,
+      lastRaidDay: -999,
+      lastFloodDay: -999,
+      strikeUntil: -1,
+      grievance: 20,
+      prices: { ...BASE_PRICE },
+      factionId: faction.id,
+      garrisonStrength: 2,
+      loyaltyToFaction: 85, // new settlements are loyal to their faction
+      sectors: defaultSectors(),
+      buildings: [],
+      construction: null,
+      focus: 'balanced' as TownFocus,
+      activeEvents: [],
+      policies: { ...DEFAULT_CITY_POLICIES },
+      recentEvents: [],
+    };
+
+    this.settlements.push(settlement);
+    faction.settlementIds.push(settlement.id);
+
+    return settlement;
+  }
+
+  /** Update all scouts: move, age, expire. Called during monthly update. */
+  private updateScouts(): void {
+    // Move active scouts
+    for (const scout of this.scouts) {
+      if (this.day < scout.expireDay) {
+        const oldX = scout.x, oldY = scout.y;
+        this.moveScout(scout);
+
+        // Invalidate faction visibility if scout moved
+        if (Math.abs(scout.x - oldX) > 0.1 || Math.abs(scout.y - oldY) > 0.1) {
+          this.invalidateFactionVisibility(scout.factionId);
+        }
+      }
+    }
+
+    // Remove expired scouts
+    this.scouts = this.scouts.filter((s) => this.day < s.expireDay);
+
+    // Attempt to spawn new scouts for factions with budget
+    for (const faction of this.regionalFactions) {
+      if (this.rng.chance(0.1)) {
+        // 10% chance per update to spawn a scout if faction has budget
+        this.spawnScout(faction);
+      }
+    }
+  }
+
+  // ---- Faction Visibility Cache (Phase 2c: deferred per-faction visibility) ----
+
+  /** Visibility cache: tiles visible to each faction (lazily computed, weekly rebuild). */
+  private factionVisibilityCache: Map<number, Set<string>> = new Map();
+  private lastVisibilityRebuild: Map<number, number> = new Map();
+
+  /** Check if a tile is visible to a faction (cache hits are O(1)). */
+  isVisibleToFaction(x: number, y: number, factionId: number): boolean {
+    // Rebuild cache if stale (weekly rebuild)
+    const lastRebuild = this.lastVisibilityRebuild.get(factionId) ?? -999;
+    if (this.day - lastRebuild >= 7) {
+      this.rebuildFactionVisibility(factionId);
+    }
+
+    const cache = this.factionVisibilityCache.get(factionId);
+    return cache ? cache.has(`${Math.round(x)},${Math.round(y)}`) : false;
+  }
+
+  /** Mark faction visibility cache as dirty (rebuild on next check). */
+  private invalidateFactionVisibility(factionId: number): void {
+    this.lastVisibilityRebuild.set(factionId, -999); // force rebuild
+  }
+
+  /** Rebuild faction visibility cache from settlements + scouts. O(settlements² + scouts × radius²). */
+  private rebuildFactionVisibility(factionId: number): void {
+    const faction = this.faction(factionId);
+    if (!faction) return;
+
+    const cache = new Set<string>();
+    const baseRadius = 2;
+
+    // Settlement visibility: 2 + tech bonus
+    for (const settlementId of faction.settlementIds) {
+      const settlement = this.settlement(settlementId);
+      if (!settlement) continue;
+
+      const radius = baseRadius;
+      const r2 = (radius + 1) ** 2;
+      for (let dx = -(radius + 1); dx <= radius + 1; dx++) {
+        for (let dy = -(radius + 1); dy <= radius + 1; dy++) {
+          if (dx * dx + dy * dy <= r2) {
+            const nx = settlement.x + dx, ny = settlement.y + dy;
+            if (nx >= 0 && nx <= 100 && ny >= 0 && ny <= 100) {
+              cache.add(`${Math.round(nx)},${Math.round(ny)}`);
+            }
+          }
+        }
+      }
+    }
+
+    // Scout visibility: 5-cell radius
+    for (const scout of this.scouts) {
+      if (scout.factionId !== factionId) continue;
+      const radius = 5;
+      const r2 = radius * radius;
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dy = -radius; dy <= radius; dy++) {
+          if (dx * dx + dy * dy <= r2) {
+            const nx = scout.x + dx, ny = scout.y + dy;
+            if (nx >= 0 && nx <= 100 && ny >= 0 && ny <= 100) {
+              cache.add(`${Math.round(nx)},${Math.round(ny)}`);
+            }
+          }
+        }
+      }
+    }
+
+    this.factionVisibilityCache.set(factionId, cache);
+    this.lastVisibilityRebuild.set(factionId, this.day);
   }
 }
