@@ -31,12 +31,15 @@ export type WorkKind =
   | 'build' | 'farm' | 'chop' | 'cook' | 'haul' | 'medic' | 'craft'
   | 'bury' | 'hunt' | 'plant' | 'fish' | 'forge'
   // New — town expansion
-  | 'research' | 'ranch' | 'mine' | 'mill' | 'smelt' | 'store';
+  | 'research' | 'ranch' | 'mine' | 'mill' | 'smelt' | 'store'
+  // New — economy & defense
+  | 'market' | 'guard' | 'evacuate';
 
 export const WORK_KINDS: WorkKind[] = [
   'build', 'farm', 'chop', 'cook', 'haul', 'medic', 'craft',
   'bury', 'hunt', 'plant', 'fish', 'forge',
   'research', 'ranch', 'mine', 'mill', 'smelt', 'store',
+  'market', 'guard', 'evacuate',
 ];
 
 // ---- Town focus (used by player and Notable Mayor post-flip) ----
@@ -372,6 +375,13 @@ export const TUNING = {
   wellInfectionReduction: 0.1,
   // Watchtower
   watchtowerWarningDays: 1,   // extra days of warning before raid arrives
+  // Market trading
+  marketPriceRecalcDays: 1,   // recalc price modifiers at most once per N game-days
+  marketPriceFloor: 0.25,     // minimum price multiplier
+  marketPriceCap: 4.0,        // maximum price multiplier
+  // Guard defense
+  guardDetectionRange: 5,     // tiles; guards see enemies at this distance
+  guardPostRange: 3,          // tiles; guard stays within this radius of post when garrisoned
   // Warehouse / storage
   warehouseBaseCap: 500,
   // Production chains

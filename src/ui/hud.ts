@@ -696,18 +696,30 @@ export class Hud {
   private tradePanel(): string {
     const offers = Object.entries(TUNING.tradeRates).map(([key, r]) => {
       const [give, get] = key.split('->');
-      const can = this.sim.stock[give as ResourceKind] >= r.give;
-      return `<button class="trade-btn" data-give="${give}" data-get="${get}"${can ? '' : ' disabled'}>${r.give}${give[0]}→${r.get}${get[0]}</button>`;
-    }).join(' ');
+      const giveKind = give as ResourceKind;
+      const have = this.sim.stock[giveKind] ?? 0;
+      const can = have >= r.give;
+      const times = Math.floor(have / r.give);
+      return `<div class="trade-row">
+        <button class="trade-btn" data-give="${give}" data-get="${get}" data-qty="1"${can ? '' : ' disabled'}>${r.give}${give[0]}→${r.get}${get[0]}</button>
+        ${times > 1 ? `<button class="trade-bulk" data-give="${give}" data-get="${get}" data-qty="${Math.min(times, 10)}" title="Shift+click">×${Math.min(times, 10)}</button>` : ''}
+        ${times > 10 ? `<button class="trade-bulk" data-give="${give}" data-get="${get}" data-qty="${times}" title="Max">×${times}</button>` : ''}
+      </div>`;
+    }).join('');
     // Sell stock for coin: how the colony banks the cash that founding a town requires
     const sellable: ResourceKind[] = ['wood', 'stone', 'grain', 'meal', 'clothes'];
     const sells = sellable.map((kind) => {
       const price = getMarketPrice(this.sim.economy, kind);
-      const can = this.sim.stock[kind] >= 5;
-      return `<button class="sell-cash-btn" data-kind="${kind}"${can ? '' : ' disabled'}>5 ${kind} → ` + formatCurrency(price * 5) + `</button>`;
-    }).join(' ');
-    return `<p class="insp-skills">BARTER:</p><p>${offers}</p>` +
-      `<p class="insp-skills">SELL FOR COIN (` + formatCurrency(Math.round(this.sim.economy.cash)) + `):</p><p>${sells}</p>`;
+      const have = this.sim.stock[kind] ?? 0;
+      const can = have >= 5;
+      const times = Math.floor(have / 5);
+      return `<div class="trade-row">
+        <button class="sell-cash-btn" data-kind="${kind}" data-qty="1"${can ? '' : ' disabled'}>5 ${kind} → ${formatCurrency(price * 5)}</button>
+        ${times > 1 ? `<button class="trade-bulk" data-kind="${kind}" data-qty="${Math.min(times, 10)}" title="Shift+click">×${Math.min(times, 10)}</button>` : ''}
+      </div>`;
+    }).join('');
+    return `<p class="insp-skills">BARTER:</p><div class="trade-panel">${offers}</div>` +
+      `<p class="insp-skills">SELL FOR COIN (` + formatCurrency(Math.round(this.sim.economy.cash)) + `):</p><div class="trade-panel">${sells}</div>`;
   }
 
   private civicPanel(bid: number): string {
