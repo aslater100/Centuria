@@ -3,8 +3,8 @@
  * operating altitude after the flip (GDD §2.5). Painterly backdrop, town
  * markers, routes, expedition wagons; DOM panel for the selected settlement.
  */
-import type { RegionSim, Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, TownFocus, WagePolicy } from '../sim/region';
-import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, DEFAULT_CITY_POLICIES } from '../sim/region';
+import type { RegionSim, Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, TownFocus, WagePolicy, Route, SectorId } from '../sim/region';
+import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, DEFAULT_CITY_POLICIES, ROUTE_SPECS } from '../sim/region';
 import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS } from '../sim/defs';
 import type { CurrencySymbol } from '../sim/defs';
 import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
@@ -30,6 +30,10 @@ export class RegionView {
   private statePanel: HTMLElement;
   private researchPanel: HTMLElement;
   researchOpen = false;
+  /** Phase A: the region-wide Route Network panel (toggle with the R key). */
+  private routeNetworkPanel: HTMLElement;
+  routeNetworkOpen = false;
+  private lastNetworkBuildFrame = -999;
   private ceremony: HTMLElement;
   private convention: HTMLElement;
   private policyModal: HTMLElement;
@@ -61,6 +65,9 @@ export class RegionView {
     this.researchPanel = document.createElement('div');
     this.researchPanel.className = 'palette research-panel hidden';
     root.appendChild(this.researchPanel);
+    this.routeNetworkPanel = document.createElement('div');
+    this.routeNetworkPanel.className = 'palette route-network-panel hidden';
+    root.appendChild(this.routeNetworkPanel);
     this.ceremony = document.createElement('div');
     this.ceremony.className = 'ceremony hidden';
     root.appendChild(this.ceremony);
@@ -82,6 +89,7 @@ export class RegionView {
     this.panel.remove();
     this.statePanel.remove();
     this.researchPanel.remove();
+    this.routeNetworkPanel.remove();
     this.ceremony.remove();
     this.convention.remove();
     this.policyModal.remove();
@@ -326,6 +334,7 @@ export class RegionView {
     this.drawPanel();
     this.drawStatePanel();
     this.drawResearchPanel();
+    this.drawRouteNetworkPanel();
     this.drawCeremony();
     this.drawConvention();
     this.drawCenturyReport();
@@ -958,7 +967,8 @@ export class RegionView {
           : r.railUnlocked()
             ? 'RAILWORKS chartered — lay rail from any town panel'
             : `railworks expected ~${RAIL_ERA_YEAR}`}</p>` +
-      `<p><button class="mini" id="research-toggle">${this.researchOpen ? '▲ research' : '▼ research'}</button> <span class="insp-skills">${researchLabel}</span></p>` +
+      `<p><button class="mini" id="research-toggle">${this.researchOpen ? '▲ research' : '▼ research'}</button> <span class="insp-skills">${researchLabel}</span>` +
+      ` <button class="mini" id="routenet-toggle" title="Region-wide route network (R)">${this.routeNetworkOpen ? '▲ routes' : '▼ routes'}</button></p>` +
       (r.canCallConvention() ? `<p><button id="convention-btn" style="font-size:10px;background:#8b5cf6;color:#fff;border:none;padding:4px 8px;cursor:pointer">★ CONVENE CONSTITUTIONAL CONVENTION</button></p>` : '') +
       this.politicsHtml() +
       this.diplomacyHtml() +
@@ -1012,6 +1022,9 @@ export class RegionView {
     };
     this.statePanel.querySelector<HTMLButtonElement>('#research-toggle')!.onclick = () => {
       this.researchOpen = !this.researchOpen;
+    };
+    this.statePanel.querySelector<HTMLButtonElement>('#routenet-toggle')!.onclick = () => {
+      this.routeNetworkOpen = !this.routeNetworkOpen;
     };
     this.statePanel.querySelector<HTMLButtonElement>('#convention-btn')?.addEventListener('click', () => {
       this.conventionOpen = true;
@@ -1978,6 +1991,120 @@ export class RegionView {
       `<p class="insp-skills">services: ${svcBtns}` +
       (p.serviceLevel >= 2 ? ` <span class="insp-cond">(+` + formatCurrency(r.popOf(t) * 0.002, 1) + `/month)</span>` : '') +
       `</p>`
+    );
+  }
+
+  /** Phase A: the region-wide Route Network panel — every link laid out with
+   *  its condition, effective capacity, cargo, and travel time, plus
+   *  repair / upgrade / tear-up / cargo-priority controls in one place. */
+  private drawRouteNetworkPanel(): void {
+    const r = this.region;
+    if (!this.routeNetworkOpen || !r.stateProclaimed) {
+      this.routeNetworkPanel.classList.add('hidden');
+      return;
+    }
+    this.routeNetworkPanel.classList.remove('hidden');
+    // Same DOM-stability guard as the other panels: rebuild on a timer, not
+    // every frame, so a button node survives between mousedown and click.
+    if (this.frame - this.lastNetworkBuildFrame < 60) return;
+    this.lastNetworkBuildFrame = this.frame;
+    this.routeNetworkPanel.innerHTML = this.routeNetworkHtml();
+    const refresh = () => { this.lastNetworkBuildFrame = -999; };
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-close')) {
+      b.onclick = () => { this.routeNetworkOpen = false; };
+    }
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-upgrade-btn')) {
+      b.onclick = () => {
+        const a = Number(b.dataset.a), to = Number(b.dataset.b), kind = b.dataset.kind;
+        if (kind === 'road') r.buildRoad(a, to);
+        else if (kind === 'rail') r.buildRail(a, to);
+        else if (kind === 'highway') r.buildHighway(a, to);
+        else if (kind === 'maglev') r.buildMaglev(a, to);
+        refresh();
+      };
+    }
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-repair-btn')) {
+      b.onclick = () => { r.repairRoute(Number(b.dataset.a), Number(b.dataset.b)); refresh(); };
+    }
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-delete-btn')) {
+      b.onclick = () => { r.deleteRoute(Number(b.dataset.a), Number(b.dataset.b)); refresh(); };
+    }
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-cargo-btn')) {
+      b.onclick = () => {
+        const s = b.dataset.sector === 'auto' ? null : (b.dataset.sector as SectorId);
+        r.setRouteCargoPriority(Number(b.dataset.a), Number(b.dataset.b), s);
+        refresh();
+      };
+    }
+  }
+
+  private routeNetworkHtml(): string {
+    const r = this.region;
+    type Up = 'road' | 'rail' | 'highway' | 'maglev';
+    const RANK: Route['kind'][] = ['trail', 'road', 'rail', 'highway', 'maglev'];
+    const unlocked = (k: Up): boolean =>
+      k === 'rail' ? r.railUnlocked() : k === 'highway' ? r.highwayUnlocked() : k === 'maglev' ? r.maglevUnlocked() : r.stateProclaimed;
+    // Best link the era allows that's strictly above the current kind.
+    const bestUpgrade = (cur: Route['kind']): Up | null => {
+      for (let i = RANK.length - 1; i > RANK.indexOf(cur); i--) {
+        if (unlocked(RANK[i] as Up)) return RANK[i] as Up;
+      }
+      return null;
+    };
+    const cargoColors: Record<string, string> = { agriculture: '#c2a14d', industry: '#8c6848', services: '#4a7fa4', information: '#7a5a9a' };
+    const built = r.routes.filter((rt) => rt.kind !== 'trail');
+    const upkeep = built.reduce((s, rt) => s + r.maintBill(rt), 0);
+    const rows = [...r.routes]
+      .sort((a, b) => b.freight - a.freight)
+      .map((rt) => {
+        const a = r.settlement(rt.a);
+        const b = r.settlement(rt.b);
+        if (!a || !b) return '';
+        const cap = Math.round(r.effectiveCapacity(rt));
+        const days = Math.max(1, Math.round(r.map.travelDays(a.x, a.y, b.x, b.y) / ROUTE_SPECS[rt.kind].speed));
+        const condClass = rt.condition < 50 ? 'insp-cond' : 'insp-skills';
+        const cargoBadge = rt.cargoType
+          ? ` <span style="color:${cargoColors[rt.cargoType]}">[${rt.cargoType.slice(0, 3)}${rt.cargoPriority ? '📌' : ''}]</span>`
+          : '';
+        let acts = '';
+        const up = bestUpgrade(rt.kind);
+        if (up) {
+          const cost = r.linkCost(rt.a, rt.b, up);
+          if (cost) {
+            const afford = r.treasury >= cost.total;
+            acts += ` <button class="mini rn-upgrade-btn" data-a="${rt.a}" data-b="${rt.b}" data-kind="${up}" ${afford ? '' : 'disabled'} ` +
+              `title="${cost.breakdown}${rt.kind !== 'trail' ? ` — replaces the ${rt.kind}` : ''}">▲${up} ` + formatCurrency(cost.total) + `</button>`;
+          }
+        }
+        if (rt.kind !== 'trail' && rt.condition < 99) {
+          const cost = r.repairCost(rt);
+          acts += ` <button class="mini rn-repair-btn" data-a="${rt.a}" data-b="${rt.b}" ${r.treasury >= cost ? '' : 'disabled'} title="restore to 100%">repair ` + formatCurrency(cost) + `</button>`;
+        }
+        if (rt.kind !== 'trail') {
+          acts += ` <button class="mini rn-delete-btn" data-a="${rt.a}" data-b="${rt.b}" title="tear up the ${rt.kind} — falls back to a trail">tear up</button>`;
+        }
+        let pins = '';
+        if (rt.kind !== 'trail') {
+          pins = SECTOR_IDS.map((id) =>
+            rt.cargoPriority === id
+              ? `<b style="color:${cargoColors[id]}">${id.slice(0, 3)}</b>`
+              : `<button class="mini rn-cargo-btn" data-a="${rt.a}" data-b="${rt.b}" data-sector="${id}" title="Pin ${SECTOR_NAMES[id]} as this route's priority cargo">${id.slice(0, 3)}</button>`,
+          ).join(' ');
+          pins += rt.cargoPriority
+            ? ` <button class="mini rn-cargo-btn" data-a="${rt.a}" data-b="${rt.b}" data-sector="auto" title="Hand the route back to automatic cargo selection">auto</button>`
+            : ` <b>auto</b>`;
+        }
+        return `<div style="margin:4px 0">${a.name} ↔ ${b.name} — <span class="${condClass}">${rt.kind} ${Math.round(rt.condition)}%</span> ` +
+          `<span class="insp-skills">· cap ${cap}/mo · ${rt.freight > 0 ? `freight ${Math.round(rt.freight)}` : 'idle'} · ~${days}d</span>${cargoBadge}` +
+          (acts ? `<br>${acts}` : '') +
+          (pins ? `<br><span class="insp-skills">cargo:</span> ${pins}` : '') +
+          `</div>`;
+      })
+      .join('');
+    return (
+      `<div class="pal-title">ROUTE NETWORK <button class="mini rn-close" title="close (R)">✕</button></div>` +
+      `<p class="insp-skills">${r.routes.length} links · ${built.length} built · upkeep ` + formatCurrency(upkeep, 1) + `/mo</p>` +
+      `<div class="thoughts">${rows || '<p class="insp-skills">no routes yet</p>'}</div>`
     );
   }
 

@@ -259,6 +259,12 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
+  // In region mode, R toggles the route-network panel (Phase A quick access).
+  if (mode === 'region' && (e.key === 'r' || e.key === 'R') && regionView) {
+    regionView.routeNetworkOpen = !regionView.routeNetworkOpen;
+    e.preventDefault();
+    return;
+  }
   // Palette hotkeys (the bracketed letters on the buttons)
   if (mode === 'town' && hud.handleKey(e.key)) {
     e.preventDefault();

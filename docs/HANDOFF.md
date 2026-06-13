@@ -1,4 +1,4 @@
-# Session Handoff — 2026-06-13 (v0.27.2)
+# Session Handoff — 2026-06-13 (v0.28.0)
 
 ## Current state
 
@@ -34,6 +34,7 @@ Version **v0.27.2**. Transportation arc, governance stack, audio, diplomacy, war
 | 0.26 | FX & monetary regimes (GDD §5.1): player-adjustable policy rate (1–15%) gates credit-cycle dynamics once `central_bank_charter` enacted; `privateLeverage` builds at low rates → debt-service > 18% GDP → confidence falls → deleveraging bust contracts GDP; `inflationRate` driven by credit expansion + money printing; `exchangeRate` (0.3–2.0) driven by trade balance, rate differential, and confidence — weak currency boosts export earnings; three monetary regimes: `float` (market-driven), `peg` (reserve-backed, breaks on depletion), `print` (money creation + inflation); sovereign bond issuance (`issueBonds`) at `policyRate + creditSpread`; credit rating AAA→D from debt/GDP, inflation, confidence; 1929-analog crash fires once when leverage is fragile in 1927–36 window; bank interest now uses policy rate not hardcoded 0.5%; GDP credit-cycle multiplier (boom +6%, bust −20%); inflation drag on GDP above 8%; inflation satisfaction drag above 5%; CENTRAL BANK dashboard in state panel; 16 new tests; all fields serialized with `??` defaults |
 | #71 | **Region governor — Phase 0** (territory/borders/resource visualization, no version bump): map now renders faction-coloured **territory control zones + frontier lines** (`drawTerritories`), per-settlement **food/wood/goods status icons** (`drawResourceIndicators`), cargo-coloured **trade-flow arrows** scaled by freight (`drawTradeFlows`), and a region HUD showing **treasury trend (↑/↓) + territorial-control %**. Sim primitives added: `territoryRadius(t)` (pop + garrison + dev, capped 18), `computeTerritoryGrid()` (REGION_N grid, strongest-influence per land cell, signature-cached), `territoryControlOf(fid)` / `playerTerritoryControl()` (0..1 land share), `getSettlementResourceStatus(t)` (surplus/balanced/deficit). 9 new tests |
 | #72 | **Town-sim RNG-drift fix** (main was red since #67): `market`/`guard`/`evacuate` had been appended to `WORK_KINDS`, so `spawnSettler` consumed 3 extra `rng.int(8)` draws per birth — shifting the entire seeded sequence (colonies starved on tuned seeds) — and could hand a settler a phantom primary job. Added `SKILLED_WORK_KINDS` (real professions only) for the birth skill roll, `best` pick, and `evtSkillBreakthrough`; support jobs keep a priority slot at skill 0 (no draw). 3 regression guards |
+| 0.28 | **Region governor — Phase A: Route Network UI.** A region-wide **Route Network panel** (toggle from the state panel or the **R** key) lists every link sorted by freight, each row showing kind · condition% · effective capacity/mo · freight · travel days, the cargo badge, and one-click **upgrade** (to the best era-unlocked tier), **repair**, **tear up**, and **cargo-priority pins**. New sim primitives in `region.ts`: `deleteRoute(a,b)` (tears a built link back to a trail — keeps the graph connected, no stranded asset), `setRouteCargoPriority(a,b,sector\|null)` + new optional `Route.cargoPriority` that overrides the automatic dominant-cargo reading in `updateRouteCargo` (serialized with `?? null`). 5 new tests |
 
 ## Ship loop
 
@@ -54,12 +55,16 @@ PR #71 description and the team's expansion brief. **Phase 0 shipped** (#71) and
 gives the data/visual substrate. Remaining phases, in pull order:
 
 - **Phase A — Infrastructure & Trade UI** (sim already has the data; this is UI):
-  - Route Network panel: list routes with condition %, capacity %, cargo type;
-    repair/upgrade/delete + cargo-priority controls. Build on existing `region.routes`
-    (a/b/kind/condition/freight/cargoType) and `routePath`/`buildLink`/`repairRoute`.
-  - Settlement connector UI ("available destinations" w/ cost + travel time via
+  - ✅ **Route Network panel shipped (0.28):** lists routes with condition %, capacity,
+    cargo type; repair/upgrade/tear-up + cargo-priority controls; toggle from the state
+    panel or the **R** key. New sim hooks `deleteRoute`/`setRouteCargoPriority` +
+    `Route.cargoPriority`.
+  - ⬜ Settlement connector UI ("available destinations" w/ cost + travel time via
     `map.travelDays`), per-town trade-partner view, cargo export-target sliders.
-  - HUD quick-access sidebar (Settlements/Routes/Diplomacy/Economy/Research) + S/R/D/E/T keys.
+    (Travel days already surfaced per-route in the network panel; the per-town
+    connector view and export sliders remain.)
+  - ⬜ Full HUD quick-access sidebar (Settlements/Routes/Diplomacy/Economy/Research) +
+    S/D/E/T keys. (Routes is wired to **R**; the rest still open from the state panel.)
 - **Phase B — Economic Policy & Growth UI** (mechanics exist; surface them):
   - State-panel economy tab: per-settlement tax slider w/ projected revenue + compliance,
     sector employment-target sliders (labor drifts via existing `sectors`/`focus`),
