@@ -175,6 +175,7 @@ export interface BuildingDef {
   maxHp?: number; // only damageable structures define this
   desc: string;
   upgrades?: UpgradeLevel[];
+  requiredTech?: string; // tech id that must be researched before placing
 }
 
 export interface TraitDef {
@@ -237,6 +238,12 @@ export const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'] as const;
 export const DAYS_PER_YEAR = DAYS_PER_SEASON * SEASONS.length;
 export const START_YEAR = 1900;
 
+// ---- Stockpile / capacity constants ----
+/** Raw-good storage per stockpile zone tile. */
+export const CAPACITY_PER_TILE = 50;
+/** Food/rest need below which a working settler abandons their task to eat/sleep. */
+export const NEED_INTERRUPT_THRESHOLD = 20;
+
 // ---- Tuning (centralized so the headless harness can sweep them) ----
 export const TUNING = {
   needDecayPerHour: { food: 2.2, rest: 1.4, warmth: 4.0, recreation: 0.8, social: 0.6 },
@@ -270,6 +277,8 @@ export const TUNING = {
   farmYieldPerTile: 10,
   cookWorkPerMeal: 20,
   cookBatch: 4,
+  /** Cook trigger: start cooking when meals < settlers × this. */
+  cookTriggerMult: 8,
   // Economy buildings (PR B2)
   bakeWorkPerMeal: 12, // bakery: bigger ovens, faster meals
   bakeBatch: 8,

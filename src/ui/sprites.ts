@@ -143,6 +143,7 @@ export interface SpriteSet {
   palisade: HTMLCanvasElement;
   palisadeVariants: HTMLCanvasElement[];
   gate: HTMLCanvasElement;
+  gateVariants: HTMLCanvasElement[];
   gatePlan: HTMLCanvasElement;
   sapling: HTMLCanvasElement;
   settler: HTMLCanvasElement[][];
@@ -1618,6 +1619,44 @@ function gateTile(): HTMLCanvasElement {
   return c;
 }
 
+function gateVerticalTile(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  g.fillStyle = P.shadow;
+  g.fillRect(24, 0, 7, TILE);
+  // posts top and bottom
+  g.fillStyle = P.woodDark;
+  g.fillRect(8, 0, 16, 5); g.fillRect(8, 27, 16, 5);
+  g.fillStyle = P.wood;
+  g.fillRect(9, 1, 14, 3); g.fillRect(9, 28, 14, 3);
+  g.fillStyle = P.woodLight;
+  g.fillRect(9, 1, 14, 1);
+  // door planks (vertical span)
+  g.fillStyle = P.plank;
+  g.fillRect(10, 5, 14, 22);
+  g.fillStyle = P.plankDark;
+  g.fillRect(14, 5, 2, 22); g.fillRect(20, 5, 2, 22);
+  // cross bar
+  g.fillStyle = P.woodDark;
+  g.fillRect(16, 5, 2, 22);
+  // hinge nails
+  g.fillStyle = P.rockDark;
+  g.fillRect(11, 6, 2, 2); g.fillRect(11, 24, 2, 2);
+  g.fillRect(22, 6, 2, 2); g.fillRect(22, 24, 2, 2);
+  return c;
+}
+
+function gateVariantTile(mask: number): HTMLCanvasElement {
+  const hasN = (mask & 1) !== 0;
+  const hasS = (mask & 4) !== 0;
+  const hasE = (mask & 2) !== 0;
+  const hasW = (mask & 8) !== 0;
+  // NS-running wall → vertical gate; EW-running or isolated → horizontal gate
+  const useVertical = (hasN || hasS) && !hasE && !hasW;
+  return useVertical ? gateVerticalTile() : gateTile();
+}
+
 function gatePlanTile(): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = TILE; c.height = TILE;
@@ -1740,12 +1779,38 @@ function saplingSprite(): HTMLCanvasElement {
   return c;
 }
 
-export function buildSprites(buildingDefs: { id: string; w: number; h: number }[]): SpriteSet {
+/** Draw upgrade tier pips at the top-right corner of a built building sprite. */
+function applyLevelPips(base: HTMLCanvasElement, level: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = base.width; c.height = base.height;
+  const g = c.getContext('2d')!;
+  g.drawImage(base, 0, 0);
+  // Draw one 2×5px pip per upgrade tier (level-1 pips), right-aligned from top-right
+  const pips = level - 1;
+  for (let i = 0; i < pips; i++) {
+    const rx = base.width - 4 - i * 4; // right edge offset
+    g.fillStyle = '#2a2a2a';
+    g.fillRect(rx - 1, 0, 4, 6);
+    g.fillStyle = '#f5c842'; // gold tier pip
+    g.fillRect(rx, 1, 2, 5);
+  }
+  return c;
+}
+
+export function buildSprites(buildingDefs: { id: string; w: number; h: number; upgrades?: unknown[] }[]): SpriteSet {
   const buildings: Record<string, HTMLCanvasElement> = {};
   const blueprints: Record<string, HTMLCanvasElement> = {};
   for (const d of buildingDefs) {
-    buildings[d.id]  = buildingSprite(d.id, d.w, d.h, false);
-    blueprints[d.id] = buildingSprite(d.id, d.w, d.h, true);
+    const base = buildingSprite(d.id, d.w, d.h, false);
+    buildings[d.id]     = base;
+    buildings[`${d.id}:1`] = base;
+    blueprints[d.id]    = buildingSprite(d.id, d.w, d.h, true);
+    // Pre-render levelled variants for buildings that have upgrades.
+    if (d.upgrades && d.upgrades.length > 0) {
+      for (let lvl = 2; lvl <= d.upgrades.length + 1; lvl++) {
+        buildings[`${d.id}:${lvl}`] = applyLevelPips(base, lvl);
+      }
+    }
   }
   const roads: Record<string, HTMLCanvasElement> = {};
   const roadPlans: Record<string, HTMLCanvasElement> = {};
@@ -1778,6 +1843,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number }[
     palisade: palisadeTile(),
     palisadeVariants: Array.from({ length: 16 }, (_, i) => palisadeVariantTile(i)),
     gate: gateTile(),
+    gateVariants: Array.from({ length: 16 }, (_, i) => gateVariantTile(i)),
     gatePlan: gatePlanTile(),
     sapling: saplingSprite(),
     settler: pawnLooks.map(([c, cd, s, ss, h]) => [

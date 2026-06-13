@@ -161,6 +161,7 @@ export class Hud {
   private gameOverBox: HTMLElement;
   private menuBox: HTMLElement;
   private showPriorities = false;
+  private showResources = false;
   private activeCat: string | null = null;
   private lastLogLen = 0;
   private foundBtn: HTMLButtonElement | null = null;
@@ -391,7 +392,24 @@ export class Hud {
       let label = item.label;
       if (item.cost) label += ` (${item.cost})`;
       btn.textContent = label;
-      btn.title = item.desc + (item.hotkey ? ` [${item.hotkey.toUpperCase()}]` : '');
+      // Tech gating: disable building buttons when their required tech is missing.
+      if (item.kind === 'building') {
+        try {
+          const def = buildingDef(item.id);
+          if (def.requiredTech && !this.sim.hasTech(def.requiredTech)) {
+            btn.disabled = true;
+            btn.classList.add('locked');
+            const techDef = TOWN_TECH_DEFS.find((t) => t.id === def.requiredTech);
+            btn.title = `Requires: ${techDef?.name ?? def.requiredTech}`;
+          } else {
+            btn.title = item.desc + (item.hotkey ? ` [${item.hotkey.toUpperCase()}]` : '');
+          }
+        } catch {
+          btn.title = item.desc + (item.hotkey ? ` [${item.hotkey.toUpperCase()}]` : '');
+        }
+      } else {
+        btn.title = item.desc + (item.hotkey ? ` [${item.hotkey.toUpperCase()}]` : '');
+      }
       // Mark active
       const active =
         (item.kind === 'building' && this.cam.placing === item.id) ||
@@ -622,14 +640,22 @@ export class Hud {
       `<span><span class="res-wood">≡</span>${s.stock.wood} ⛏${s.stock.stone} 🌾${s.stock.grain} 🍖${s.stock.meal} 👕${s.stock.clothes}${s.stock.weapons ? ` ⚔${s.stock.weapons}` : ''}</span>` +
       `<span title="average mood">♥${Math.round(s.avgMood())}</span>` +
       (s.raidActive ? `<span class="tb-over">⚔ RAID ${s.raiders.length}!</span>` : '') +
+      `<button id="tb-res" class="tb-btn${this.showResources ? ' active' : ''}" title="Resources panel">RES</button>` +
       `<span class="tb-speed">${this.paused ? '⏸' : '▶'.repeat(this.speed)} <i>(space 1-3)</i></span>`);
+    const resBtn = this.topBar.querySelector<HTMLButtonElement>('#tb-res');
+    if (resBtn) resBtn.onclick = () => { this.showResources = !this.showResources; };
+    // Close resources when the inspector fires a close-res event
+    this.inspector.addEventListener('close-res', () => { this.showResources = false; }, { once: true });
   }
 
   private drawInspector(): void {
     const s = this.sim;
     const settler = s.settlers.find((p) => p.id === this.cam.selectedSettler);
     const building = s.buildings.find((b) => b.id === this.cam.selectedBuilding);
-    if (settler) {
+    if (this.showResources) {
+      this.setHtml(this.inspector, this.resourcesCard());
+      this.inspector.classList.remove('hidden');
+    } else if (settler) {
       this.setHtml(this.inspector, this.settlerCard(settler));
       this.inspector.classList.remove('hidden');
     } else if (building) {
@@ -664,6 +690,32 @@ export class Hud {
       rows +
       (granaryCount > 0 ? `<p class="insp-skills">Meal cap: ${TUNING.mealCapBase} base + ${granaryCount} granary = ${mealCap}</p>` : `<p class="insp-skills">Build a Granary to extend meal storage.</p>`)
     );
+  }
+
+  private resourcesCard(): string {
+    const s = this.sim;
+    type Group = { label: string; kinds: ResourceKind[] };
+    const GROUPS: Group[] = [
+      { label: 'Basic', kinds: ['wood', 'grain', 'stone', 'clothes', 'weapons', 'flax', 'clay', 'coal', 'iron_ore', 'herbs'] },
+      { label: 'Refined', kinds: ['timber', 'brick', 'iron', 'tools', 'rope', 'flour', 'ale', 'medicine'] },
+      { label: 'Food Variety', kinds: ['meal', 'bread', 'dairy', 'produce', 'game_meal', 'fish_meal', 'preserved'] },
+    ];
+    // Resources that have consumers but no known producers ("no source" flag).
+    const NO_SOURCE = new Set<ResourceKind>(['rope', 'preserved']);
+    let html = `<h3>Resources <button onclick="this.closest('.inspector').dispatchEvent(new CustomEvent('close-res'))" style="float:right;cursor:pointer">✕</button></h3>`;
+    for (const g of GROUPS) {
+      html += `<div class="insp-section"><b>${g.label}</b></div>`;
+      for (const k of g.kinds) {
+        const qty = s.stock[k] ?? 0;
+        const flow = s.netFlow(k);
+        const flowStr = flow > 0.05 ? `<span style="color:#6f6">+${flow.toFixed(1)}/day</span>`
+          : flow < -0.05 ? `<span style="color:#f66">${flow.toFixed(1)}/day</span>`
+          : `<span style="color:#888">~0/day</span>`;
+        const noSource = NO_SOURCE.has(k) ? ` <span style="color:#f66" title="No known production source">⚠ No source</span>` : '';
+        html += `<div class="bar-row"><span style="min-width:80px">${k.replace('_', ' ')}</span><span style="min-width:32px;text-align:right">${qty}</span> ${flowStr}${noSource}</div>`;
+      }
+    }
+    return html;
   }
 
   private buildingCard(b: Building): string {
