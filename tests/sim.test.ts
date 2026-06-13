@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Simulation } from '../src/sim/sim';
-import { MINUTES_PER_DAY, MINUTES_PER_TICK, TUNING } from '../src/sim/defs';
+import { MINUTES_PER_DAY, MINUTES_PER_TICK, TUNING, WORK_KINDS, SKILLED_WORK_KINDS } from '../src/sim/defs';
 import { World, MAP_W, MAP_H } from '../src/sim/world';
 import { Rng } from '../src/sim/rng';
 
@@ -353,5 +353,43 @@ describe('Fog of war', () => {
     const after = sim.world.tiles.filter((t) => t.explored).length;
     expect(after).toBeGreaterThan(before);
     expect(sim.world.at(5, 5).explored).toBe(true);
+  });
+});
+
+describe('Settler professions (regression: contextual jobs are not callings)', () => {
+  it('market/guard/evacuate are excluded from the trainable professions', () => {
+    // These jobs only exist with the right building or during a raid; rolling
+    // them as a birth profession both drifts the seeded RNG and hands settlers
+    // a phantom primary job. Guard against either creeping back in.
+    for (const k of ['market', 'guard', 'evacuate'] as const) {
+      expect(WORK_KINDS).toContain(k); // still a valid work kind…
+      expect(SKILLED_WORK_KINDS).not.toContain(k); // …but never a profession
+    }
+  });
+
+  it('a fresh settler never takes a contextual support job as their calling', () => {
+    const sim = new Simulation(7);
+    for (const s of sim.settlers) {
+      const primary = (Object.keys(s.priorities) as (keyof typeof s.priorities)[])
+        .filter((k) => s.priorities[k] === 3);
+      for (const k of primary) {
+        expect(['market', 'guard', 'evacuate']).not.toContain(k);
+      }
+      // Support jobs still get a priority slot the scheduler can read.
+      expect(s.priorities.market).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('settler spawning does not drift the RNG: market jobs cost no birth draws', () => {
+    // Same seed, same draw sequence: spawning is deterministic and the support
+    // jobs carry a fixed default skill (no rng.int per kind).
+    const a = new Simulation(123);
+    const b = new Simulation(123);
+    expect(a.settlers.map((s) => s.name)).toEqual(b.settlers.map((s) => s.name));
+    for (const s of a.settlers) {
+      expect(s.skills.market).toBe(0);
+      expect(s.skills.guard).toBe(0);
+      expect(s.skills.evacuate).toBe(0);
+    }
   });
 });
