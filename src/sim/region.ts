@@ -3722,6 +3722,9 @@ export class RegionSim {
 
     // Update regional faction economies: calculate production based on resource focus
     this.updateRegionalTrade();
+
+    // Update faction alliances: compatible goals form pacts, incompatible ones break
+    this.updateFactionAlliances();
   }
 
   /** Calculate regional trade dynamics: factions compete for market dominance by resource type. */
@@ -5787,9 +5790,45 @@ export class RegionSim {
                 `RAID: ${other.name} raiding parties strike ${target.name} — ${losses} workers lost.`,
                 'bad'
               );
+
+              // Allies may retaliate (Phase 3b)
+              this.trigerAllyRetaliationForRaid(other.id, faction.id, target.id);
             }
           }
         }
+      }
+    }
+  }
+
+  /** When a raid occurs, allies of the victim may retaliate against the raider (Phase 3b). */
+  private trigerAllyRetaliationForRaid(raiderId: number, victimId: number, targetSettlementId: number): void {
+    // Find allies of the victim faction
+    for (const ally of this.regionalFactions) {
+      if (!this.areAllied(ally.id, victimId)) continue;
+      if (ally.id === raiderId || ally.id === victimId) continue;
+
+      // Allied faction retaliates: raid the raider's settlements
+      if (this.rng.chance(0.3)) {
+        const raiderFaction = this.faction(raiderId);
+        const allyFaction = this.faction(ally.id);
+        if (!raiderFaction || !allyFaction) continue;
+
+        const raiderSettlements = raiderFaction.settlementIds
+          .map(id => this.settlement(id))
+          .filter(s => s !== null) as Settlement[];
+
+        if (raiderSettlements.length === 0) continue;
+
+        const target = raiderSettlements[this.rng.int(raiderSettlements.length)];
+        const losses = 1 + this.rng.int(3);
+        target.cohorts.bands[1] = Math.max(0, target.cohorts.bands[1] - losses);
+        target.grievance = Math.min(100, target.grievance + 10);
+
+        this.addLog(
+          `RETALIATION: ${allyFaction.name}, allied with ${this.settlement(targetSettlementId)?.name}, ` +
+          `strikes back at ${raiderFaction.name}'s ${target.name} — ${losses} workers lost.`,
+          'good'
+        );
       }
     }
   }
@@ -5859,6 +5898,114 @@ export class RegionSim {
         'info'
       );
       return; // Will be replaced by new goal next update
+    }
+  }
+
+  // ---- Faction Alliances (Phase 3b: Alliance Blocs) ----
+
+  /** Track faction alliances: array of pair keys like "1:3" (faction IDs, canonical order). */
+  private factionAlliances: string[] = [];
+
+  /** Helper: create canonical pair key for two faction IDs (min:max). */
+  private factionPairKey(factionIdA: number, factionIdB: number): string {
+    const min = Math.min(factionIdA, factionIdB);
+    const max = Math.max(factionIdA, factionIdB);
+    return `${min}:${max}`;
+  }
+
+  /** Check if two factions are allied. */
+  private areAllied(factionIdA: number, factionIdB: number): boolean {
+    return this.factionAlliances.includes(this.factionPairKey(factionIdA, factionIdB));
+  }
+
+  /** Form an alliance between two factions (Phase 3b). */
+  private formAlliance(factionIdA: number, factionIdB: number): boolean {
+    if (this.areAllied(factionIdA, factionIdB)) return false;
+
+    const key = this.factionPairKey(factionIdA, factionIdB);
+    this.factionAlliances.push(key);
+
+    const a = this.faction(factionIdA);
+    const b = this.faction(factionIdB);
+    if (a && b) {
+      this.addLog(
+        `FACTION ALLIANCE: ${a.name} and ${b.name} form a pact for mutual defense and trade.`,
+        'good'
+      );
+    }
+    return true;
+  }
+
+  /** Break an alliance between two factions. */
+  private breakAlliance(factionIdA: number, factionIdB: number): boolean {
+    const key = this.factionPairKey(factionIdA, factionIdB);
+    const idx = this.factionAlliances.indexOf(key);
+    if (idx < 0) return false;
+
+    this.factionAlliances.splice(idx, 1);
+
+    const a = this.faction(factionIdA);
+    const b = this.faction(factionIdB);
+    if (a && b) {
+      this.addLog(
+        `ALLIANCE BROKEN: ${a.name} and ${b.name} end their pact. Suspicion grows.`,
+        'bad'
+      );
+    }
+    return true;
+  }
+
+  /** Evaluate alliance compatibility based on goal alignment (Phase 3b).
+   *  Returns 0–100 score indicating how well two factions' goals align. */
+  private evaluateAllianceCompatibility(factionIdA: number, factionIdB: number): number {
+    const a = this.faction(factionIdA);
+    const b = this.faction(factionIdB);
+    if (!a || !b || !a.currentGoal || !b.currentGoal) return 20; // baseline
+
+    // Compatible: expansion goals (both want to grow)
+    const expansionGoals = ['territorial_expansion', 'convert_heathen'];
+    const aIsExpanding = expansionGoals.includes(a.currentGoal.id);
+    const bIsExpanding = expansionGoals.includes(b.currentGoal.id);
+
+    // Compatible: economic goals (both want trade)
+    const economicGoals = ['enrich_treasury', 'trade_dominance'];
+    const aIsEconomic = economicGoals.includes(a.currentGoal.id);
+    const bIsEconomic = economicGoals.includes(b.currentGoal.id);
+
+    // Compatible: military goals (both want power)
+    const militaryGoals = ['military_supremacy', 'resource_monopoly'];
+    const aIsMilitary = militaryGoals.includes(a.currentGoal.id);
+    const bIsMilitary = militaryGoals.includes(b.currentGoal.id);
+
+    let compatibility = 30; // baseline
+    if (aIsExpanding && bIsExpanding) compatibility += 35;
+    else if (aIsEconomic && bIsEconomic) compatibility += 30;
+    else if (aIsMilitary && bIsMilitary) compatibility += 35;
+    else if ((aIsExpanding || bIsExpanding) && (aIsEconomic || bIsEconomic)) compatibility += 15;
+
+    // Incompatible: same specific goal = natural rivalry
+    if (a.currentGoal.id === b.currentGoal.id) compatibility -= 40;
+
+    return Math.max(0, Math.min(100, compatibility));
+  }
+
+  /** Update faction alliance dynamics (Phase 3b: called during monthly faction update). */
+  private updateFactionAlliances(): void {
+    for (let i = 0; i < this.regionalFactions.length; i++) {
+      for (let j = i + 1; j < this.regionalFactions.length; j++) {
+        const a = this.regionalFactions[i];
+        const b = this.regionalFactions[j];
+        const allied = this.areAllied(a.id, b.id);
+        const compatibility = this.evaluateAllianceCompatibility(a.id, b.id);
+
+        if (!allied && compatibility > 60 && this.rng.chance(0.02)) {
+          // Form alliance: compatible goals + random chance
+          this.formAlliance(a.id, b.id);
+        } else if (allied && compatibility < 30 && this.rng.chance(0.03)) {
+          // Break alliance: incompatible goals emerged
+          this.breakAlliance(a.id, b.id);
+        }
+      }
     }
   }
 
