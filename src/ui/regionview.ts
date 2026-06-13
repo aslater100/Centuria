@@ -3,8 +3,8 @@
  * operating altitude after the flip (GDD §2.5). Painterly backdrop, town
  * markers, routes, expedition wagons; DOM panel for the selected settlement.
  */
-import type { RegionSim, Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, TownFocus, WagePolicy, Route, SectorId } from '../sim/region';
-import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, DEFAULT_CITY_POLICIES, ROUTE_SPECS } from '../sim/region';
+import type { Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, TownFocus, WagePolicy, Route, SectorId } from '../sim/region';
+import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, DEFAULT_CITY_POLICIES, ROUTE_SPECS } from '../sim/region';
 import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS } from '../sim/defs';
 import type { CurrencySymbol } from '../sim/defs';
 import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
@@ -1951,6 +1951,8 @@ export class RegionView {
     }
     const sw = this.panel.querySelector<HTMLButtonElement>('#seawall-btn');
     if (sw) sw.onclick = () => { this.region.buildSeaWall(t.id); this.refreshPanel(); };
+    const mil = this.panel.querySelector<HTMLButtonElement>('#militia-btn');
+    if (mil) mil.onclick = () => { this.region.recruitMilitia(t.id); this.refreshPanel(); };
     for (const cb of this.panel.querySelectorAll<HTMLButtonElement>('.city-build-btn')) {
       cb.onclick = () => { this.region.buildCity(t.id, cb.dataset.b!); this.refreshPanel(); };
     }
@@ -1966,6 +1968,23 @@ export class RegionView {
     for (const sb of this.panel.querySelectorAll<HTMLButtonElement>('.policy-svc-btn')) {
       sb.onclick = () => { this.region.setCityPolicy(t.id, 'serviceLevel', Number(sb.dataset.svc)); this.refreshPanel(); };
     }
+  }
+
+  /** Defence row: this town's garrison plus a button to drill more militia —
+   *  a clear treasury sink that satisfies the Charter's military gate. */
+  private garrisonHtml(t: Settlement): string {
+    const r = this.region;
+    const g = Math.round(t.garrisonStrength || 0);
+    const cap = r.garrisonCap(t);
+    const can = r.canRecruitMilitia(t.id);
+    return (
+      `<p class="insp-skills">DEFENCE</p>` +
+      `<p>garrison <b>${g}</b>/${cap} militia</p>` +
+      `<button class="mini" id="militia-btn" ${can.ok ? '' : 'disabled'} ` +
+      `title="${can.ok ? `Arm and drill ${RegionSim.MILITIA_ADD} more militia` : can.reason}">` +
+      `drill militia (+${RegionSim.MILITIA_ADD}, ${formatCurrency(RegionSim.MILITIA_COST)})</button>` +
+      (can.ok ? '' : ` <span class="insp-skills">${can.reason}</span>`)
+    );
   }
 
   /** Route list to every other town, with terrain-priced build/repair buttons. */
@@ -2357,6 +2376,7 @@ export class RegionView {
           `title="Granite and pumps against the rising sea (GDD §8.2) — tidal flooding never touches a walled town">` +
           `sea wall ` + formatCurrency(r.seaWallCost(t)) + `</button></p>`
         : '') +
+      this.garrisonHtml(t) +
       this.sectorsHtml(t) +
       this.policiesHtml(t) +
       this.cityHtml(t) +

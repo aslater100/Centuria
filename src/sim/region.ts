@@ -2857,9 +2857,13 @@ export class RegionSim {
       }
     }
     this.tradeValueLastMonth = turnover;
-    if (this.stateProclaimed && turnover > 0) {
-      // Free Trade policy removes the levy entirely; otherwise use the configured rate
-      const effectiveLevyRate = this.policyActive('free_trade') ? 0 : this.tradeLevyRate;
+    if (turnover > 0) {
+      // Free Trade policy removes the levy entirely; otherwise use the configured rate.
+      const baseRate = this.policyActive('free_trade') ? 0 : this.tradeLevyRate;
+      // Before the State exists the Mayor still collects market tolls on every
+      // caravan — at a gentler rate — so connecting and trading between towns
+      // visibly builds the treasury toward the Charter's economic gate.
+      const effectiveLevyRate = this.stateProclaimed ? baseRate : baseRate * 0.8;
       this.treasury += turnover * effectiveLevyRate;
     }
   }
@@ -3575,7 +3579,9 @@ export class RegionSim {
     const pact = this.rivals.some((rv) => rv.treaties.includes('defensive_pact'));
     // Defensive doctrine (nation design): the homeland is where the drills pay
     const doctrine = this.militaryDoctrine === 'defensive' ? 1.2 : 1;
-    const militia = this.workersOf(t) * 0.12 * captain * funded * (relief ? 1.25 : 1) * (pact ? 1.15 : 1) * doctrine;
+    // A standing garrison stiffens the line on top of the levée of working hands.
+    const garrison = (t.garrisonStrength || 0) * 0.5;
+    const militia = (this.workersOf(t) * 0.12 + garrison) * captain * funded * (relief ? 1.25 : 1) * (pact ? 1.15 : 1) * doctrine;
     t.lastRaidDay = this.day;
     const foreignArms = sponsored ? ` The dead carried rifles of foreign make — ${sponsor!.name}'s hand, deniably.` : '';
     if (militia >= strength) {
@@ -3757,6 +3763,42 @@ export class RegionSim {
       `${e.site.river ? ', bound for a river site' : ''}${e.site.coastal ? ', on the coast' : ''}.`,
       'info',
     );
+    return true;
+  }
+
+  // ---- garrison (militia) ----
+  /** A town can only field as many militia as its populace allows — bigger
+   *  towns sustain larger garrisons; tiny hamlets can't. */
+  garrisonCap(t: Settlement): number {
+    return Math.min(16, 6 + Math.floor(this.popOf(t) / 12));
+  }
+
+  static readonly MILITIA_COST = 250;
+  static readonly MILITIA_ADD = 2;
+
+  canRecruitMilitia(townId: number): { ok: boolean; reason: string } {
+    const t = this.settlement(townId);
+    if (!t) return { ok: false, reason: 'no settlement' };
+    if (this.treasury < RegionSim.MILITIA_COST) {
+      return { ok: false, reason: `needs ${formatCurrency(RegionSim.MILITIA_COST)} (have ${formatCurrency(Math.floor(this.treasury))})` };
+    }
+    if (this.popOf(t) < 12) return { ok: false, reason: 'too few people to muster a militia' };
+    if ((t.garrisonStrength || 0) >= this.garrisonCap(t)) {
+      return { ok: false, reason: `garrison at capacity (${this.garrisonCap(t)}) — grow the town first` };
+    }
+    return { ok: true, reason: '' };
+  }
+
+  /** Arm and drill fresh militia: spend treasury to raise this town's garrison,
+   *  which both stiffens raid defence and counts toward the Charter's military
+   *  gate. Capped by the town's population. */
+  recruitMilitia(townId: number): boolean {
+    const check = this.canRecruitMilitia(townId);
+    const t = this.settlement(townId);
+    if (!check.ok || !t) return false;
+    this.treasury -= RegionSim.MILITIA_COST;
+    t.garrisonStrength = Math.min(this.garrisonCap(t), (t.garrisonStrength || 0) + RegionSim.MILITIA_ADD);
+    this.addLog(`${t.name} drills fresh militia — garrison now ${Math.round(t.garrisonStrength)}.`, 'info');
     return true;
   }
 

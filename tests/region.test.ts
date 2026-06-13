@@ -136,6 +136,41 @@ describe('RegionSim (aggregate model)', () => {
     expect(r2.charterGates().every((g) => g.met)).toBe(r2.charterEligible());
   });
 
+  it('recruitMilitia spends treasury to raise garrison, capped by population', () => {
+    const r = flipped(42);
+    const t = r.settlements[0];
+    r.treasury = 1000;
+    const before = t.garrisonStrength || 0;
+    expect(r.recruitMilitia(t.id)).toBe(true);
+    expect(t.garrisonStrength).toBe(before + 2);
+    expect(r.treasury).toBe(750);
+    // Drilling stops at the population-scaled cap.
+    for (let i = 0; i < 20; i++) { r.treasury = 1000; r.recruitMilitia(t.id); }
+    expect(t.garrisonStrength).toBeLessThanOrEqual(r.garrisonCap(t));
+    expect(r.canRecruitMilitia(t.id).ok).toBe(false);
+    // Broke towns can't recruit.
+    const t2 = r.settlements[0];
+    r.treasury = 10;
+    expect(r.recruitMilitia(t2.id)).toBe(false);
+  });
+
+  it('market tolls fill the treasury before statehood, from inter-town trade', () => {
+    const r = flipped(42);
+    expect(r.stateProclaimed).toBe(false);
+    // Grow a second town so caravans and traders have somewhere to run.
+    for (let i = 0; i < 30 && r.settlements.length < 2; i++) {
+      r.treasury = Math.max(r.treasury, 8000);
+      runDays(r, 60);
+      for (const t of r.settlements) {
+        if (r.canFoundTown(t.id).ok) { r.foundTown(t.id); break; }
+      }
+    }
+    r.treasury = 0;
+    runDays(r, 90); // three trade seasons
+    // Pre-statehood tolls are modest but real — the treasury is no longer inert.
+    expect(r.treasury).toBeGreaterThan(0);
+  });
+
   it('treasuryDeltaMonth reports the prior month net swing', () => {
     const r = flipped(42);
     toStatehood(r);
