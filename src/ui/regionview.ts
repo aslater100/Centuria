@@ -1081,9 +1081,6 @@ export class RegionView {
     }
     this.statePanel.classList.remove('hidden');
     const lvl = (v: number) => ['none', 'basic', 'funded'][v];
-    const researchLabel = r.activeResearch
-      ? TECH_TREE.find((n) => n.id === r.activeResearch)?.name ?? r.activeResearch
-      : `${r.researched.length}/${TECH_TREE.length} nodes`;
     this.statePanel.innerHTML =
       `<div class="pal-title">${r.nationProclaimed ? r.nationName.toUpperCase() : r.stateName.toUpperCase()}</div>` +
       `<p class="insp-skills">${r.nationProclaimed && r.govType
