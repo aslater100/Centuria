@@ -1197,6 +1197,7 @@ export interface Route {
   terrainCost: number; // summed cell costs — what the land charges
   freight: number; // food moved last caravan season (the overlay number)
   cargoType: SectorId | null; // Phase 6: dominant sector cargo flowing this route
+  cargoPriority?: SectorId | null; // Phase A: governor's manual cargo pin (overrides the auto tag)
 }
 
 export const ROUTE_SPECS: Record<RouteKind, {
@@ -2302,6 +2303,33 @@ export class RegionSim {
     const a = this.settlement(aId)?.name ?? '?';
     const b = this.settlement(bId)?.name ?? '?';
     this.addLog(`Repair gangs put the ${r.kind} between ${a} and ${b} back in order — ` + formatCurrency(cost) + `.`, 'good');
+    return true;
+  }
+
+  /** Tear up a built link (Phase A route-network controls): the rails come up,
+   *  the asphalt is broken, and the corridor falls back to a plain trail so the
+   *  towns stay connected — no upkeep, no capacity, no stranded asset. */
+  deleteRoute(aId: number, bId: number): boolean {
+    if (!this.stateProclaimed) return false;
+    const r = this.routeBetween(aId, bId);
+    if (!r || r.kind === 'trail') return false;
+    const was = r.kind;
+    r.kind = 'trail';
+    r.condition = 100;
+    r.cargoPriority = null;
+    const a = this.settlement(aId)?.name ?? '?';
+    const b = this.settlement(bId)?.name ?? '?';
+    this.addLog(`The ${was} between ${a} and ${b} is torn up — only a trail remains.`, 'bad');
+    return true;
+  }
+
+  /** Pin (or clear) the cargo a route should prioritise carrying (Phase A).
+   *  A null sector hands the route back to the automatic dominant-cargo reading. */
+  setRouteCargoPriority(aId: number, bId: number, sector: SectorId | null): boolean {
+    const r = this.routeBetween(aId, bId);
+    if (!r) return false;
+    r.cargoPriority = sector;
+    if (sector) r.cargoType = sector;
     return true;
   }
 
@@ -3415,6 +3443,9 @@ export class RegionSim {
       const a = this.settlement(route.a);
       const b = this.settlement(route.b);
       if (!a || !b) { route.cargoType = null; continue; }
+      // A governor's manual pin (Phase A route-network controls) wins over the
+      // auto reading — the wagons carry what the state directs.
+      if (route.cargoPriority) { route.cargoType = route.cargoPriority; continue; }
       let maxDiff = 0;
       let dominant: SectorId | null = null;
       for (const id of SECTOR_IDS) {
@@ -5430,7 +5461,7 @@ export class RegionSim {
     }));
     r.notables = d.notables;
     r.expeditions = d.expeditions;
-    r.routes = (d.routes as Route[]).map((rt) => ({ ...rt, cargoType: rt.cargoType ?? null }));
+    r.routes = (d.routes as Route[]).map((rt) => ({ ...rt, cargoType: rt.cargoType ?? null, cargoPriority: rt.cargoPriority ?? null }));
     r.log = d.log;
     r.stateProclaimed = d.stateProclaimed;
     r.ceremonyPending = d.ceremonyPending;
