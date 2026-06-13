@@ -224,7 +224,7 @@ export class Renderer {
             (sim.world.inBounds(x - 1, y) && (sim.world.at(x - 1, y).wall || sim.world.at(x - 1, y).gate) ? 8 : 0);
           g.drawImage(sprites.palisadeVariants[mask], px, py);
         } else if (t.gate) g.drawImage(sprites.gate, px, py);
-        else if (t.kind === 'tree') g.drawImage(t.marked ? sprites.treeMarked : sprites.tree, px - 2, py - 6);
+        else if (t.kind === 'tree') g.drawImage(t.marked ? sprites.treeMarked : sprites.tree, px - 4, py - 12);
         else if (t.sapling) g.drawImage(sprites.sapling, px, py);
       }
     }
