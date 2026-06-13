@@ -360,6 +360,64 @@ describe('Washouts & repair (M6c)', () => {
   });
 });
 
+describe('Route Network controls (Phase A)', () => {
+  it('deleteRoute tears a built link back to a trail, keeping the towns connected', () => {
+    const r = flipped(42);
+    toStatehood(r);
+    const [a, b] = r.settlements;
+    r.treasury = 10000;
+    expect(r.buildRoad(a.id, b.id)).toBe(true);
+    expect(r.routeBetween(a.id, b.id)!.kind).toBe('road');
+    expect(r.deleteRoute(a.id, b.id)).toBe(true);
+    const route = r.routeBetween(a.id, b.id)!;
+    expect(route.kind).toBe('trail');
+    expect(route.condition).toBe(100);
+    expect(r.connectedToAll()).toBe(true); // no settlement orphaned
+    expect(r.deleteRoute(a.id, b.id)).toBe(false); // a trail has nothing to tear up
+  });
+
+  it('deleteRoute is a State work — nothing tears up before Incorporation', () => {
+    const r = flipped(42);
+    const [a, b] = r.settlements;
+    // force a road onto the graph without statehood, then try to delete it
+    r.routeBetween(a.id, b.id)!.kind = 'road';
+    expect(r.deleteRoute(a.id, b.id)).toBe(false);
+    expect(r.routeBetween(a.id, b.id)!.kind).toBe('road');
+  });
+
+  it('a pinned cargo priority overrides the automatic dominant-cargo reading', () => {
+    const r = flipped(42);
+    toStatehood(r);
+    const [a, b] = r.settlements;
+    r.treasury = 10000;
+    expect(r.buildRoad(a.id, b.id)).toBe(true);
+    expect(r.setRouteCargoPriority(a.id, b.id, 'information')).toBe(true);
+    const route = r.routeBetween(a.id, b.id)!;
+    expect(route.cargoPriority).toBe('information');
+    expect(route.cargoType).toBe('information');
+    // the monthly recompute must not wash the pin away
+    runDays(r, 35);
+    expect(route.cargoType).toBe('information');
+    // clearing the pin hands the route back to the automatic tag
+    expect(r.setRouteCargoPriority(a.id, b.id, null)).toBe(true);
+    expect(route.cargoPriority).toBeNull();
+  });
+
+  it('cargoPriority survives a save/load round-trip', () => {
+    const sim = new Simulation(42);
+    grow(sim);
+    const r = RegionSim.fromTown(sim, 8, 80, 80);
+    runDays(r, 5);
+    toStatehood(r);
+    const [a, b] = r.settlements;
+    r.treasury = 10000;
+    r.buildRoad(a.id, b.id);
+    r.setRouteCargoPriority(a.id, b.id, 'industry');
+    const r2 = RegionSim.deserialize(r.serialize(), sim);
+    expect(r2.routeBetween(a.id, b.id)!.cargoPriority).toBe('industry');
+  });
+});
+
 describe('Militia relief rides the network (M6c)', () => {
   it('a built link to a larger town counts as a relief line; a trail does not', () => {
     const r = flipped(42);

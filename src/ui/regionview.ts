@@ -3,8 +3,8 @@
  * operating altitude after the flip (GDD §2.5). Painterly backdrop, town
  * markers, routes, expedition wagons; DOM panel for the selected settlement.
  */
-import type { RegionSim, Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, TownFocus, WagePolicy } from '../sim/region';
-import { AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, DEFAULT_CITY_POLICIES } from '../sim/region';
+import type { Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, TownFocus, WagePolicy, Route, SectorId } from '../sim/region';
+import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES } from '../sim/region';
 import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS } from '../sim/defs';
 import type { CurrencySymbol } from '../sim/defs';
 import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
@@ -30,6 +30,18 @@ export class RegionView {
   private statePanel: HTMLElement;
   private researchPanel: HTMLElement;
   researchOpen = false;
+  /** Phase A: the region-wide Route Network panel (toggle with the R key). */
+  private routeNetworkPanel: HTMLElement;
+  routeNetworkOpen = false;
+  private lastNetworkBuildFrame = -999;
+  /** Phase A: settlements list panel (S key). */
+  private settlementListPanel: HTMLElement;
+  settlementListOpen = false;
+  private lastSettlementListBuildFrame = -999;
+  /** Phase A/B: economy panel (E key). */
+  private economyPanel: HTMLElement;
+  economyOpen = false;
+  private lastEconomyBuildFrame = -999;
   private ceremony: HTMLElement;
   private convention: HTMLElement;
   private policyModal: HTMLElement;
@@ -49,6 +61,16 @@ export class RegionView {
   private frame = 0;
   private lastPanelBuildFrame = -999;
   private lastPanelBuildId: number | null = null;
+  /** True while the inline town-rename field is open — pauses panel rebuilds so
+   *  the once-per-second refresh doesn't destroy the input mid-edit. */
+  private editingName = false;
+  // ---- Map camera (zoom + pan). Base view (scale 1, no offset) fits the whole
+  //      region; zoom in to read crowded clusters, drag/keys to roam. ----
+  private camScale = 1;
+  private camX = 0; // screen-px offset applied after scaling
+  private camY = 0;
+  private static readonly MIN_SCALE = 1;
+  private static readonly MAX_SCALE = 6;
 
   constructor(private canvas: HTMLCanvasElement, private region: RegionSim, root: HTMLElement) {
     this.g = canvas.getContext('2d')!;
@@ -61,6 +83,15 @@ export class RegionView {
     this.researchPanel = document.createElement('div');
     this.researchPanel.className = 'palette research-panel hidden';
     root.appendChild(this.researchPanel);
+    this.routeNetworkPanel = document.createElement('div');
+    this.routeNetworkPanel.className = 'palette route-network-panel hidden';
+    root.appendChild(this.routeNetworkPanel);
+    this.settlementListPanel = document.createElement('div');
+    this.settlementListPanel.className = 'palette settlement-list-panel hidden';
+    root.appendChild(this.settlementListPanel);
+    this.economyPanel = document.createElement('div');
+    this.economyPanel.className = 'palette economy-panel hidden';
+    root.appendChild(this.economyPanel);
     this.ceremony = document.createElement('div');
     this.ceremony.className = 'ceremony hidden';
     root.appendChild(this.ceremony);
@@ -82,6 +113,9 @@ export class RegionView {
     this.panel.remove();
     this.statePanel.remove();
     this.researchPanel.remove();
+    this.routeNetworkPanel.remove();
+    this.settlementListPanel.remove();
+    this.economyPanel.remove();
     this.ceremony.remove();
     this.convention.remove();
     this.policyModal.remove();
@@ -98,13 +132,57 @@ export class RegionView {
 
   click(px: number, py: number): void {
     this.selectedId = null;
+    // Convert the screen click into map-space (undo the camera) so hit-testing
+    // matches the transformed sprites. The 26px pick radius scales with zoom.
+    const mx = (px - this.camX) / this.camScale;
+    const my = (py - this.camY) / this.camScale;
+    const radius = 26;
     for (const t of this.region.settlements) {
       const p = this.toPx(t.x, t.y);
-      if (Math.hypot(p.px - px, p.py - py) < 26) {
+      if (Math.hypot(p.px - mx, p.py - my) < radius) {
         this.selectedId = t.id;
         break;
       }
     }
+  }
+
+  // ---- Camera controls (wired from main.ts) ----
+  /** Zoom toward a screen point (wheel or +/-). dir>0 zooms in. */
+  zoomAt(screenX: number, screenY: number, dir: number): void {
+    const factor = dir > 0 ? 1.15 : 1 / 1.15;
+    const next = Math.max(RegionView.MIN_SCALE, Math.min(RegionView.MAX_SCALE, this.camScale * factor));
+    if (next === this.camScale) return;
+    // Keep the map point under the cursor fixed: solve for the new offset.
+    const baseX = (screenX - this.camX) / this.camScale;
+    const baseY = (screenY - this.camY) / this.camScale;
+    this.camScale = next;
+    this.camX = screenX - baseX * next;
+    this.camY = screenY - baseY * next;
+    this.clampCamera();
+  }
+
+  /** Pan by a screen-space delta (drag or arrow/WASD keys). */
+  panBy(dx: number, dy: number): void {
+    this.camX += dx;
+    this.camY += dy;
+    this.clampCamera();
+  }
+
+  /** Snap back to the full-region view. */
+  resetView(): void {
+    this.camScale = 1;
+    this.camX = 0;
+    this.camY = 0;
+  }
+
+  /** Keep the scaled map from drifting off-screen; at scale 1 it stays pinned. */
+  private clampCamera(): void {
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const minX = W - W * this.camScale; // most-negative offset (right edge held)
+    const minY = H - H * this.camScale;
+    this.camX = Math.min(0, Math.max(minX, this.camX));
+    this.camY = Math.min(0, Math.max(minY, this.camY));
   }
 
   draw(): void {
@@ -115,6 +193,11 @@ export class RegionView {
 
     g.fillStyle = '#10141c';
     g.fillRect(0, 0, W, H);
+    // Everything from the terrain to the expedition wagons is map-space: apply
+    // the camera (zoom + pan) once here so individual draws stay in base coords.
+    g.save();
+    g.translate(this.camX, this.camY);
+    g.scale(this.camScale, this.camScale);
     this.drawTerrain(W, H);
     // Phase 0: contested ground — territory fills and frontier lines under all.
     this.drawTerritories(W, H);
@@ -297,20 +380,50 @@ export class RegionView {
       g.fillText(`→ ${e.name}`, px, py - 8);
     }
     g.textAlign = 'left';
+    g.restore(); // end map-space; HUD below draws in screen space
 
-    // Charter banner
+    // Charter banner — the path to the State. Each requirement reads as a
+    // ✓/✗ chip so the player can see exactly what still blocks Incorporation.
     if (!region.stateProclaimed) {
-      g.fillStyle = 'rgba(16,14,10,0.85)';
-      g.fillRect(W / 2 - 230, H - 40, 460, 26);
-      g.fillStyle = region.charterEligible() || region.ceremonyPending ? '#8fc26a' : '#998c6e';
-      g.font = '12px monospace';
-      const need = region.ceremonyPending
-        ? 'The Charter is drafted — the towns await your proclamation.'
-        : region.charterEligible()
-          ? `Regional Charter being drafted… ${Math.floor(region.charterProgress)}%`
-          : `Toward Statehood: ${region.settlements.length}/3 towns · ${region.totalPop()}/500 citizens` +
-            (region.connectedToAll() ? '' : ' · towns unconnected!');
-      g.fillText(need, W / 2 - 220, H - 23);
+      if (region.ceremonyPending || region.charterEligible()) {
+        g.fillStyle = 'rgba(16,14,10,0.85)';
+        g.fillRect(W / 2 - 230, H - 40, 460, 26);
+        g.fillStyle = '#8fc26a';
+        g.font = '12px monospace';
+        const need = region.ceremonyPending
+          ? 'The Charter is drafted — the towns await your proclamation.'
+          : `Regional Charter being drafted… ${Math.floor(region.charterProgress)}%`;
+        g.textAlign = 'center';
+        g.fillText(need, W / 2, H - 23);
+        g.textAlign = 'left';
+      } else {
+        // Not yet eligible: draw the gate chips, color-coded, centered.
+        const gates = region.charterGates();
+        g.font = '12px monospace';
+        const head = 'Toward Statehood — ';
+        const segs = gates.map((gt) => ({
+          text: `${gt.met ? '✓' : '✗'} ${gt.label} ${gt.detail}`,
+          color: gt.met ? '#8fc26a' : '#e0995a',
+        }));
+        const sep = '   ';
+        const totalW = g.measureText(head).width +
+          segs.reduce((w, s, i) => w + g.measureText(s.text).width + (i ? g.measureText(sep).width : 0), 0);
+        const bw = Math.max(460, totalW + 24);
+        g.fillStyle = 'rgba(16,14,10,0.85)';
+        g.fillRect(W / 2 - bw / 2, H - 40, bw, 26);
+        let x = W / 2 - totalW / 2;
+        const y = H - 23;
+        g.textAlign = 'left';
+        g.fillStyle = '#bfae86';
+        g.fillText(head, x, y);
+        x += g.measureText(head).width;
+        for (let i = 0; i < segs.length; i++) {
+          if (i) { g.fillStyle = '#5a5247'; g.fillText(sep, x, y); x += g.measureText(sep).width; }
+          g.fillStyle = segs[i].color;
+          g.fillText(segs[i].text, x, y);
+          x += g.measureText(segs[i].text).width;
+        }
+      }
     } else {
       g.fillStyle = 'rgba(110,74,47,0.92)';
       g.fillRect(W / 2 - 200, H - 44, 400, 30);
@@ -326,6 +439,9 @@ export class RegionView {
     this.drawPanel();
     this.drawStatePanel();
     this.drawResearchPanel();
+    this.drawRouteNetworkPanel();
+    this.drawSettlementListPanel();
+    this.drawEconomyPanel();
     this.drawCeremony();
     this.drawConvention();
     this.drawCenturyReport();
@@ -656,6 +772,8 @@ export class RegionView {
     }
   }
 
+  private static readonly WATER_BIOMES = new Set(['sea', 'lake', 'river']);
+
   /** The generated land itself, in 8-bit blocks: this map IS the world. */
   private drawTerrain(W: number, H: number): void {
     const { g, region } = this;
@@ -664,6 +782,12 @@ export class RegionView {
     const m = 60;
     const cw = (W - 2 * m) / N;
     const ch = (H - 2 * m) / N;
+    const isWater = (x: number, y: number): boolean =>
+      x >= 0 && y >= 0 && x < N && y < N && RegionView.WATER_BIOMES.has(map.at(x, y).biome);
+    const touchesLand = (x: number, y: number): boolean =>
+      !isWater(x - 1, y) || !isWater(x + 1, y) || !isWater(x, y - 1) || !isWater(x, y + 1);
+    const touchesWater = (x: number, y: number): boolean =>
+      isWater(x - 1, y) || isWater(x + 1, y) || isWater(x, y - 1) || isWater(x, y + 1);
     for (let y = 0; y < N; y++) {
       for (let x = 0; x < N; x++) {
         const c = map.at(x, y);
@@ -687,6 +811,28 @@ export class RegionView {
         g.fillStyle = col;
         g.fillRect(bx, by, bw, bh);
 
+        const water = RegionView.WATER_BIOMES.has(c.biome);
+        // Coastal shallows: water cells touching land get a turquoise rim — the
+        // single biggest readability win, giving the map a real coastline.
+        if (water && c.biome !== 'river' && touchesLand(x, y)) {
+          g.fillStyle = 'rgba(86,150,160,0.5)';
+          g.fillRect(bx, by, bw, bh);
+        }
+        // Beach: land cells at the water's edge get a sandy lip.
+        if (!water && c.biome !== 'mountains' && touchesWater(x, y)) {
+          g.fillStyle = 'rgba(196,176,120,0.5)';
+          g.fillRect(bx, by, bw, Math.max(1, Math.ceil(bh * 0.55)));
+        }
+        // Subtle per-cell dither so flat colour bands read as textured ground.
+        if (!water) {
+          const hash = (x * 73856093 ^ y * 19349663) >>> 0;
+          const n = (hash % 5) - 2; // -2..+2
+          if (n !== 0) {
+            g.fillStyle = n > 0 ? `rgba(255,250,235,${n * 0.018})` : `rgba(0,0,0,${-n * 0.022})`;
+            g.fillRect(bx, by, bw, bh);
+          }
+        }
+
         // Elevation-based lighting: NW-lit hillshade
         const north = y > 0 ? map.at(x, y - 1).elevation : c.elevation;
         const west  = x > 0 ? map.at(x - 1, y).elevation : c.elevation;
@@ -699,13 +845,29 @@ export class RegionView {
           g.fillRect(bx, by, bw, bh);
         }
 
-        // Forest texture: scattered tree dots
+        // Forest canopy: layered blobs — dark trunks under lit crowns — so
+        // woodland reads as foliage rather than a flat green block.
         if (c.biome === 'forest') {
-          const seed = (x * 17 + y * 31) % 7;
-          if (seed < 3) {
-            g.fillStyle = 'rgba(20,40,16,0.55)';
-            g.fillRect(bx + (seed * 3) % bw, by + (seed * 5) % bh, Math.max(1, bw * 0.4), Math.max(1, bh * 0.4));
+          const r = Math.max(2, bw * 0.26);
+          for (let k = 0; k < 3; k++) {
+            const h = (x * 17 + y * 31 + k * 101) >>> 0;
+            const ox = bx + (h % Math.max(1, Math.floor(bw - r)));
+            const oy = by + ((h >> 4) % Math.max(1, Math.floor(bh - r)));
+            g.fillStyle = 'rgba(18,36,14,0.5)';
+            g.fillRect(ox, oy + 1, r, r); // shadow
+            g.fillStyle = 'rgba(58,96,46,0.55)';
+            g.fillRect(ox, oy, r, r); // lit crown
           }
+        }
+        // Plains: sparse grass tufts for a meadow texture.
+        if (c.biome === 'plains' && (x * 13 + y * 7) % 6 < 2) {
+          g.fillStyle = 'rgba(120,134,78,0.4)';
+          g.fillRect(bx + (x % 3) + 1, by + bh * 0.4, Math.max(1, bw * 0.18), Math.max(1, bh * 0.4));
+        }
+        // Hills: a few scattered rocks/scrub dots.
+        if (c.biome === 'hills' && (x * 11 + y * 5) % 5 < 2) {
+          g.fillStyle = 'rgba(40,36,28,0.32)';
+          g.fillRect(bx + bw * 0.5, by + bh * 0.45, Math.max(1, bw * 0.22), Math.max(1, bh * 0.22));
         }
         // Mountain snow caps on highest peaks
         if (c.biome === 'mountains' && c.elevation > 0.82) {
@@ -919,9 +1081,6 @@ export class RegionView {
     }
     this.statePanel.classList.remove('hidden');
     const lvl = (v: number) => ['none', 'basic', 'funded'][v];
-    const researchLabel = r.activeResearch
-      ? TECH_TREE.find((n) => n.id === r.activeResearch)?.name ?? r.activeResearch
-      : `${r.researched.length}/${TECH_TREE.length} nodes`;
     this.statePanel.innerHTML =
       `<div class="pal-title">${r.nationProclaimed ? r.nationName.toUpperCase() : r.stateName.toUpperCase()}</div>` +
       `<p class="insp-skills">${r.nationProclaimed && r.govType
@@ -958,7 +1117,14 @@ export class RegionView {
           : r.railUnlocked()
             ? 'RAILWORKS chartered — lay rail from any town panel'
             : `railworks expected ~${RAIL_ERA_YEAR}`}</p>` +
-      `<p><button class="mini" id="research-toggle">${this.researchOpen ? '▲ research' : '▼ research'}</button> <span class="insp-skills">${researchLabel}</span></p>` +
+      `<p>` +
+      `<button class="mini" id="research-toggle" title="Research tree (T)">${this.researchOpen ? '▲' : '▼'} T:research</button> ` +
+      `<button class="mini" id="routenet-toggle" title="Route network (R)">${this.routeNetworkOpen ? '▲' : '▼'} R:routes</button>` +
+      `</p>` +
+      `<p>` +
+      `<button class="mini" id="settlements-toggle" title="Settlement list (S)">${this.settlementListOpen ? '▲' : '▼'} S:towns</button> ` +
+      `<button class="mini" id="economy-toggle" title="Economy panel (E)">${this.economyOpen ? '▲' : '▼'} E:econ</button>` +
+      `</p>` +
       (r.canCallConvention() ? `<p><button id="convention-btn" style="font-size:10px;background:#8b5cf6;color:#fff;border:none;padding:4px 8px;cursor:pointer">★ CONVENE CONSTITUTIONAL CONVENTION</button></p>` : '') +
       this.politicsHtml() +
       this.diplomacyHtml() +
@@ -1012,6 +1178,15 @@ export class RegionView {
     };
     this.statePanel.querySelector<HTMLButtonElement>('#research-toggle')!.onclick = () => {
       this.researchOpen = !this.researchOpen;
+    };
+    this.statePanel.querySelector<HTMLButtonElement>('#routenet-toggle')!.onclick = () => {
+      this.routeNetworkOpen = !this.routeNetworkOpen;
+    };
+    this.statePanel.querySelector<HTMLButtonElement>('#settlements-toggle')!.onclick = () => {
+      this.settlementListOpen = !this.settlementListOpen;
+    };
+    this.statePanel.querySelector<HTMLButtonElement>('#economy-toggle')!.onclick = () => {
+      this.economyOpen = !this.economyOpen;
     };
     this.statePanel.querySelector<HTMLButtonElement>('#convention-btn')?.addEventListener('click', () => {
       this.conventionOpen = true;
@@ -1558,9 +1733,10 @@ export class RegionView {
           `</p>`
         : '';
 
+      const regimeName = RIVAL_REGIMES.find((g) => g.id === faction.regime)?.name ?? 'Unknown';
       return `<p style="margin:2px 0">` +
         `<b style="color:${faction.color ?? '#aaa'}">${faction.name}</b>` +
-        ` <span class="insp-skills">pop ${stats.population} · ${formatCurrency(Math.round(stats.treasury))}</span>` +
+        ` <span class="insp-skills">${regimeName} · pop ${stats.population} · ${formatCurrency(Math.round(stats.treasury))}</span>` +
         `</p>` +
         `<p style="margin:2px 0 2px 8px">${goalText}</p>` +
         relRow;
@@ -1742,6 +1918,7 @@ export class RegionView {
     // Only rebuild innerHTML when selection changes or once per second (~60 frames).
     // Rebuilding every frame destroys the button DOM node between mousedown and click,
     // so the click event fires on the panel div instead of the button.
+    if (this.editingName) return; // don't clobber the open rename field
     const needsRebuild = this.lastPanelBuildId !== t.id || this.frame - this.lastPanelBuildFrame >= 60;
     if (!needsRebuild) return;
 
@@ -1753,11 +1930,36 @@ export class RegionView {
     if (btn) {
       btn.onclick = () => { this.region.foundTown(t.id); this.refreshPanel(); };
     }
+    // Inline rename: Electron has no window.prompt(), so swap the heading for an
+    // editable field on click. Enter/blur commits, Escape cancels.
     const renameBtn = this.panel.querySelector<HTMLButtonElement>('#rename-btn');
     if (renameBtn) {
       renameBtn.onclick = () => {
-        const name = prompt('Rename town:', t.name);
-        if (name && name.trim()) { t.name = name.trim(); this.refreshPanel(); }
+        const heading = renameBtn.closest('h3');
+        if (!heading) return;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.maxLength = 28;
+        input.value = t.name;
+        input.className = 'rename-input';
+        heading.replaceWith(input);
+        this.editingName = true;
+        input.focus();
+        input.select();
+        let done = false;
+        const commit = (save: boolean): void => {
+          if (done) return;
+          done = true;
+          this.editingName = false;
+          if (save && input.value.trim()) t.name = input.value.trim();
+          this.refreshPanel();
+        };
+        input.onkeydown = (ev) => {
+          if (ev.key === 'Enter') { ev.preventDefault(); commit(true); }
+          else if (ev.key === 'Escape') { ev.preventDefault(); commit(false); }
+          ev.stopPropagation(); // don't let the game eat the keystrokes
+        };
+        input.onblur = () => commit(true);
       };
     }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.road-btn')) {
@@ -1777,6 +1979,8 @@ export class RegionView {
     }
     const sw = this.panel.querySelector<HTMLButtonElement>('#seawall-btn');
     if (sw) sw.onclick = () => { this.region.buildSeaWall(t.id); this.refreshPanel(); };
+    const mil = this.panel.querySelector<HTMLButtonElement>('#militia-btn');
+    if (mil) mil.onclick = () => { this.region.recruitMilitia(t.id); this.refreshPanel(); };
     for (const cb of this.panel.querySelectorAll<HTMLButtonElement>('.city-build-btn')) {
       cb.onclick = () => { this.region.buildCity(t.id, cb.dataset.b!); this.refreshPanel(); };
     }
@@ -1792,6 +1996,29 @@ export class RegionView {
     for (const sb of this.panel.querySelectorAll<HTMLButtonElement>('.policy-svc-btn')) {
       sb.onclick = () => { this.region.setCityPolicy(t.id, 'serviceLevel', Number(sb.dataset.svc)); this.refreshPanel(); };
     }
+    const aidBtn = this.panel.querySelector<HTMLButtonElement>('.crisis-aid-btn');
+    if (aidBtn) aidBtn.onclick = () => { this.region.sendFoodAid(t.id); this.refreshPanel(); };
+    const svcBtn = this.panel.querySelector<HTMLButtonElement>('.crisis-svc-btn');
+    if (svcBtn) svcBtn.onclick = () => { this.region.servicesLevel = Math.min(2, this.region.servicesLevel + 1); this.refreshPanel(); };
+    const taxBtn = this.panel.querySelector<HTMLButtonElement>('.crisis-tax-btn');
+    if (taxBtn) taxBtn.onclick = () => { this.region.taxRate = Math.max(0, this.region.taxRate - 0.02); this.refreshPanel(); };
+  }
+
+  /** Defence row: this town's garrison plus a button to drill more militia —
+   *  a clear treasury sink that satisfies the Charter's military gate. */
+  private garrisonHtml(t: Settlement): string {
+    const r = this.region;
+    const g = Math.round(t.garrisonStrength || 0);
+    const cap = r.garrisonCap(t);
+    const can = r.canRecruitMilitia(t.id);
+    return (
+      `<p class="insp-skills">DEFENCE</p>` +
+      `<p>garrison <b>${g}</b>/${cap} militia</p>` +
+      `<button class="mini" id="militia-btn" ${can.ok ? '' : 'disabled'} ` +
+      `title="${can.ok ? `Arm and drill ${RegionSim.MILITIA_ADD} more militia` : can.reason}">` +
+      `drill militia (+${RegionSim.MILITIA_ADD}, ${formatCurrency(RegionSim.MILITIA_COST)})</button>` +
+      (can.ok ? '' : ` <span class="insp-skills">${can.reason}</span>`)
+    );
   }
 
   /** Route list to every other town, with terrain-priced build/repair buttons. */
@@ -1805,7 +2032,11 @@ export class RegionView {
         const cargoBadge = route?.cargoType
           ? ` <span style="color:${cargoColors[route.cargoType]}">[${route.cargoType.slice(0, 3)}]</span>`
           : '';
-        const status = route ? `${route.kind} · ${Math.round(route.condition)}%${cargoBadge}` : 'no route';
+        const days = Math.max(1, Math.round(r.map.travelDays(t.x, t.y, o.x, o.y) / (route ? ROUTE_SPECS[route.kind].speed : 1)));
+        const freightNote = route && route.freight > 0 ? ` · freight ${Math.round(route.freight)}` : '';
+        const status = route
+          ? `${route.kind} · ${Math.round(route.condition)}% · ~${days}d${freightNote}${cargoBadge}`
+          : `no route · ~${days}d walk`;
         let btn = '';
         if (r.stateProclaimed && (!route || route.kind === 'trail')) {
           const cost = r.roadCost(t.id, o.id);
@@ -1981,6 +2212,286 @@ export class RegionView {
     );
   }
 
+  /** Phase A: the region-wide Route Network panel — every link laid out with
+   *  its condition, effective capacity, cargo, and travel time, plus
+   *  repair / upgrade / tear-up / cargo-priority controls in one place. */
+  private drawRouteNetworkPanel(): void {
+    const r = this.region;
+    if (!this.routeNetworkOpen || !r.stateProclaimed) {
+      this.routeNetworkPanel.classList.add('hidden');
+      return;
+    }
+    this.routeNetworkPanel.classList.remove('hidden');
+    // Same DOM-stability guard as the other panels: rebuild on a timer, not
+    // every frame, so a button node survives between mousedown and click.
+    if (this.frame - this.lastNetworkBuildFrame < 60) return;
+    this.lastNetworkBuildFrame = this.frame;
+    this.routeNetworkPanel.innerHTML = this.routeNetworkHtml();
+    const refresh = () => { this.lastNetworkBuildFrame = -999; };
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-close')) {
+      b.onclick = () => { this.routeNetworkOpen = false; };
+    }
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-upgrade-btn')) {
+      b.onclick = () => {
+        const a = Number(b.dataset.a), to = Number(b.dataset.b), kind = b.dataset.kind;
+        if (kind === 'road') r.buildRoad(a, to);
+        else if (kind === 'rail') r.buildRail(a, to);
+        else if (kind === 'highway') r.buildHighway(a, to);
+        else if (kind === 'maglev') r.buildMaglev(a, to);
+        refresh();
+      };
+    }
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-repair-btn')) {
+      b.onclick = () => { r.repairRoute(Number(b.dataset.a), Number(b.dataset.b)); refresh(); };
+    }
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-delete-btn')) {
+      b.onclick = () => { r.deleteRoute(Number(b.dataset.a), Number(b.dataset.b)); refresh(); };
+    }
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-cargo-btn')) {
+      b.onclick = () => {
+        const s = b.dataset.sector === 'auto' ? null : (b.dataset.sector as SectorId);
+        r.setRouteCargoPriority(Number(b.dataset.a), Number(b.dataset.b), s);
+        refresh();
+      };
+    }
+  }
+
+  private routeNetworkHtml(): string {
+    const r = this.region;
+    type Up = 'road' | 'rail' | 'highway' | 'maglev';
+    const RANK: Route['kind'][] = ['trail', 'road', 'rail', 'highway', 'maglev'];
+    const unlocked = (k: Up): boolean =>
+      k === 'rail' ? r.railUnlocked() : k === 'highway' ? r.highwayUnlocked() : k === 'maglev' ? r.maglevUnlocked() : r.stateProclaimed;
+    // Best link the era allows that's strictly above the current kind.
+    const bestUpgrade = (cur: Route['kind']): Up | null => {
+      for (let i = RANK.length - 1; i > RANK.indexOf(cur); i--) {
+        if (unlocked(RANK[i] as Up)) return RANK[i] as Up;
+      }
+      return null;
+    };
+    const cargoColors: Record<string, string> = { agriculture: '#c2a14d', industry: '#8c6848', services: '#4a7fa4', information: '#7a5a9a' };
+    const built = r.routes.filter((rt) => rt.kind !== 'trail');
+    const upkeep = built.reduce((s, rt) => s + r.maintBill(rt), 0);
+    const rows = [...r.routes]
+      .sort((a, b) => b.freight - a.freight)
+      .map((rt) => {
+        const a = r.settlement(rt.a);
+        const b = r.settlement(rt.b);
+        if (!a || !b) return '';
+        const cap = Math.round(r.effectiveCapacity(rt));
+        const days = Math.max(1, Math.round(r.map.travelDays(a.x, a.y, b.x, b.y) / ROUTE_SPECS[rt.kind].speed));
+        const condClass = rt.condition < 50 ? 'insp-cond' : 'insp-skills';
+        const cargoBadge = rt.cargoType
+          ? ` <span style="color:${cargoColors[rt.cargoType]}">[${rt.cargoType.slice(0, 3)}${rt.cargoPriority ? '📌' : ''}]</span>`
+          : '';
+        let acts = '';
+        const up = bestUpgrade(rt.kind);
+        if (up) {
+          const cost = r.linkCost(rt.a, rt.b, up);
+          if (cost) {
+            const afford = r.treasury >= cost.total;
+            acts += ` <button class="mini rn-upgrade-btn" data-a="${rt.a}" data-b="${rt.b}" data-kind="${up}" ${afford ? '' : 'disabled'} ` +
+              `title="${cost.breakdown}${rt.kind !== 'trail' ? ` — replaces the ${rt.kind}` : ''}">▲${up} ` + formatCurrency(cost.total) + `</button>`;
+          }
+        }
+        if (rt.kind !== 'trail' && rt.condition < 99) {
+          const cost = r.repairCost(rt);
+          acts += ` <button class="mini rn-repair-btn" data-a="${rt.a}" data-b="${rt.b}" ${r.treasury >= cost ? '' : 'disabled'} title="restore to 100%">repair ` + formatCurrency(cost) + `</button>`;
+        }
+        if (rt.kind !== 'trail') {
+          acts += ` <button class="mini rn-delete-btn" data-a="${rt.a}" data-b="${rt.b}" title="tear up the ${rt.kind} — falls back to a trail">tear up</button>`;
+        }
+        let pins = '';
+        if (rt.kind !== 'trail') {
+          pins = SECTOR_IDS.map((id) =>
+            rt.cargoPriority === id
+              ? `<b style="color:${cargoColors[id]}">${id.slice(0, 3)}</b>`
+              : `<button class="mini rn-cargo-btn" data-a="${rt.a}" data-b="${rt.b}" data-sector="${id}" title="Pin ${SECTOR_NAMES[id]} as this route's priority cargo">${id.slice(0, 3)}</button>`,
+          ).join(' ');
+          pins += rt.cargoPriority
+            ? ` <button class="mini rn-cargo-btn" data-a="${rt.a}" data-b="${rt.b}" data-sector="auto" title="Hand the route back to automatic cargo selection">auto</button>`
+            : ` <b>auto</b>`;
+        }
+        return `<div style="margin:4px 0">${a.name} ↔ ${b.name} — <span class="${condClass}">${rt.kind} ${Math.round(rt.condition)}%</span> ` +
+          `<span class="insp-skills">· cap ${cap}/mo · ${rt.freight > 0 ? `freight ${Math.round(rt.freight)}` : 'idle'} · ~${days}d</span>${cargoBadge}` +
+          (acts ? `<br>${acts}` : '') +
+          (pins ? `<br><span class="insp-skills">cargo:</span> ${pins}` : '') +
+          `</div>`;
+      })
+      .join('');
+    return (
+      `<div class="pal-title">ROUTE NETWORK <button class="mini rn-close" title="close (R)">✕</button></div>` +
+      `<p class="insp-skills">${r.routes.length} links · ${built.length} built · upkeep ` + formatCurrency(upkeep, 1) + `/mo</p>` +
+      `<div class="thoughts">${rows || '<p class="insp-skills">no routes yet</p>'}</div>`
+    );
+  }
+
+  /** Pan the map so the given region-coordinate (0–100) is at screen centre. */
+  centerOn(x: number, y: number): void {
+    const { px, py } = this.toPx(x, y);
+    this.camX = this.canvas.width / 2 - px * this.camScale;
+    this.camY = this.canvas.height / 2 - py * this.camScale;
+    this.clampCamera();
+  }
+
+  /** Phase A: Settlements list panel — all player towns with at-a-glance health
+   *  and a one-click pan/select shortcut. Toggle with the S key. */
+  private drawSettlementListPanel(): void {
+    const r = this.region;
+    if (!this.settlementListOpen || !r.stateProclaimed) {
+      this.settlementListPanel.classList.add('hidden');
+      return;
+    }
+    this.settlementListPanel.classList.remove('hidden');
+    if (this.frame - this.lastSettlementListBuildFrame < 60) return;
+    this.lastSettlementListBuildFrame = this.frame;
+    this.settlementListPanel.innerHTML = this.settlementListHtml();
+    for (const b of this.settlementListPanel.querySelectorAll<HTMLButtonElement>('.sl-close')) {
+      b.onclick = () => { this.settlementListOpen = false; };
+    }
+    for (const b of this.settlementListPanel.querySelectorAll<HTMLButtonElement>('.sl-select-btn')) {
+      b.onclick = () => {
+        const sid = Number(b.dataset.sid);
+        this.selectedId = sid;
+        const t = r.settlement(sid);
+        if (t) this.centerOn(t.x, t.y);
+        this.lastSettlementListBuildFrame = -999;
+      };
+    }
+    for (const b of this.settlementListPanel.querySelectorAll<HTMLButtonElement>('.sl-aid-btn')) {
+      b.onclick = () => { r.sendFoodAid(Number(b.dataset.sid)); this.lastSettlementListBuildFrame = -999; };
+    }
+  }
+
+  private settlementListHtml(): string {
+    const r = this.region;
+    const towns = r.settlements
+      .filter((t) => t.factionId === r.playerFactionId)
+      .sort((a, b) => r.popOf(b) - r.popOf(a));
+    const sColor = (s: string) => s === 'surplus' ? '#4e9' : s === 'deficit' ? '#e55' : '#998c6e';
+    const alerts = towns.filter((t) => t.food < r.popOf(t) * 5 || t.grievance > 60 || r.day < t.strikeUntil);
+    const alertHtml = alerts.length
+      ? `<p class="insp-cond">⚠ ${alerts.length} town${alerts.length > 1 ? 's' : ''} need attention</p>`
+      : `<p class="insp-skills">all towns stable</p>`;
+    const rows = towns.map((t) => {
+      const pop = Math.round(r.popOf(t));
+      const status = r.getSettlementResourceStatus(t);
+      const satColor = t.satisfaction >= 60 ? '#4e9' : t.satisfaction >= 40 ? '#ca4' : '#e55';
+      const griCol = t.grievance > 60 ? 'insp-cond' : 'insp-skills';
+      const strike = r.day < t.strikeUntil ? ' <span class="insp-cond">STRIKE</span>' : '';
+      const hungry = t.food < r.popOf(t) * 5;
+      return (
+        `<div style="margin:4px 0;padding:4px 0;border-bottom:1px solid #3a2e20">` +
+        `<div><b>${t.name}</b> <button class="mini sl-select-btn" data-sid="${t.id}" title="Pan to this settlement">→</button>` +
+        (hungry ? ` <button class="mini sl-aid-btn" data-sid="${t.id}" title="Send emergency grain convoy (£10)">🌾 aid</button>` : '') +
+        `</div>` +
+        `<div class="insp-skills">pop ${pop} · <span style="color:${satColor}">sat ${Math.round(t.satisfaction)}</span> · <span class="${griCol}">grv ${Math.round(t.grievance)}</span>${strike}</div>` +
+        `<div class="insp-skills">` +
+        `<span style="color:${sColor(status.food)}" title="food">food ${status.food[0]}</span> ` +
+        `<span style="color:${sColor(status.wood)}" title="timber">wood ${status.wood[0]}</span> ` +
+        `<span style="color:${sColor(status.goods)}" title="goods">goods ${status.goods[0]}</span>` +
+        `</div></div>`
+      );
+    }).join('');
+    return (
+      `<div class="pal-title">SETTLEMENTS [S] <button class="mini sl-close" title="close (S)">✕</button></div>` +
+      alertHtml +
+      `<div class="thoughts">${rows || '<p class="insp-skills">no towns yet</p>'}</div>`
+    );
+  }
+
+  /** Phase A/B: Economy panel — global finances, faction mood with action
+   *  buttons, per-settlement tax controls. Toggle with the E key. */
+  private drawEconomyPanel(): void {
+    const r = this.region;
+    if (!this.economyOpen || !r.stateProclaimed) {
+      this.economyPanel.classList.add('hidden');
+      return;
+    }
+    this.economyPanel.classList.remove('hidden');
+    if (this.frame - this.lastEconomyBuildFrame < 60) return;
+    this.lastEconomyBuildFrame = this.frame;
+    this.economyPanel.innerHTML = this.economyPanelHtml();
+    const refresh = () => { this.lastEconomyBuildFrame = -999; };
+    for (const b of this.economyPanel.querySelectorAll<HTMLButtonElement>('.ep-close')) {
+      b.onclick = () => { this.economyOpen = false; };
+    }
+    for (const b of this.economyPanel.querySelectorAll<HTMLButtonElement>('.ep-tax-up')) {
+      b.onclick = () => {
+        const t = r.settlement(Number(b.dataset.sid));
+        if (t) r.setCityPolicy(t.id, 'taxBand', Math.min(3, t.policies.taxBand + 1));
+        refresh();
+      };
+    }
+    for (const b of this.economyPanel.querySelectorAll<HTMLButtonElement>('.ep-tax-dn')) {
+      b.onclick = () => {
+        const t = r.settlement(Number(b.dataset.sid));
+        if (t) r.setCityPolicy(t.id, 'taxBand', Math.max(0, t.policies.taxBand - 1));
+        refresh();
+      };
+    }
+    const svcUp = this.economyPanel.querySelector<HTMLButtonElement>('#ep-svc-up');
+    if (svcUp) svcUp.onclick = () => { r.servicesLevel = Math.min(2, r.servicesLevel + 1); refresh(); };
+    const taxDown = this.economyPanel.querySelector<HTMLButtonElement>('#ep-tax-gdown');
+    if (taxDown) taxDown.onclick = () => { r.taxRate = Math.max(0, r.taxRate - 0.02); refresh(); };
+  }
+
+  private economyPanelHtml(): string {
+    const r = this.region;
+    const towns = r.settlements
+      .filter((t) => t.factionId === r.playerFactionId)
+      .sort((a, b) => r.popOf(b) - r.popOf(a));
+    // Faction demands — consolidate into unique actions
+    let wantSvc = false, wantTax = false;
+    const factionHtml = r.factions.length > 0
+      ? r.factions.map((f) => {
+          const col = f.support >= 60 ? '#4e9' : f.support >= 40 ? '#ca4' : '#e55';
+          if (f.support < 40) {
+            if (f.id === 'workers') { wantSvc = true; wantTax = true; }
+            if (f.id === 'landowners') wantTax = true;
+          }
+          return (
+            `<div class="bar-row" title="${f.name}: ${f.demand}">` +
+            `<span style="width:76px;display:inline-block">${f.name}</span>` +
+            `<div class="bar" style="flex:1"><div class="bar-fill" style="width:${Math.round(f.support)}%;background:${col}"></div></div>` +
+            `<span class="insp-skills" style="min-width:32px;text-align:right">${Math.round(f.support)}%</span>` +
+            (f.support < 40 ? `<span class="insp-cond"> ⚠</span>` : '') +
+            `</div>` +
+            (f.support < 40 ? `<p class="insp-skills" style="margin:1px 0 4px 76px">↳ ${f.demand}</p>` : '')
+          );
+        }).join('')
+      : '';
+    const actionsHtml = (wantSvc || wantTax)
+      ? `<p class="insp-skills">SUGGESTED ACTIONS</p>` +
+        (wantSvc ? `<p><button class="mini" id="ep-svc-up" ${r.servicesLevel >= 2 ? 'disabled' : ''} title="Raise national services level">raise services</button></p>` : '') +
+        (wantTax ? `<p><button class="mini" id="ep-tax-gdown" title="Lower global tax rate by 2%">lower tax −2%</button></p>` : '')
+      : '';
+    const settRows = towns.map((t) => {
+      const totalOutput = SECTOR_IDS.reduce((s, id) => s + t.sectors[id].output, 0);
+      const taxRate = TAX_BAND_RATES[Math.min(3, Math.max(0, t.policies.taxBand))];
+      const rev = totalOutput * taxRate;
+      const hungry = t.food < r.popOf(t) * 5;
+      return (
+        `<div style="margin:3px 0">` +
+        `<b>${t.name}</b> <span class="insp-skills">pop ${Math.round(r.popOf(t))}</span>` +
+        (hungry ? ` <span class="insp-cond">⚠ hungry</span>` : '') +
+        `<br><span class="insp-skills">GDP ` + formatCurrency(totalOutput, 1) + `/mo · tax ` + formatCurrency(rev, 1) + `/mo</span>` +
+        ` <button class="mini ep-tax-up" data-sid="${t.id}" ${t.policies.taxBand >= 3 ? 'disabled' : ''} title="Raise local tax band">+tax</button>` +
+        ` <button class="mini ep-tax-dn" data-sid="${t.id}" ${t.policies.taxBand <= 0 ? 'disabled' : ''} title="Lower local tax band">−tax</button>` +
+        `</div>`
+      );
+    }).join('');
+    return (
+      `<div class="pal-title">ECONOMY [E] <button class="mini ep-close" title="close (E)">✕</button></div>` +
+      `<p>treasury ` + formatCurrency(Math.floor(r.treasury)) + ` · GDP ` + formatCurrency(Math.floor(r.gdpLastMonth)) + `/mo</p>` +
+      `<p>global tax ${Math.round(r.taxRate * 100)}% · trade ` + formatCurrency(Math.floor(r.tradeValueLastMonth)) + `/mo</p>` +
+      (factionHtml ? `<p class="insp-skills">FACTION MOOD</p>${factionHtml}` : '') +
+      actionsHtml +
+      `<p class="insp-skills">PER SETTLEMENT</p>` +
+      `<div class="thoughts">${settRows || '<p class="insp-skills">no towns yet</p>'}</div>`
+    );
+  }
+
   /** Research panel: tech + civics tree progress, node browser, start/cancel. */
   private drawResearchPanel(): void {
     const r = this.region;
@@ -2069,16 +2580,53 @@ export class RegionView {
           `title="Granite and pumps against the rising sea (GDD §8.2) — tidal flooding never touches a walled town">` +
           `sea wall ` + formatCurrency(r.seaWallCost(t)) + `</button></p>`
         : '') +
+      this.garrisonHtml(t) +
       this.sectorsHtml(t) +
       this.policiesHtml(t) +
       this.cityHtml(t) +
       this.routesHtml(t) +
       recentHtml +
+      this.crisisActionsHtml(t) +
       `<p class="insp-skills">COHORTS</p>` + bands +
       (notables ? `<p class="insp-skills">NOTABLES</p><ul class="thoughts">${notables}</ul>` : '') +
       `<button id="found-btn" ${can.ok ? '' : 'disabled'} title="${can.reason}">Found new town (8 pop, 80 food, 80 wood)</button>` +
       (can.ok ? '' : `<p class="insp-skills">${can.reason}</p>`)
     );
+  }
+
+  /** Contextual action buttons surfaced when a settlement is in trouble — so
+   *  the player always has a direct response available. */
+  private crisisActionsHtml(t: Settlement): string {
+    const r = this.region;
+    if (t.factionId !== r.playerFactionId || !r.stateProclaimed) return '';
+    const actions: string[] = [];
+    const hungry = t.food < r.popOf(t) * 5;
+    const onStrike = r.day < t.strikeUntil;
+    const highGrievance = t.grievance > 60;
+    if (!hungry && !onStrike && !highGrievance) return '';
+    if (hungry) {
+      const aidOk = r.treasury >= 10;
+      actions.push(
+        `<button class="mini crisis-aid-btn" ${aidOk ? '' : 'disabled'} ` +
+        `title="${aidOk ? 'Send emergency grain (£10) — buys ~one month of food' : 'Treasury too low for aid'}">` +
+        `🌾 send grain (£10)</button>`,
+      );
+    }
+    if (onStrike || highGrievance) {
+      const svcOk = r.servicesLevel < 2;
+      actions.push(
+        `<button class="mini crisis-svc-btn" ${svcOk ? '' : 'disabled'} ` +
+        `title="Raise national services level — reduces grievance in all towns">raise services</button>`,
+      );
+      if (r.taxRate > 0) {
+        actions.push(
+          `<button class="mini crisis-tax-btn" title="Lower global tax rate by 2% — eases strike pressure">lower tax</button>`,
+        );
+      }
+    }
+    return actions.length
+      ? `<p class="insp-skills">CRISIS ACTIONS</p><p>${actions.join(' ')}</p>`
+      : '';
   }
 
   private showLoanDialog(lenderId: number): void {

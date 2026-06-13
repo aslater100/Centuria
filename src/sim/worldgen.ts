@@ -23,6 +23,7 @@ export interface Cell {
   fertility: number; // 0.3..1.4 — farm productivity multiplier
   forest: number; // 0..1 — wood availability
   roughness: number; // 0..1 — travel cost & defensibility
+  ore: boolean; // true on cells with minable ore deposits
 }
 
 export interface TownSite {
@@ -124,11 +125,13 @@ export class RegionMap {
           fertility: 1,
           forest: 0,
           roughness: 0,
+          ore: false,
         });
       }
     }
     this.carveRivers();
     this.classify();
+    this.generateOre();
   }
 
   /** Rivers: descend from high wet cells to the sea, accumulating flow. */
@@ -147,17 +150,16 @@ export class RegionMap {
       let flow = 1;
       for (let step = 0; step < 200; step++) {
         const c = this.at(x, y);
-        if (c.elevation <= this.seaLevel) break; // reached the sea
+        if (c.elevation <= this.seaLevel) break;
         c.river = true;
         c.flow += flow;
         flow += 0.15;
-        // flow to the lowest neighbor (ties broken deterministically)
         let bx = x;
         let by = y;
         let be = c.elevation;
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
           const nb = this.at(x + dx, y + dy);
-          const eff = nb.elevation - (nb.river ? 0.03 : 0); // rivers attract rivers → confluences
+          const eff = nb.elevation - (nb.river ? 0.03 : 0);
           if (eff < be) {
             be = eff;
             bx = x + dx;
@@ -165,7 +167,6 @@ export class RegionMap {
           }
         }
         if (bx === x && by === y) {
-          // a depression: form a lake and stop
           c.biome = 'lake';
           break;
         }
@@ -207,6 +208,35 @@ export class RegionMap {
         );
         c.forest = c.biome === 'forest' ? 0.7 + c.moisture * 0.3 : c.biome === 'hills' ? 0.45 : c.biome === 'mountains' ? 0.25 : 0.3;
         c.roughness = c.biome === 'mountains' ? 1 : c.biome === 'hills' ? 0.6 : c.biome === 'marsh' ? 0.5 : 0.15;
+      }
+    }
+  }
+
+  private generateOre(): void {
+    // collect hills/mountains candidates for ore clusters
+    const candidates: { x: number; y: number }[] = [];
+    for (let y = 2; y < REGION_N - 2; y++) {
+      for (let x = 2; x < REGION_N - 2; x++) {
+        const b = this.at(x, y).biome;
+        if (b === 'hills' || b === 'mountains') candidates.push({ x, y });
+      }
+    }
+    if (candidates.length === 0) return;
+    // seed-deterministic shuffle to pick 3-5 cluster centres
+    const clusterCount = 3 + (this.seed % 3); // 3, 4, or 5
+    const step = Math.max(1, Math.floor(candidates.length / (clusterCount + 1)));
+    for (let i = 0; i < clusterCount; i++) {
+      const centre = candidates[(i + 1) * step % candidates.length];
+      // mark a 2-cell radius blob
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          if (Math.abs(dx) + Math.abs(dy) > 3) continue;
+          const cx = centre.x + dx;
+          const cy = centre.y + dy;
+          if (cx < 0 || cy < 0 || cx >= REGION_N || cy >= REGION_N) continue;
+          const cell = this.at(cx, cy);
+          if (cell.biome === 'hills' || cell.biome === 'mountains') cell.ore = true;
+        }
       }
     }
   }

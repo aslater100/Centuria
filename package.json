@@ -1,7 +1,11 @@
 {
   "name": "centuria",
   "private": true,
+<<<<<<< HEAD
   "version": "0.28.0",
+=======
+  "version": "0.29.0",
+>>>>>>> ee62fbbaa5abec88c1ecb495e52fcd726a4eb838
   "description": "A colony-to-nation deep-simulation builder, 1900–2100.",
   "author": "aslater100",
   "type": "module",
@@ -41,7 +45,7 @@
     "publish": {
       "provider": "github",
       "owner": "aslater100",
-      "repo": "Colonysim",
+      "repo": "Centuria",
       "releaseType": "release"
     },
     "win": {

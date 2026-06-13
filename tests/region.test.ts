@@ -111,6 +111,77 @@ describe('RegionSim (aggregate model)', () => {
     expect(r.log.some((l) => l.text.includes('INCORPORATION'))).toBe(true);
   });
 
+  it('charterGates mirrors charterEligible and names the blocking requirement', () => {
+    const r = flipped(42);
+    // A fresh region with one town fails on towns, citizens, treasury, garrison.
+    const gates = r.charterGates();
+    const labels = gates.map((g) => g.label);
+    expect(labels).toEqual(['towns', 'citizens', 'all towns connected', 'treasury', 'garrison']);
+    expect(gates.every((g) => g.met)).toBe(false);
+    expect(r.charterEligible()).toBe(false);
+    // The aggregate gate is true exactly when every individual gate is met.
+    toStatehood(r);
+    runDays(r, 1);
+    // Once incorporated the gates are moot, but before completeIncorporation the
+    // per-gate breakdown and the boolean must agree — re-derive on a fresh run.
+    const r2 = flipped(7);
+    for (let i = 0; i < 40 && !r2.charterEligible(); i++) {
+      r2.treasury = Math.max(r2.treasury, 8000);
+      for (const t of r2.settlements) t.garrisonStrength = Math.max(t.garrisonStrength || 0, 5);
+      runDays(r2, 60);
+      for (const t of r2.settlements) {
+        if (r2.settlements.length + r2.expeditions.length < 4 && r2.canFoundTown(t.id).ok) { r2.foundTown(t.id); break; }
+      }
+    }
+    expect(r2.charterGates().every((g) => g.met)).toBe(r2.charterEligible());
+  });
+
+  it('recruitMilitia spends treasury to raise garrison, capped by population', () => {
+    const r = flipped(42);
+    const t = r.settlements[0];
+    r.treasury = 1000;
+    const before = t.garrisonStrength || 0;
+    expect(r.recruitMilitia(t.id)).toBe(true);
+    expect(t.garrisonStrength).toBe(before + 2);
+    expect(r.treasury).toBe(750);
+    // Drilling stops at the population-scaled cap.
+    for (let i = 0; i < 20; i++) { r.treasury = 1000; r.recruitMilitia(t.id); }
+    expect(t.garrisonStrength).toBeLessThanOrEqual(r.garrisonCap(t));
+    expect(r.canRecruitMilitia(t.id).ok).toBe(false);
+    // Broke towns can't recruit.
+    const t2 = r.settlements[0];
+    r.treasury = 10;
+    expect(r.recruitMilitia(t2.id)).toBe(false);
+  });
+
+  it('market tolls fill the treasury before statehood, from inter-town trade', () => {
+    const r = flipped(42);
+    expect(r.stateProclaimed).toBe(false);
+    // Grow a second town so caravans and traders have somewhere to run.
+    for (let i = 0; i < 30 && r.settlements.length < 2; i++) {
+      r.treasury = Math.max(r.treasury, 8000);
+      runDays(r, 60);
+      for (const t of r.settlements) {
+        if (r.canFoundTown(t.id).ok) { r.foundTown(t.id); break; }
+      }
+    }
+    r.treasury = 0;
+    runDays(r, 90); // three trade seasons
+    // Pre-statehood tolls are modest but real — the treasury is no longer inert.
+    expect(r.treasury).toBeGreaterThan(0);
+  });
+
+  it('treasuryDeltaMonth reports the prior month net swing', () => {
+    const r = flipped(42);
+    toStatehood(r);
+    r.taxRate = 0.2;
+    const before = r.treasury;
+    runDays(r, 35); // cross at least one month boundary
+    // The delta is a real number reflecting the month's books, not stuck at 0.
+    expect(Number.isFinite(r.treasuryDeltaMonth)).toBe(true);
+    expect(r.treasury).not.toBe(before);
+  });
+
   it('statehood brings money: taxes fill the treasury, spending drains it', () => {
     const r = flipped(42);
     toStatehood(r);

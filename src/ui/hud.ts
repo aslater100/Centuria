@@ -159,13 +159,12 @@ export class Hud {
   private logBox: HTMLElement;
   private prioBox: HTMLElement;
   private gameOverBox: HTMLElement;
+  private regionBottomBar: HTMLElement;
   private menuBox: HTMLElement;
   private showPriorities = false;
+  private showResources = false;
   private activeCat: string | null = null;
   private lastLogLen = 0;
-  /** Last region treasury reading, so the HUD can show a rising/falling arrow. */
-  private lastRegionTreasury: number | null = null;
-  private regionTreasuryTrend: '↑' | '↓' | '' = '';
   private foundBtn: HTMLButtonElement | null = null;
   private htmlCache = new Map<HTMLElement, string>();
   private techPanel!: TechPanel;
@@ -188,6 +187,7 @@ export class Hud {
     this.prioBox = el('div', 'priorities hidden', root);
     this.gameOverBox = el('div', 'gameover hidden', root);
     this.menuBox = el('div', 'menu hidden', root);
+    this.regionBottomBar = el('div', 'region-bottombar hidden', root);
 
     this.buildBuildBar();
     this.techPanel = new TechPanel(root, sim);
@@ -204,14 +204,33 @@ export class Hud {
 
     // Delegate clicks on inspector
     this.inspector.addEventListener('mousedown', (e) => {
-      const trade = (e.target as HTMLElement).closest<HTMLElement>('.trade-btn');
+      const shift = (e as MouseEvent).shiftKey;
+      // Barter: base button trades 1 (Shift = all we can afford); ×N buttons carry their own qty.
+      const trade = (e.target as HTMLElement).closest<HTMLElement>('.trade-btn, .trade-bulk');
       if (trade) {
-        this.sim.trade(trade.dataset.give as ResourceKind, trade.dataset.get as ResourceKind);
+        const give = trade.dataset.give as ResourceKind;
+        const get = trade.dataset.get as ResourceKind;
+        const rate = TUNING.tradeRates[`${give}->${get}`];
+        const max = rate ? Math.floor((this.sim.stock[give] ?? 0) / rate.give) : 1;
+        const qty = shift ? max : Number(trade.dataset.qty ?? 1);
+        this.sim.trade(give, get, Math.max(1, qty));
         return;
       }
-      const sell = (e.target as HTMLElement).closest<HTMLElement>('.sell-cash-btn');
+      // Sell for coin: Shift+click (or the ×all button) sells the whole stock.
+      const sell = (e.target as HTMLElement).closest<HTMLElement>('.sell-cash-btn, .sell-bulk');
       if (sell) {
-        this.sim.sellToMarket(sell.dataset.kind as ResourceKind, 5);
+        const kind = sell.dataset.kind as ResourceKind;
+        const have = this.sim.stock[kind] ?? 0;
+        const qty = shift ? have : Math.min(Number(sell.dataset.qty ?? 5), have);
+        if (qty > 0) this.sim.sellToMarket(kind, qty);
+        return;
+      }
+      // Buy with coin: Shift+click on the base button buys 25.
+      const buy = (e.target as HTMLElement).closest<HTMLElement>('.buy-cash-btn');
+      if (buy) {
+        const kind = buy.dataset.kind as ResourceKind;
+        const qty = shift ? 25 : Number(buy.dataset.qty ?? 5);
+        this.sim.buyFromMarket(kind, Math.max(1, qty));
         return;
       }
       const btn = (e.target as HTMLElement).closest<HTMLElement>('button[data-action]');
@@ -375,7 +394,24 @@ export class Hud {
       let label = item.label;
       if (item.cost) label += ` (${item.cost})`;
       btn.textContent = label;
-      btn.title = item.desc + (item.hotkey ? ` [${item.hotkey.toUpperCase()}]` : '');
+      // Tech gating: disable building buttons when their required tech is missing.
+      if (item.kind === 'building') {
+        try {
+          const def = buildingDef(item.id);
+          if (def.requiredTech && !this.sim.hasTech(def.requiredTech)) {
+            btn.disabled = true;
+            btn.classList.add('locked');
+            const techDef = TOWN_TECH_DEFS.find((t) => t.id === def.requiredTech);
+            btn.title = `Requires: ${techDef?.name ?? def.requiredTech}`;
+          } else {
+            btn.title = item.desc + (item.hotkey ? ` [${item.hotkey.toUpperCase()}]` : '');
+          }
+        } catch {
+          btn.title = item.desc + (item.hotkey ? ` [${item.hotkey.toUpperCase()}]` : '');
+        }
+      } else {
+        btn.title = item.desc + (item.hotkey ? ` [${item.hotkey.toUpperCase()}]` : '');
+      }
       // Mark active
       const active =
         (item.kind === 'building' && this.cam.placing === item.id) ||
@@ -530,20 +566,63 @@ export class Hud {
   setRegionMode(on: boolean): void {
     this.buildBar.classList.toggle('hidden', on);
     this.inspector.classList.toggle('hidden', on);
+    this.regionBottomBar.classList.toggle('hidden', !on);
     this.prioBox.classList.add('hidden');
     if (on) this.showPriorities = false;
+  }
+
+  drawRegionBottomBar(r: import('../sim/region').RegionSim): void {
+    if (this.regionBottomBar.classList.contains('hidden')) return;
+    const alerts: string[] = [];
+    if (r.stateProclaimed) {
+      const hungry = r.settlements.filter((t) => t.factionId === r.playerFactionId && t.food < r.popOf(t) * 3);
+      if (hungry.length) alerts.push(`<span class="rbb-alert">⚠ ${hungry.length} town${hungry.length > 1 ? 's' : ''} hungry</span>`);
+      const striking = r.settlements.filter((t) => t.factionId === r.playerFactionId && r.day < t.strikeUntil);
+      if (striking.length) alerts.push(`<span class="rbb-alert">⚡ ${striking.length} on strike</span>`);
+      const delta = Math.round(r.treasuryDeltaMonth);
+      if (delta < -500) alerts.push(`<span class="rbb-alert">📉 treasury declining</span>`);
+    }
+    this.setHtml(this.regionBottomBar,
+      `<div class="rbb-alerts">${alerts.join(' ')}</div>` +
+      `<div class="rbb-shortcuts">` +
+      `<button class="rbb-btn" id="rbb-towns" title="Settlement list (S)">S: Towns</button>` +
+      `<button class="rbb-btn" id="rbb-routes" title="Route network (R)">R: Routes</button>` +
+      `<button class="rbb-btn" id="rbb-econ" title="Economy panel (E)">E: Economy</button>` +
+      `<button class="rbb-btn" id="rbb-tech" title="Research tree (T)">T: Research</button>` +
+      `</div>` +
+      `<div class="rbb-speed">` +
+      `<button class="rbb-speed-btn" id="rbb-pause" title="Space">${this.paused ? '▶ Play' : '⏸ Pause'}</button>` +
+      `<button class="rbb-speed-btn${this.speed === 1 ? ' active' : ''}" id="rbb-s1" title="1">1×</button>` +
+      `<button class="rbb-speed-btn${this.speed === 3 ? ' active' : ''}" id="rbb-s2" title="2">2×</button>` +
+      `<button class="rbb-speed-btn${this.speed === 8 ? ' active' : ''}" id="rbb-s3" title="3">3×</button>` +
+      `</div>`,
+    );
+    this.regionBottomBar.querySelector('#rbb-pause')!.addEventListener('click', () => { this.paused = !this.paused; });
+    this.regionBottomBar.querySelector('#rbb-s1')!.addEventListener('click', () => { this.speed = 1; this.paused = false; });
+    this.regionBottomBar.querySelector('#rbb-s2')!.addEventListener('click', () => { this.speed = 3; this.paused = false; });
+    this.regionBottomBar.querySelector('#rbb-s3')!.addEventListener('click', () => { this.speed = 8; this.paused = false; });
+    // S/R/E/T shortcuts — dispatch synthetic key events so the main keydown
+    // handler handles them (single source of truth for panel toggles).
+    const dispatch = (key: string) => window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    this.regionBottomBar.querySelector('#rbb-towns')!.addEventListener('click', () => dispatch('s'));
+    this.regionBottomBar.querySelector('#rbb-routes')!.addEventListener('click', () => dispatch('r'));
+    this.regionBottomBar.querySelector('#rbb-econ')!.addEventListener('click', () => dispatch('e'));
+    this.regionBottomBar.querySelector('#rbb-tech')!.addEventListener('click', () => dispatch('t'));
   }
 
   drawRegionTopBar(r: import('../sim/region').RegionSim, dioramaOpen: boolean): void {
     const wx = r.weather.forDay(r.day);
     const skyIcon = { clear: '☀', overcast: '☁', rain: '☔', storm: '⛈', snow: '❄' }[wx.sky];
     const drought = r.weather.isDrought(r.day) && r.seasonIndex < 3 ? ' <span class="tb-over">DROUGHT</span>' : '';
-    // Treasury with a rising/falling arrow (deadband to avoid frame flicker).
+    // Treasury with last month's net swing — a stable monthly figure beats a
+    // per-frame arrow that flickers as daily events nudge the books.
     const gold = r.treasury;
-    if (this.lastRegionTreasury !== null && Math.abs(gold - this.lastRegionTreasury) > 0.5) {
-      this.regionTreasuryTrend = gold > this.lastRegionTreasury ? '↑' : '↓';
-    }
-    this.lastRegionTreasury = gold;
+    const delta = Math.round(r.treasuryDeltaMonth);
+    const trendColor = delta > 0 ? '#7fc26a' : delta < 0 ? '#e0995a' : '#998c6e';
+    const trendStr = delta === 0
+      ? ''
+      : ` <span style="color:${trendColor}" title="net change in the treasury over the last month">` +
+        `${delta > 0 ? '▲' : '▼'}${formatCurrency(Math.abs(delta))}/mo</span>`;
     // Player's share of regional territory — the road to nationhood.
     const terr = Math.round(r.playerTerritoryControl() * 100);
     this.setHtml(this.topBar,
@@ -551,7 +630,7 @@ export class Hud {
       `<span>${skyIcon}${drought}</span>` +
       `<span>TOWNS ${r.settlements.length}${r.expeditions.length ? ` (+${r.expeditions.length} en route)` : ''}</span>` +
       `<span>POP ${r.totalPop()}</span>` +
-      `<span>💰${formatCurrency(Math.round(gold))} ${this.regionTreasuryTrend}</span>` +
+      `<span>💰${formatCurrency(Math.round(gold))}${trendStr}</span>` +
       `<span title="your share of regional territory">⬣ ${terr}%</span>` +
       `<span>NOTABLES ${r.notables.filter((n) => n.alive).length}</span>` +
       (r.stateProclaimed ? `<span class="tb-date">★ STATE</span>` : '') +
@@ -563,10 +642,20 @@ export class Hud {
     if (menuBtn) menuBtn.onclick = () => this.toggleMenu();
   }
 
+  resetLogLen(): void { this.lastLogLen = 0; }
+
   regionLog(r: import('../sim/region').RegionSim): void {
     if (r.log.length === this.lastLogLen) return;
     this.lastLogLen = r.log.length;
-    this.setHtml(this.logBox, r.log.slice(-6).map((l) => `<div class="log-${l.kind}">d${l.day} · ${l.text}</div>`).reverse().join(''));
+    const DAYS_PER_YEAR = 360;
+    const START_YEAR = 1900;
+    const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
+    const label = (day: number): string => {
+      const y = START_YEAR + Math.floor(day / DAYS_PER_YEAR);
+      const s = SEASONS[Math.floor((day % DAYS_PER_YEAR) / (DAYS_PER_YEAR / 4)) % 4];
+      return `${s} ${y}`;
+    };
+    this.setHtml(this.logBox, r.log.slice(-8).map((l) => `<div class="log-${l.kind}">${label(l.day)} · ${l.text}</div>`).reverse().join(''));
   }
 
   update(): void {
@@ -603,14 +692,22 @@ export class Hud {
       `<span><span class="res-wood">≡</span>${s.stock.wood} ⛏${s.stock.stone} 🌾${s.stock.grain} 🍖${s.stock.meal} 👕${s.stock.clothes}${s.stock.weapons ? ` ⚔${s.stock.weapons}` : ''}</span>` +
       `<span title="average mood">♥${Math.round(s.avgMood())}</span>` +
       (s.raidActive ? `<span class="tb-over">⚔ RAID ${s.raiders.length}!</span>` : '') +
+      `<button id="tb-res" class="tb-btn${this.showResources ? ' active' : ''}" title="Resources panel">RES</button>` +
       `<span class="tb-speed">${this.paused ? '⏸' : '▶'.repeat(this.speed)} <i>(space 1-3)</i></span>`);
+    const resBtn = this.topBar.querySelector<HTMLButtonElement>('#tb-res');
+    if (resBtn) resBtn.onclick = () => { this.showResources = !this.showResources; };
+    // Close resources when the inspector fires a close-res event
+    this.inspector.addEventListener('close-res', () => { this.showResources = false; }, { once: true });
   }
 
   private drawInspector(): void {
     const s = this.sim;
     const settler = s.settlers.find((p) => p.id === this.cam.selectedSettler);
     const building = s.buildings.find((b) => b.id === this.cam.selectedBuilding);
-    if (settler) {
+    if (this.showResources) {
+      this.setHtml(this.inspector, this.resourcesCard());
+      this.inspector.classList.remove('hidden');
+    } else if (settler) {
       this.setHtml(this.inspector, this.settlerCard(settler));
       this.inspector.classList.remove('hidden');
     } else if (building) {
@@ -645,6 +742,32 @@ export class Hud {
       rows +
       (granaryCount > 0 ? `<p class="insp-skills">Meal cap: ${TUNING.mealCapBase} base + ${granaryCount} granary = ${mealCap}</p>` : `<p class="insp-skills">Build a Granary to extend meal storage.</p>`)
     );
+  }
+
+  private resourcesCard(): string {
+    const s = this.sim;
+    type Group = { label: string; kinds: ResourceKind[] };
+    const GROUPS: Group[] = [
+      { label: 'Basic', kinds: ['wood', 'grain', 'stone', 'clothes', 'weapons', 'flax', 'clay', 'coal', 'iron_ore', 'herbs'] },
+      { label: 'Refined', kinds: ['timber', 'brick', 'iron', 'tools', 'rope', 'flour', 'ale', 'medicine'] },
+      { label: 'Food Variety', kinds: ['meal', 'bread', 'dairy', 'produce', 'game_meal', 'fish_meal', 'preserved'] },
+    ];
+    // Resources that have consumers but no known producers ("no source" flag).
+    const NO_SOURCE = new Set<ResourceKind>(['rope', 'preserved']);
+    let html = `<h3>Resources <button onclick="this.closest('.inspector').dispatchEvent(new CustomEvent('close-res'))" style="float:right;cursor:pointer">✕</button></h3>`;
+    for (const g of GROUPS) {
+      html += `<div class="insp-section"><b>${g.label}</b></div>`;
+      for (const k of g.kinds) {
+        const qty = s.stock[k] ?? 0;
+        const flow = s.netFlow(k);
+        const flowStr = flow > 0.05 ? `<span style="color:#6f6">+${flow.toFixed(1)}/day</span>`
+          : flow < -0.05 ? `<span style="color:#f66">${flow.toFixed(1)}/day</span>`
+          : `<span style="color:#888">~0/day</span>`;
+        const noSource = NO_SOURCE.has(k) ? ` <span style="color:#f66" title="No known production source">⚠ No source</span>` : '';
+        html += `<div class="bar-row"><span style="min-width:80px">${k.replace('_', ' ')}</span><span style="min-width:32px;text-align:right">${qty}</span> ${flowStr}${noSource}</div>`;
+      }
+    }
+    return html;
   }
 
   private buildingCard(b: Building): string {
@@ -720,19 +843,29 @@ export class Hud {
       </div>`;
     }).join('');
     // Sell stock for coin: how the colony banks the cash that founding a town requires
-    const sellable: ResourceKind[] = ['wood', 'stone', 'grain', 'meal', 'clothes'];
+    const sellable: ResourceKind[] = ['wood', 'stone', 'grain', 'meal', 'clothes', 'weapons'];
     const sells = sellable.map((kind) => {
       const price = getMarketPrice(this.sim.economy, kind);
       const have = this.sim.stock[kind] ?? 0;
       const can = have >= 5;
-      const times = Math.floor(have / 5);
       return `<div class="trade-row">
-        <button class="sell-cash-btn" data-kind="${kind}" data-qty="1"${can ? '' : ' disabled'}>5 ${kind} → ${formatCurrency(price * 5)}</button>
-        ${times > 1 ? `<button class="trade-bulk" data-kind="${kind}" data-qty="${Math.min(times, 10)}" title="Shift+click">×${Math.min(times, 10)}</button>` : ''}
+        <button class="sell-cash-btn" data-kind="${kind}" data-qty="5"${can ? '' : ' disabled'} title="Shift+click to sell all">5 ${kind} → ${formatCurrency(price * 5)}</button>
+        ${have > 5 ? `<button class="sell-bulk" data-kind="${kind}" data-qty="${have}" title="Sell all ${have}">×all → ${formatCurrency(price * have)}</button>` : ''}
+      </div>`;
+    }).join('');
+    // Buy essentials with coin — keeps the larder stocked when farms fall short.
+    const buyable: ResourceKind[] = ['meal', 'grain', 'wood'];
+    const cash = this.sim.economy.cash;
+    const buys = buyable.map((kind) => {
+      const price = getMarketPrice(this.sim.economy, kind);
+      return `<div class="trade-row">
+        <button class="buy-cash-btn" data-kind="${kind}" data-qty="5"${cash >= price * 5 ? '' : ' disabled'} title="Shift+click to buy 25">${formatCurrency(price * 5)} → 5 ${kind}</button>
+        <button class="buy-cash-btn" data-kind="${kind}" data-qty="25"${cash >= price * 25 ? '' : ' disabled'}>×25 → ${formatCurrency(price * 25)}</button>
       </div>`;
     }).join('');
     return `<p class="insp-skills">BARTER:</p><div class="trade-panel">${offers}</div>` +
-      `<p class="insp-skills">SELL FOR COIN (` + formatCurrency(Math.round(this.sim.economy.cash)) + `):</p><div class="trade-panel">${sells}</div>`;
+      `<p class="insp-skills">SELL FOR COIN (` + formatCurrency(Math.round(cash)) + `):</p><div class="trade-panel">${sells}</div>` +
+      `<p class="insp-skills">BUY WITH COIN:</p><div class="trade-panel">${buys}</div>`;
   }
 
   private civicPanel(bid: number): string {

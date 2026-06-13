@@ -9,6 +9,7 @@ import {
   BUILDING_DEFS, buildingDef, traitDef, FIRST_NAMES, LAST_NAMES, TRAIT_DEFS,
   MINUTES_PER_TICK, MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR,
   TUNING, WORK_KINDS, SKILLED_WORK_KINDS, TOWN_TECH_DEFS, setCurrencySymbol, formatCurrency, DIFFICULTY_PRESETS,
+  CAPACITY_PER_TILE, NEED_INTERRUPT_THRESHOLD,
 } from './defs';
 import type { ResourceKind, WorkKind, TownFocus, TradeOrder, TradeRecord, PendingEvent, CurrencySymbol, TownDesign } from './defs';
 import type { EconomyData } from './economy';
@@ -48,6 +49,8 @@ export interface Task {
   animalId?: number;
   workLeft: number;
   label: string;
+  /** cook: bakery baking bread from flour instead of meal from grain */
+  bakesBread?: boolean;
 }
 
 export interface Wound {
@@ -221,7 +224,11 @@ export class Simulation {
   mayorNotableId: number | null = null;
 
   currencySymbol: CurrencySymbol = '$';
+  /** Chosen at town design; carried into region mode to tune the AI competitors. */
+  difficulty: 'easy' | 'normal' | 'hard' = 'normal';
   marketDisruptionEnd = 0;
+  /** Rolling 7-day daily snapshots of each resource for production/consumption display. */
+  stockHistory: Partial<Record<ResourceKind, number[]>> = {};
   priceModifiers: Record<ResourceKind, number>;  // multiplier for each resource at town level
   lastPriceRecalcDay = -999;
 
@@ -259,6 +266,7 @@ export class Simulation {
    *  here once, penalty-free — later switches go through changeCurrency(). */
   private applyTownDesign(design: TownDesign): void {
     const preset = DIFFICULTY_PRESETS[design.difficulty];
+    this.difficulty = design.difficulty;
     this.stock.wood = Math.round(this.stock.wood * preset.stockMult);
     this.stock.grain = Math.round(this.stock.grain * preset.stockMult);
     this.stock.meal = Math.round(this.stock.meal * preset.stockMult);
@@ -462,8 +470,9 @@ export class Simulation {
     return cap;
   }
 
-  canPlace(defId: string, x: number, y: number, rotation = 0): boolean {
+  canPlace(defId: string, x: number, y: number, rotation = 0, ignoreTech = false): boolean {
     const def = buildingDef(defId);
+    if (!ignoreTech && def.requiredTech && !this.hasTech(def.requiredTech)) return false;
     const w = rotation % 2 === 1 ? def.h : def.w;
     const h = rotation % 2 === 1 ? def.w : def.h;
     for (let dy = 0; dy < h; dy++) {
@@ -485,7 +494,8 @@ export class Simulation {
     } else {
       rotation = rotationOrPrebuilt;
     }
-    if (!this.canPlace(defId, x, y, rotation)) return null;
+    // prebuilt bypasses tech gate (used by tests and scenario setup)
+    if (!this.canPlace(defId, x, y, rotation, prebuilt)) return null;
     const def = buildingDef(defId);
     const w = rotation % 2 === 1 ? def.h : def.w;
     const h = rotation % 2 === 1 ? def.w : def.h;
@@ -834,6 +844,29 @@ export class Simulation {
     return cap;
   }
 
+  /** Max raw-good storage: stockpile tiles × CAPACITY_PER_TILE + warehouse capacity. */
+  /** 7-day average net flow for a resource (positive = production > consumption). */
+  netFlow(kind: ResourceKind): number {
+    const hist = this.stockHistory[kind];
+    if (!hist || hist.length < 2) return 0;
+    return (hist[0] - hist[Math.min(7, hist.length - 1)]) / Math.min(7, hist.length - 1);
+  }
+
+  stockpileCapacity(): number {
+    const tiles = this.world.tiles.filter((t) => t.stockpileZone).length;
+    const warehouseCap = this.builtOf('warehouse').reduce(
+      (sum, b) => sum + TUNING.warehouseBaseCap + this.buildingEffectiveCapacity(b), 0);
+    return tiles * CAPACITY_PER_TILE + warehouseCap;
+  }
+
+  /** Total raw goods in stock (excludes food-variety items tracked by mealCap). */
+  totalRawStock(): number {
+    const FOOD_KINDS = new Set<ResourceKind>(['meal', 'game_meal', 'fish_meal', 'bread', 'dairy', 'produce', 'preserved', 'ale']);
+    return (Object.keys(this.stock) as ResourceKind[])
+      .filter((k) => !FOOD_KINDS.has(k))
+      .reduce((sum, k) => sum + this.stock[k], 0);
+  }
+
   building(id: number | null | undefined): Building | undefined {
     return this.buildings.find((b) => b.id === id);
   }
@@ -946,6 +979,13 @@ export class Simulation {
 
   private dailyUpdate(): void {
     for (let i = 0; i < this.traffic.length; i++) this.traffic[i] *= 0.9; // overlay shows recent flow
+    // Snapshot each resource for 7-day rolling production/consumption display.
+    for (const k of Object.keys(this.stock) as ResourceKind[]) {
+      if (!this.stockHistory[k]) this.stockHistory[k] = [];
+      const hist = this.stockHistory[k]!;
+      hist.unshift(this.stock[k]);
+      if (hist.length > 8) hist.length = 8; // keep 8 snapshots → 7 deltas
+    }
     this.updatePopulationFlows();
     // Animal pens produce dairy from livestock
     for (const pen of this.builtOf('ranching').filter(b => b.defId === 'animal_pen' && b.built)) {
@@ -1780,6 +1820,11 @@ export class Simulation {
       }
       case 'moving':
       case 'working': {
+        // Critical food/sleep preempts any task so settlers don't starve at their post.
+        if (s.needs.food < NEED_INTERRUPT_THRESHOLD || s.needs.rest < NEED_INTERRUPT_THRESHOLD) {
+          this.finishTask(s);
+          return;
+        }
         this.runTask(s, hours);
         return;
       }
@@ -1791,6 +1836,7 @@ export class Simulation {
   }
 
   private decide(s: Settler): void {
+    const t = TUNING;
     const night = this.hour >= 22 || this.hour < 6;
     // Hunger comes before everything — bed rest and sleep used to outrank it,
     // and settlers starved in bed beside a stocked larder (0.1 death-spiral fix).
@@ -1813,6 +1859,14 @@ export class Simulation {
         return;
       }
     }
+    // Morale needs at the breaking point preempt work. Without this a settler
+    // in a work-rich colony grinds every daylight hour and never tops up
+    // recreation/social until they collapse into a mental break (the
+    // "worked to death" spiral). Above these floors work still wins, so the
+    // colony stays productive.
+    if (s.needs.recreation < t.recreationCritical || s.needs.social < t.socialCritical) {
+      if (this.goRecreate(s)) return;
+    }
     if (!night) {
       const task = this.findTask(s);
       if (task) {
@@ -1822,18 +1876,23 @@ export class Simulation {
         return;
       }
     }
+    // Idle or off-shift: top up recreation and company before drifting.
     if (s.needs.recreation < 60 || s.needs.social < 50) {
-      const hall = this.builtOf('recreation')[0];
-      const spTile = this.nearestStockpileTile(s.pos);
-      const dest = hall ? this.buildingCenter(hall) : spTile;
-      if (dest) {
-        s.state = 'recreating';
-        s.stateUntil = this.minute + 180;
-        this.setDestination(s, dest);
-        return;
-      }
+      if (this.goRecreate(s)) return;
     }
     this.wander(s);
+  }
+
+  /** Send a settler to unwind at the meeting hall (or, lacking one, the
+   *  stockpile commons). Returns false only when there's nowhere to go. */
+  private goRecreate(s: Settler): boolean {
+    const hall = this.builtOf('recreation')[0];
+    const dest = hall ? this.buildingCenter(hall) : this.nearestStockpileTile(s.pos);
+    if (!dest) return false;
+    s.state = 'recreating';
+    s.stateUntil = this.minute + 180;
+    this.setDestination(s, dest);
+    return true;
   }
 
   // ---- task generation & execution ----
@@ -1856,12 +1915,9 @@ export class Simulation {
     };
 
     // Haul ground items to the stockpile zone.
-    const hasStockpile = this.world.tiles.some((t) => t.stockpileZone);
-    if (hasStockpile) {
-      for (const it of this.items) {
-        if (it.reservedBy === null) {
-          push({ kind: 'haul', x: it.x, y: it.y, itemId: it.id, workLeft: 5, label: `haul ${it.kind}` }, 'haul');
-        }
+    for (const it of this.items) {
+      if (it.reservedBy === null) {
+        push({ kind: 'haul', x: it.x, y: it.y, itemId: it.id, workLeft: 5, label: `haul ${it.kind}` }, 'haul');
       }
     }
     // Deliver wood to blueprints, then build them.
@@ -1945,15 +2001,20 @@ export class Simulation {
     // produce from the mill) must not suppress the primary cooking loop.
     const cookShops = this.builtOf('cook');
     const kitchen = cookShops.find((b) => b.defId === 'bakery') ?? cookShops[0];
-    if (kitchen && this.stock.grain > 0 && this.stock.meal < this.settlers.length * 3) {
+    if (kitchen && this.stock.grain >= TUNING.cookBatch && this.stock.meal < this.settlers.length * TUNING.cookTriggerMult) {
       const { workPerMeal, batch } = this.cookParams(kitchen);
       push({ kind: 'cook', x: kitchen.x, y: kitchen.y, buildingId: kitchen.id, workLeft: workPerMeal * batch, label: 'cook meals' }, 'cook');
     }
     // Mill: convert grain to flour (2:2, counts as distinct food variety).
-    // Cap produce so the mill doesn't crowd out cooking by inflating food totals.
     for (const mill of this.builtOf('milling')) {
-      if (this.stock.grain >= 2 && this.stock.produce < this.settlers.length * 2) {
+      if (this.stock.grain >= 2 && this.stock.flour < this.settlers.length * 4) {
         push({ kind: 'mill', x: mill.x, y: mill.y, buildingId: mill.id, workLeft: 60, label: 'mill flour' }, 'mill');
+      }
+    }
+    // Bakery: bake bread from flour (2 flour → 2 bread).
+    for (const bakery of this.builtOf('cook').filter(b => b.defId === 'bakery')) {
+      if (bakery.built && this.stock.flour >= 2 && this.stock.bread < this.settlers.length * 3) {
+        push({ kind: 'cook', x: bakery.x, y: bakery.y, buildingId: bakery.id, workLeft: TUNING.bakeWorkPerMeal * 2, label: 'bake bread', bakesBread: true } as Task, 'cook');
       }
     }
     // Brewery: convert grain to ale for settler recreation/morale.
@@ -2067,9 +2128,12 @@ export class Simulation {
         push({ kind: 'chop', x: cs.x, y: cs.y, workLeft: TUNING.treeChopWork, label: 'harvest timber' }, 'chop');
       }
     }
-    // Armoury: forge weapons when wood is available (one job per armoury).
+    // Armoury: forge weapons when wood is available, but only up to a full
+    // armory for the colony (one spare per head). Without this cap the forge
+    // ran forever and buried the stores in surplus weapons.
+    const weaponTarget = this.settlers.length;
     for (const a of this.builtOf('forge')) {
-      if (this.stock.wood >= TUNING.forgeWoodCost) {
+      if (this.stock.wood >= TUNING.forgeWoodCost && this.stock.weapons < weaponTarget) {
         push({ kind: 'forge', x: a.x, y: a.y, buildingId: a.id, workLeft: TUNING.forgeWorkPerWeapon, label: 'forge weapon' }, 'forge');
       }
     }
@@ -2220,6 +2284,7 @@ export class Simulation {
         }
         return;
       }
+      case 'store':
       case 'haul': {
         const item = this.items.find((i) => i.id === task.itemId);
         if (!s.carrying) {
@@ -2377,13 +2442,23 @@ export class Simulation {
         task.workLeft -= work;
         if (task.workLeft <= 0) {
           this.stock.grain -= 2;
-          this.stock.produce += 2;  // flour → produce-style food variety item
+          this.stock.flour += 2;
           this.finishTask(s);
         }
         return;
       }
       case 'cook': {
         const k = this.building(task.buildingId);
+        // Bread-baking path: bakery converts flour → bread.
+        if (task.bakesBread) {
+          if (!k?.built || this.stock.flour < 2) return this.finishTask(s);
+          task.workLeft -= work;
+          if (task.workLeft <= 0) {
+            if (this.stock.flour >= 2) { this.stock.flour -= 2; this.stock.bread += 2; }
+            this.finishTask(s);
+          }
+          return;
+        }
         if (!k?.built || this.stock.grain <= 0) return this.finishTask(s);
         // Brewery produces ale; everything else produces meal.
         if (k.defId === 'brewery') {

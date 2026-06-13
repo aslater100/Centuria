@@ -26,6 +26,7 @@
       "provides": "sleep",
       "homeType": "communal",
       "capacity": 8,
+      "requiredTech": "militia_training",
       "desc": "Shared bunk room for 8 settlers. Cheap per head — communal and military types thrive here; loners chafe.",
       "upgrades": [
         { "cost": { "wood": 20 }, "capacityBonus": 4, "desc": "Second bunk tier: houses 12 settlers." },
@@ -42,6 +43,7 @@
       "provides": "sleep",
       "homeType": "private",
       "capacity": 2,
+      "requiredTech": "stone_masonry",
       "desc": "Two private rooms. Quiet and dignified — loners thrive here; sociable types feel stifled.",
       "upgrades": [
         { "cost": { "wood": 15, "stone": 8 }, "capacityBonus": 1, "desc": "Attic room: houses 3 settlers." },
@@ -126,6 +128,7 @@
       "cost": { "wood": 45 },
       "buildWork": 540,
       "provides": "cook",
+      "requiredTech": "milling",
       "desc": "Big ovens, bigger batches. Cooks faster than the cookhouse — preferred when built.",
       "upgrades": [
         { "cost": { "wood": 30, "stone": 10 }, "capacityBonus": 0, "desc": "Second oven: batch size +50%." },
@@ -225,6 +228,7 @@
       "cost": { "wood": 40, "stone": 5 },
       "buildWork": 540,
       "provides": "milling",
+      "requiredTech": "milling",
       "desc": "Waterwheel-driven millstones grind grain into flour — a distinct food type for variety bonuses. Requires Milling tech.",
       "upgrades": [
         { "cost": { "wood": 25 }, "capacityBonus": 0, "desc": "Better stones: milling 30% faster." },
@@ -239,6 +243,7 @@
       "cost": { "wood": 30 },
       "buildWork": 420,
       "provides": "brewing",
+      "requiredTech": "fermentation",
       "desc": "Ferments grain into ale (2 grain → 1 ale). Ale counts as a distinct food type and boosts settler morale. Requires Fermentation tech.",
       "upgrades": [
         { "cost": { "wood": 20 }, "capacityBonus": 0, "desc": "Larger vats: brewing 30% faster." }
@@ -252,6 +257,7 @@
       "cost": { "wood": 15 },
       "buildWork": 240,
       "provides": "ranching",
+      "requiredTech": "horticulture",
       "desc": "A tended kitchen garden yields fresh produce — variety food with no grain cost. Requires Horticulture tech.",
       "upgrades": [
         { "cost": { "wood": 10 }, "capacityBonus": 0, "desc": "Cold frames: harvest year-round." }
@@ -293,6 +299,7 @@
       "cost": { "wood": 10, "stone": 5 },
       "buildWork": 180,
       "provides": "well",
+      "requiredTech": "first_aid",
       "desc": "Clean water source — reduces infection risk colony-wide. Requires First Aid tech.",
       "upgrades": [
         { "cost": { "stone": 10 }, "capacityBonus": 0, "desc": "Stone casing: infection reduction doubled." },
@@ -307,6 +314,7 @@
       "cost": { "wood": 25 },
       "buildWork": 360,
       "provides": "watchtower",
+      "requiredTech": "fortification",
       "desc": "Scouts spot raiders early — logs a warning one day before arrival. Requires Fortification tech.",
       "upgrades": [
         { "cost": { "wood": 15, "stone": 8 }, "capacityBonus": 0, "desc": "Stone base: warning two days in advance." },
@@ -321,6 +329,7 @@
       "cost": { "wood": 50, "stone": 10 },
       "buildWork": 720,
       "provides": "warehouse",
+      "requiredTech": "commerce",
       "desc": "Bulk dry storage — each warehouse adds 500 capacity for raw goods. Requires Commerce tech.",
       "upgrades": [
         { "cost": { "wood": 30 }, "capacityBonus": 0, "desc": "Organized shelving: +250 extra capacity." },
@@ -335,6 +344,7 @@
       "cost": { "wood": 20 },
       "buildWork": 240,
       "provides": "herbalism",
+      "requiredTech": "herbalism",
       "desc": "Cultivated medicinal plants — a tended herb garden yields herbs periodically. Requires Herbalism tech.",
       "upgrades": [
         { "cost": { "wood": 15 }, "capacityBonus": 0, "desc": "Extended beds: herbs per harvest +50%." },
@@ -349,6 +359,7 @@
       "cost": { "wood": 35, "stone": 5 },
       "buildWork": 480,
       "provides": "apothecary",
+      "requiredTech": "germ_theory",
       "desc": "Compounds herbs into medicine (2 herbs → 1 medicine). Medicine in stock speeds clinic healing. Requires Germ Theory tech.",
       "upgrades": [
         { "cost": { "wood": 20, "stone": 8 }, "capacityBonus": 0, "desc": "Better compounds: medicine yield +50%." },
@@ -363,6 +374,7 @@
       "cost": { "wood": 35 },
       "buildWork": 480,
       "provides": "sawmill",
+      "requiredTech": "carpentry",
       "desc": "Cuts wood into shaped timber (2 wood → 1 timber). Timber enables advanced stone-class buildings. Requires Carpentry tech.",
       "upgrades": [
         { "cost": { "wood": 25 }, "capacityBonus": 0, "desc": "Circular blade: sawing 30% faster." },
@@ -377,6 +389,7 @@
       "cost": { "wood": 35 },
       "buildWork": 480,
       "provides": "ranching",
+      "requiredTech": "animal_husbandry",
       "desc": "Livestock enclosure — livestock grow on adjacent pasture zones and produce dairy daily. Requires Animal Husbandry tech.",
       "upgrades": [
         { "cost": { "wood": 20 }, "capacityBonus": 0, "desc": "Larger pen: livestock cap +4." },
@@ -391,6 +404,7 @@
       "cost": { "wood": 20, "stone": 5 },
       "buildWork": 300,
       "provides": "kiln",
+      "requiredTech": "brickwork",
       "desc": "Fires clay into bricks (2 clay → 1 brick). Bricks enable masonry-grade construction. Requires Brickwork tech.",
       "upgrades": [
         { "cost": { "stone": 10 }, "capacityBonus": 0, "desc": "Better draft: firing 30% faster." },
@@ -405,6 +419,7 @@
       "cost": { "wood": 30 },
       "buildWork": 420,
       "provides": "mining",
+      "requiredTech": "prospecting",
       "desc": "Opens a shaft — settlers extract clay from painted mine zones (rock tiles). Iron Mining tech also yields iron ore and coal. Requires Prospecting tech.",
       "upgrades": [
         { "cost": { "wood": 20, "stone": 8 }, "capacityBonus": 0, "desc": "Shoring timbers: +25% ore yield." },
@@ -419,6 +434,7 @@
       "cost": { "wood": 25, "stone": 10 },
       "buildWork": 420,
       "provides": "smithing",
+      "requiredTech": "blacksmithing",
       "desc": "Smelts iron ore + coal into iron, then iron into tools. Tools in stock speed all construction by 20%. Requires Blacksmithing tech.",
       "upgrades": [
         { "cost": { "stone": 15 }, "capacityBonus": 0, "desc": "Bellows: smelting 30% faster." },
@@ -435,6 +451,7 @@
       "provides": "sleep",
       "homeType": "communal",
       "capacity": 12,
+      "requiredTech": "stone_masonry",
       "desc": "A long stone hall — houses 12 settlers comfortably. Communal types thrive here. Requires Stone Masonry tech.",
       "upgrades": [
         { "cost": { "stone": 20 }, "capacityBonus": 4, "desc": "Wing added: houses 16 settlers." },
@@ -449,6 +466,7 @@
       "cost": { "wood": 30, "stone": 10 },
       "buildWork": 480,
       "provides": "education",
+      "requiredTech": "schooling",
       "desc": "Teaching and letters — each schoolhouse adds 25% to town research speed. Requires Schooling tech.",
       "upgrades": [
         { "cost": { "wood": 20, "stone": 10 }, "capacityBonus": 0, "desc": "Library wing: research bonus +40%." },

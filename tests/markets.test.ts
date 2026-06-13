@@ -106,7 +106,7 @@ describe('Local markets (GDD §5.2)', () => {
     expect(town2.wood).toBeGreaterThan(0);
   });
 
-  it('the State levies the turnover; before the State nobody collects', () => {
+  it('the State levies turnover at full rate; the pre-State Mayor takes gentler tolls', () => {
     const r = flipped(42);
     const [home, town2] = r.settlements;
     home.wood = 5000;
@@ -116,8 +116,10 @@ describe('Local markets (GDD §5.2)', () => {
     r.treasury = 0;
     r.traders();
     expect(r.tradeValueLastMonth).toBeGreaterThan(0);
-    expect(r.treasury).toBe(0); // no State, no levy
+    // Before the State, market tolls run at 0.8× the levy rate (0.04 of 0.05).
+    expect(r.treasury).toBeCloseTo(r.tradeValueLastMonth * r.tradeLevyRate * 0.8, 6);
     r.stateProclaimed = true;
+    r.treasury = 0;
     home.wood = 5000;
     town2.wood = 0;
     const route = r.routeBetween(home.id, town2.id)!;

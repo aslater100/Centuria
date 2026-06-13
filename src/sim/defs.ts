@@ -112,6 +112,20 @@ export const DIFFICULTY_PRESETS = {
   hard: { stockMult: 0.6, startCash: 200 },
 } as const;
 
+/** Difficulty also drives the regional AI competitors (GDD §6.2): how often
+ *  rivals act, how hard they expand and fight, how fast they research, and how
+ *  ambitious (short-fused) their goals are. `easy` is the "story" pole — passive,
+ *  slow, generous deadlines; `hard` is "brutal" — frequent, aggressive, fast.
+ *  `goalYearsMult` stretches (>1) or compresses (<1) each goal's deadline, so a
+ *  hard AI sets itself tighter, more aggressive timelines. */
+export const AI_DIFFICULTY = {
+  easy:   { updateFreq: 150, expandChance: 0.06, settlementCap: 4, techMult: 0.7, raidMult: 0.4, goalYearsMult: 1.5, scoutChance: 0.06, aggressionBias: -20 },
+  normal: { updateFreq: 90,  expandChance: 0.10, settlementCap: 6, techMult: 1.0, raidMult: 1.0, goalYearsMult: 1.0, scoutChance: 0.10, aggressionBias: 0 },
+  hard:   { updateFreq: 45,  expandChance: 0.16, settlementCap: 8, techMult: 1.4, raidMult: 1.8, goalYearsMult: 0.7, scoutChance: 0.16, aggressionBias: 20 },
+} as const;
+
+export type AiDifficulty = keyof typeof AI_DIFFICULTY;
+
 // ---- Market automation ----
 export interface TradeOrder {
   id: number;
@@ -161,6 +175,7 @@ export interface BuildingDef {
   maxHp?: number; // only damageable structures define this
   desc: string;
   upgrades?: UpgradeLevel[];
+  requiredTech?: string; // tech id that must be researched before placing
 }
 
 export interface TraitDef {
@@ -223,6 +238,12 @@ export const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'] as const;
 export const DAYS_PER_YEAR = DAYS_PER_SEASON * SEASONS.length;
 export const START_YEAR = 1900;
 
+// ---- Stockpile / capacity constants ----
+/** Raw-good storage per stockpile zone tile. */
+export const CAPACITY_PER_TILE = 50;
+/** Food/rest need below which a working settler abandons their task to eat/sleep. */
+export const NEED_INTERRUPT_THRESHOLD = 20;
+
 // ---- Tuning (centralized so the headless harness can sweep them) ----
 export const TUNING = {
   needDecayPerHour: { food: 2.2, rest: 1.4, warmth: 4.0, recreation: 0.8, social: 0.6 },
@@ -231,6 +252,11 @@ export const TUNING = {
   sleepRestPerHour: { bed: 9, ground: 5 },
   recreationPerHour: 12,
   socialPerHour: 10,
+  // Below these floors, a settler drops their work to unwind/socialize even on
+  // shift — above them, work wins. Without a hard floor, settlers in a busy
+  // colony grind recreation/social to zero and break down (worked to death).
+  recreationCritical: 25,
+  socialCritical: 20,
   moodWeights: { food: 0.35, rest: 0.25, warmth: 0.15, recreation: 0.15, social: 0.1 },
   mentalBreakMoodThreshold: 20,
   mentalBreakChancePerPointPerDay: 0.015,
@@ -251,6 +277,8 @@ export const TUNING = {
   farmYieldPerTile: 10,
   cookWorkPerMeal: 20,
   cookBatch: 4,
+  /** Cook trigger: start cooking when meals < settlers × this. */
+  cookTriggerMult: 8,
   // Economy buildings (PR B2)
   bakeWorkPerMeal: 12, // bakery: bigger ovens, faster meals
   bakeBatch: 8,
