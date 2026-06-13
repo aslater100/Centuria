@@ -35,15 +35,15 @@ jobs:
             --title "$VERSION" \
             --notes "## Download Centuria $VERSION
 
-Pick the installer for your platform from the **Assets** section below.
+          Pick the installer for your platform from the **Assets** section below.
 
-| Platform | File |
-|----------|------|
-| **Windows** | \`Centuria-Setup-$VERSION.exe\` |
-| **macOS** (Apple Silicon) | \`Centuria-$VERSION-arm64.dmg\` |
-| **Linux** | \`Centuria-$VERSION.AppImage\` |
+          | Platform | File |
+          |----------|------|
+          | **Windows** | \`Centuria-Setup-$VERSION.exe\` |
+          | **macOS** (Apple Silicon) | \`Centuria-$VERSION-arm64.dmg\` |
+          | **Linux** | \`Centuria-$VERSION.AppImage\` |
 
-Already installed? The app checks for updates automatically each time it launches." \
+          Already installed? The app checks for updates automatically each time it launches." \
             2>/dev/null || echo "Release already exists, skipping creation"
 
   release:
@@ -68,7 +68,7 @@ Already installed? The app checks for updates automatically each time it launche
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
   publish-release:
-    needs: release
+    needs: [create-release, release]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -77,7 +77,7 @@ Already installed? The app checks for updates automatically each time it launche
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ needs.release.outputs.tag }}"
+          TAG="${{ needs.create-release.outputs.tag }}"
           if [[ -z "$TAG" ]]; then
             if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
               TAG="$GITHUB_REF_NAME"
