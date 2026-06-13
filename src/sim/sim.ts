@@ -470,9 +470,9 @@ export class Simulation {
     return cap;
   }
 
-  canPlace(defId: string, x: number, y: number, rotation = 0): boolean {
+  canPlace(defId: string, x: number, y: number, rotation = 0, ignoreTech = false): boolean {
     const def = buildingDef(defId);
-    if (def.requiredTech && !this.hasTech(def.requiredTech)) return false;
+    if (!ignoreTech && def.requiredTech && !this.hasTech(def.requiredTech)) return false;
     const w = rotation % 2 === 1 ? def.h : def.w;
     const h = rotation % 2 === 1 ? def.w : def.h;
     for (let dy = 0; dy < h; dy++) {
@@ -494,7 +494,8 @@ export class Simulation {
     } else {
       rotation = rotationOrPrebuilt;
     }
-    if (!this.canPlace(defId, x, y, rotation)) return null;
+    // prebuilt bypasses tech gate (used by tests and scenario setup)
+    if (!this.canPlace(defId, x, y, rotation, prebuilt)) return null;
     const def = buildingDef(defId);
     const w = rotation % 2 === 1 ? def.h : def.w;
     const h = rotation % 2 === 1 ? def.w : def.h;
@@ -1913,20 +1914,10 @@ export class Simulation {
       candidates.push({ task, prio, dist });
     };
 
-    // Haul ground items to the stockpile zone (blocked when at capacity).
-    const hasStockpile = this.world.tiles.some((t) => t.stockpileZone);
-    const atCapacity = hasStockpile && this.totalRawStock() >= this.stockpileCapacity();
-    if (hasStockpile && !atCapacity) {
-      for (const it of this.items) {
-        if (it.reservedBy === null) {
-          push({ kind: 'haul', x: it.x, y: it.y, itemId: it.id, workLeft: 5, label: `haul ${it.kind}` }, 'haul');
-        }
-      }
-    }
-    // Store task: proactive haul when grain is plentiful but meals are short.
-    if (hasStockpile && !atCapacity && this.stock.grain > 40 && this.stock.meal < this.settlers.length * 5) {
-      for (const it of this.items.filter((i) => i.reservedBy === null && i.kind === 'grain')) {
-        push({ kind: 'store', x: it.x, y: it.y, itemId: it.id, workLeft: 5, label: `store ${it.kind}` }, 'store');
+    // Haul ground items to the stockpile zone.
+    for (const it of this.items) {
+      if (it.reservedBy === null) {
+        push({ kind: 'haul', x: it.x, y: it.y, itemId: it.id, workLeft: 5, label: `haul ${it.kind}` }, 'haul');
       }
     }
     // Deliver wood to blueprints, then build them.

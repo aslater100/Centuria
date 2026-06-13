@@ -62,7 +62,7 @@ function valueNoise(x: number, y: number, seed: number): number {
 }
 
 /** fractal Brownian motion: layered octaves of value noise */
-export function fbm(x: number, y: number, seed: number, octaves = 6): number {
+export function fbm(x: number, y: number, seed: number, octaves = 4): number {
   let v = 0;
   let amp = 0.5;
   let freq = 1;
@@ -77,7 +77,7 @@ export function fbm(x: number, y: number, seed: number, octaves = 6): number {
 /** fbm normalized to the full 0..1 range with mild contrast — octave
  *  averaging otherwise compresses everything toward the middle and the
  *  world comes out as featureless mush (no mountains, no droughts). */
-export function fbm01(x: number, y: number, seed: number, octaves = 6): number {
+export function fbm01(x: number, y: number, seed: number, octaves = 4): number {
   const maxAmp = 1 - Math.pow(0.5, octaves);
   const n = fbm(x, y, seed, octaves) / maxAmp; // ≈0..1, mean ~0.5
   const c = (n - 0.5) * 1.6 + 0.5; // stretch the middle back out
@@ -113,12 +113,6 @@ export class RegionMap {
         const ny = y / REGION_N;
         let e = fbm01(nx * 4, ny * 4, s) * 0.62 + nx * 0.48 - 0.12;
         e += (fbm01(nx * 9, ny * 9, s + 7) - 0.5) * 0.18;
-        // radial noise: creates highland mass in the interior independent of
-        // the east-west gradient so maps have varied topography in all quadrants
-        const radDx = nx - 0.45;
-        const radDy = ny - 0.5;
-        const radialFactor = Math.max(0, 0.28 - Math.hypot(radDx, radDy) * 0.65);
-        e += radialFactor * (0.4 + fbm01(nx * 2, ny * 2, s + 199) * 0.6);
         const t = 1 - ny * 0.55 - Math.max(0, e - this.seaLevel) * 0.5; // north & heights are cold
         const m = fbm01(nx * 5, ny * 5, s + 31);
         this.cells.push({
@@ -142,10 +136,18 @@ export class RegionMap {
 
   /** Rivers: descend from high wet cells to the sea, accumulating flow. */
   private carveRivers(): void {
-    const traceRiver = (startX: number, startY: number, initFlow: number) => {
-      let x = startX;
-      let y = startY;
-      let flow = initFlow;
+    const sources: { x: number; y: number; score: number }[] = [];
+    for (let y = 2; y < REGION_N - 2; y++) {
+      for (let x = 2; x < REGION_N - 2; x++) {
+        const c = this.at(x, y);
+        if (c.elevation > 0.62) sources.push({ x, y, score: c.elevation * c.moisture });
+      }
+    }
+    sources.sort((a, b) => b.score - a.score);
+    const n = Math.min(7, sources.length);
+    for (let i = 0; i < n; i++) {
+      let { x, y } = sources[Math.floor((i * sources.length) / Math.max(1, n))];
+      let flow = 1;
       for (let step = 0; step < 200; step++) {
         const c = this.at(x, y);
         if (c.elevation <= this.seaLevel) break;
@@ -157,7 +159,7 @@ export class RegionMap {
         let be = c.elevation;
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
           const nb = this.at(x + dx, y + dy);
-          const eff = nb.elevation - (nb.river ? 0.03 : 0); // rivers attract rivers → confluences
+          const eff = nb.elevation - (nb.river ? 0.03 : 0);
           if (eff < be) {
             be = eff;
             bx = x + dx;
@@ -171,38 +173,6 @@ export class RegionMap {
         x = bx;
         y = by;
       }
-    };
-
-    // primary network: high-elevation wet sources
-    const primarySources: { x: number; y: number; score: number }[] = [];
-    for (let y = 2; y < REGION_N - 2; y++) {
-      for (let x = 2; x < REGION_N - 2; x++) {
-        const c = this.at(x, y);
-        if (c.elevation > 0.58) primarySources.push({ x, y, score: c.elevation * c.moisture });
-      }
-    }
-    primarySources.sort((a, b) => b.score - a.score);
-    const nPrimary = Math.min(18, primarySources.length);
-    for (let i = 0; i < nPrimary; i++) {
-      const { x, y } = primarySources[Math.floor((i * primarySources.length) / Math.max(1, nPrimary))];
-      traceRiver(x, y, 1);
-    }
-
-    // secondary network: mid-elevation sources for broader drainage coverage
-    const secondarySources: { x: number; y: number; score: number }[] = [];
-    for (let y = 4; y < REGION_N - 4; y++) {
-      for (let x = 4; x < REGION_N - 4; x++) {
-        const c = this.at(x, y);
-        if (c.elevation > 0.44 && c.elevation <= 0.58 && c.moisture > 0.6) {
-          secondarySources.push({ x, y, score: c.moisture });
-        }
-      }
-    }
-    secondarySources.sort((a, b) => b.score - a.score);
-    const nSecondary = Math.min(6, secondarySources.length);
-    for (let i = 0; i < nSecondary; i++) {
-      const { x, y } = secondarySources[Math.floor((i * secondarySources.length) / Math.max(1, nSecondary))];
-      traceRiver(x, y, 0.5);
     }
   }
 
@@ -217,7 +187,7 @@ export class RegionMap {
           c.biome = 'sea';
         } else if (c.river) {
           c.biome = 'river';
-        } else if (c.elevation > 0.65) {
+        } else if (c.elevation > 0.72) {
           c.biome = 'mountains';
         } else if (c.elevation > 0.58) {
           c.biome = 'hills';
