@@ -647,6 +647,8 @@ export interface Scout {
   health: number; // 0–100; dies when reaches 0 (from enemy scouts, etc.)
   maintenanceCost: number; // gold per tick to keep alive
   createdDay: number;
+  expireDay: number; // scout auto-removed when day >= expireDay (200 days lifespan)
+  targetMode: 'random' | 'objective'; // random walk or move toward goal objective
 }
 
 /** Central Bank: tracks currency systems, reserves, and monetary policy. */
@@ -2512,6 +2514,7 @@ export class RegionSim {
     if (this.stateProclaimed) this.updateFactions();
     this.updateDiplomacy();
     this.updateRivalAI(); // staggered AI updates for rivals (GDD §6.2)
+    this.updateScouts(); // update faction scouts: movement, spawning, expiry (GDD §6.2)
     this.tickClimate(); // the ledger runs from the first decade (GDD §8.2)
     if (this.passedLaws.includes('central_bank_charter')) this.tickMonetary();
     this.updateLoans(); // process loan interest and check for defaults
@@ -5537,6 +5540,17 @@ export class RegionSim {
   updateFactionAI(faction: RegionalFaction): void {
     // Generate or refresh goal (once per year)
     if (!faction.currentGoal || this.day - faction.lastGoalCheckDay >= 365) {
+      // Check if previous goal succeeded/failed
+      if (faction.currentGoal) {
+        const succeeded = faction.currentGoal.successCondition(faction, this);
+        if (succeeded) {
+          this.addLog(`${faction.name} achieves goal: "${faction.currentGoal.objective}".`, 'good');
+          faction.treasury += 100; // prestige bonus
+        } else if (this.day > faction.currentGoal.targetYear) {
+          this.addLog(`${faction.name} abandons goal: "${faction.currentGoal.objective}" (timeout).`, 'info');
+        }
+      }
+
       faction.currentGoal = this.generateFactionGoal(faction);
       faction.lastGoalCheckDay = this.day;
       if (faction.currentGoal) {
@@ -5558,10 +5572,15 @@ export class RegionSim {
     const techSpeed = faction.treasury * 0.0001 + factionPop * 0.00001;
     faction.techProgress += techSpeed * (faction.currentGoal?.sectorFocus === 'technology' ? 1.5 : 1);
 
+    // Scout spawning: 10% chance per update to spawn if under limit
+    if (this.rng.chance(0.1) && faction.settlementIds.length > 0) {
+      this.spawnScout(faction);
+    }
+
     // Settlement expansion: cheap Monte Carlo approach (5 random sites, pick best)
     if (this.rng.chance(0.1) && faction.settlementIds.length < 6) {
       // 10% chance per update to expand if below 6 settlements
-      // In full implementation, would place new settlement here
+      // TODO Phase 2b: call findBestExpansionSite() and foundSettlement()
     }
 
     // Military scaling: garrison = pop * 0.01 * tech_mult
@@ -5577,6 +5596,111 @@ export class RegionSim {
       if (this.day - rival.lastEnvoyDay >= 365) {
         // Placeholder: could drive AI decisions here (peace, war, treaties)
         rival.lastEnvoyDay = this.day;
+      }
+    }
+  }
+
+  // ---- Scout System (GDD §6.2: exploratory units for faction AI) ----
+
+  /** Spawn scouts for a faction if it has budget and slots. Called during faction AI update. */
+  private spawnScout(faction: RegionalFaction): Scout | null {
+    if (faction.settlementIds.length === 0) return null;
+    const scoutCount = this.scouts.filter((s) => s.factionId === faction.id).length;
+    if (scoutCount >= 2) return null; // max 2 scouts per faction
+    if (faction.treasury < 5) return null; // costs 5 gold
+
+    // Spawn near random friendly settlement
+    const settlement = this.settlement(faction.settlementIds[this.rng.int(faction.settlementIds.length)]);
+    if (!settlement) return null;
+
+    const scout: Scout = {
+      id: this.nextScoutId++,
+      factionId: faction.id,
+      x: settlement.x + (this.rng.int(5) - 2),
+      y: settlement.y + (this.rng.int(5) - 2),
+      health: 100,
+      maintenanceCost: 5,
+      createdDay: this.day,
+      expireDay: this.day + 200, // 200-day lifespan
+      targetMode: faction.currentGoal ? 'objective' : 'random',
+    };
+
+    // Clamp to map bounds
+    scout.x = Math.max(0, Math.min(100, scout.x));
+    scout.y = Math.max(0, Math.min(100, scout.y));
+
+    this.scouts.push(scout);
+    faction.treasury -= 5;
+    return scout;
+  }
+
+  /** Move a single scout by 2-3 cells toward objective or random direction. */
+  private moveScout(scout: Scout): void {
+    const oldX = scout.x, oldY = scout.y;
+    const faction = this.faction(scout.factionId);
+    if (!faction || !faction.currentGoal) {
+      // Random walk
+      scout.x += this.rng.int(3) - 1;
+      scout.y += this.rng.int(3) - 1;
+    } else {
+      // Move toward unexplored tiles biased by goal
+      const target = this.scoutDestinationTile(scout, faction);
+      if (target) {
+        const dx = target.x - scout.x, dy = target.y - scout.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0) {
+          scout.x += (dx / dist) * 2.5;
+          scout.y += (dy / dist) * 2.5;
+        }
+      } else {
+        // Fallback: random walk
+        scout.x += this.rng.int(3) - 1;
+        scout.y += this.rng.int(3) - 1;
+      }
+    }
+
+    // Clamp to bounds
+    scout.x = Math.max(0, Math.min(100, scout.x));
+    scout.y = Math.max(0, Math.min(100, scout.y));
+
+    // Invalidate faction visibility if moved significantly
+    if (Math.abs(scout.x - oldX) > 0.1 || Math.abs(scout.y - oldY) > 0.1) {
+      // Would invalidate cache here in Phase 2c
+    }
+    void oldX; // suppress unused warning
+  }
+
+  /** Find best tile for scout to explore, biased by goal. Returns nearest unexplored tile. */
+  private scoutDestinationTile(_scout: Scout, faction: RegionalFaction): { x: number; y: number } | null {
+    // Pick random unexplored region, search toward it
+    const targetX = this.rng.int(100), targetY = this.rng.int(100);
+
+    // If goal has settlementBias, prefer tiles matching that type (Phase 2b)
+    if (faction.currentGoal?.settlementBias) {
+      // TODO Phase 2b: use bias to find matching site type
+      void faction.currentGoal.settlementBias;
+    }
+
+    return { x: targetX, y: targetY };
+  }
+
+  /** Update all scouts: move, age, expire. Called during monthly update. */
+  private updateScouts(): void {
+    // Move active scouts
+    for (const scout of this.scouts) {
+      if (this.day < scout.expireDay) {
+        this.moveScout(scout);
+      }
+    }
+
+    // Remove expired scouts
+    this.scouts = this.scouts.filter((s) => this.day < s.expireDay);
+
+    // Attempt to spawn new scouts for factions with budget
+    for (const faction of this.regionalFactions) {
+      if (this.rng.chance(0.1)) {
+        // 10% chance per update to spawn a scout if faction has budget
+        void this.spawnScout(faction); // suppress unused if not yet called
       }
     }
   }
