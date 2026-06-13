@@ -5,7 +5,7 @@
 import type { Simulation, Settler, Building } from '../sim/sim';
 import { buildingDef, traitDef, WORK_KINDS, TUNING, TOWN_TECH_DEFS, formatCurrency } from '../sim/defs';
 import type { ResourceKind, WorkKind } from '../sim/defs';
-import { getMarketPrice } from '../sim/economy';
+import { BASE_PRICES } from '../sim/economy';
 import type { Camera } from './render';
 import type { PaintKind } from '../sim/world';
 import type { Sfx } from './audio';
@@ -865,29 +865,44 @@ export class Hud {
         ${times > 10 ? `<button class="trade-bulk" data-give="${give}" data-get="${get}" data-qty="${times}" title="Max">×${times}</button>` : ''}
       </div>`;
     }).join('');
-    // Sell stock for coin: how the colony banks the cash that founding a town requires
-    const sellable: ResourceKind[] = ['wood', 'stone', 'grain', 'meal', 'clothes', 'weapons'];
-    const sells = sellable.map((kind) => {
-      const price = getMarketPrice(this.sim.economy, kind);
+    // Spot-price arrow: how the current market price compares to the resource's
+    // natural base — ▲ when scarce/bid-up, ▼ when the player has flooded it.
+    const priceTag = (kind: ResourceKind): string => {
+      const spot = this.sim.marketPrice(kind);
+      const base = BASE_PRICES[kind] ?? 10;
+      const ratio = spot / base;
+      const arrow = ratio > 1.08 ? `<span style="color:#6f6">▲</span>`
+        : ratio < 0.92 ? `<span style="color:#f66">▼</span>` : '';
+      return `${formatCurrency(spot)}${arrow}`;
+    };
+    // Sell stock for coin: any good the colony holds can be sold. Prices are
+    // marginal — dumping a big stock floods the market and clears below spot.
+    const sellable = (Object.keys(this.sim.stock) as ResourceKind[])
+      .filter((kind) => (this.sim.stock[kind] ?? 0) >= 5);
+    const sells = sellable.length === 0
+      ? `<p class="insp-skills" style="opacity:0.6">Nothing in surplus to sell.</p>`
+      : sellable.map((kind) => {
       const have = this.sim.stock[kind] ?? 0;
-      const can = have >= 5;
       return `<div class="trade-row">
-        <button class="sell-cash-btn" data-kind="${kind}" data-qty="5"${can ? '' : ' disabled'} title="Shift+click to sell all">5 ${kind} → ${formatCurrency(price * 5)}</button>
-        ${have > 5 ? `<button class="sell-bulk" data-kind="${kind}" data-qty="${have}" title="Sell all ${have}">×all → ${formatCurrency(price * have)}</button>` : ''}
+        <button class="sell-cash-btn" data-kind="${kind}" data-qty="5" title="Shift+click to sell all">5 ${kind} (${priceTag(kind)}/u)</button>
+        ${have > 5 ? `<button class="sell-bulk" data-kind="${kind}" data-qty="${have}" title="Sell all ${have} — marginal price falls as you dump">×all (${have})</button>` : ''}
       </div>`;
     }).join('');
     // Buy essentials with coin — keeps the larder stocked when farms fall short.
     const buyable: ResourceKind[] = ['meal', 'grain', 'wood'];
     const cash = this.sim.economy.cash;
     const buys = buyable.map((kind) => {
-      const price = getMarketPrice(this.sim.economy, kind);
+      const price = this.sim.marketPrice(kind);
       return `<div class="trade-row">
         <button class="buy-cash-btn" data-kind="${kind}" data-qty="5"${cash >= price * 5 ? '' : ' disabled'} title="Shift+click to buy 25">${formatCurrency(price * 5)} → 5 ${kind}</button>
         <button class="buy-cash-btn" data-kind="${kind}" data-qty="25"${cash >= price * 25 ? '' : ' disabled'}>×25 → ${formatCurrency(price * 25)}</button>
       </div>`;
     }).join('');
+    const inflation = this.sim.hasTech('banking')
+      ? ` · inflation ${(this.sim.economy.inflation * 100).toFixed(1)}%`
+      : '';
     return `<p class="insp-skills">BARTER:</p><div class="trade-panel">${offers}</div>` +
-      `<p class="insp-skills">SELL FOR COIN (` + formatCurrency(Math.round(cash)) + `):</p><div class="trade-panel">${sells}</div>` +
+      `<p class="insp-skills">SELL FOR COIN (` + formatCurrency(Math.round(cash)) + inflation + `):</p><div class="trade-panel">${sells}</div>` +
       `<p class="insp-skills">BUY WITH COIN:</p><div class="trade-panel">${buys}</div>`;
   }
 

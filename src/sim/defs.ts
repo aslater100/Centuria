@@ -415,10 +415,18 @@ export const TUNING = {
   wellInfectionReduction: 0.1,
   // Watchtower
   watchtowerWarningDays: 1,   // extra days of warning before raid arrives
-  // Market trading
+  // Market trading — dynamic supply/demand pricing
   marketPriceRecalcDays: 1,   // recalc price modifiers at most once per N game-days
   marketPriceFloor: 0.25,     // minimum price multiplier
   marketPriceCap: 4.0,        // maximum price multiplier
+  marketSellElasticity: 0.012,  // how far one sold unit pushes a resource's price down
+  marketBuyElasticity: 0.012,   // how far one bought unit pushes a resource's price up
+  marketRecoveryPerDay: 0.15,   // fraction of the gap back to 1.0 that prices heal each day
+  // Town-tier inflation (gated by the Banking tech → dynamicPricing mechanic)
+  inflationCashAnchor: 90,      // target cash per capita; above this, inflation builds
+  inflationDriftPerDay: 0.05,   // fraction of the gap to target inflation closed each day
+  inflationMin: -0.1,           // deflation floor (−10%)
+  inflationMax: 0.4,            // inflation ceiling (+40%)
   // Guard defense
   guardDetectionRange: 5,     // tiles; guards see enemies at this distance
   guardPostRange: 3,          // tiles; guard stays within this radius of post when garrisoned
