@@ -159,6 +159,7 @@ export class Hud {
   private logBox: HTMLElement;
   private prioBox: HTMLElement;
   private gameOverBox: HTMLElement;
+  private regionBottomBar: HTMLElement;
   private menuBox: HTMLElement;
   private showPriorities = false;
   private showResources = false;
@@ -186,6 +187,7 @@ export class Hud {
     this.prioBox = el('div', 'priorities hidden', root);
     this.gameOverBox = el('div', 'gameover hidden', root);
     this.menuBox = el('div', 'menu hidden', root);
+    this.regionBottomBar = el('div', 'region-bottombar hidden', root);
 
     this.buildBuildBar();
     this.techPanel = new TechPanel(root, sim);
@@ -564,8 +566,48 @@ export class Hud {
   setRegionMode(on: boolean): void {
     this.buildBar.classList.toggle('hidden', on);
     this.inspector.classList.toggle('hidden', on);
+    this.regionBottomBar.classList.toggle('hidden', !on);
     this.prioBox.classList.add('hidden');
     if (on) this.showPriorities = false;
+  }
+
+  drawRegionBottomBar(r: import('../sim/region').RegionSim): void {
+    if (this.regionBottomBar.classList.contains('hidden')) return;
+    const alerts: string[] = [];
+    if (r.stateProclaimed) {
+      const hungry = r.settlements.filter((t) => t.factionId === r.playerFactionId && t.food < r.popOf(t) * 3);
+      if (hungry.length) alerts.push(`<span class="rbb-alert">⚠ ${hungry.length} town${hungry.length > 1 ? 's' : ''} hungry</span>`);
+      const striking = r.settlements.filter((t) => t.factionId === r.playerFactionId && r.day < t.strikeUntil);
+      if (striking.length) alerts.push(`<span class="rbb-alert">⚡ ${striking.length} on strike</span>`);
+      const delta = Math.round(r.treasuryDeltaMonth);
+      if (delta < -500) alerts.push(`<span class="rbb-alert">📉 treasury declining</span>`);
+    }
+    this.setHtml(this.regionBottomBar,
+      `<div class="rbb-alerts">${alerts.join(' ')}</div>` +
+      `<div class="rbb-shortcuts">` +
+      `<button class="rbb-btn" id="rbb-towns" title="Settlement list (S)">S: Towns</button>` +
+      `<button class="rbb-btn" id="rbb-routes" title="Route network (R)">R: Routes</button>` +
+      `<button class="rbb-btn" id="rbb-econ" title="Economy panel (E)">E: Economy</button>` +
+      `<button class="rbb-btn" id="rbb-tech" title="Research tree (T)">T: Research</button>` +
+      `</div>` +
+      `<div class="rbb-speed">` +
+      `<button class="rbb-speed-btn" id="rbb-pause" title="Space">${this.paused ? '▶ Play' : '⏸ Pause'}</button>` +
+      `<button class="rbb-speed-btn${this.speed === 1 ? ' active' : ''}" id="rbb-s1" title="1">1×</button>` +
+      `<button class="rbb-speed-btn${this.speed === 3 ? ' active' : ''}" id="rbb-s2" title="2">2×</button>` +
+      `<button class="rbb-speed-btn${this.speed === 8 ? ' active' : ''}" id="rbb-s3" title="3">3×</button>` +
+      `</div>`,
+    );
+    this.regionBottomBar.querySelector('#rbb-pause')!.addEventListener('click', () => { this.paused = !this.paused; });
+    this.regionBottomBar.querySelector('#rbb-s1')!.addEventListener('click', () => { this.speed = 1; this.paused = false; });
+    this.regionBottomBar.querySelector('#rbb-s2')!.addEventListener('click', () => { this.speed = 3; this.paused = false; });
+    this.regionBottomBar.querySelector('#rbb-s3')!.addEventListener('click', () => { this.speed = 8; this.paused = false; });
+    // S/R/E/T shortcuts — dispatch synthetic key events so the main keydown
+    // handler handles them (single source of truth for panel toggles).
+    const dispatch = (key: string) => window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    this.regionBottomBar.querySelector('#rbb-towns')!.addEventListener('click', () => dispatch('s'));
+    this.regionBottomBar.querySelector('#rbb-routes')!.addEventListener('click', () => dispatch('r'));
+    this.regionBottomBar.querySelector('#rbb-econ')!.addEventListener('click', () => dispatch('e'));
+    this.regionBottomBar.querySelector('#rbb-tech')!.addEventListener('click', () => dispatch('t'));
   }
 
   drawRegionTopBar(r: import('../sim/region').RegionSim, dioramaOpen: boolean): void {
@@ -600,10 +642,20 @@ export class Hud {
     if (menuBtn) menuBtn.onclick = () => this.toggleMenu();
   }
 
+  resetLogLen(): void { this.lastLogLen = 0; }
+
   regionLog(r: import('../sim/region').RegionSim): void {
     if (r.log.length === this.lastLogLen) return;
     this.lastLogLen = r.log.length;
-    this.setHtml(this.logBox, r.log.slice(-6).map((l) => `<div class="log-${l.kind}">d${l.day} · ${l.text}</div>`).reverse().join(''));
+    const DAYS_PER_YEAR = 360;
+    const START_YEAR = 1900;
+    const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
+    const label = (day: number): string => {
+      const y = START_YEAR + Math.floor(day / DAYS_PER_YEAR);
+      const s = SEASONS[Math.floor((day % DAYS_PER_YEAR) / (DAYS_PER_YEAR / 4)) % 4];
+      return `${s} ${y}`;
+    };
+    this.setHtml(this.logBox, r.log.slice(-8).map((l) => `<div class="log-${l.kind}">${label(l.day)} · ${l.text}</div>`).reverse().join(''));
   }
 
   update(): void {

@@ -198,7 +198,7 @@ export interface CityConstruction {
 }
 
 /** Population at which a town (beyond the capital) opens to direct management. */
-export const CITY_MANAGEMENT_POP = 400;
+export const CITY_MANAGEMENT_POP = 100;
 /** Repainting a town's development focus costs a survey and some bureaucracy. */
 export const FOCUS_CHANGE_COST = 10;
 
@@ -2045,9 +2045,10 @@ export class RegionSim {
       this.exchangeRates[`0:${rivalId}`] = 1.0; // start at parity
       this.exchangeRates[`${rivalId}:0`] = 1.0;
 
-      // Each rival gets an initial settlement in an unexplored area
-      // This is simplified; in a full implementation, they'd have expedition logic
-      // For now, just mark that they exist and will expand as part of AI
+      // Note: first settlements are planted via updateFactionAI once the AI
+      // scheduler first fires; we give them extra starting gold so they can
+      // afford to expand immediately rather than saving up.
+      faction.treasury = 120 + this.aiRng.int(60); // enough to found on first update
     }
   }
 
@@ -2614,10 +2615,13 @@ export class RegionSim {
     return null;
   }
 
-  /** The GDD §2.2 connection requirement, made real by the route graph. */
+  /** The GDD §2.2 connection requirement: every player-faction settlement is
+   *  reachable from the first through the route graph. Rival settlements are
+   *  excluded — they manage their own networks. */
   connectedToAll(): boolean {
-    if (this.settlements.length < 2) return true;
-    const start = this.settlements[0].id;
+    const playerTowns = this.settlements.filter((t) => t.factionId === this.playerFactionId);
+    if (playerTowns.length < 2) return true;
+    const start = playerTowns[0].id;
     const seen = new Set([start]);
     const queue = [start];
     while (queue.length > 0) {
@@ -2629,7 +2633,7 @@ export class RegionSim {
         queue.push(other);
       }
     }
-    return this.settlements.every((t) => seen.has(t.id));
+    return playerTowns.every((t) => seen.has(t.id));
   }
 
   /** A relief line (M6c): a built link — road or rail, in any state — to a
@@ -2702,7 +2706,7 @@ export class RegionSim {
   static fromTown(sim: Simulation, expeditionPop: number, expeditionFood: number, expeditionWood: number): RegionSim {
     // The region inherits the town's world: same map, same weather, one truth.
     const region = new RegionSim(sim.rng, sim.minute, sim.regionMap, sim.weather);
-    region.log = [...sim.log];
+    region.log = sim.log.slice(-3); // carry only the most recent town events
     // Transfer town's cash to regional treasury
     region.treasury = Math.max(0, Math.round(sim.economy.cash));
     region.prevMonthTreasury = region.treasury; // seed so the first delta reads ~0
@@ -2909,14 +2913,31 @@ export class RegionSim {
         t.grievance = Math.max(0, Math.min(100, t.grievance + pressure));
       }
       this.updateMarket(t);
-      // Starvation
+      // Starvation — halved death rate vs original; player-owned towns get one
+      // emergency grain purchase from treasury before deaths begin (500 food
+      // costs £10; at least one tick of relief per starvation event).
       if (t.food < 0) {
-        const starved = Math.min(pop * 0.02, -t.food / 10);
-        this.removePop(t, starved);
-        t.food = 0;
-        if (starved > 0.5 && this.rng.chance(0.2)) {
-          this.addLog(`Hunger stalks ${t.name} — the granary is empty.`, 'bad');
-          this.townEvent(t, 'Granary empty — hunger in the streets.', 'bad');
+        if (t.factionId === this.playerFactionId && this.treasury >= 10) {
+          const relief = Math.min(500, this.popOf(t) * 2);
+          t.food += relief;
+          this.treasury -= 10;
+          if (t.food < 0) { // still hungry after relief
+            const starved = Math.min(pop * 0.01, -t.food / 20);
+            this.removePop(t, starved);
+            t.food = 0;
+            this.addLog(`Famine in ${t.name} — emergency grain bought, but not enough.`, 'bad');
+            this.townEvent(t, 'Famine — emergency rations exhausted.', 'bad');
+          } else {
+            this.addLog(`Emergency grain purchased for ${t.name} (£10 from treasury).`, 'info');
+          }
+        } else {
+          const starved = Math.min(pop * 0.01, -t.food / 20);
+          this.removePop(t, starved);
+          t.food = 0;
+          if (starved > 0.5 && this.rng.chance(0.2)) {
+            this.addLog(`Hunger stalks ${t.name} — the granary is empty.`, 'bad');
+            this.townEvent(t, 'Granary empty — hunger in the streets.', 'bad');
+          }
         }
       }
     }
@@ -3126,7 +3147,7 @@ export class RegionSim {
       const need = this.popOf(needy) * 0.75 * 20 - needy.food; // 20-day buffer target
       if (need <= 0) continue;
       const donor = [...this.settlements]
-        .filter((t) => t !== needy && t.food > this.popOf(t) * 0.75 * 60)
+        .filter((t) => t !== needy && t.factionId === needy.factionId && t.food > this.popOf(t) * 0.75 * 60)
         .sort((a, b) => b.food - a.food)[0];
       if (!donor) continue;
       const surplus = donor.food - this.popOf(donor) * 0.75 * 60;
@@ -3660,6 +3681,23 @@ export class RegionSim {
         this.addLog(`${def.name} strikes ${t.name} — ${def.desc}`, good ? 'good' : 'bad');
       }
     }
+  }
+
+  // ---- Emergency Aid ----
+
+  /** Spend treasury to send emergency grain to a starving player-owned town.
+   *  Cost: £10 per 500 food (minimum viable ration for the settlement's pop). */
+  sendFoodAid(townId: number): boolean {
+    const t = this.settlement(townId);
+    if (!t || t.factionId !== this.playerFactionId) return false;
+    const cost = 10;
+    if (this.treasury < cost) return false;
+    const amount = Math.max(200, Math.round(this.popOf(t) * 5));
+    t.food += amount;
+    this.treasury -= cost;
+    this.addLog(`Emergency grain convoy reaches ${t.name} (+${amount} food, −` + formatCurrency(cost) + `).`, 'good');
+    this.townEvent(t, `Emergency grain convoy arrived.`, 'good');
+    return true;
   }
 
   // ---- Phase 5: Local Policies ----
@@ -4206,6 +4244,18 @@ export class RegionSim {
       'good',
     );
     if (mayor) mayor.bio.push(`Signed the Regional Charter of ${this.stateName}, ${this.year}.`);
+    // Bootstrap any rival factions that haven't founded yet — they appear on
+    // the map the same moment the player's charter is signed.
+    for (const faction of this.regionalFactions) {
+      if (faction.id === this.playerFactionId) continue;
+      if (faction.settlementIds.length === 0 && faction.treasury >= 50) {
+        const site = this.findBestExpansionSite(faction, 8);
+        if (site && site.score > 0) {
+          const s = this.foundSettlement(faction, site.x, site.y);
+          if (s) { faction.capital = s.id; faction.treasury -= 50; }
+        }
+      }
+    }
   }
 
   // ---- Faction system (GDD §5.3) ----
@@ -6320,9 +6370,12 @@ export class RegionSim {
     // factions expand only occasionally so the region doesn't fill instantly.
     // Difficulty sets both the per-update chance and the ceiling on territory.
     const canAfford = faction.treasury >= 50;
+    // Bootstrap: faction with no settlements always tries to plant its first one.
+    // Expansion: only possible when the faction has enough population to spare 8
+    // settlers for a new outpost (founding pulls people from the largest town).
     const wantsToExpand = faction.settlementIds.length === 0
       ? canAfford
-      : (this.aiRng.chance(knobs.expandChance) && faction.settlementIds.length < knobs.settlementCap && canAfford);
+      : (factionPop >= 16 && this.aiRng.chance(knobs.expandChance) && faction.settlementIds.length < knobs.settlementCap && canAfford);
     if (wantsToExpand) {
       const site = this.findBestExpansionSite(faction, faction.settlementIds.length === 0 ? 8 : 5);
       if (site && site.score > 0) {
@@ -6631,19 +6684,16 @@ export class RegionSim {
       }
     }
 
-    // Regional factions: staggered AI so not every faction acts each month
-    // (keeps the per-tick cost O(1) on average). Each faction generates goals,
-    // founds settlements, spawns scouts, advances tech, and reacts to conflicts.
-    // Rivals are a post-statehood regional-competition feature — before the State
-    // is proclaimed the player is still a lone town finding its feet, and rival
-    // settlements would pollute the pre-statehood settlement list and gates.
-    if (this.stateProclaimed) {
-      for (const faction of this.regionalFactions) {
-        if (faction.id === this.playerFactionId) continue;
-        if (this.day - faction.lastUpdateDay >= faction.updateFrequency) {
-          this.updateFactionAI(faction);
-          faction.lastUpdateDay = this.day;
-        }
+    // Regional factions: staggered AI so not every faction acts each month.
+    // Full faction AI only runs after statehood; rivals are bootstrapped
+    // immediately in completeIncorporation() so they appear the moment the
+    // player's charter ceremony fires.
+    for (const faction of this.regionalFactions) {
+      if (faction.id === this.playerFactionId) continue;
+      if (!this.stateProclaimed) continue;
+      if (this.day - faction.lastUpdateDay >= faction.updateFrequency) {
+        this.updateFactionAI(faction);
+        faction.lastUpdateDay = this.day;
       }
     }
   }
