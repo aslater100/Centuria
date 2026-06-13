@@ -5802,7 +5802,13 @@ export class RegionSim {
     // Move active scouts
     for (const scout of this.scouts) {
       if (this.day < scout.expireDay) {
+        const oldX = scout.x, oldY = scout.y;
         this.moveScout(scout);
+
+        // Invalidate faction visibility if scout moved
+        if (Math.abs(scout.x - oldX) > 0.1 || Math.abs(scout.y - oldY) > 0.1) {
+          this.invalidateFactionVisibility(scout.factionId);
+        }
       }
     }
 
@@ -5813,8 +5819,79 @@ export class RegionSim {
     for (const faction of this.regionalFactions) {
       if (this.rng.chance(0.1)) {
         // 10% chance per update to spawn a scout if faction has budget
-        void this.spawnScout(faction); // suppress unused if not yet called
+        this.spawnScout(faction);
       }
     }
+  }
+
+  // ---- Faction Visibility Cache (Phase 2c: deferred per-faction visibility) ----
+
+  /** Visibility cache: tiles visible to each faction (lazily computed, weekly rebuild). */
+  private factionVisibilityCache: Map<number, Set<string>> = new Map();
+  private lastVisibilityRebuild: Map<number, number> = new Map();
+
+  /** Check if a tile is visible to a faction (cache hits are O(1)). */
+  isVisibleToFaction(x: number, y: number, factionId: number): boolean {
+    // Rebuild cache if stale (weekly rebuild)
+    const lastRebuild = this.lastVisibilityRebuild.get(factionId) ?? -999;
+    if (this.day - lastRebuild >= 7) {
+      this.rebuildFactionVisibility(factionId);
+    }
+
+    const cache = this.factionVisibilityCache.get(factionId);
+    return cache ? cache.has(`${Math.round(x)},${Math.round(y)}`) : false;
+  }
+
+  /** Mark faction visibility cache as dirty (rebuild on next check). */
+  private invalidateFactionVisibility(factionId: number): void {
+    this.lastVisibilityRebuild.set(factionId, -999); // force rebuild
+  }
+
+  /** Rebuild faction visibility cache from settlements + scouts. O(settlements² + scouts × radius²). */
+  private rebuildFactionVisibility(factionId: number): void {
+    const faction = this.faction(factionId);
+    if (!faction) return;
+
+    const cache = new Set<string>();
+    const baseRadius = 2;
+
+    // Settlement visibility: 2 + tech bonus
+    for (const settlementId of faction.settlementIds) {
+      const settlement = this.settlement(settlementId);
+      if (!settlement) continue;
+
+      const radius = baseRadius;
+      const r2 = (radius + 1) ** 2;
+      for (let dx = -(radius + 1); dx <= radius + 1; dx++) {
+        for (let dy = -(radius + 1); dy <= radius + 1; dy++) {
+          if (dx * dx + dy * dy <= r2) {
+            const nx = settlement.x + dx, ny = settlement.y + dy;
+            if (nx >= 0 && nx <= 100 && ny >= 0 && ny <= 100) {
+              cache.add(`${Math.round(nx)},${Math.round(ny)}`);
+            }
+          }
+        }
+      }
+    }
+
+    // Scout visibility: 5-cell radius
+    for (const scout of this.scouts) {
+      if (scout.factionId !== factionId) continue;
+      const radius = 5;
+      const r2 = radius * radius;
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dy = -radius; dy <= radius; dy++) {
+          if (dx * dx + dy * dy <= r2) {
+            const nx = scout.x + dx, ny = scout.y + dy;
+            if (nx >= 0 && nx <= 100 && ny >= 0 && ny <= 100) {
+              cache.add(`${Math.round(nx)},${Math.round(ny)}`);
+            }
+          }
+        }
+      }
+    }
+
+    this.factionVisibilityCache.set(factionId, cache);
+    this.lastVisibilityRebuild.set(factionId, this.day);
   }
 }
