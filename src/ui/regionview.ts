@@ -754,6 +754,8 @@ export class RegionView {
     }
   }
 
+  private static readonly WATER_BIOMES = new Set(['sea', 'lake', 'river']);
+
   /** The generated land itself, in 8-bit blocks: this map IS the world. */
   private drawTerrain(W: number, H: number): void {
     const { g, region } = this;
@@ -762,6 +764,12 @@ export class RegionView {
     const m = 60;
     const cw = (W - 2 * m) / N;
     const ch = (H - 2 * m) / N;
+    const isWater = (x: number, y: number): boolean =>
+      x >= 0 && y >= 0 && x < N && y < N && RegionView.WATER_BIOMES.has(map.at(x, y).biome);
+    const touchesLand = (x: number, y: number): boolean =>
+      !isWater(x - 1, y) || !isWater(x + 1, y) || !isWater(x, y - 1) || !isWater(x, y + 1);
+    const touchesWater = (x: number, y: number): boolean =>
+      isWater(x - 1, y) || isWater(x + 1, y) || isWater(x, y - 1) || isWater(x, y + 1);
     for (let y = 0; y < N; y++) {
       for (let x = 0; x < N; x++) {
         const c = map.at(x, y);
@@ -785,6 +793,28 @@ export class RegionView {
         g.fillStyle = col;
         g.fillRect(bx, by, bw, bh);
 
+        const water = RegionView.WATER_BIOMES.has(c.biome);
+        // Coastal shallows: water cells touching land get a turquoise rim — the
+        // single biggest readability win, giving the map a real coastline.
+        if (water && c.biome !== 'river' && touchesLand(x, y)) {
+          g.fillStyle = 'rgba(86,150,160,0.5)';
+          g.fillRect(bx, by, bw, bh);
+        }
+        // Beach: land cells at the water's edge get a sandy lip.
+        if (!water && c.biome !== 'mountains' && touchesWater(x, y)) {
+          g.fillStyle = 'rgba(196,176,120,0.5)';
+          g.fillRect(bx, by, bw, Math.max(1, Math.ceil(bh * 0.55)));
+        }
+        // Subtle per-cell dither so flat colour bands read as textured ground.
+        if (!water) {
+          const hash = (x * 73856093 ^ y * 19349663) >>> 0;
+          const n = (hash % 5) - 2; // -2..+2
+          if (n !== 0) {
+            g.fillStyle = n > 0 ? `rgba(255,250,235,${n * 0.018})` : `rgba(0,0,0,${-n * 0.022})`;
+            g.fillRect(bx, by, bw, bh);
+          }
+        }
+
         // Elevation-based lighting: NW-lit hillshade
         const north = y > 0 ? map.at(x, y - 1).elevation : c.elevation;
         const west  = x > 0 ? map.at(x - 1, y).elevation : c.elevation;
@@ -797,13 +827,29 @@ export class RegionView {
           g.fillRect(bx, by, bw, bh);
         }
 
-        // Forest texture: scattered tree dots
+        // Forest canopy: layered blobs — dark trunks under lit crowns — so
+        // woodland reads as foliage rather than a flat green block.
         if (c.biome === 'forest') {
-          const seed = (x * 17 + y * 31) % 7;
-          if (seed < 3) {
-            g.fillStyle = 'rgba(20,40,16,0.55)';
-            g.fillRect(bx + (seed * 3) % bw, by + (seed * 5) % bh, Math.max(1, bw * 0.4), Math.max(1, bh * 0.4));
+          const r = Math.max(2, bw * 0.26);
+          for (let k = 0; k < 3; k++) {
+            const h = (x * 17 + y * 31 + k * 101) >>> 0;
+            const ox = bx + (h % Math.max(1, Math.floor(bw - r)));
+            const oy = by + ((h >> 4) % Math.max(1, Math.floor(bh - r)));
+            g.fillStyle = 'rgba(18,36,14,0.5)';
+            g.fillRect(ox, oy + 1, r, r); // shadow
+            g.fillStyle = 'rgba(58,96,46,0.55)';
+            g.fillRect(ox, oy, r, r); // lit crown
           }
+        }
+        // Plains: sparse grass tufts for a meadow texture.
+        if (c.biome === 'plains' && (x * 13 + y * 7) % 6 < 2) {
+          g.fillStyle = 'rgba(120,134,78,0.4)';
+          g.fillRect(bx + (x % 3) + 1, by + bh * 0.4, Math.max(1, bw * 0.18), Math.max(1, bh * 0.4));
+        }
+        // Hills: a few scattered rocks/scrub dots.
+        if (c.biome === 'hills' && (x * 11 + y * 5) % 5 < 2) {
+          g.fillStyle = 'rgba(40,36,28,0.32)';
+          g.fillRect(bx + bw * 0.5, by + bh * 0.45, Math.max(1, bw * 0.22), Math.max(1, bh * 0.22));
         }
         // Mountain snow caps on highest peaks
         if (c.biome === 'mountains' && c.elevation > 0.82) {

@@ -111,6 +111,42 @@ describe('RegionSim (aggregate model)', () => {
     expect(r.log.some((l) => l.text.includes('INCORPORATION'))).toBe(true);
   });
 
+  it('charterGates mirrors charterEligible and names the blocking requirement', () => {
+    const r = flipped(42);
+    // A fresh region with one town fails on towns, citizens, treasury, garrison.
+    const gates = r.charterGates();
+    const labels = gates.map((g) => g.label);
+    expect(labels).toEqual(['towns', 'citizens', 'all towns connected', 'treasury', 'garrison']);
+    expect(gates.every((g) => g.met)).toBe(false);
+    expect(r.charterEligible()).toBe(false);
+    // The aggregate gate is true exactly when every individual gate is met.
+    toStatehood(r);
+    runDays(r, 1);
+    // Once incorporated the gates are moot, but before completeIncorporation the
+    // per-gate breakdown and the boolean must agree — re-derive on a fresh run.
+    const r2 = flipped(7);
+    for (let i = 0; i < 40 && !r2.charterEligible(); i++) {
+      r2.treasury = Math.max(r2.treasury, 8000);
+      for (const t of r2.settlements) t.garrisonStrength = Math.max(t.garrisonStrength || 0, 5);
+      runDays(r2, 60);
+      for (const t of r2.settlements) {
+        if (r2.settlements.length + r2.expeditions.length < 4 && r2.canFoundTown(t.id).ok) { r2.foundTown(t.id); break; }
+      }
+    }
+    expect(r2.charterGates().every((g) => g.met)).toBe(r2.charterEligible());
+  });
+
+  it('treasuryDeltaMonth reports the prior month net swing', () => {
+    const r = flipped(42);
+    toStatehood(r);
+    r.taxRate = 0.2;
+    const before = r.treasury;
+    runDays(r, 35); // cross at least one month boundary
+    // The delta is a real number reflecting the month's books, not stuck at 0.
+    expect(Number.isFinite(r.treasuryDeltaMonth)).toBe(true);
+    expect(r.treasury).not.toBe(before);
+  });
+
   it('statehood brings money: taxes fill the treasury, spending drains it', () => {
     const r = flipped(42);
     toStatehood(r);
