@@ -5675,10 +5675,10 @@ export class RegionSim {
       if (faction.currentGoal) {
         const succeeded = faction.currentGoal.successCondition(faction, this);
         if (succeeded) {
-          this.addLog(`${faction.name} achieves goal: "${faction.currentGoal.objective}".`, 'good');
+          this.addLog(`${faction.name} achieves ambition: "${faction.currentGoal.objective}". Their power grows.`, 'good');
           faction.treasury += 100; // prestige bonus
-        } else if (this.day > faction.currentGoal.targetYear) {
-          this.addLog(`${faction.name} abandons goal: "${faction.currentGoal.objective}" (timeout).`, 'info');
+        } else if (this.day > faction.currentGoal.targetYear * DAYS_PER_YEAR + START_YEAR * DAYS_PER_YEAR) {
+          this.addLog(`${faction.name} abandons goal: "${faction.currentGoal.objective.toLowerCase()}" (timeout).`, 'info');
         }
       }
 
@@ -5690,6 +5690,9 @@ export class RegionSim {
           'info',
         );
       }
+    } else if (faction.currentGoal) {
+      // Evaluate progress toward current goal (for milestone announcements)
+      this.evaluateGoalProgress(faction);
     }
 
     // Calculate faction population from its settlements
@@ -5722,6 +5725,141 @@ export class RegionSim {
 
     // Military scaling: garrison = pop * 0.01 * tech_mult
     faction.militaryStrength = Math.round(factionPop * 0.01 * (1 + faction.techProgress * 0.05));
+
+    // Check for goal conflicts with other factions (Phase 3a)
+    this.checkFactionGoalConflicts(faction);
+  }
+
+  /** Detect and escalate goal conflicts between factions (Phase 3a).
+   *  When two factions have similar/conflicting goals, tensions rise and raids may occur. */
+  private checkFactionGoalConflicts(faction: RegionalFaction): void {
+    if (!faction.currentGoal) return;
+
+    for (const other of this.regionalFactions) {
+      if (other.id === faction.id || !other.currentGoal) continue;
+
+      // Calculate goal conflict severity (0–100)
+      const conflict = this.evaluateGoalConflict(faction.currentGoal, other.currentGoal);
+      if (conflict < 30) continue; // No significant conflict
+
+      // Escalate tensions: rival raids friendly settlements or competes for resources
+      const settlementDist = Math.min(
+        ...faction.settlementIds.map(fid => {
+          const fs = this.settlement(fid);
+          if (!fs) return 999;
+          return Math.min(
+            ...other.settlementIds.map(oid => {
+              const os = this.settlement(oid);
+              if (!os) return 999;
+              return Math.hypot(fs.x - os.x, fs.y - os.y);
+            })
+          );
+        })
+      );
+
+      // Only escalate if factions are neighbors (within 40 map units)
+      if (settlementDist > 40) continue;
+
+      const escalationChance = conflict / 100 * 0.05; // 0–5% per month
+      if (this.rng.chance(escalationChance)) {
+        // Log the conflict
+        const conflictReason =
+          faction.currentGoal.id === other.currentGoal.id
+            ? `both pursue "${faction.currentGoal.objective.toLowerCase()}"`
+            : 'competing interests';
+        this.addLog(
+          `REGIONAL TENSION: ${faction.name} and ${other.name} clash — ${conflictReason}.`,
+          'bad'
+        );
+
+        // Occasional raids if conflict is severe
+        if (conflict > 70 && this.rng.chance(0.1)) {
+          const targetSettlements = faction.settlementIds
+            .map(id => this.settlement(id))
+            .filter(s => s && settlementDist < 50); // only nearby settlements
+          if (targetSettlements.length > 0) {
+            const target = targetSettlements[this.rng.int(targetSettlements.length)];
+            if (target) {
+              const losses = 2 + this.rng.int(4);
+              target.cohorts.bands[1] -= losses;
+              target.grievance = Math.min(100, target.grievance + 15);
+              this.addLog(
+                `RAID: ${other.name} raiding parties strike ${target.name} — ${losses} workers lost.`,
+                'bad'
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** Calculate goal conflict severity between two faction goals (0–100).
+   *  Higher values indicate more direct conflict. */
+  private evaluateGoalConflict(goal1: FactionGoal, goal2: FactionGoal): number {
+    // Same goal = maximum conflict
+    if (goal1.id === goal2.id) return 100;
+
+    // Related goal pairs (military goals, expansion goals, economic goals conflict)
+    const militaryGoals = ['military_supremacy', 'resource_monopoly'];
+    const expansionGoals = ['territorial_expansion', 'convert_heathen'];
+    const economicGoals = ['enrich_treasury', 'trade_dominance'];
+
+    const goal1Type = militaryGoals.includes(goal1.id) ? 'military' :
+                      expansionGoals.includes(goal1.id) ? 'expansion' :
+                      economicGoals.includes(goal1.id) ? 'economic' : 'other';
+    const goal2Type = militaryGoals.includes(goal2.id) ? 'military' :
+                      expansionGoals.includes(goal2.id) ? 'expansion' :
+                      economicGoals.includes(goal2.id) ? 'economic' : 'other';
+
+    if (goal1Type === goal2Type && goal1Type !== 'other') return 60; // Same type = high conflict
+    if (goal1Type !== 'other' && goal2Type !== 'other') return 30; // Different economic types = some conflict
+    return 20; // Minor conflict by default
+  }
+
+  /** Evaluate goal progress and announce successes/failures (Phase 3a: Presentation).
+   *  Called during annual goal checks to provide player feedback on rival ambitions. */
+  private evaluateGoalProgress(faction: RegionalFaction): void {
+    if (!faction.currentGoal) return;
+
+    const goal = faction.currentGoal;
+    const succeeded = goal.successCondition(faction, this);
+    const targetYear = goal.targetYear;
+    const yearsLeft = targetYear - this.year;
+
+    // Announce major milestones (75% and 90% toward target year)
+    const milestoneYear75 = goal.generatedYear + Math.round((targetYear - goal.generatedYear) * 0.75);
+    const milestoneYear90 = goal.generatedYear + Math.round((targetYear - goal.generatedYear) * 0.9);
+
+    if (this.year === milestoneYear75 && !succeeded) {
+      this.addLog(
+        `${faction.name} progresses: "${goal.objective.toLowerCase()}" nearing completion.`,
+        'info'
+      );
+    } else if (this.year === milestoneYear90 && !succeeded) {
+      this.addLog(
+        `${faction.name} approaches final phase: "${goal.objective.toLowerCase()}" almost within grasp.`,
+        'info'
+      );
+    }
+
+    // Success announcement
+    if (succeeded) {
+      this.addLog(
+        `${faction.name} achieves ambition: "${goal.objective}". Their power grows.`,
+        'good'
+      );
+      return; // Will be replaced by new goal next update
+    }
+
+    // Failure: goal becomes impossible or timeout
+    if (yearsLeft <= 0) {
+      this.addLog(
+        `${faction.name} abandons goal: "${goal.objective.toLowerCase()}" (unable to achieve).`,
+        'info'
+      );
+      return; // Will be replaced by new goal next update
+    }
   }
 
   /** Monthly update hook for faction AI: check if any faction is due for update.
