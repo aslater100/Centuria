@@ -49,7 +49,10 @@ function bootSim(): { sim: Simulation; region: RegionSim | null; needsDesign: bo
         const d = JSON.parse(data);
         if (d.v === 2 && d.mode === 'region') {
           const town = Simulation.deserialize(d.town);
-          return { sim: town, region: RegionSim.deserialize(d.region, town), needsDesign: false };
+          const reg = RegionSim.deserialize(d.region, town);
+          // Keep town economy cash consistent with region treasury (Fix 7).
+          town.economy.cash = reg.treasury;
+          return { sim: town, region: reg, needsDesign: false };
         }
         return { sim: Simulation.deserialize(data), region: null, needsDesign: false };
       }

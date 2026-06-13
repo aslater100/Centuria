@@ -183,6 +183,12 @@ export class Renderer {
     const tx1 = Math.min(MAP_W, Math.ceil((vw - ox + TILE * 2) / TILE));
     const ty1 = Math.min(MAP_H, Math.ceil((vh - oy + TILE * 2) / TILE));
 
+    // Stockpile fill metrics — computed once per frame, shared across all zone tiles.
+    const stockCap = sim.stockpileCapacity();
+    const stockFill = stockCap > 0 ? Math.min(1, sim.totalRawStock() / stockCap) : 0;
+    const stockDom = sim.stock.grain >= sim.stock.wood && sim.stock.grain >= sim.stock.stone ? '#e8b84b'
+      : sim.stock.wood >= sim.stock.stone ? '#8b5e3c' : '#9e9e9e';
+
     // Pass 1: ground (grass clusters via coarse hash so tones form patches),
     // water, soil, roads. Trees draw in pass 2 so canopies overlap properly.
     for (let y = ty0; y < ty1; y++) {
@@ -208,7 +214,15 @@ export class Renderer {
         }
         if (t.road) g.drawImage(sprites.roads[t.road], px, py, bw, bw);
         else if (t.roadPlan) g.drawImage(sprites.roadPlans[t.roadPlan], px, py);
-        if (t.stockpileZone && !t.road) g.drawImage(sprites.stockpileZone, px, py);
+        if (t.stockpileZone && !t.road) {
+          g.drawImage(sprites.stockpileZone, px, py);
+          if (stockFill > 0.05) {
+            g.globalAlpha = stockFill * 0.35;
+            g.fillStyle = stockDom;
+            g.fillRect(px + 1, py + 1, TILE - 2, Math.round((TILE - 2) * stockFill));
+            g.globalAlpha = 1;
+          }
+        }
         if (t.trapZone) g.drawImage(sprites.trapZone, px, py);
         if (t.wallPlan) g.drawImage(sprites.wallPlan, px, py);
         if (t.gatePlan) g.drawImage(sprites.gatePlan, px, py);
@@ -228,7 +242,14 @@ export class Renderer {
             (sim.world.inBounds(x, y + 1) && (sim.world.at(x, y + 1).wall || sim.world.at(x, y + 1).gate) ? 4 : 0) |
             (sim.world.inBounds(x - 1, y) && (sim.world.at(x - 1, y).wall || sim.world.at(x - 1, y).gate) ? 8 : 0);
           g.drawImage(sprites.palisadeVariants[mask], px, py);
-        } else if (t.gate) g.drawImage(sprites.gate, px, py);
+        } else if (t.gate) {
+          const gmask =
+            (sim.world.inBounds(x, y - 1) && (sim.world.at(x, y - 1).wall || sim.world.at(x, y - 1).gate) ? 1 : 0) |
+            (sim.world.inBounds(x + 1, y) && (sim.world.at(x + 1, y).wall || sim.world.at(x + 1, y).gate) ? 2 : 0) |
+            (sim.world.inBounds(x, y + 1) && (sim.world.at(x, y + 1).wall || sim.world.at(x, y + 1).gate) ? 4 : 0) |
+            (sim.world.inBounds(x - 1, y) && (sim.world.at(x - 1, y).wall || sim.world.at(x - 1, y).gate) ? 8 : 0);
+          g.drawImage(sprites.gateVariants[gmask], px, py);
+        }
         else if (t.kind === 'tree') g.drawImage(t.marked ? sprites.treeMarked : sprites.tree, px - 4, py - 12);
         else if (t.sapling) g.drawImage(sprites.sapling, px, py);
       }
@@ -259,7 +280,10 @@ export class Renderer {
     // Buildings (built solid, blueprints ghosted)
     for (const b of sim.buildings) {
       const def = buildingDef(b.defId);
-      const img = b.built ? this.sprites.buildings[b.defId] : this.sprites.blueprints[b.defId];
+      const levelKey = `${b.defId}:${b.level ?? 1}`;
+      const img = b.built
+        ? (this.sprites.buildings[levelKey] ?? this.sprites.buildings[b.defId])
+        : this.sprites.blueprints[b.defId];
       const rot = b.rotation ?? 0;
       const rw = rot % 2 === 1 ? def.h : def.w;
       const rh = rot % 2 === 1 ? def.w : def.h;
