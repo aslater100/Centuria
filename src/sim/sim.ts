@@ -110,6 +110,8 @@ export interface Settler {
   foodLog: ResourceKind[];
   /** housing preference from traits — affects which bed type gives mood bonus */
   housingPreference: 'private' | 'communal' | 'military' | null;
+  /** dedicated to this building when set; null = unassigned (auto-mode) */
+  assignedBuildingId: number | null;
 }
 
 export interface Corpse {
@@ -371,6 +373,7 @@ export class Simulation {
         (pref, id) => pref ?? traitDef(id).housingPreference ?? null,
         null,
       ),
+      assignedBuildingId: null,
     };
     this.settlers.push(s);
     return s;
@@ -524,6 +527,7 @@ export class Simulation {
     }
     for (const s of this.settlers) {
       if (s.bedId === id) s.bedId = null;
+      if (s.assignedBuildingId === id) s.assignedBuildingId = null;
     }
     this.buildings = this.buildings.filter((x) => x.id !== id);
     this.addLog(`${def.name} demolished; recovered ${Math.floor((def.cost.wood ?? 0) / 2)} wood.`, 'info');
@@ -812,6 +816,40 @@ export class Simulation {
 
   building(id: number | null | undefined): Building | undefined {
     return this.buildings.find((b) => b.id === id);
+  }
+
+  /** Assign the nearest idle unassigned settler to a building; returns true on success. */
+  assignWorker(buildingId: number): boolean {
+    const b = this.building(buildingId);
+    if (!b) return false;
+    const bc = this.buildingCenter(b);
+    const candidate = this.settlers
+      .filter((s) => s.assignedBuildingId === null && !s.wound && s.health > 10)
+      .sort((a, z) => Math.hypot(a.pos.x - bc.x, a.pos.y - bc.y) - Math.hypot(z.pos.x - bc.x, z.pos.y - bc.y))[0] ?? null;
+    if (!candidate) return false;
+    candidate.assignedBuildingId = buildingId;
+    b.workerLimit = (b.workerLimit ?? 0) + 1;
+    return true;
+  }
+
+  /** Unassign one settler from a building; returns true on success. */
+  unassignWorker(buildingId: number): boolean {
+    const b = this.building(buildingId);
+    if (!b) return false;
+    const assigned = this.settlers.find((s) => s.assignedBuildingId === buildingId);
+    if (!assigned) return false;
+    assigned.assignedBuildingId = null;
+    b.workerLimit = Math.max(0, (b.workerLimit ?? 1) - 1);
+    if (b.workerLimit === 0) b.workerLimit = null;
+    return true;
+  }
+
+  /** Clear all assignments for a building (Auto mode). */
+  clearBuildingAssignments(buildingId: number): void {
+    const b = this.building(buildingId);
+    if (!b) return;
+    this.settlers.forEach((s) => { if (s.assignedBuildingId === buildingId) s.assignedBuildingId = null; });
+    b.workerLimit = null;
   }
 
   builtOf(provides: string): Building[] {
@@ -1775,9 +1813,18 @@ export class Simulation {
   // ---- task generation & execution ----
   private findTask(s: Settler): Task | null {
     const candidates: { task: Task; prio: number; dist: number }[] = [];
+    // Pre-compute assigned counts per building for workerLimit enforcement.
+    const countAssigned = (bid: number): number =>
+      this.settlers.filter((x) => x.assignedBuildingId === bid).length;
     const push = (task: Task, kind: WorkKind) => {
       const prio = s.priorities[kind];
       if (prio <= 0 || this.reserved.has(this.taskKey(task))) return;
+      // If this task belongs to a building with a workerLimit, skip it for
+      // unassigned settlers when the building is already fully staffed.
+      if (task.buildingId !== undefined && s.assignedBuildingId === null) {
+        const bld = this.building(task.buildingId);
+        if (bld && bld.workerLimit !== null && countAssigned(bld.id) >= bld.workerLimit) return;
+      }
       const dist = Math.abs(task.x - s.pos.x) + Math.abs(task.y - s.pos.y);
       candidates.push({ task, prio, dist });
     };
@@ -2030,6 +2077,17 @@ export class Simulation {
       if (hall) {
         push({ kind: 'research', x: hall.x, y: hall.y, buildingId: hall.id, workLeft: 999999, label: 'research' }, 'research');
       }
+    }
+
+    // Sticky assignment filter: if this settler is assigned to a building,
+    // remove tasks that belong to a DIFFERENT building (but keep tasks with
+    // no buildingId — haul, chop, bury — so assigned settlers remain useful).
+    if (s.assignedBuildingId !== null) {
+      const filtered = candidates.filter(
+        (c) => c.task.buildingId === undefined || c.task.buildingId === s.assignedBuildingId,
+      );
+      // Fall back to unfiltered list so assigned settlers aren't completely stuck.
+      if (filtered.length > 0) candidates.length = 0, candidates.push(...filtered);
     }
 
     if (candidates.length === 0) return null;
@@ -3046,7 +3104,7 @@ export class Simulation {
         if (skills[k] === undefined) skills[k] = 0;
         if (priorities[k] === undefined) priorities[k] = 1;
       }
-      return { ...s, skills, priorities, lastFoodType: s.lastFoodType ?? null, foodLog: s.foodLog ?? [], housingPreference: s.housingPreference ?? null };
+      return { ...s, skills, priorities, lastFoodType: s.lastFoodType ?? null, foodLog: s.foodLog ?? [], housingPreference: s.housingPreference ?? null, assignedBuildingId: s.assignedBuildingId ?? null };
     });
     sim.buildings = d.buildings.map((b: Building) => ({
       ...b,
