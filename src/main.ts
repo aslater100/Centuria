@@ -12,6 +12,7 @@ import { Sfx } from './ui/audio';
 import { Music } from './ui/music';
 import { Soundscape } from './ui/soundscape';
 import { DesignScreen } from './ui/designscreen';
+import { TitleScreen } from './ui/titlescreen';
 import type { TownDesign } from './sim/defs';
 
 const root = document.getElementById('app')!;
@@ -149,8 +150,30 @@ let dioramaOpen = false;
 let region: RegionSim | null = null;
 let regionView: RegionView | null = null;
 
-// A lost colony offers a clean slate: reload re-seeds from the clock.
-hud.onRestart = () => location.reload();
+// ---- Title / Home Screen ----
+const titleScreen = new TitleScreen(root, { sfx, music, soundscape });
+
+function showTitleScreen(): void {
+  hud.closeMenu();
+  hud.paused = true;
+  titleScreen.show(localStorage.getItem(SAVE_KEY) !== null);
+}
+
+titleScreen.onNewColony = () => {
+  titleScreen.hide();
+  hud.paused = true;
+  new DesignScreen().showTownDesign((design) => {
+    sessionStorage.setItem(DESIGN_KEY, JSON.stringify(design));
+    location.reload();
+  });
+};
+titleScreen.onContinue = () => {
+  sessionStorage.setItem('centuria-load-on-boot', '1');
+  location.reload();
+};
+titleScreen.onQuit = () => window.close();
+
+hud.onRestart = showTitleScreen;
 hud.onQuit = () => window.close();
 
 /** Shared by the flip and the load path: hand the screen to the region. */
@@ -191,14 +214,8 @@ hud.onFoundTown = () => {
 };
 if (boot.region) enterRegionMode(boot.region);
 
-// A fresh world waits on the founder's choices: currency, site, party, odds.
-if (boot.needsDesign) {
-  hud.paused = true;
-  new DesignScreen().showTownDesign((design) => {
-    sessionStorage.setItem(DESIGN_KEY, JSON.stringify(design));
-    location.reload();
-  });
-}
+// A fresh world waits on the founder's choices: show the home screen first.
+if (boot.needsDesign) showTitleScreen();
 
 // ---- input ----
 const keys = new Set<string>();

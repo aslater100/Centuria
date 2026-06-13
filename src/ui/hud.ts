@@ -149,6 +149,7 @@ export class Hud {
   onQuit: ((save: boolean) => void) | null = null;
   hasSave: (() => boolean) | null = null;
   menuOpen = false;
+  private menuView: 'main' | 'options' = 'main';
   private pausedBeforeMenu = false;
   private topBar: HTMLElement;
   private buildBar: HTMLElement;
@@ -270,18 +271,30 @@ export class Hud {
           else this.renderMenu('Save failed.');
           break;
         case 'menu-load': this.onLoad?.(); break;
-        case 'menu-mute': this.sfx?.toggleMuted(); this.renderMenu(); break;
-        case 'menu-music': this.music?.toggle(); this.music?.unlock(); this.renderMenu(); break;
-        case 'menu-soundscape': this.soundscape?.toggle(); this.soundscape?.unlock(); this.renderMenu(); break;
-        case 'menu-save-quit':
-          if (this.onSave?.()) this.onQuit?.(true);
-          else this.renderMenu('Save failed — check storage.');
+        case 'menu-options':
+          this.menuView = 'options';
+          this.renderMenu();
           break;
-        case 'menu-quit':
-          if (confirm('Quit without saving? Unsaved progress will be lost.')) this.onQuit?.(false);
+        case 'menu-opt-back':
+          this.menuView = 'main';
+          this.renderMenu();
           break;
-        case 'menu-restart':
-          if (confirm('Abandon this colony and start over?')) this.onRestart?.();
+        case 'menu-opt-sound': this.sfx?.toggleMuted(); this.renderMenu(); break;
+        case 'menu-opt-music': this.music?.toggle(); this.music?.unlock(); this.renderMenu(); break;
+        case 'menu-opt-ambience': this.soundscape?.toggle(); this.soundscape?.unlock(); this.renderMenu(); break;
+        case 'menu-opt-fullscreen':
+          if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
+          else document.exitFullscreen?.().catch(() => {});
+          this.renderMenu();
+          break;
+        case 'menu-quit-menu':
+          if (confirm('Save and return to main menu?')) {
+            this.onSave?.();
+            this.onRestart?.();
+          }
+          break;
+        case 'menu-quit-desktop':
+          if (confirm('Quit to desktop? Unsaved progress will be lost.')) this.onQuit?.(false);
           break;
       }
     });
@@ -445,6 +458,7 @@ export class Hud {
 
   openMenu(): void {
     this.menuOpen = true;
+    this.menuView = 'main';
     this.pausedBeforeMenu = this.paused;
     this.paused = true;
     this.renderMenu();
@@ -465,19 +479,48 @@ export class Hud {
   private renderMenu(note = ''): void {
     const canSave = this.onSave !== null;
     const canLoad = (this.hasSave?.() ?? false) && this.onLoad !== null;
+    const isFullscreen = !!document.fullscreenElement;
+    const body = this.menuView === 'options'
+      ? `<div class="menu-section">` +
+        `<button id="menu-opt-back" class="menu-btn-back">‹  Back</button>` +
+        `</div>` +
+        `<div class="menu-section">` +
+        `<button id="menu-opt-sound" class="menu-toggle">` +
+        `<span class="menu-toggle-label">Sound Effects</span>` +
+        `<span class="menu-toggle-val ${this.sfx?.muted ? 'menu-off' : 'menu-on'}">${this.sfx?.muted ? 'OFF' : 'ON'}</span>` +
+        `</button>` +
+        `<button id="menu-opt-music" class="menu-toggle">` +
+        `<span class="menu-toggle-label">Music</span>` +
+        `<span class="menu-toggle-val ${this.music?.enabled ? 'menu-on' : 'menu-off'}">${this.music?.enabled ? 'ON' : 'OFF'}</span>` +
+        `</button>` +
+        `<button id="menu-opt-ambience" class="menu-toggle">` +
+        `<span class="menu-toggle-label">Ambience</span>` +
+        `<span class="menu-toggle-val ${this.soundscape?.enabled ? 'menu-on' : 'menu-off'}">${this.soundscape?.enabled ? 'ON' : 'OFF'}</span>` +
+        `</button>` +
+        `</div>` +
+        `<div class="menu-section menu-section-last">` +
+        `<button id="menu-opt-fullscreen" class="menu-toggle">` +
+        `<span class="menu-toggle-label">Display Mode</span>` +
+        `<span class="menu-toggle-val">${isFullscreen ? 'Fullscreen' : 'Windowed'}</span>` +
+        `</button>` +
+        `</div>`
+      : `<div class="menu-section">` +
+        `<button id="menu-resume" class="menu-btn-primary">▶  Resume  <span class="menu-key">[M]</span></button>` +
+        `<button id="menu-save"${canSave ? '' : ' disabled'}>  Save</button>` +
+        `<button id="menu-load"${canLoad ? '' : ' disabled'}>  Load</button>` +
+        `<button id="menu-options">  Options  <span class="menu-key">›</span></button>` +
+        `</div>` +
+        `<div class="menu-section menu-section-last">` +
+        `<button id="menu-quit-menu" class="menu-btn-danger">  Quit to Home</button>` +
+        `<button id="menu-quit-desktop" class="menu-btn-danger">  Quit to Desktop</button>` +
+        `</div>`;
     this.setHtml(this.menuBox,
       `<div class="menu-box">` +
-      `<h2>CENTURIA</h2>` +
+      `<div class="menu-header">` +
+      `<h2>C E N T U R I A</h2>` +
       `<p class="menu-note">${note || 'The colony waits.'}</p>` +
-      `<button id="menu-resume">Resume [M]</button>` +
-      `<button id="menu-save"${canSave ? '' : ' disabled'}>Save Game</button>` +
-      `<button id="menu-load"${canLoad ? '' : ' disabled'}>Load Game</button>` +
-      `<button id="menu-mute">${this.sfx?.muted ? 'Sound: OFF' : 'Sound: ON'}</button>` +
-      `<button id="menu-music">${this.music?.enabled ? 'Music: ON' : 'Music: OFF'}</button>` +
-      `<button id="menu-soundscape">${this.soundscape?.enabled ? 'Ambience: ON' : 'Ambience: OFF'}</button>` +
-      `<button id="menu-save-quit"${canSave ? '' : ' disabled'}>Save &amp; Quit</button>` +
-      `<button id="menu-quit">Quit without Saving</button>` +
-      `<button id="menu-restart">Restart Colony</button>` +
+      `</div>` +
+      body +
       `</div>`);
   }
 
@@ -541,10 +584,10 @@ export class Hud {
     const drought = s.weather.isDrought(s.day) && s.growingSeason ? ' <span class="tb-over">DROUGHT</span>' : '';
     this.setHtml(this.topBar,
       `<span class="tb-date">${s.dateLabel} ${hh}:${mm}</span>` +
-      `<span>${skyIcon} ${Math.round(s.temperature())}°C${drought}</span>` +
+      `<span>${skyIcon} ${Math.round(s.temperature() * 9 / 5 + 32)}°F${drought}</span>` +
       `<span>${popDisplay}${capWarn}</span>` +
       `<span>💰` + formatCurrency(Math.round(s.economy.cash)) + `</span>` +
-      `<span>🪵${s.stock.wood} ⛏${s.stock.stone} 🌾${s.stock.grain} 🍖${s.stock.meal} 👕${s.stock.clothes}${s.stock.weapons ? ` ⚔${s.stock.weapons}` : ''}</span>` +
+      `<span><span class="res-wood">≡</span>${s.stock.wood} ⛏${s.stock.stone} 🌾${s.stock.grain} 🍖${s.stock.meal} 👕${s.stock.clothes}${s.stock.weapons ? ` ⚔${s.stock.weapons}` : ''}</span>` +
       `<span title="average mood">♥${Math.round(s.avgMood())}</span>` +
       (s.raidActive ? `<span class="tb-over">⚔ RAID ${s.raiders.length}!</span>` : '') +
       `<span class="tb-speed">${this.paused ? '⏸' : '▶'.repeat(this.speed)} <i>(space 1-3)</i></span>`);
@@ -750,7 +793,7 @@ export class Hud {
   private drawLog(): void {
     if (this.sim.log.length === this.lastLogLen) return;
     this.lastLogLen = this.sim.log.length;
-    this.setHtml(this.logBox, this.sim.log.slice(-6).map((l) => `<div class="log-${l.kind}">d${l.day} · ${l.text}</div>`).reverse().join(''));
+    this.setHtml(this.logBox, this.sim.log.slice(-8).map((l) => `<div class="log-entry log-${l.kind}">d${l.day} · ${l.text}</div>`).join(''));
   }
 
   private drawPriorities(): void {
