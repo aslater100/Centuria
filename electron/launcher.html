@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Centuria</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #141a14;
+      color: #c8d4a0;
+      font-family: 'Courier New', monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      user-select: none;
+      -webkit-app-region: drag;
+    }
+    h1 {
+      font-size: 2.5rem;
+      letter-spacing: 0.3em;
+      color: #e8d88a;
+      margin-bottom: 0.4rem;
+    }
+    .subtitle {
+      font-size: 0.7rem;
+      color: #5a7a5a;
+      letter-spacing: 0.2em;
+      margin-bottom: 3rem;
+    }
+    .status {
+      font-size: 0.75rem;
+      color: #8aaa70;
+      margin-bottom: 0.75rem;
+      min-height: 1.1em;
+      letter-spacing: 0.05em;
+    }
+    .progress-track {
+      width: 260px;
+      height: 3px;
+      background: #253025;
+      border-radius: 2px;
+      overflow: hidden;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .progress-track.visible { opacity: 1; }
+    .progress-fill {
+      height: 100%;
+      background: #c8b850;
+      width: 0%;
+      transition: width 0.25s ease-out;
+    }
+    .version {
+      position: fixed;
+      bottom: 0.8rem;
+      right: 1rem;
+      font-size: 0.6rem;
+      color: #304030;
+      letter-spacing: 0.05em;
+    }
+  </style>
+</head>
+<body>
+  <h1>CENTURIA</h1>
+  <div class="subtitle">A COLONY-TO-NATION BUILDER · 1900–2100</div>
+  <div class="status" id="status">Checking for updates…</div>
+  <div class="progress-track" id="track">
+    <div class="progress-fill" id="fill"></div>
+  </div>
+  <div class="version" id="ver"></div>
+  <script>
+    const { ipcRenderer } = require('electron');
+    const status = document.getElementById('status');
+    const track   = document.getElementById('track');
+    const fill    = document.getElementById('fill');
+    const ver     = document.getElementById('ver');
+
+    ipcRenderer.on('launcher-status',   (_, msg) => { status.textContent = msg; });
+    ipcRenderer.on('launcher-progress', (_, pct) => {
+      track.classList.add('visible');
+      fill.style.width = pct + '%';
+    });
+    ipcRenderer.on('launcher-version',  (_, v)   => { ver.textContent = 'v' + v; });
+  </script>
+</body>
+</html>
