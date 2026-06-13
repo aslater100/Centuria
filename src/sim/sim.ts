@@ -43,6 +43,7 @@ export interface Task {
   roadTile?: boolean;
   wallTile?: boolean;
   gateTile?: boolean;
+  repairTile?: boolean; // repair a damaged (still-standing) wall or gate
   /** hunt: the animal being stalked */
   animalId?: number;
   workLeft: number;
@@ -1817,6 +1818,13 @@ export class Simulation {
             push({ kind: 'build', x, y, workLeft: TUNING.gateWork, label: 'build gate', gateTile: true }, 'build');
           }
         }
+        // Repair damaged standing walls/gates.
+        if ((tile.wall || tile.gate) && tile.wallHp > 0) {
+          const maxHp = tile.gate ? TUNING.gateMaxHp : TUNING.wallMaxHp;
+          if (tile.wallHp < maxHp && (TUNING.wallRepairCost.wood ?? 0) <= this.stock.wood) {
+            push({ kind: 'build', x, y, workLeft: TUNING.wallRepairWork, label: 'repair palisade', repairTile: true, gateTile: tile.gate }, 'build');
+          }
+        }
       }
     }
     // Chop marked trees, quarry marked rock, lay planned roads.
@@ -1972,11 +1980,15 @@ export class Simulation {
         }, 'fish');
       }
     }
-    // Foresters replant: one sapling order at a time per lodge, on free grass nearby.
+    // Foresters replant and harvest: plant saplings on free grass, chop mature trees in radius.
     for (const f of this.builtOf('forestry')) {
       const spot = this.saplingSpot(f);
       if (spot) {
         push({ kind: 'plant', x: spot.x, y: spot.y, workLeft: TUNING.plantWork, label: 'plant sapling' }, 'plant');
+      }
+      const chopSpots = this.foresterChopSpots(f);
+      for (const cs of chopSpots) {
+        push({ kind: 'chop', x: cs.x, y: cs.y, workLeft: TUNING.treeChopWork, label: 'harvest timber' }, 'chop');
       }
     }
     // Armoury: forge weapons when wood is available (one job per armoury).
@@ -2110,6 +2122,19 @@ export class Simulation {
         return;
       }
       case 'build': {
+        // Repair damaged standing wall/gate: restore to full HP on completion.
+        if (task.repairTile) {
+          const tile = this.world.at(task.x, task.y);
+          if (!tile.wall && !tile.gate) return this.finishTask(s); // demolished while we were walking
+          task.workLeft -= work;
+          if (task.workLeft <= 0) {
+            if ((TUNING.wallRepairCost.wood ?? 0) > this.stock.wood) return this.finishTask(s);
+            this.stock.wood -= TUNING.wallRepairCost.wood ?? 0;
+            tile.wallHp = tile.gate ? TUNING.gateMaxHp : TUNING.wallMaxHp;
+            this.finishTask(s);
+          }
+          return;
+        }
         // Wall tiles: materials deducted, wall HP set on completion.
         if (task.wallTile) {
           const tile = this.world.at(task.x, task.y);
@@ -2555,6 +2580,29 @@ export class Simulation {
       }
     }
     return best;
+  }
+
+  /** Trees within the forester radius eligible for managed harvesting (up to 3 per lodge). */
+  private foresterChopSpots(f: Building): Vec[] {
+    const c = this.buildingCenter(f);
+    const r = TUNING.foresterRadius;
+    const spots: Vec[] = [];
+    for (let y = c.y - r; y <= c.y + r && spots.length < 3; y++) {
+      for (let x = c.x - r; x <= c.x + r && spots.length < 3; x++) {
+        if (!this.world.inBounds(x, y)) continue;
+        const t = this.world.at(x, y);
+        if (t.kind !== 'tree') continue;
+        const d = Math.hypot(x - c.x, y - c.y);
+        if (d > r) continue;
+        if (this.reserved.has(`chop:${x},${y}`)) continue;
+        const reachable = [[-1,0],[1,0],[0,-1],[0,1]].some(([dx, dy]) => {
+          const nx = x + dx, ny = y + dy;
+          return this.world.inBounds(nx, ny) && this.world.passable(nx, ny);
+        });
+        if (reachable) spots.push({ x, y });
+      }
+    }
+    return spots;
   }
 
   private taskKey(t: Task): string {
