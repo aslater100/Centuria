@@ -85,6 +85,9 @@ export interface Settlement {
   activeEvents: ActiveEvent[];
   /** Phase 5: local governance policies for managed cities. */
   policies: CityPolicies;
+  // ---- AI Competitors Phase 2d: settlement resource bias ----
+  /** Primary resource focus: wool, grain, iron, wood (tied to founding location/goal) */
+  resourceFocus?: 'wool' | 'grain' | 'iron' | 'wood' | 'diverse';
 }
 
 /** Local markets (GDD §5.2, first slice): each town prices the two goods
@@ -949,7 +952,14 @@ const FACTION_GOAL_GENERATORS: Array<(faction: RegionalFaction, region: RegionSi
         govTypes: ['junta', 'one_party', 'fascist', 'corporate'],
         generatedYear: region.year,
         targetYear: region.year + 10,
-        successCondition: (f) => f.militaryStrength > 50,
+        successCondition: (f, r) => {
+          // Success: high garrison strength across settlements (3+ settlements with 10+ garrison each)
+          const garrisonedSettlements = f.settlementIds.filter((id) => {
+            const s = r.settlement(id);
+            return s && s.garrisonStrength >= 10;
+          }).length;
+          return garrisonedSettlements >= 3 && f.militaryStrength >= 40;
+        },
         description: 'Build the strongest army — every neighbor must tremble.',
         sectorFocus: 'military',
         settlementBias: ['mountain', 'plains'],
@@ -965,7 +975,14 @@ const FACTION_GOAL_GENERATORS: Array<(faction: RegionalFaction, region: RegionSi
         govTypes: ['junta', 'one_party', 'fascist'],
         generatedYear: region.year,
         targetYear: region.year + 15,
-        successCondition: (f) => f.treasury >= 400,
+        successCondition: (f, r) => {
+          // Success: control 3+ iron-focused settlements AND have industrial treasury
+          const ironSettlements = f.settlementIds.filter((id) => {
+            const s = r.settlement(id);
+            return s?.resourceFocus === 'iron';
+          }).length;
+          return ironSettlements >= 3 && f.treasury >= 300;
+        },
         description: 'Monopolize strategic resources — lock rivals out of industrialization.',
         sectorFocus: 'industry',
         settlementBias: ['mountain'],
@@ -999,7 +1016,14 @@ const FACTION_GOAL_GENERATORS: Array<(faction: RegionalFaction, region: RegionSi
         govTypes: ['theocracy'],
         generatedYear: region.year,
         targetYear: region.year + 25,
-        successCondition: (f) => f.settlementIds.length >= 4,
+        successCondition: (f, r) => {
+          // Success: expansion to 5+ settlements with high collective satisfaction (cultural dominance)
+          const totalPop = f.settlementIds.reduce((sum, id) => {
+            const s = r.settlement(id);
+            return sum + (s ? r.popOf(s) : 0);
+          }, 0);
+          return f.settlementIds.length >= 5 && totalPop >= 300;
+        },
         description: 'Convert the godless — expand the church\'s reach.',
         sectorFocus: 'culture',
         settlementBias: ['river', 'plains', 'coastal'],
@@ -1016,7 +1040,14 @@ const FACTION_GOAL_GENERATORS: Array<(faction: RegionalFaction, region: RegionSi
         govTypes: ['merchant_republic', 'parliamentary'],
         generatedYear: region.year,
         targetYear: region.year + 12,
-        successCondition: (f) => f.treasury >= 500,
+        successCondition: (f, r) => {
+          // Success: control 3+ coastal settlements (wool producers)
+          const woolSettlements = f.settlementIds.filter((id) => {
+            const s = r.settlement(id);
+            return s?.resourceFocus === 'wool';
+          }).length;
+          return woolSettlements >= 3 && f.treasury >= 400;
+        },
         description: 'Become the merchant kings — the continent trades at your prices.',
         sectorFocus: 'commerce',
         settlementBias: ['river', 'coastal'],
@@ -1033,7 +1064,14 @@ const FACTION_GOAL_GENERATORS: Array<(faction: RegionalFaction, region: RegionSi
         govTypes: ['parliamentary', 'merchant_republic'],
         generatedYear: region.year,
         targetYear: region.year + 15,
-        successCondition: (f) => f.settlementIds.length >= 3,
+        successCondition: (f, r) => {
+          // Success: 3+ settlements with high average satisfaction (cultural health)
+          const culturedSettlements = f.settlementIds.filter((id) => {
+            const s = r.settlement(id);
+            return s && s.satisfaction >= 65;
+          }).length;
+          return culturedSettlements >= 3;
+        },
         description: 'Make us the intellectual heart of the continent.',
         sectorFocus: 'culture',
         supportingTechs: ['universities', 'printing_press'],
@@ -1050,7 +1088,14 @@ const FACTION_GOAL_GENERATORS: Array<(faction: RegionalFaction, region: RegionSi
         govTypes: ['abs_monarchy', 'junta', 'one_party', 'fascist', 'const_monarchy'],
         generatedYear: region.year,
         targetYear: region.year + 20,
-        successCondition: (f) => f.settlementIds.length >= 4,
+        successCondition: (f, r) => {
+          // Success: 4+ settlements with combined population 400+
+          const totalPop = f.settlementIds.reduce((sum, id) => {
+            const s = r.settlement(id);
+            return sum + (s ? r.popOf(s) : 0);
+          }, 0);
+          return f.settlementIds.length >= 4 && totalPop >= 400;
+        },
         description: 'Expand our borders — empty lands await settlement.',
         sectorFocus: 'agriculture',
         settlementBias: ['river', 'plains', 'forest'],
@@ -1481,6 +1526,67 @@ export class RegionSim {
   /** Get garrison strength of a settlement. */
   garrisonOf(settlement: Settlement): number {
     return settlement.garrisonStrength || 0;
+  }
+
+  /** Get comprehensive statistics for a faction (Phase 4: UI foundation).
+   *  Useful for faction status panels and activity log context. */
+  getFactionStats(factionId: number): {
+    id: number;
+    name: string;
+    population: number;
+    settlements: number;
+    treasury: number;
+    militaryStrength: number;
+    techProgress: number;
+    currentGoal: string | null;
+    goalProgress: number;
+    allies: number[];
+    rivals: number[];
+  } | null {
+    const faction = this.faction(factionId);
+    if (!faction) return null;
+
+    const population = faction.settlementIds.reduce((sum, id) => {
+      const s = this.settlement(id);
+      return sum + (s ? this.popOf(s) : 0);
+    }, 0);
+
+    // Calculate goal progress as percentage toward target year
+    let goalProgress = 0;
+    if (faction.currentGoal) {
+      const elapsed = this.year - faction.currentGoal.generatedYear;
+      const total = faction.currentGoal.targetYear - faction.currentGoal.generatedYear;
+      goalProgress = total > 0 ? Math.round((elapsed / total) * 100) : 0;
+    }
+
+    // Find allies and rivals
+    const allies: number[] = [];
+    const rivals: number[] = [];
+    for (const other of this.regionalFactions) {
+      if (other.id === faction.id) continue;
+      if (this.areAllied(faction.id, other.id)) {
+        allies.push(other.id);
+      } else if (faction.currentGoal && other.currentGoal) {
+        const conflict = this.evaluateGoalConflict(faction.currentGoal, other.currentGoal);
+        if (conflict > 60) {
+          rivals.push(other.id);
+        }
+      }
+    }
+
+    return {
+      id: faction.id,
+      name: faction.name,
+      population,
+      settlements: faction.settlementIds.length,
+      treasury: Math.round(faction.treasury),
+      militaryStrength: faction.militaryStrength,
+      techProgress: Math.round(faction.techProgress),
+      currentGoal: faction.currentGoal?.objective ?? null,
+      goalProgress,
+      allies,
+      rivals,
+    };
   }
 
   /** Initialize the regional faction system for the player. Called once when entering region mode. */
@@ -3674,6 +3780,95 @@ export class RegionSim {
         demand: merchantSupport < 40 ? 'open markets' : 'content',
       },
     ];
+
+    // Update regional faction economies: calculate production based on resource focus
+    this.updateRegionalTrade();
+
+    // Update faction alliances: compatible goals form pacts, incompatible ones break
+    this.updateFactionAlliances();
+  }
+
+  /** Calculate regional trade dynamics: factions compete for market dominance by resource type. */
+  private updateRegionalTrade(): void {
+    // Calculate resource production for each faction
+    const factionResources: Record<number, Record<string, number>> = {};
+
+    for (const faction of this.regionalFactions) {
+      factionResources[faction.id] = {
+        wool: 0,
+        grain: 0,
+        iron: 0,
+        wood: 0,
+      };
+
+      for (const settlementId of faction.settlementIds) {
+        const settlement = this.settlement(settlementId);
+        if (!settlement) continue;
+
+        const focus = settlement.resourceFocus ?? 'diverse';
+        const pop = this.popOf(settlement);
+
+        // Production scales with population and resource focus
+        const baseProduction = pop * 0.5;
+        if (focus === 'wool') {
+          factionResources[faction.id].wool += baseProduction * 1.5;
+        } else if (focus === 'grain') {
+          factionResources[faction.id].grain += baseProduction * 1.5;
+        } else if (focus === 'iron') {
+          factionResources[faction.id].iron += baseProduction * 1.5;
+        } else if (focus === 'wood') {
+          factionResources[faction.id].wood += baseProduction * 1.5;
+        } else {
+          // diverse: spread evenly
+          factionResources[faction.id].wool += baseProduction * 0.3;
+          factionResources[faction.id].grain += baseProduction * 0.3;
+          factionResources[faction.id].iron += baseProduction * 0.2;
+          factionResources[faction.id].wood += baseProduction * 0.2;
+        }
+      }
+    }
+
+    // Calculate total regional production for price dynamics
+    const totalProduction = {
+      wool: 0,
+      grain: 0,
+      iron: 0,
+      wood: 0,
+    };
+
+    for (const resources of Object.values(factionResources)) {
+      totalProduction.wool += resources.wool;
+      totalProduction.grain += resources.grain;
+      totalProduction.iron += resources.iron;
+      totalProduction.wood += resources.wood;
+    }
+
+    // Update faction treasuries based on trade dominance
+    for (const faction of this.regionalFactions) {
+      if (faction.id === this.playerFactionId) continue; // Player treasury handled elsewhere
+
+      const resources = factionResources[faction.id];
+      let tradeIncome = 0;
+
+      // Factions with dominant resource production earn more
+      if (totalProduction.wool > 0 && resources.wool > totalProduction.wool * 0.4) {
+        tradeIncome += resources.wool * 0.08;
+      }
+      if (totalProduction.grain > 0 && resources.grain > totalProduction.grain * 0.4) {
+        tradeIncome += resources.grain * 0.06;
+      }
+      if (totalProduction.iron > 0 && resources.iron > totalProduction.iron * 0.5) {
+        tradeIncome += resources.iron * 0.12;
+      }
+      if (totalProduction.wood > 0 && resources.wood > totalProduction.wood * 0.4) {
+        tradeIncome += resources.wood * 0.07;
+      }
+
+      // General trade income from all settlements
+      tradeIncome += faction.settlementIds.length * 5;
+
+      faction.treasury += tradeIncome;
+    }
   }
 
   // ---- Elections (GDD §5.3) ----
@@ -5544,10 +5739,10 @@ export class RegionSim {
       if (faction.currentGoal) {
         const succeeded = faction.currentGoal.successCondition(faction, this);
         if (succeeded) {
-          this.addLog(`${faction.name} achieves goal: "${faction.currentGoal.objective}".`, 'good');
+          this.addLog(`${faction.name} achieves ambition: "${faction.currentGoal.objective}". Their power grows.`, 'good');
           faction.treasury += 100; // prestige bonus
-        } else if (this.day > faction.currentGoal.targetYear) {
-          this.addLog(`${faction.name} abandons goal: "${faction.currentGoal.objective}" (timeout).`, 'info');
+        } else if (this.day > faction.currentGoal.targetYear * DAYS_PER_YEAR + START_YEAR * DAYS_PER_YEAR) {
+          this.addLog(`${faction.name} abandons goal: "${faction.currentGoal.objective.toLowerCase()}" (timeout).`, 'info');
         }
       }
 
@@ -5559,6 +5754,9 @@ export class RegionSim {
           'info',
         );
       }
+    } else if (faction.currentGoal) {
+      // Evaluate progress toward current goal (for milestone announcements)
+      this.evaluateGoalProgress(faction);
     }
 
     // Calculate faction population from its settlements
@@ -5591,6 +5789,285 @@ export class RegionSim {
 
     // Military scaling: garrison = pop * 0.01 * tech_mult
     faction.militaryStrength = Math.round(factionPop * 0.01 * (1 + faction.techProgress * 0.05));
+
+    // Check for goal conflicts with other factions (Phase 3a)
+    this.checkFactionGoalConflicts(faction);
+  }
+
+  /** Detect and escalate goal conflicts between factions (Phase 3a).
+   *  When two factions have similar/conflicting goals, tensions rise and raids may occur. */
+  private checkFactionGoalConflicts(faction: RegionalFaction): void {
+    if (!faction.currentGoal) return;
+
+    for (const other of this.regionalFactions) {
+      if (other.id === faction.id || !other.currentGoal) continue;
+
+      // Calculate goal conflict severity (0–100)
+      const conflict = this.evaluateGoalConflict(faction.currentGoal, other.currentGoal);
+      if (conflict < 30) continue; // No significant conflict
+
+      // Escalate tensions: rival raids friendly settlements or competes for resources
+      const settlementDist = Math.min(
+        ...faction.settlementIds.map(fid => {
+          const fs = this.settlement(fid);
+          if (!fs) return 999;
+          return Math.min(
+            ...other.settlementIds.map(oid => {
+              const os = this.settlement(oid);
+              if (!os) return 999;
+              return Math.hypot(fs.x - os.x, fs.y - os.y);
+            })
+          );
+        })
+      );
+
+      // Only escalate if factions are neighbors (within 40 map units)
+      if (settlementDist > 40) continue;
+
+      const escalationChance = conflict / 100 * 0.05; // 0–5% per month
+      if (this.rng.chance(escalationChance)) {
+        // Log the conflict
+        const conflictReason =
+          faction.currentGoal.id === other.currentGoal.id
+            ? `both pursue "${faction.currentGoal.objective.toLowerCase()}"`
+            : 'competing interests';
+        this.addLog(
+          `REGIONAL TENSION: ${faction.name} and ${other.name} clash — ${conflictReason}.`,
+          'bad'
+        );
+
+        // Occasional raids if conflict is severe
+        if (conflict > 70 && this.rng.chance(0.1)) {
+          const targetSettlements = faction.settlementIds
+            .map(id => this.settlement(id))
+            .filter(s => s && settlementDist < 50); // only nearby settlements
+          if (targetSettlements.length > 0) {
+            const target = targetSettlements[this.rng.int(targetSettlements.length)];
+            if (target) {
+              const losses = 2 + this.rng.int(4);
+              target.cohorts.bands[1] -= losses;
+              target.grievance = Math.min(100, target.grievance + 15);
+              this.addLog(
+                `RAID: ${other.name} raiding parties strike ${target.name} — ${losses} workers lost.`,
+                'bad'
+              );
+
+              // Allies may retaliate (Phase 3b)
+              this.trigerAllyRetaliationForRaid(other.id, faction.id, target.id);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** When a raid occurs, allies of the victim may retaliate against the raider (Phase 3b). */
+  private trigerAllyRetaliationForRaid(raiderId: number, victimId: number, targetSettlementId: number): void {
+    // Find allies of the victim faction
+    for (const ally of this.regionalFactions) {
+      if (!this.areAllied(ally.id, victimId)) continue;
+      if (ally.id === raiderId || ally.id === victimId) continue;
+
+      // Allied faction retaliates: raid the raider's settlements
+      if (this.rng.chance(0.3)) {
+        const raiderFaction = this.faction(raiderId);
+        const allyFaction = this.faction(ally.id);
+        if (!raiderFaction || !allyFaction) continue;
+
+        const raiderSettlements = raiderFaction.settlementIds
+          .map(id => this.settlement(id))
+          .filter(s => s !== null) as Settlement[];
+
+        if (raiderSettlements.length === 0) continue;
+
+        const target = raiderSettlements[this.rng.int(raiderSettlements.length)];
+        const losses = 1 + this.rng.int(3);
+        target.cohorts.bands[1] = Math.max(0, target.cohorts.bands[1] - losses);
+        target.grievance = Math.min(100, target.grievance + 10);
+
+        this.addLog(
+          `RETALIATION: ${allyFaction.name}, allied with ${this.settlement(targetSettlementId)?.name}, ` +
+          `strikes back at ${raiderFaction.name}'s ${target.name} — ${losses} workers lost.`,
+          'good'
+        );
+      }
+    }
+  }
+
+  /** Calculate goal conflict severity between two faction goals (0–100).
+   *  Higher values indicate more direct conflict. */
+  private evaluateGoalConflict(goal1: FactionGoal, goal2: FactionGoal): number {
+    // Same goal = maximum conflict
+    if (goal1.id === goal2.id) return 100;
+
+    // Related goal pairs (military goals, expansion goals, economic goals conflict)
+    const militaryGoals = ['military_supremacy', 'resource_monopoly'];
+    const expansionGoals = ['territorial_expansion', 'convert_heathen'];
+    const economicGoals = ['enrich_treasury', 'trade_dominance'];
+
+    const goal1Type = militaryGoals.includes(goal1.id) ? 'military' :
+                      expansionGoals.includes(goal1.id) ? 'expansion' :
+                      economicGoals.includes(goal1.id) ? 'economic' : 'other';
+    const goal2Type = militaryGoals.includes(goal2.id) ? 'military' :
+                      expansionGoals.includes(goal2.id) ? 'expansion' :
+                      economicGoals.includes(goal2.id) ? 'economic' : 'other';
+
+    if (goal1Type === goal2Type && goal1Type !== 'other') return 60; // Same type = high conflict
+    if (goal1Type !== 'other' && goal2Type !== 'other') return 30; // Different economic types = some conflict
+    return 20; // Minor conflict by default
+  }
+
+  /** Evaluate goal progress and announce successes/failures (Phase 3a: Presentation).
+   *  Called during annual goal checks to provide player feedback on rival ambitions. */
+  private evaluateGoalProgress(faction: RegionalFaction): void {
+    if (!faction.currentGoal) return;
+
+    const goal = faction.currentGoal;
+    const succeeded = goal.successCondition(faction, this);
+    const targetYear = goal.targetYear;
+    const yearsLeft = targetYear - this.year;
+
+    // Announce major milestones (75% and 90% toward target year)
+    const milestoneYear75 = goal.generatedYear + Math.round((targetYear - goal.generatedYear) * 0.75);
+    const milestoneYear90 = goal.generatedYear + Math.round((targetYear - goal.generatedYear) * 0.9);
+
+    if (this.year === milestoneYear75 && !succeeded) {
+      this.addLog(
+        `${faction.name} progresses: "${goal.objective.toLowerCase()}" nearing completion.`,
+        'info'
+      );
+    } else if (this.year === milestoneYear90 && !succeeded) {
+      this.addLog(
+        `${faction.name} approaches final phase: "${goal.objective.toLowerCase()}" almost within grasp.`,
+        'info'
+      );
+    }
+
+    // Success announcement
+    if (succeeded) {
+      this.addLog(
+        `${faction.name} achieves ambition: "${goal.objective}". Their power grows.`,
+        'good'
+      );
+      return; // Will be replaced by new goal next update
+    }
+
+    // Failure: goal becomes impossible or timeout
+    if (yearsLeft <= 0) {
+      this.addLog(
+        `${faction.name} abandons goal: "${goal.objective.toLowerCase()}" (unable to achieve).`,
+        'info'
+      );
+      return; // Will be replaced by new goal next update
+    }
+  }
+
+  // ---- Faction Alliances (Phase 3b: Alliance Blocs) ----
+
+  /** Track faction alliances: array of pair keys like "1:3" (faction IDs, canonical order). */
+  private factionAlliances: string[] = [];
+
+  /** Helper: create canonical pair key for two faction IDs (min:max). */
+  private factionPairKey(factionIdA: number, factionIdB: number): string {
+    const min = Math.min(factionIdA, factionIdB);
+    const max = Math.max(factionIdA, factionIdB);
+    return `${min}:${max}`;
+  }
+
+  /** Check if two factions are allied. */
+  private areAllied(factionIdA: number, factionIdB: number): boolean {
+    return this.factionAlliances.includes(this.factionPairKey(factionIdA, factionIdB));
+  }
+
+  /** Form an alliance between two factions (Phase 3b). */
+  private formAlliance(factionIdA: number, factionIdB: number): boolean {
+    if (this.areAllied(factionIdA, factionIdB)) return false;
+
+    const key = this.factionPairKey(factionIdA, factionIdB);
+    this.factionAlliances.push(key);
+
+    const a = this.faction(factionIdA);
+    const b = this.faction(factionIdB);
+    if (a && b) {
+      this.addLog(
+        `FACTION ALLIANCE: ${a.name} and ${b.name} form a pact for mutual defense and trade.`,
+        'good'
+      );
+    }
+    return true;
+  }
+
+  /** Break an alliance between two factions. */
+  private breakAlliance(factionIdA: number, factionIdB: number): boolean {
+    const key = this.factionPairKey(factionIdA, factionIdB);
+    const idx = this.factionAlliances.indexOf(key);
+    if (idx < 0) return false;
+
+    this.factionAlliances.splice(idx, 1);
+
+    const a = this.faction(factionIdA);
+    const b = this.faction(factionIdB);
+    if (a && b) {
+      this.addLog(
+        `ALLIANCE BROKEN: ${a.name} and ${b.name} end their pact. Suspicion grows.`,
+        'bad'
+      );
+    }
+    return true;
+  }
+
+  /** Evaluate alliance compatibility based on goal alignment (Phase 3b).
+   *  Returns 0–100 score indicating how well two factions' goals align. */
+  private evaluateAllianceCompatibility(factionIdA: number, factionIdB: number): number {
+    const a = this.faction(factionIdA);
+    const b = this.faction(factionIdB);
+    if (!a || !b || !a.currentGoal || !b.currentGoal) return 20; // baseline
+
+    // Compatible: expansion goals (both want to grow)
+    const expansionGoals = ['territorial_expansion', 'convert_heathen'];
+    const aIsExpanding = expansionGoals.includes(a.currentGoal.id);
+    const bIsExpanding = expansionGoals.includes(b.currentGoal.id);
+
+    // Compatible: economic goals (both want trade)
+    const economicGoals = ['enrich_treasury', 'trade_dominance'];
+    const aIsEconomic = economicGoals.includes(a.currentGoal.id);
+    const bIsEconomic = economicGoals.includes(b.currentGoal.id);
+
+    // Compatible: military goals (both want power)
+    const militaryGoals = ['military_supremacy', 'resource_monopoly'];
+    const aIsMilitary = militaryGoals.includes(a.currentGoal.id);
+    const bIsMilitary = militaryGoals.includes(b.currentGoal.id);
+
+    let compatibility = 30; // baseline
+    if (aIsExpanding && bIsExpanding) compatibility += 35;
+    else if (aIsEconomic && bIsEconomic) compatibility += 30;
+    else if (aIsMilitary && bIsMilitary) compatibility += 35;
+    else if ((aIsExpanding || bIsExpanding) && (aIsEconomic || bIsEconomic)) compatibility += 15;
+
+    // Incompatible: same specific goal = natural rivalry
+    if (a.currentGoal.id === b.currentGoal.id) compatibility -= 40;
+
+    return Math.max(0, Math.min(100, compatibility));
+  }
+
+  /** Update faction alliance dynamics (Phase 3b: called during monthly faction update). */
+  private updateFactionAlliances(): void {
+    for (let i = 0; i < this.regionalFactions.length; i++) {
+      for (let j = i + 1; j < this.regionalFactions.length; j++) {
+        const a = this.regionalFactions[i];
+        const b = this.regionalFactions[j];
+        const allied = this.areAllied(a.id, b.id);
+        const compatibility = this.evaluateAllianceCompatibility(a.id, b.id);
+
+        if (!allied && compatibility > 60 && this.rng.chance(0.02)) {
+          // Form alliance: compatible goals + random chance
+          this.formAlliance(a.id, b.id);
+        } else if (allied && compatibility < 30 && this.rng.chance(0.03)) {
+          // Break alliance: incompatible goals emerged
+          this.breakAlliance(a.id, b.id);
+        }
+      }
+    }
   }
 
   /** Monthly update hook for faction AI: check if any faction is due for update.
@@ -5676,18 +6153,37 @@ export class RegionSim {
     void oldX; // suppress unused warning
   }
 
-  /** Find best tile for scout to explore, biased by goal. Returns nearest unexplored tile. */
+  /** Find best tile for scout to explore, biased by goal. Returns tile matching goal bias. */
   private scoutDestinationTile(_scout: Scout, faction: RegionalFaction): { x: number; y: number } | null {
-    // Pick random unexplored region, search toward it
-    const targetX = this.rng.int(100), targetY = this.rng.int(100);
+    const bias = faction.currentGoal?.settlementBias ?? [];
 
-    // If goal has settlementBias, prefer tiles matching that type (Phase 2b)
-    if (faction.currentGoal?.settlementBias) {
-      // TODO Phase 2b: use bias to find matching site type
-      void faction.currentGoal.settlementBias;
+    // If no bias, return random target
+    if (bias.length === 0) {
+      return { x: this.rng.int(100), y: this.rng.int(100) };
     }
 
-    return { x: targetX, y: targetY };
+    // Sample 10 random tiles, pick best match for goal bias
+    let bestTile: { x: number; y: number } | null = null;
+    let bestMatches = 0;
+
+    for (let i = 0; i < 10; i++) {
+      const x = this.rng.int(100);
+      const y = this.rng.int(100);
+      const siteTypes = this.siteType(x, y);
+
+      // Count how many bias types match
+      let matches = 0;
+      for (const b of bias) {
+        if (siteTypes.includes(b)) matches++;
+      }
+
+      if (matches > bestMatches) {
+        bestMatches = matches;
+        bestTile = { x, y };
+      }
+    }
+
+    return bestTile ?? { x: this.rng.int(100), y: this.rng.int(100) };
   }
 
   // ---- Settlement Expansion (Phase 2b: Monte Carlo placement) ----
@@ -5761,6 +6257,14 @@ export class RegionSim {
     const site = this.map.siteAt(Math.round(x), Math.round(y));
     if (!site) return null;
 
+    // Determine resource focus from site characteristics
+    const siteTypes = this.siteType(Math.round(x), Math.round(y));
+    let resourceFocus: 'wool' | 'grain' | 'iron' | 'wood' | 'diverse' = 'diverse';
+    if (siteTypes.includes('coastal')) resourceFocus = 'wool'; // trade goods
+    else if (siteTypes.includes('plains')) resourceFocus = 'grain'; // agriculture
+    else if (siteTypes.includes('mountain')) resourceFocus = 'iron'; // mining
+    else if (siteTypes.includes('forest')) resourceFocus = 'wood'; // forestry
+
     const settlement: Settlement = {
       id: this.nextId++,
       name: `${faction.name}'s Outpost`, // TODO: better naming
@@ -5789,6 +6293,7 @@ export class RegionSim {
       activeEvents: [],
       policies: { ...DEFAULT_CITY_POLICIES },
       recentEvents: [],
+      resourceFocus,
     };
 
     this.settlements.push(settlement);
