@@ -4,7 +4,7 @@
  * markers, routes, expedition wagons; DOM panel for the selected settlement.
  */
 import type { Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, TownFocus, WagePolicy, Route, SectorId } from '../sim/region';
-import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES } from '../sim/region';
+import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES } from '../sim/region';
 import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS } from '../sim/defs';
 import type { CurrencySymbol } from '../sim/defs';
 import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
@@ -34,6 +34,14 @@ export class RegionView {
   private routeNetworkPanel: HTMLElement;
   routeNetworkOpen = false;
   private lastNetworkBuildFrame = -999;
+  /** Phase A: settlements list panel (S key). */
+  private settlementListPanel: HTMLElement;
+  settlementListOpen = false;
+  private lastSettlementListBuildFrame = -999;
+  /** Phase A/B: economy panel (E key). */
+  private economyPanel: HTMLElement;
+  economyOpen = false;
+  private lastEconomyBuildFrame = -999;
   private ceremony: HTMLElement;
   private convention: HTMLElement;
   private policyModal: HTMLElement;
@@ -78,6 +86,12 @@ export class RegionView {
     this.routeNetworkPanel = document.createElement('div');
     this.routeNetworkPanel.className = 'palette route-network-panel hidden';
     root.appendChild(this.routeNetworkPanel);
+    this.settlementListPanel = document.createElement('div');
+    this.settlementListPanel.className = 'palette settlement-list-panel hidden';
+    root.appendChild(this.settlementListPanel);
+    this.economyPanel = document.createElement('div');
+    this.economyPanel.className = 'palette economy-panel hidden';
+    root.appendChild(this.economyPanel);
     this.ceremony = document.createElement('div');
     this.ceremony.className = 'ceremony hidden';
     root.appendChild(this.ceremony);
@@ -100,6 +114,8 @@ export class RegionView {
     this.statePanel.remove();
     this.researchPanel.remove();
     this.routeNetworkPanel.remove();
+    this.settlementListPanel.remove();
+    this.economyPanel.remove();
     this.ceremony.remove();
     this.convention.remove();
     this.policyModal.remove();
@@ -424,6 +440,8 @@ export class RegionView {
     this.drawStatePanel();
     this.drawResearchPanel();
     this.drawRouteNetworkPanel();
+    this.drawSettlementListPanel();
+    this.drawEconomyPanel();
     this.drawCeremony();
     this.drawConvention();
     this.drawCenturyReport();
@@ -1102,8 +1120,14 @@ export class RegionView {
           : r.railUnlocked()
             ? 'RAILWORKS chartered — lay rail from any town panel'
             : `railworks expected ~${RAIL_ERA_YEAR}`}</p>` +
-      `<p><button class="mini" id="research-toggle">${this.researchOpen ? '▲ research' : '▼ research'}</button> <span class="insp-skills">${researchLabel}</span>` +
-      ` <button class="mini" id="routenet-toggle" title="Region-wide route network (R)">${this.routeNetworkOpen ? '▲ routes' : '▼ routes'}</button></p>` +
+      `<p>` +
+      `<button class="mini" id="research-toggle" title="Research tree (T)">${this.researchOpen ? '▲' : '▼'} T:research</button> ` +
+      `<button class="mini" id="routenet-toggle" title="Route network (R)">${this.routeNetworkOpen ? '▲' : '▼'} R:routes</button>` +
+      `</p>` +
+      `<p>` +
+      `<button class="mini" id="settlements-toggle" title="Settlement list (S)">${this.settlementListOpen ? '▲' : '▼'} S:towns</button> ` +
+      `<button class="mini" id="economy-toggle" title="Economy panel (E)">${this.economyOpen ? '▲' : '▼'} E:econ</button>` +
+      `</p>` +
       (r.canCallConvention() ? `<p><button id="convention-btn" style="font-size:10px;background:#8b5cf6;color:#fff;border:none;padding:4px 8px;cursor:pointer">★ CONVENE CONSTITUTIONAL CONVENTION</button></p>` : '') +
       this.politicsHtml() +
       this.diplomacyHtml() +
@@ -1160,6 +1184,12 @@ export class RegionView {
     };
     this.statePanel.querySelector<HTMLButtonElement>('#routenet-toggle')!.onclick = () => {
       this.routeNetworkOpen = !this.routeNetworkOpen;
+    };
+    this.statePanel.querySelector<HTMLButtonElement>('#settlements-toggle')!.onclick = () => {
+      this.settlementListOpen = !this.settlementListOpen;
+    };
+    this.statePanel.querySelector<HTMLButtonElement>('#economy-toggle')!.onclick = () => {
+      this.economyOpen = !this.economyOpen;
     };
     this.statePanel.querySelector<HTMLButtonElement>('#convention-btn')?.addEventListener('click', () => {
       this.conventionOpen = true;
@@ -1969,6 +1999,12 @@ export class RegionView {
     for (const sb of this.panel.querySelectorAll<HTMLButtonElement>('.policy-svc-btn')) {
       sb.onclick = () => { this.region.setCityPolicy(t.id, 'serviceLevel', Number(sb.dataset.svc)); this.refreshPanel(); };
     }
+    const aidBtn = this.panel.querySelector<HTMLButtonElement>('.crisis-aid-btn');
+    if (aidBtn) aidBtn.onclick = () => { this.region.sendFoodAid(t.id); this.refreshPanel(); };
+    const svcBtn = this.panel.querySelector<HTMLButtonElement>('.crisis-svc-btn');
+    if (svcBtn) svcBtn.onclick = () => { this.region.servicesLevel = Math.min(2, this.region.servicesLevel + 1); this.refreshPanel(); };
+    const taxBtn = this.panel.querySelector<HTMLButtonElement>('.crisis-tax-btn');
+    if (taxBtn) taxBtn.onclick = () => { this.region.taxRate = Math.max(0, this.region.taxRate - 0.02); this.refreshPanel(); };
   }
 
   /** Defence row: this town's garrison plus a button to drill more militia —
@@ -1999,7 +2035,11 @@ export class RegionView {
         const cargoBadge = route?.cargoType
           ? ` <span style="color:${cargoColors[route.cargoType]}">[${route.cargoType.slice(0, 3)}]</span>`
           : '';
-        const status = route ? `${route.kind} · ${Math.round(route.condition)}%${cargoBadge}` : 'no route';
+        const days = Math.max(1, Math.round(r.map.travelDays(t.x, t.y, o.x, o.y) / (route ? ROUTE_SPECS[route.kind].speed : 1)));
+        const freightNote = route && route.freight > 0 ? ` · freight ${Math.round(route.freight)}` : '';
+        const status = route
+          ? `${route.kind} · ${Math.round(route.condition)}% · ~${days}d${freightNote}${cargoBadge}`
+          : `no route · ~${days}d walk`;
         let btn = '';
         if (r.stateProclaimed && (!route || route.kind === 'trail')) {
           const cost = r.roadCost(t.id, o.id);
@@ -2289,6 +2329,172 @@ export class RegionView {
     );
   }
 
+  /** Pan the map so the given region-coordinate (0–100) is at screen centre. */
+  centerOn(x: number, y: number): void {
+    const { px, py } = this.toPx(x, y);
+    this.camX = this.canvas.width / 2 - px * this.camScale;
+    this.camY = this.canvas.height / 2 - py * this.camScale;
+    this.clampCamera();
+  }
+
+  /** Phase A: Settlements list panel — all player towns with at-a-glance health
+   *  and a one-click pan/select shortcut. Toggle with the S key. */
+  private drawSettlementListPanel(): void {
+    const r = this.region;
+    if (!this.settlementListOpen || !r.stateProclaimed) {
+      this.settlementListPanel.classList.add('hidden');
+      return;
+    }
+    this.settlementListPanel.classList.remove('hidden');
+    if (this.frame - this.lastSettlementListBuildFrame < 60) return;
+    this.lastSettlementListBuildFrame = this.frame;
+    this.settlementListPanel.innerHTML = this.settlementListHtml();
+    for (const b of this.settlementListPanel.querySelectorAll<HTMLButtonElement>('.sl-close')) {
+      b.onclick = () => { this.settlementListOpen = false; };
+    }
+    for (const b of this.settlementListPanel.querySelectorAll<HTMLButtonElement>('.sl-select-btn')) {
+      b.onclick = () => {
+        const sid = Number(b.dataset.sid);
+        this.selectedId = sid;
+        const t = r.settlement(sid);
+        if (t) this.centerOn(t.x, t.y);
+        this.lastSettlementListBuildFrame = -999;
+      };
+    }
+    for (const b of this.settlementListPanel.querySelectorAll<HTMLButtonElement>('.sl-aid-btn')) {
+      b.onclick = () => { r.sendFoodAid(Number(b.dataset.sid)); this.lastSettlementListBuildFrame = -999; };
+    }
+  }
+
+  private settlementListHtml(): string {
+    const r = this.region;
+    const towns = r.settlements
+      .filter((t) => t.factionId === r.playerFactionId)
+      .sort((a, b) => r.popOf(b) - r.popOf(a));
+    const sColor = (s: string) => s === 'surplus' ? '#4e9' : s === 'deficit' ? '#e55' : '#998c6e';
+    const alerts = towns.filter((t) => t.food < r.popOf(t) * 5 || t.grievance > 60 || r.day < t.strikeUntil);
+    const alertHtml = alerts.length
+      ? `<p class="insp-cond">⚠ ${alerts.length} town${alerts.length > 1 ? 's' : ''} need attention</p>`
+      : `<p class="insp-skills">all towns stable</p>`;
+    const rows = towns.map((t) => {
+      const pop = Math.round(r.popOf(t));
+      const status = r.getSettlementResourceStatus(t);
+      const satColor = t.satisfaction >= 60 ? '#4e9' : t.satisfaction >= 40 ? '#ca4' : '#e55';
+      const griCol = t.grievance > 60 ? 'insp-cond' : 'insp-skills';
+      const strike = r.day < t.strikeUntil ? ' <span class="insp-cond">STRIKE</span>' : '';
+      const hungry = t.food < r.popOf(t) * 5;
+      return (
+        `<div style="margin:4px 0;padding:4px 0;border-bottom:1px solid #3a2e20">` +
+        `<div><b>${t.name}</b> <button class="mini sl-select-btn" data-sid="${t.id}" title="Pan to this settlement">→</button>` +
+        (hungry ? ` <button class="mini sl-aid-btn" data-sid="${t.id}" title="Send emergency grain convoy (£10)">🌾 aid</button>` : '') +
+        `</div>` +
+        `<div class="insp-skills">pop ${pop} · <span style="color:${satColor}">sat ${Math.round(t.satisfaction)}</span> · <span class="${griCol}">grv ${Math.round(t.grievance)}</span>${strike}</div>` +
+        `<div class="insp-skills">` +
+        `<span style="color:${sColor(status.food)}" title="food">food ${status.food[0]}</span> ` +
+        `<span style="color:${sColor(status.wood)}" title="timber">wood ${status.wood[0]}</span> ` +
+        `<span style="color:${sColor(status.goods)}" title="goods">goods ${status.goods[0]}</span>` +
+        `</div></div>`
+      );
+    }).join('');
+    return (
+      `<div class="pal-title">SETTLEMENTS [S] <button class="mini sl-close" title="close (S)">✕</button></div>` +
+      alertHtml +
+      `<div class="thoughts">${rows || '<p class="insp-skills">no towns yet</p>'}</div>`
+    );
+  }
+
+  /** Phase A/B: Economy panel — global finances, faction mood with action
+   *  buttons, per-settlement tax controls. Toggle with the E key. */
+  private drawEconomyPanel(): void {
+    const r = this.region;
+    if (!this.economyOpen || !r.stateProclaimed) {
+      this.economyPanel.classList.add('hidden');
+      return;
+    }
+    this.economyPanel.classList.remove('hidden');
+    if (this.frame - this.lastEconomyBuildFrame < 60) return;
+    this.lastEconomyBuildFrame = this.frame;
+    this.economyPanel.innerHTML = this.economyPanelHtml();
+    const refresh = () => { this.lastEconomyBuildFrame = -999; };
+    for (const b of this.economyPanel.querySelectorAll<HTMLButtonElement>('.ep-close')) {
+      b.onclick = () => { this.economyOpen = false; };
+    }
+    for (const b of this.economyPanel.querySelectorAll<HTMLButtonElement>('.ep-tax-up')) {
+      b.onclick = () => {
+        const t = r.settlement(Number(b.dataset.sid));
+        if (t) r.setCityPolicy(t.id, 'taxBand', Math.min(3, t.policies.taxBand + 1));
+        refresh();
+      };
+    }
+    for (const b of this.economyPanel.querySelectorAll<HTMLButtonElement>('.ep-tax-dn')) {
+      b.onclick = () => {
+        const t = r.settlement(Number(b.dataset.sid));
+        if (t) r.setCityPolicy(t.id, 'taxBand', Math.max(0, t.policies.taxBand - 1));
+        refresh();
+      };
+    }
+    const svcUp = this.economyPanel.querySelector<HTMLButtonElement>('#ep-svc-up');
+    if (svcUp) svcUp.onclick = () => { r.servicesLevel = Math.min(2, r.servicesLevel + 1); refresh(); };
+    const taxDown = this.economyPanel.querySelector<HTMLButtonElement>('#ep-tax-gdown');
+    if (taxDown) taxDown.onclick = () => { r.taxRate = Math.max(0, r.taxRate - 0.02); refresh(); };
+  }
+
+  private economyPanelHtml(): string {
+    const r = this.region;
+    const towns = r.settlements
+      .filter((t) => t.factionId === r.playerFactionId)
+      .sort((a, b) => r.popOf(b) - r.popOf(a));
+    // Faction demands — consolidate into unique actions
+    let wantSvc = false, wantTax = false;
+    const factionHtml = r.factions.length > 0
+      ? r.factions.map((f) => {
+          const col = f.support >= 60 ? '#4e9' : f.support >= 40 ? '#ca4' : '#e55';
+          if (f.support < 40) {
+            if (f.id === 'workers') { wantSvc = true; wantTax = true; }
+            if (f.id === 'landowners') wantTax = true;
+          }
+          return (
+            `<div class="bar-row" title="${f.name}: ${f.demand}">` +
+            `<span style="width:76px;display:inline-block">${f.name}</span>` +
+            `<div class="bar" style="flex:1"><div class="bar-fill" style="width:${Math.round(f.support)}%;background:${col}"></div></div>` +
+            `<span class="insp-skills" style="min-width:32px;text-align:right">${Math.round(f.support)}%</span>` +
+            (f.support < 40 ? `<span class="insp-cond"> ⚠</span>` : '') +
+            `</div>` +
+            (f.support < 40 ? `<p class="insp-skills" style="margin:1px 0 4px 76px">↳ ${f.demand}</p>` : '')
+          );
+        }).join('')
+      : '';
+    const actionsHtml = (wantSvc || wantTax)
+      ? `<p class="insp-skills">SUGGESTED ACTIONS</p>` +
+        (wantSvc ? `<p><button class="mini" id="ep-svc-up" ${r.servicesLevel >= 2 ? 'disabled' : ''} title="Raise national services level">raise services</button></p>` : '') +
+        (wantTax ? `<p><button class="mini" id="ep-tax-gdown" title="Lower global tax rate by 2%">lower tax −2%</button></p>` : '')
+      : '';
+    const settRows = towns.map((t) => {
+      const totalOutput = SECTOR_IDS.reduce((s, id) => s + t.sectors[id].output, 0);
+      const taxRate = TAX_BAND_RATES[Math.min(3, Math.max(0, t.policies.taxBand))];
+      const rev = totalOutput * taxRate;
+      const hungry = t.food < r.popOf(t) * 5;
+      return (
+        `<div style="margin:3px 0">` +
+        `<b>${t.name}</b> <span class="insp-skills">pop ${Math.round(r.popOf(t))}</span>` +
+        (hungry ? ` <span class="insp-cond">⚠ hungry</span>` : '') +
+        `<br><span class="insp-skills">GDP ` + formatCurrency(totalOutput, 1) + `/mo · tax ` + formatCurrency(rev, 1) + `/mo</span>` +
+        ` <button class="mini ep-tax-up" data-sid="${t.id}" ${t.policies.taxBand >= 3 ? 'disabled' : ''} title="Raise local tax band">+tax</button>` +
+        ` <button class="mini ep-tax-dn" data-sid="${t.id}" ${t.policies.taxBand <= 0 ? 'disabled' : ''} title="Lower local tax band">−tax</button>` +
+        `</div>`
+      );
+    }).join('');
+    return (
+      `<div class="pal-title">ECONOMY [E] <button class="mini ep-close" title="close (E)">✕</button></div>` +
+      `<p>treasury ` + formatCurrency(Math.floor(r.treasury)) + ` · GDP ` + formatCurrency(Math.floor(r.gdpLastMonth)) + `/mo</p>` +
+      `<p>global tax ${Math.round(r.taxRate * 100)}% · trade ` + formatCurrency(Math.floor(r.tradeValueLastMonth)) + `/mo</p>` +
+      (factionHtml ? `<p class="insp-skills">FACTION MOOD</p>${factionHtml}` : '') +
+      actionsHtml +
+      `<p class="insp-skills">PER SETTLEMENT</p>` +
+      `<div class="thoughts">${settRows || '<p class="insp-skills">no towns yet</p>'}</div>`
+    );
+  }
+
   /** Research panel: tech + civics tree progress, node browser, start/cancel. */
   private drawResearchPanel(): void {
     const r = this.region;
@@ -2383,11 +2589,47 @@ export class RegionView {
       this.cityHtml(t) +
       this.routesHtml(t) +
       recentHtml +
+      this.crisisActionsHtml(t) +
       `<p class="insp-skills">COHORTS</p>` + bands +
       (notables ? `<p class="insp-skills">NOTABLES</p><ul class="thoughts">${notables}</ul>` : '') +
       `<button id="found-btn" ${can.ok ? '' : 'disabled'} title="${can.reason}">Found new town (8 pop, 80 food, 80 wood)</button>` +
       (can.ok ? '' : `<p class="insp-skills">${can.reason}</p>`)
     );
+  }
+
+  /** Contextual action buttons surfaced when a settlement is in trouble — so
+   *  the player always has a direct response available. */
+  private crisisActionsHtml(t: Settlement): string {
+    const r = this.region;
+    if (t.factionId !== r.playerFactionId || !r.stateProclaimed) return '';
+    const actions: string[] = [];
+    const hungry = t.food < r.popOf(t) * 5;
+    const onStrike = r.day < t.strikeUntil;
+    const highGrievance = t.grievance > 60;
+    if (!hungry && !onStrike && !highGrievance) return '';
+    if (hungry) {
+      const aidOk = r.treasury >= 10;
+      actions.push(
+        `<button class="mini crisis-aid-btn" ${aidOk ? '' : 'disabled'} ` +
+        `title="${aidOk ? 'Send emergency grain (£10) — buys ~one month of food' : 'Treasury too low for aid'}">` +
+        `🌾 send grain (£10)</button>`,
+      );
+    }
+    if (onStrike || highGrievance) {
+      const svcOk = r.servicesLevel < 2;
+      actions.push(
+        `<button class="mini crisis-svc-btn" ${svcOk ? '' : 'disabled'} ` +
+        `title="Raise national services level — reduces grievance in all towns">raise services</button>`,
+      );
+      if (r.taxRate > 0) {
+        actions.push(
+          `<button class="mini crisis-tax-btn" title="Lower global tax rate by 2% — eases strike pressure">lower tax</button>`,
+        );
+      }
+    }
+    return actions.length
+      ? `<p class="insp-skills">CRISIS ACTIONS</p><p>${actions.join(' ')}</p>`
+      : '';
   }
 
   private showLoanDialog(lenderId: number): void {

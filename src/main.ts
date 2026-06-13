@@ -186,6 +186,7 @@ function enterRegionMode(r: RegionSim): void {
   regionView = new RegionView(canvas, r, root);
   mode = 'region';
   dioramaOpen = false;
+  hud.resetLogLen(); // region log starts independently from town log
   hud.closeMenu();
   // Region saves bundle the town snapshot too — the diorama keeps it alive.
   hud.onSave = () => {
@@ -262,11 +263,24 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
-  // In region mode, R toggles the route-network panel (Phase A quick access).
-  if (mode === 'region' && (e.key === 'r' || e.key === 'R') && regionView) {
-    regionView.routeNetworkOpen = !regionView.routeNetworkOpen;
-    e.preventDefault();
-    return;
+  // In region mode, R/S/E/T toggle the quick-access panels (Phase A sidebar).
+  if (mode === 'region' && regionView) {
+    if (e.key === 'r' || e.key === 'R') {
+      regionView.routeNetworkOpen = !regionView.routeNetworkOpen;
+      e.preventDefault(); return;
+    }
+    if (e.key === 's' || e.key === 'S') {
+      regionView.settlementListOpen = !regionView.settlementListOpen;
+      e.preventDefault(); return;
+    }
+    if (e.key === 'e' || e.key === 'E') {
+      regionView.economyOpen = !regionView.economyOpen;
+      e.preventDefault(); return;
+    }
+    if (e.key === 't' || e.key === 'T') {
+      regionView.researchOpen = !regionView.researchOpen;
+      e.preventDefault(); return;
+    }
   }
   // Region-map zoom/reset from the keyboard (zoom centers on the screen).
   if (mode === 'region' && !dioramaOpen && regionView) {
@@ -508,6 +522,7 @@ function loop(now: number): void {
     }
     hud.drawRegionTopBar(region, dioramaOpen);
     hud.regionLog(region);
+    hud.drawRegionBottomBar(region);
     const btn = document.getElementById('tb-diorama');
     if (btn) (btn as HTMLButtonElement).onclick = () => {
       dioramaOpen = !dioramaOpen;
