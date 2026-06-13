@@ -222,6 +222,8 @@ export class Simulation {
 
   currencySymbol: CurrencySymbol = '$';
   marketDisruptionEnd = 0;
+  priceModifiers: Record<ResourceKind, number>;  // multiplier for each resource at town level
+  lastPriceRecalcDay = -999;
 
   readonly seed: number;
 
@@ -236,6 +238,17 @@ export class Simulation {
     this.world = new World(this.rng, this.site);
     this.nextEventDay = 4 + this.rng.int(3);
     this.nextRaidDay = TUNING.firstRaidDay + this.rng.int(5);
+    // Initialize price modifiers (all resources at 1.0 = neutral price)
+    const resourceKinds: ResourceKind[] = [
+      'wood', 'grain', 'meal', 'stone', 'clothes', 'weapons',
+      'clay', 'coal', 'iron_ore', 'flax', 'herbs',
+      'timber', 'brick', 'iron', 'tools', 'rope', 'flour', 'ale', 'medicine',
+      'bread', 'dairy', 'produce', 'game_meal', 'fish_meal', 'preserved',
+    ];
+    this.priceModifiers = {} as Record<ResourceKind, number>;
+    for (const kind of resourceKinds) {
+      this.priceModifiers[kind] = 1.0;
+    }
     if (design) this.applyTownDesign(design);
     this.foundColony(design?.startingPop ?? 12);
     // The woods were never empty: game animals range the map from day one.
@@ -949,7 +962,7 @@ export class Simulation {
       }, 0);
       const daysUntilRaid = this.nextRaidDay - this.day;
       if (daysUntilRaid === warningDays) {
-        this.addLog('Your watchmen have spotted raiders gathering in the distance!', 'bad');
+        this.addLog('🔔 BELL! Your watchmen have spotted raiders gathering in the distance!', 'bad');
       }
     }
     // Cooked food keeps only so long; granaries extend the larder. Grain is uncapped.
@@ -1286,6 +1299,12 @@ export class Simulation {
       if (this.raidActive) {
         this.raidActive = false;
         this.addLog('The raid is over.', 'good');
+        // Clear guard and evacuate jobs when raid ends
+        for (const s of this.settlers) {
+          if (s.task && (s.task.kind === 'guard' || s.task.kind === 'evacuate')) {
+            this.finishTask(s);
+          }
+        }
       }
       return;
     }
@@ -2082,6 +2101,36 @@ export class Simulation {
       }
     }
 
+    // Market: merchant buys/sells goods to optimize stockpile.
+    for (const market of this.builtOf('market')) {
+      push({ kind: 'market', x: market.x, y: market.y, buildingId: market.id, workLeft: 999999, label: 'trade at market' }, 'market');
+    }
+
+    // Guard: defend gates/watchtowers during raids.
+    if (this.raiders.length > 0) {
+      for (const gate of this.builtOf('gate')) {
+        if (gate.built) {
+          push({ kind: 'guard', x: gate.x, y: gate.y, buildingId: gate.id, workLeft: 999999, label: 'guard gate' }, 'guard');
+        }
+      }
+      for (const tower of this.builtOf('watchtower')) {
+        if (tower.built) {
+          push({ kind: 'guard', x: tower.x, y: tower.y, buildingId: tower.id, workLeft: 999999, label: 'guard tower' }, 'guard');
+        }
+      }
+    }
+
+    // Evacuate: move unarmed/weak settlers to safety during raids.
+    if (this.raiders.length > 0) {
+      const hallOrMeeting = this.buildings.find((b) => (b.defId === 'town_hall' || b.defId === 'meeting_hall') && b.built);
+      if (hallOrMeeting) {
+        const noEnemiesNear = !this.raiders.some((r) => Math.hypot(r.pos.x - hallOrMeeting.x, r.pos.y - hallOrMeeting.y) < 2);
+        if (noEnemiesNear && (s.combat < 3 || s.health < 50)) {
+          push({ kind: 'evacuate', x: hallOrMeeting.x, y: hallOrMeeting.y, buildingId: hallOrMeeting.id, workLeft: 999999, label: 'evacuate to safety' }, 'evacuate');
+        }
+      }
+    }
+
     // Sticky assignment filter: if this settler is assigned to a building,
     // remove tasks that belong to a DIFFERENT building (but keep tasks with
     // no buildingId — haul, chop, bury — so assigned settlers remain useful).
@@ -2604,6 +2653,44 @@ export class Simulation {
         }
         return;
       }
+      case 'market': {
+        const market = this.building(task.buildingId);
+        if (!market?.built || market.defId !== 'market') return this.finishTask(s);
+        task.workLeft -= work;
+        if (task.workLeft <= 0) {
+          this.merchantTrade();
+          task.workLeft = 999999;
+        }
+        return;
+      }
+      case 'guard': {
+        const post = this.building(task.buildingId);
+        if (!post?.built) return this.finishTask(s);
+        const postPos = { x: post.x, y: post.y };
+        const dist = Math.hypot(s.pos.x - postPos.x, s.pos.y - postPos.y);
+        if (dist > TUNING.guardPostRange) {
+          s.state = 'moving';
+          this.setDestination(s, postPos);
+          return;
+        }
+        const nearestRaider = this.findNearestRaider(s.pos, TUNING.guardDetectionRange);
+        if (nearestRaider) {
+          s.state = 'fighting';
+          return;
+        }
+        return;
+      }
+      case 'evacuate': {
+        const evac = task.buildingId !== undefined ? this.building(task.buildingId) : null;
+        if (!evac?.built) return this.finishTask(s);
+        const dist = Math.hypot(s.pos.x - evac.x, s.pos.y - evac.y);
+        if (dist > 1.5) {
+          s.state = 'moving';
+          this.setDestination(s, { x: evac.x, y: evac.y });
+          return;
+        }
+        return this.finishTask(s);
+      }
     }
   }
 
@@ -2612,6 +2699,43 @@ export class Simulation {
     return b.defId === 'bakery'
       ? { workPerMeal: TUNING.bakeWorkPerMeal, batch: TUNING.bakeBatch }
       : { workPerMeal: TUNING.cookWorkPerMeal, batch: TUNING.cookBatch };
+  }
+
+  /** Merchant auto-trades based on resource levels and strategy. */
+  private merchantTrade(): void {
+    const canTrade = (give: ResourceKind, get: ResourceKind): boolean => {
+      const rate = TUNING.tradeRates[`${give}->${get}`];
+      return rate && this.stock[give] >= rate.give;
+    };
+    const doTrade = (give: ResourceKind, get: ResourceKind): void => {
+      const rate = TUNING.tradeRates[`${give}->${get}`];
+      if (rate && canTrade(give, get)) {
+        this.stock[give] -= rate.give;
+        this.stock[get] += rate.get;
+      }
+    };
+    const grain = this.stock.grain ?? 0;
+    const meal = this.stock.meal ?? 0;
+    const wood = this.stock.wood ?? 0;
+    const stone = this.stock.stone ?? 0;
+    if (grain < 50 && wood > 100) doTrade('wood', 'grain');
+    if (grain < 50 && stone > 50) doTrade('stone', 'grain');
+    if (meal < 30 && grain > 100) doTrade('grain', 'meal');
+    if (wood < 50 && stone > 50 && meal > 30) doTrade('stone', 'grain');
+  }
+
+  /** Finds the nearest raider within detection range. */
+  private findNearestRaider(pos: Vec, range: number): { pos: Vec; health: number; id: number } | null {
+    let nearest: { pos: Vec; health: number; id: number } | null = null;
+    let nearestDist = range;
+    for (const raider of this.raiders) {
+      const dist = Math.hypot(raider.pos.x - pos.x, raider.pos.y - pos.y);
+      if (dist < nearestDist) {
+        nearest = raider;
+        nearestDist = dist;
+      }
+    }
+    return nearest;
   }
 
   /** Farthest free, unreserved grass tile in the forester's range (outermost first so the
