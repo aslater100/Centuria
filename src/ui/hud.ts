@@ -207,6 +207,7 @@ export class Hud {
   private gameOverBox: HTMLElement;
   private regionBottomBar: HTMLElement;
   private menuBox: HTMLElement;
+  private eventModal: HTMLElement;
   private showPriorities = false;
   private showResources = false;
   private activeCat: string | null = null;
@@ -234,6 +235,7 @@ export class Hud {
     this.gameOverBox = el('div', 'gameover hidden', root);
     this.menuBox = el('div', 'menu hidden', root);
     this.regionBottomBar = el('div', 'region-bottombar hidden', root);
+    this.eventModal = el('div', 'event-modal hidden', root);
 
     this.buildBuildBar();
     this.techPanel = new TechPanel(root, sim);
@@ -365,6 +367,14 @@ export class Hud {
           if (confirm('Quit to desktop? Unsaved progress will be lost.')) this.onQuit?.(false);
           break;
       }
+    });
+
+    this.eventModal.addEventListener('mousedown', (e) => {
+      const btn = (e.target as HTMLElement).closest<HTMLElement>('.evt-choice');
+      if (!btn || !this.sim.pendingChoice) return;
+      const choiceIdx = Number(btn.dataset.choice);
+      this.sfx?.click();
+      this.sim.resolveEventChoice(choiceIdx);
     });
   }
 
@@ -758,6 +768,7 @@ export class Hud {
     this.drawTopBar();
     this.drawInspector();
     this.drawLog();
+    this.updateEventModal();
     this.drawGameOver();
     if (this.showPriorities) this.drawPriorities();
     this.techPanel.update();
@@ -1134,7 +1145,32 @@ export class Hud {
   private drawLog(): void {
     if (this.sim.log.length === this.lastLogLen) return;
     this.lastLogLen = this.sim.log.length;
-    this.setHtml(this.logBox, this.sim.log.slice(-8).map((l) => `<div class="log-entry log-${l.kind}">d${l.day} · ${l.text}</div>`).join(''));
+    // Show last 3 events; format: Month X · Event text
+    const lastThree = this.sim.log.slice(-3).reverse();
+    this.setHtml(this.logBox, lastThree.map((l) => {
+      // 12 months per year: each month is roughly 5 days (60/12)
+      const month = Math.floor((l.day % 60) / 5) + 1;
+      return `<div class="log-entry log-${l.kind}">Month ${month} · ${l.text}</div>`;
+    }).join(''));
+  }
+
+  private updateEventModal(): void {
+    if (!this.sim.pendingChoice) {
+      this.eventModal.classList.add('hidden');
+      return;
+    }
+    const evt = this.sim.pendingChoice;
+    const buttons = evt.choices.map((c, i) =>
+      `<button class="evt-choice" data-choice="${i}">${c.label}<br><span class="evt-desc">${c.desc}</span></button>`
+    ).join('');
+    this.setHtml(this.eventModal, `
+      <div class="evt-box">
+        <h2>${evt.title}</h2>
+        <p>${evt.text}</p>
+        <div class="evt-buttons">${buttons}</div>
+      </div>
+    `);
+    this.eventModal.classList.remove('hidden');
   }
 
   private drawPriorities(): void {

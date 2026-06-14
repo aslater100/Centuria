@@ -332,6 +332,11 @@ export class Simulation {
     const dayOfSeason = (this.day % DAYS_PER_YEAR) % DAYS_PER_SEASON + 1;
     return `${this.season} ${dayOfSeason}, ${this.year}`;
   }
+  get monthLabel(): string {
+    // 12 months per year: each month is roughly 5 days (60/12)
+    const month = Math.floor((this.day % DAYS_PER_YEAR) / 5) + 1;
+    return `Month ${month}, ${this.year}`;
+  }
   get growingSeason(): boolean {
     return this.seasonIndex < 3; // crops die in winter
   }
@@ -1382,20 +1387,151 @@ export class Simulation {
   /** Town-tier incident deck — 12 named events, ~45% bad / 55% good (GDD §3.3). */
   private fireEvent(): void {
     const roll = this.rng.next();
-    if      (roll < 0.12) this.evtWanderer();
-    else if (roll < 0.21) this.evtColdSnap();
-    else if (roll < 0.30) this.evtRats();
-    else if (roll < 0.42) this.evtFestival();
-    else if (roll < 0.52) this.evtFever();
-    else if (roll < 0.62) this.evtBumperHarvest();
-    else if (roll < 0.70) this.evtWindfallTimber();
-    else if (roll < 0.78) this.evtSkillBreakthrough();
-    else if (roll < 0.85) this.evtStormDamage();
-    else if (roll < 0.91) this.evtInjuredWorker();
-    else if (roll < 0.96) this.evtMerchant();
-    else                  this.evtSettlerFeud();
+    // 25% of events are choice-based, 75% are automatic
+    if (roll < 0.25) {
+      const choiceRoll = this.rng.next();
+      if      (choiceRoll < 0.25) this.evtChoiceBandits();
+      else if (choiceRoll < 0.50) this.evtChoiceRefugees();
+      else if (choiceRoll < 0.75) this.evtChoiceTrader();
+      else                        this.evtChoiceFeud();
+    } else {
+      const autoRoll = (roll - 0.25) / 0.75; // remap to [0, 1]
+      if      (autoRoll < 0.12) this.evtWanderer();
+      else if (autoRoll < 0.21) this.evtColdSnap();
+      else if (autoRoll < 0.30) this.evtRats();
+      else if (autoRoll < 0.42) this.evtFestival();
+      else if (autoRoll < 0.52) this.evtFever();
+      else if (autoRoll < 0.62) this.evtBumperHarvest();
+      else if (autoRoll < 0.70) this.evtWindfallTimber();
+      else if (autoRoll < 0.78) this.evtSkillBreakthrough();
+      else if (autoRoll < 0.85) this.evtStormDamage();
+      else if (autoRoll < 0.91) this.evtInjuredWorker();
+      else if (autoRoll < 0.96) this.evtMerchant();
+      else                      this.evtSettlerFeud();
+    }
   }
 
+  // ---- Choice-based events ----
+  private evtChoiceBandits(): void {
+    this.pendingChoice = {
+      id: 'bandits',
+      title: 'Bandits at the Gate',
+      text: 'A group of bandits demands tribute. Pay them off or stand your ground?',
+      choices: [
+        { label: 'Pay tribute', desc: '10 grain lost' },
+        { label: 'Stand firm', desc: 'Risk militia casualties' },
+      ],
+    };
+  }
+
+  private evtChoiceRefugees(): void {
+    const available = Math.max(1, Math.floor(this.settlers.length * 0.3));
+    this.pendingChoice = {
+      id: 'refugees',
+      title: 'Refugees Seeking Shelter',
+      text: `A group of ${available} refugees asks to join your colony. Accept or turn away?`,
+      choices: [
+        { label: 'Welcome them', desc: `+${available} settlers, +food consumption` },
+        { label: 'Turn away', desc: 'Keep morale stable' },
+      ],
+    };
+  }
+
+  private evtChoiceTrader(): void {
+    this.pendingChoice = {
+      id: 'trader',
+      title: 'Merchant Caravan',
+      text: 'A well-supplied merchant caravan passes through. Trade with them?',
+      choices: [
+        { label: 'Trade 5 wood', desc: 'Get 8 grain' },
+        { label: 'Decline', desc: 'Keep your resources' },
+      ],
+    };
+  }
+
+  private evtChoiceFeud(): void {
+    if (this.settlers.length < 2) {
+      this.evtSettlerFeud();
+      return;
+    }
+    this.pendingChoice = {
+      id: 'feud',
+      title: 'Settlement Conflict',
+      text: 'Two families nearly come to blows over land. How to resolve it?',
+      choices: [
+        { label: 'Mediate fairly', desc: 'Morale improves' },
+        { label: 'Ignore it', desc: 'Conflict lingers' },
+      ],
+    };
+  }
+
+  /** Resolves a pending choice event and applies its consequences. */
+  resolveEventChoice(choiceIndex: number): void {
+    if (!this.pendingChoice) return;
+    const evt = this.pendingChoice;
+    this.pendingChoice = null;
+
+    switch (evt.id) {
+      case 'bandits':
+        if (choiceIndex === 0) {
+          // Pay tribute
+          const payment = Math.min(10, this.stock.grain);
+          this.stock.grain -= payment;
+          this.addLog(`Paid ${payment} grain to the bandits. They leave peacefully.`, 'bad');
+        } else {
+          // Stand firm
+          const casualties = 1 + this.rng.int(2);
+          for (let i = 0; i < Math.min(casualties, this.settlers.length); i++) {
+            const idx = this.rng.int(this.settlers.length);
+            const s = this.settlers[idx];
+            s.health -= 50 + this.rng.int(50);
+          }
+          this.addLog(`Drove off the bandits! ${casualties} settlers injured in the fight.`, 'good');
+        }
+        break;
+      case 'refugees':
+        if (choiceIndex === 0) {
+          // Welcome them
+          const available = Math.max(1, Math.floor(this.settlers.length * 0.3));
+          for (let i = 0; i < available; i++) {
+            this.spawnSettler(Math.floor(MAP_W / 2), Math.floor(MAP_H / 2));
+          }
+          this.addLog(`${available} refugees settle in. The colony grows.`, 'good');
+        } else {
+          // Turn away
+          this.addLog('Turned away the refugees. A difficult but practical choice.', 'info');
+        }
+        break;
+      case 'trader':
+        if (choiceIndex === 0 && this.stock.wood >= 5) {
+          // Trade
+          this.stock.wood -= 5;
+          this.stock.grain += 8;
+          this.addLog('Traded 5 wood for 8 grain with a passing merchant.', 'good');
+        } else {
+          // Decline
+          this.addLog('The merchant moves on, seeking trade elsewhere.', 'info');
+        }
+        break;
+      case 'feud':
+        if (choiceIndex === 0) {
+          // Mediate
+          for (const s of this.settlers.slice(0, 2)) {
+            this.addThought(s, 'Peace restored', 3, 3 * MINUTES_PER_DAY);
+          }
+          this.addLog('Mediated the dispute fairly. Tensions ease.', 'good');
+        } else {
+          // Ignore
+          const shuffled = [...this.settlers].sort(() => this.rng.next() - 0.5);
+          this.addThought(shuffled[0], 'Still feuding', -3, 5 * MINUTES_PER_DAY);
+          if (shuffled[1]) this.addThought(shuffled[1], 'Still feuding', -3, 5 * MINUTES_PER_DAY);
+          this.addLog('The feud continues to fester in the colony.', 'bad');
+        }
+        break;
+    }
+  }
+
+  // ---- Automatic events ----
   private evtWanderer(): void {
     if (this.settlers.length >= TUNING.hardCapPop) return;
     if (this.stock.meal + this.stock.grain > this.settlers.length * 2) {

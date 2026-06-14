@@ -171,6 +171,15 @@ export interface PendingEvent {
   title: string;
   text: string;
   choices: { label: string; desc: string }[];
+  /** Index of the selected choice (-1 = not yet chosen) */
+  chosenIndex?: number;
+}
+
+export interface EventDef {
+  id: string;
+  title: string;
+  text: (sim: any) => string; // parameterized by simulation state
+  choices: { label: string; desc: string }[];
 }
 
 export interface UpgradeLevel {
@@ -250,6 +259,86 @@ export function townTechDef(id: string): TownTechDef {
   const def = TOWN_TECH_DEFS.find((d) => d.id === id);
   if (!def) throw new Error(`unknown town tech: ${id}`);
   return def;
+}
+
+// ---- Town-tier interactive events ----
+export const TOWN_EVENT_DEFS: EventDef[] = [
+  {
+    id: 'bandits',
+    title: 'Bandits at the Gate',
+    text: () => 'A group of bandits demands tribute. Pay them off or stand your ground?',
+    choices: [
+      { label: 'Pay tribute', desc: '10 grain lost, but avoid conflict' },
+      { label: 'Stand firm', desc: 'Keep resources, but risk militia casualties' },
+    ],
+  },
+  {
+    id: 'refugees',
+    title: 'Refugees Seeking Shelter',
+    text: () => 'A group of refugees asks to join your colony. Accept them or turn them away?',
+    choices: [
+      { label: 'Welcome them', desc: '+4 settlers, +1 food consumption' },
+      { label: 'Turn them away', desc: 'Keep morale stable, avoid extra mouths' },
+    ],
+  },
+  {
+    id: 'plague',
+    title: 'Sickness Spreads',
+    text: () => 'A contagious illness breaks out. Quarantine the sick or treat them freely?',
+    choices: [
+      { label: 'Quarantine', desc: 'Slow the spread, but hurt morale' },
+      { label: 'Treat freely', desc: 'Keep morale high, but sickness lingers' },
+    ],
+  },
+  {
+    id: 'fire',
+    title: 'Fire in Camp',
+    text: () => 'A building catches fire! Evacuate nearby or try to extinguish it?',
+    choices: [
+      { label: 'Evacuate', desc: 'Everyone stays safe, but building is lost' },
+      { label: 'Fight fire', desc: 'Chance to save the building, but risk casualties' },
+    ],
+  },
+  {
+    id: 'trader',
+    title: 'Merchant Caravan',
+    text: () => 'A well-supplied merchant caravan passes through. Trade with them?',
+    choices: [
+      { label: 'Trade 5 wood', desc: 'Get 8 grain' },
+      { label: 'Decline', desc: 'Keep your resources' },
+    ],
+  },
+  {
+    id: 'harvest',
+    title: 'Bumper Harvest',
+    text: () => 'The fields yield an exceptional crop! How to use it?',
+    choices: [
+      { label: 'Store it all', desc: '+20 grain to reserves' },
+      { label: 'Celebrate', desc: '+10 grain, all settlers +2 mood' },
+    ],
+  },
+  {
+    id: 'ore_discovery',
+    title: 'Ore Discovery',
+    text: () => 'Diggers strike a rich vein! How to proceed?',
+    choices: [
+      { label: 'Mine aggressively', desc: '+20 iron ore, but settlers tire quickly' },
+      { label: 'Steady pace', desc: '+10 iron ore, sustainable' },
+    ],
+  },
+  {
+    id: 'settlement_feud',
+    title: 'Settlement Conflict',
+    text: () => 'Two families nearly come to blows over land. How to resolve it?',
+    choices: [
+      { label: 'Mediate fairly', desc: 'Morale stable, mood penalties fade' },
+      { label: 'Ignore it', desc: 'Conflict lingers, mood penalties persist' },
+    ],
+  },
+];
+
+export function townEventDef(id: string): EventDef | undefined {
+  return TOWN_EVENT_DEFS.find((d) => d.id === id);
 }
 
 // ---- Rooms & workstations (Songs-of-Syx build model: walls + floors + designated
