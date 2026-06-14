@@ -366,6 +366,36 @@ body {
   margin-bottom: 2px;
 }
 
+/* ---- Tab strip (reusable for any panel with grouped content) ---- */
+.insp-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 4px 0 6px;
+  flex-wrap: wrap;
+}
+
+.insp-tab {
+  flex: 1;
+  min-width: 48px;
+  padding: 3px 6px !important;
+  background: #1e1c18 !important;
+  color: #998c6e !important;
+  border: 1px solid #4d3320 !important;
+  font-size: 10px !important;
+  cursor: pointer;
+}
+
+.insp-tab:hover {
+  background: #2e2a24 !important;
+  color: #dfe6ee !important;
+}
+
+.insp-tab.active {
+  background: #3d3020 !important;
+  border-color: #e8d27a !important;
+  color: #e8d27a !important;
+}
+
 .inspector p {
   margin: 3px 0;
 }
