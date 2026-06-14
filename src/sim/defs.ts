@@ -200,14 +200,17 @@ export const TRAIT_DEFS: TraitDef[] = traitsJson.traits as TraitDef[];
 export const FIRST_NAMES: string[] = namesJson.first;
 export const LAST_NAMES: string[] = namesJson.last;
 
+const _buildingDefById = new Map(BUILDING_DEFS.map((d) => [d.id, d]));
+const _traitDefById = new Map(TRAIT_DEFS.map((d) => [d.id, d]));
+
 export function buildingDef(id: string): BuildingDef {
-  const def = BUILDING_DEFS.find((d) => d.id === id);
+  const def = _buildingDefById.get(id);
   if (!def) throw new Error(`unknown building def: ${id}`);
   return def;
 }
 
 export function traitDef(id: string): TraitDef {
-  const def = TRAIT_DEFS.find((d) => d.id === id);
+  const def = _traitDefById.get(id);
   if (!def) throw new Error(`unknown trait def: ${id}`);
   return def;
 }

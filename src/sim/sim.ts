@@ -1,6 +1,6 @@
 import { Rng } from './rng';
 import { World, MAP_W, MAP_H } from './world';
-import type { Vec } from './world';
+import type { Vec, RoadKind, Tile } from './world';
 import { RegionMap } from './worldgen';
 import type { TownSite } from './worldgen';
 import { Weather } from './weather';
@@ -14,6 +14,25 @@ import {
 import type { ResourceKind, WorkKind, TownFocus, TradeOrder, TradeRecord, PendingEvent, CurrencySymbol, TownDesign } from './defs';
 import type { EconomyData } from './economy';
 import { createTownEconomy, BASE_PRICES } from './economy';
+
+// Resource kinds that are always hauled even when the industrial stockpile cap is full.
+const FOOD_HAUL_KINDS: ReadonlySet<ResourceKind> = new Set<ResourceKind>([
+  'grain', 'flour', 'meal', 'game_meal', 'fish_meal', 'bread', 'dairy', 'produce', 'preserved', 'ale',
+]);
+
+// Per-tick tile scan built once and shared across all idle settlers in findTask().
+interface TileTaskScan {
+  wallPlanTiles: Array<{ x: number; y: number }>;
+  gatePlanTiles: Array<{ x: number; y: number }>;
+  damagedWallTiles: Array<{ x: number; y: number; isGate: boolean }>;
+  markedTrees: Array<{ x: number; y: number }>;
+  markedRocks: Array<{ x: number; y: number }>;
+  roadPlanTiles: Array<{ x: number; y: number; road: RoadKind }>;
+  farmReadyTiles: Array<{ x: number; y: number }>;
+  farmSowTiles: Array<{ x: number; y: number }>;
+  flaxReadyTiles: Array<{ x: number; y: number }>;
+  mineReadyTiles: Array<{ x: number; y: number }>;
+}
 
 export interface Needs {
   food: number;
@@ -212,6 +231,12 @@ export class Simulation {
   private nextId = 1;
   private nextEventDay: number;
   private reserved = new Set<string>(); // task target keys
+  // Per-tick tile scan; built once in tick() and consumed by findTask() for all idle settlers.
+  private _tileTaskScan: TileTaskScan | null = null;
+  // Soil tile cache; never invalidated (soil tiles are set at worldgen and don't change kind).
+  private _soilTilesCache: Tile[] | null = null;
+  // Last tile index at which each settler triggered a fog reveal; skips re-reveal when stationary.
+  private _settlerLastRevealIdx = new Map<number, number>();
 
   // ---- town expansion fields ----
   townName = 'New Settlement';
@@ -968,6 +993,44 @@ export class Simulation {
     }
   }
 
+  // ---- perf helpers ----
+  /** Lazy soil-tile list: built once from worldgen output, reused every dormant tick and dailyUpdate. */
+  private soilTiles(): Tile[] {
+    if (!this._soilTilesCache) this._soilTilesCache = this.world.tiles.filter(t => t.kind === 'soil');
+    return this._soilTilesCache;
+  }
+
+  /** Single full-map scan shared across all idle settlers in findTask() this tick. */
+  private buildTileTaskScan(): TileTaskScan {
+    const scan: TileTaskScan = {
+      wallPlanTiles: [], gatePlanTiles: [], damagedWallTiles: [],
+      markedTrees: [], markedRocks: [], roadPlanTiles: [],
+      farmReadyTiles: [], farmSowTiles: [], flaxReadyTiles: [], mineReadyTiles: [],
+    };
+    const inSeason = this.growingSeason;
+    for (let y = 0; y < MAP_H; y++) {
+      for (let x = 0; x < MAP_W; x++) {
+        const tile = this.world.at(x, y);
+        if (tile.wallPlan && !tile.wall) scan.wallPlanTiles.push({ x, y });
+        if (tile.gatePlan && !tile.gate) scan.gatePlanTiles.push({ x, y });
+        if ((tile.wall || tile.gate) && tile.wallHp > 0) {
+          const maxHp = tile.gate ? TUNING.gateMaxHp : TUNING.wallMaxHp;
+          if (tile.wallHp < maxHp) scan.damagedWallTiles.push({ x, y, isGate: tile.gate });
+        }
+        if (tile.kind === 'tree' && tile.marked) scan.markedTrees.push({ x, y });
+        else if (tile.kind === 'rock' && tile.marked) scan.markedRocks.push({ x, y });
+        if (tile.roadPlan) scan.roadPlanTiles.push({ x, y, road: tile.roadPlan });
+        if (tile.farmZone) {
+          if (tile.growth >= 100) scan.farmReadyTiles.push({ x, y });
+          else if (!tile.sown && inSeason) scan.farmSowTiles.push({ x, y });
+        }
+        if (tile.flaxZone && tile.growth >= 100) scan.flaxReadyTiles.push({ x, y });
+        if (tile.mineZone && tile.mineCharges > 0) scan.mineReadyTiles.push({ x, y });
+      }
+    }
+    return scan;
+  }
+
   // ---- main loop ----
   tick(): void {
     if (this.gameOver) return;
@@ -978,8 +1041,21 @@ export class Simulation {
     this.updateSaplings();
     this.updateRaiders();
     this.updateAnimals();
-    for (const s of [...this.settlers]) this.updateSettler(s);
-    for (const s of this.settlers) this.world.revealAround(s.pos.x, s.pos.y, 5);
+    // Build the tile-task scan once; findTask() reads it for every idle settler this tick.
+    this._tileTaskScan = this.buildTileTaskScan();
+    // Iterate backwards: safe for in-place removal when kill() shrinks the array.
+    for (let i = this.settlers.length - 1; i >= 0; i--) this.updateSettler(this.settlers[i]);
+    this._tileTaskScan = null;
+    // Reveal fog only when a settler has moved to a new tile.
+    for (const s of this.settlers) {
+      const fx = Math.floor(s.pos.x);
+      const fy = Math.floor(s.pos.y);
+      const idx = fy * MAP_W + fx;
+      if (this._settlerLastRevealIdx.get(s.id) !== idx) {
+        this.world.revealAround(s.pos.x, s.pos.y, 5);
+        this._settlerLastRevealIdx.set(s.id, idx);
+      }
+    }
     if (this.settlers.length === 0 && !this.gameOver) {
       this.gameOver = true;
       this.addLog('The colony has perished. (Failure state: depopulation.)', 'bad');
@@ -1029,8 +1105,7 @@ export class Simulation {
     const grainPerDay = (100 / TUNING.farmGrowDays) * this.weather.growthMult(this.day);
     const flaxPerDay = 100 / TUNING.flaxGrowDays;
     const inSeason = this.growingSeason;
-    for (const t of this.world.tiles) {
-      if (t.kind !== 'soil') continue;
+    for (const t of this.soilTiles()) {
       if (t.farmZone) {
         if (!inSeason) continue; // grain is seasonal; winter is fallow
         if (!t.sown) t.sown = true; // auto-sow what no settler is here to plant
@@ -1151,8 +1226,8 @@ export class Simulation {
     }
     // Winter kills the standing crop.
     if (!this.growingSeason) {
-      for (const t of this.world.tiles) {
-        if (t.kind === 'soil' && (t.sown || t.growth > 0) && !t.flaxZone) {
+      for (const t of this.soilTiles()) {
+        if ((t.sown || t.growth > 0) && !t.flaxZone) {
           t.sown = false;
           t.growth = 0;
         }
@@ -2056,9 +2131,14 @@ export class Simulation {
   // ---- task generation & execution ----
   private findTask(s: Settler): Task | null {
     const candidates: { task: Task; prio: number; dist: number }[] = [];
-    // Pre-compute assigned counts per building for workerLimit enforcement.
-    const countAssigned = (bid: number): number =>
-      this.settlers.filter((x) => x.assignedBuildingId === bid).length;
+    // Pre-compute assigned counts once; workerLimit checks are O(1) from this Map.
+    const assignedCounts = new Map<number, number>();
+    for (const w of this.settlers) {
+      if (w.assignedBuildingId !== null) {
+        assignedCounts.set(w.assignedBuildingId, (assignedCounts.get(w.assignedBuildingId) ?? 0) + 1);
+      }
+    }
+    const countAssigned = (bid: number): number => assignedCounts.get(bid) ?? 0;
     const push = (task: Task, kind: WorkKind) => {
       const prio = s.priorities[kind];
       if (prio <= 0 || this.reserved.has(this.taskKey(task))) return;
@@ -2077,9 +2157,8 @@ export class Simulation {
     // that a wood glut can never starve the colony.
     const rawCap = this.stockpileCapacity();
     const rawFull = rawCap > 0 && this.totalRawStock() >= rawCap;
-    const FOOD_HAUL = new Set<ResourceKind>(['grain', 'flour', 'meal', 'game_meal', 'fish_meal', 'bread', 'dairy', 'produce', 'preserved', 'ale']);
     for (const it of this.items) {
-      if (it.reservedBy === null && (!rawFull || FOOD_HAUL.has(it.kind))) {
+      if (it.reservedBy === null && (!rawFull || FOOD_HAUL_KINDS.has(it.kind))) {
         push({ kind: 'haul', x: it.x, y: it.y, itemId: it.id, workLeft: 5, label: `haul ${it.kind}` }, 'haul');
       }
     }
@@ -2094,69 +2173,47 @@ export class Simulation {
         push({ kind: 'build', x: b.x, y: b.y, buildingId: b.id, workLeft: b.buildLeft, label: `build ${buildingDef(b.defId).name}` }, 'build');
       }
     }
+    // Use the per-tick tile scan (built once in tick(), shared by all idle settlers).
+    const scan = this._tileTaskScan ?? this.buildTileTaskScan();
     // Build wall zones.
-    for (let y = 0; y < MAP_H; y++) {
-      for (let x = 0; x < MAP_W; x++) {
-        const tile = this.world.at(x, y);
-        if (tile.wallPlan && !tile.wall) {
-          const affordable = (TUNING.wallCost.wood ?? 0) <= this.stock.wood;
-          if (affordable) {
-            push({ kind: 'build', x, y, workLeft: TUNING.wallWork, label: 'build palisade', wallTile: true }, 'build');
-          }
-        }
-        if (tile.gatePlan && !tile.gate) {
-          const affordable = (TUNING.gateCost.wood ?? 0) <= this.stock.wood;
-          if (affordable) {
-            push({ kind: 'build', x, y, workLeft: TUNING.gateWork, label: 'build gate', gateTile: true }, 'build');
-          }
-        }
-        // Repair damaged standing walls/gates.
-        if ((tile.wall || tile.gate) && tile.wallHp > 0) {
-          const maxHp = tile.gate ? TUNING.gateMaxHp : TUNING.wallMaxHp;
-          if (tile.wallHp < maxHp && (TUNING.wallRepairCost.wood ?? 0) <= this.stock.wood) {
-            push({ kind: 'build', x, y, workLeft: TUNING.wallRepairWork, label: 'repair palisade', repairTile: true, gateTile: tile.gate }, 'build');
-          }
-        }
+    if ((TUNING.wallCost.wood ?? 0) <= this.stock.wood) {
+      for (const { x, y } of scan.wallPlanTiles) {
+        push({ kind: 'build', x, y, workLeft: TUNING.wallWork, label: 'build palisade', wallTile: true }, 'build');
+      }
+    }
+    if ((TUNING.gateCost.wood ?? 0) <= this.stock.wood) {
+      for (const { x, y } of scan.gatePlanTiles) {
+        push({ kind: 'build', x, y, workLeft: TUNING.gateWork, label: 'build gate', gateTile: true }, 'build');
+      }
+    }
+    if ((TUNING.wallRepairCost.wood ?? 0) <= this.stock.wood) {
+      for (const { x, y, isGate } of scan.damagedWallTiles) {
+        push({ kind: 'build', x, y, workLeft: TUNING.wallRepairWork, label: 'repair palisade', repairTile: true, gateTile: isGate }, 'build');
       }
     }
     // Chop marked trees, quarry marked rock, lay planned roads.
-    for (let y = 0; y < MAP_H; y++) {
-      for (let x = 0; x < MAP_W; x++) {
-        const tile = this.world.at(x, y);
-        if (tile.kind === 'tree' && tile.marked) {
-          push({ kind: 'chop', x, y, workLeft: TUNING.treeChopWork, label: 'chop tree' }, 'chop');
-        } else if (tile.kind === 'rock' && tile.marked) {
-          push({ kind: 'chop', x, y, workLeft: TUNING.rockQuarryWork, label: 'quarry stone' }, 'chop');
-        }
-        if (tile.roadPlan) {
-          const cost = TUNING.roadCost[tile.roadPlan];
-          const affordable = (cost.wood ?? 0) <= this.stock.wood && (cost.stone ?? 0) <= this.stock.stone;
-          if (affordable) {
-            push({ kind: 'build', x, y, workLeft: TUNING.roadWork[tile.roadPlan], label: `lay ${tile.roadPlan} road`, roadTile: true }, 'build');
-          }
-        }
+    for (const { x, y } of scan.markedTrees) {
+      push({ kind: 'chop', x, y, workLeft: TUNING.treeChopWork, label: 'chop tree' }, 'chop');
+    }
+    for (const { x, y } of scan.markedRocks) {
+      push({ kind: 'chop', x, y, workLeft: TUNING.rockQuarryWork, label: 'quarry stone' }, 'chop');
+    }
+    for (const { x, y, road } of scan.roadPlanTiles) {
+      const cost = TUNING.roadCost[road];
+      if ((cost.wood ?? 0) <= this.stock.wood && (cost.stone ?? 0) <= this.stock.stone) {
+        push({ kind: 'build', x, y, workLeft: TUNING.roadWork[road], label: `lay ${road} road`, roadTile: true }, 'build');
       }
     }
     // Farm: sow bare soil in season, harvest ripe tiles.
-    for (let y = 0; y < MAP_H; y++) {
-      for (let x = 0; x < MAP_W; x++) {
-        const tile = this.world.at(x, y);
-        if (!tile.farmZone) continue;
-        if (tile.growth >= 100) {
-          push({ kind: 'farm', x, y, workLeft: 10, label: 'harvest grain' }, 'farm');
-        } else if (!tile.sown && this.growingSeason) {
-          push({ kind: 'farm', x, y, workLeft: 15, label: 'sow grain' }, 'farm');
-        }
-      }
+    for (const { x, y } of scan.farmReadyTiles) {
+      push({ kind: 'farm', x, y, workLeft: 10, label: 'harvest grain' }, 'farm');
     }
-    // Flax zone: harvest when ripe
-    for (let y = 0; y < MAP_H; y++) {
-      for (let x = 0; x < MAP_W; x++) {
-        const tile = this.world.at(x, y);
-        if (tile.flaxZone && tile.growth >= 100) {
-          push({ kind: 'farm', x, y, workLeft: 10, label: 'harvest flax' }, 'farm');
-        }
-      }
+    for (const { x, y } of scan.farmSowTiles) {
+      push({ kind: 'farm', x, y, workLeft: 15, label: 'sow grain' }, 'farm');
+    }
+    // Flax zone: harvest when ripe.
+    for (const { x, y } of scan.flaxReadyTiles) {
+      push({ kind: 'farm', x, y, workLeft: 10, label: 'harvest flax' }, 'farm');
     }
     // Cook while there is grain and meals are short. A bakery outclasses the
     // cookhouse (faster, bigger batches), so it takes over when built.
@@ -2213,15 +2270,10 @@ export class Simulation {
         push({ kind: 'smelt', x: bs.x, y: bs.y, buildingId: bs.id, workLeft: TUNING.smithWorkPerTools, label: 'smith tools' }, 'smelt');
       }
     }
-    // Mine: extract resources from mine zones
+    // Mine: extract resources from mine zones.
     if (this.builtOf('mining').some(b => b.built)) {
-      for (let y = 0; y < MAP_H; y++) {
-        for (let x = 0; x < MAP_W; x++) {
-          const tile = this.world.at(x, y);
-          if (tile.mineZone && tile.mineCharges > 0) {
-            push({ kind: 'mine', x, y, workLeft: TUNING.mineWorkPerCharge, label: 'mine ore' }, 'mine');
-          }
-        }
+      for (const { x, y } of scan.mineReadyTiles) {
+        push({ kind: 'mine', x, y, workLeft: TUNING.mineWorkPerCharge, label: 'mine ore' }, 'mine');
       }
     }
     // Kitchen garden: produce fresh vegetables periodically
@@ -3384,6 +3436,7 @@ export class Simulation {
 
   private kill(s: Settler, cause: string): void {
     this.settlers = this.settlers.filter((o) => o !== s);
+    this._settlerLastRevealIdx.delete(s.id);
     this.releaseTask(s);
     this.corpses.push({
       id: this.nextId++, name: s.name,

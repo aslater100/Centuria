@@ -2,12 +2,69 @@
 
 ---
 
+## Track C — Scale Engine (Songs-of-Syx-scale town tier)
+
+**Decision (2026-06-14):** build a fresh data-oriented town engine alongside the
+current `Simulation`, prove each stage on the bench, swap when it beats the old
+core on both speed AND behavior parity. The current game stays untouched and
+playable throughout. Region tier (politics/econ/central banks/exchanges) is
+month-cadence over 4–8 factions — cheap, sits on top, not part of this track.
+
+**Why:** `scripts/bench-scale.ts` showed the fat-object sim costs 13ms/tick at
+just 200 agents and grows superlinearly (629MB heap at 5k). Two walls: GC from
+fat per-agent objects, and per-agent A* every idle tick.
+
+**Stage 1 — SoA agent core. ✅ LANDED.** `src/sim/agents.ts` (`AgentStore`):
+every agent field in flat typed arrays, allocation-free tick, swap-remove deaths,
+time-sliced decisions. `scripts/bench-agents.ts` proves the floor:
+
+| agents | fat-object | SoA core | heap old→new |
+|---|---|---|---|
+| 200 | 13.2 ms | 0.018 ms | 16 → 7 MB |
+| 5000 | 1663 ms | 0.098 ms | 629 → 9 MB |
+| 10000 | n/a | 0.194 ms | 7 MB flat |
+
+Caveat: cost FLOOR only — straight-line movement, no jobs/pathing yet.
+
+**Stage 2 — Flow-field pathing.** One flow field per hot destination (stockpile,
+hearth, job clusters), computed O(map) once, all agents read it. Replaces
+per-agent A* — the measured superlinear term. Reuse `world.ts` passability.
+
+**Stage 3 — Job board.** Central open-job list; agents pull nearest matching job
+(O(agents+jobs)) instead of each scanning the map (O(agents×map)). Replaces
+`findTask`'s per-settler full scan.
+
+**Stage 4 — Behavior port.** Move full-fidelity needs/mood/thoughts/skills/combat/
+traits onto the SoA columns until the new core matches the old sim's 441-test
+behavior. Add headless parity tests.
+
+**Stage 5 — Render + bigger maps.** 96×96 holds only ~9k tiles; SoS cities need
+larger worlds. Wire to the chunk-LOD renderer (Phase 4 foundation already landed).
+Swap the live town tier to the new core once it wins on speed + parity.
+
+---
+
+
 ## Session Handoff (Read This First in a New Session)
 
 **Repo:** `/home/user/Centuria` — TypeScript + Canvas 2D + Vite + Electron city-builder.  
-**Branch:** `claude/continue-g9fxsh` — push all work here; never push to main without user approval.  
+**Branch:** `claude/plan-sim-optimization-4mlwny` — push all work here; never push to main without user approval.  
 **Git remote:** `aslater100/centuria`  
 **Plan file:** `PLAN.md` (this file, committed to repo)
+
+### Sim + World Optimization (landed 2026-06-14)
+
+Five concrete hot-path fixes applied and verified (441 tests pass):
+
+| Fix | File | Mechanism | Win |
+|---|---|---|---|
+| **Per-tick tile scan** | `sim.ts` | `buildTileTaskScan()` scans MAP once per tick; `findTask()` reads the cached lists instead of doing 5 separate 9,216-tile sweeps per idle settler | ~5× fewer tile iterations in findTask with any idle settlers |
+| **Remove settlers spread** | `sim.ts` | `tick()` iterated `[...this.settlers]` (new array every tick); replaced with backwards index loop (splice-safe, zero allocation) | GC pressure eliminated |
+| **Fog skip when stationary** | `sim.ts` | `_settlerLastRevealIdx` tracks last tile index per settler; `revealAround()` called only when the settler moves to a new tile | ~70% of reveal calls eliminated for working/sleeping settlers |
+| **Soil tile cache** | `sim.ts` | `soilTiles()` builds a filtered slice once from worldgen output (soil never changes kind); `accrueDormantFarms()` and the winter-kill loop iterate only soil tiles | Dormant tick and daily winter scan skip ~80% of tiles |
+| **A\* road check cache** | `world.ts` | `findPath()` scanned all 9,216 tiles every call to detect any road; now uses `_anyRoadDirty`/`hasAnyRoad()` — recomputed only when `invalidatePathCache()` is called (terrain change) | O(n) per pathfind → O(1) |
+| **FOOD_HAUL_KINDS constant** | `sim.ts` | Module-level `ReadonlySet`; was `new Set(...)` inside `findTask()` per idle settler | Allocation eliminated |
+| **countAssigned precompute** | `sim.ts` | Was `settlers.filter(...)` per building per task; now `Map<buildingId, count>` built once at start of `findTask()` | O(n²) → O(n) |
 
 ### Track A status — verified against source 2026-06-14 (v0.31.0)
 
