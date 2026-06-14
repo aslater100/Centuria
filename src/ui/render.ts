@@ -70,7 +70,7 @@ const GLOW_BUILDINGS = new Set([
 // so we swap the 4–5 scaled-drawImage tile passes for one flat fillRect per tile.
 // ponytail: single-town LOD; the full multi-parcel chunk cache is Phase 4 and only
 // pays off once the seamless world ships.
-const LOD_ZOOM = 0.6;
+const LOD_ZOOM = 0.4;
 
 /** Dominant flat colour for a tile at low zoom (matches the sprite's overall tone). */
 function tileColor(t: import('../sim/world').Tile): string {
@@ -383,6 +383,7 @@ export class Renderer {
     }
 
     // Buildings (built solid, blueprints ghosted)
+    const detailZoom = this.cam.zoom >= 0.5; // Skip detail overlays below 0.5x
     for (const b of sim.buildings) {
       const def = buildingDef(b.defId);
       const levelKey = `${b.defId}:${b.level ?? 1}`;
@@ -404,16 +405,18 @@ export class Renderer {
       } else {
         g.drawImage(img, bx, by);
       }
-      if (!b.built) {
-        const need = (def.cost.wood ?? 0);
-        g.fillStyle = '#dfe6ee';
-        g.font = '8px monospace';
-        g.fillText(`${b.delivered}/${need}`, bx + 2, by + 8);
+      if (detailZoom) {
+        if (!b.built) {
+          const need = (def.cost.wood ?? 0);
+          g.fillStyle = '#dfe6ee';
+          g.font = '8px monospace';
+          g.fillText(`${b.delivered}/${need}`, bx + 2, by + 8);
+        }
+        if (b.built && def.maxHp && b.hp < def.maxHp) {
+          this.hpBar(bx, by - 3, b.hp / def.maxHp);
+        }
+        if (this.cam.selectedBuilding === b.id) this.outline(bx, by, rw * TILE, rh * TILE);
       }
-      if (b.built && def.maxHp && b.hp < def.maxHp) {
-        this.hpBar(bx, by - 3, b.hp / def.maxHp);
-      }
-      if (this.cam.selectedBuilding === b.id) this.outline(bx, by, rw * TILE, rh * TILE);
     }
 
     // Chimney smoke drifting up from working buildings
@@ -436,45 +439,49 @@ export class Renderer {
       }
     }
 
-    // Graves (over the burial-ground plot), then ground items, then the unburied
-    for (const gr of sim.graves) {
-      const px = ox + gr.x * TILE, py = oy + gr.y * TILE;
-      if (!this.isInViewport(px, py)) continue;
-      g.drawImage(this.sprites.grave, px, py);
-    }
-    for (const it of sim.items) {
-      const px = ox + it.x * TILE, py = oy + it.y * TILE;
-      if (!this.isInViewport(px, py)) continue;
-      g.drawImage(this.sprites.items[it.kind], px, py);
-    }
-    for (const c of sim.corpses) {
-      const px = ox + c.x * TILE, py = oy + c.y * TILE;
-      if (!this.isInViewport(px, py)) continue;
-      g.drawImage(this.sprites.corpse, px, py);
+    // Graves, items, corpses — low-priority clutter, skip below 0.5x
+    if (detailZoom) {
+      for (const gr of sim.graves) {
+        const px = ox + gr.x * TILE, py = oy + gr.y * TILE;
+        if (!this.isInViewport(px, py)) continue;
+        g.drawImage(this.sprites.grave, px, py);
+      }
+      for (const it of sim.items) {
+        const px = ox + it.x * TILE, py = oy + it.y * TILE;
+        if (!this.isInViewport(px, py)) continue;
+        g.drawImage(this.sprites.items[it.kind], px, py);
+      }
+      for (const c of sim.corpses) {
+        const px = ox + c.x * TILE, py = oy + c.y * TILE;
+        if (!this.isInViewport(px, py)) continue;
+        g.drawImage(this.sprites.corpse, px, py);
+      }
     }
 
-    // Wildlife
+    // Wildlife (fewer entities, still draw but skip HP bars below 0.5x)
     for (const a of sim.animals) {
       const px = ox + Math.round(a.pos.x * TILE);
       const py = oy + Math.round(a.pos.y * TILE);
       if (!this.isInViewport(px, py)) continue;
       const fr = Math.floor(this.frame / 14) % 2;
       g.drawImage(a.kind === 'wolf' ? this.sprites.wolf[fr] : this.sprites.deer[fr], px, py);
-      const maxHp = a.kind === 'wolf' ? TUNING.wolfHealth : TUNING.deerHealth;
-      if (a.health < maxHp) this.hpBar(px, py - 2, a.health / maxHp);
+      if (detailZoom) {
+        const maxHp = a.kind === 'wolf' ? TUNING.wolfHealth : TUNING.deerHealth;
+        if (a.health < maxHp) this.hpBar(px, py - 2, a.health / maxHp);
+      }
     }
 
-    // Raiders
+    // Raiders (few entities, keep visible but skip HP bars below 0.5x)
     for (const r of sim.raiders) {
       const px = ox + Math.round(r.pos.x * TILE);
       const py = oy + Math.round(r.pos.y * TILE) - 4;
       if (!this.isInViewport(px, py)) continue;
       const fr = Math.floor(this.frame / 10) % 2;
       g.drawImage(this.sprites.raider[fr], px, py);
-      this.hpBar(px, py + 2, r.health / 70);
+      if (detailZoom) this.hpBar(px, py + 2, r.health / 70);
     }
 
-    // Settlers with a 2-frame walk bob (spear carriers draw armed)
+    // Settlers (with detail overlays skipped below 0.5x)
     for (const s of sim.settlers) {
       const px = ox + Math.round(s.pos.x * TILE);
       const py = oy + Math.round(s.pos.y * TILE) - 4;
@@ -482,19 +489,21 @@ export class Renderer {
       const variant = s.id % this.sprites.settler.length;
       const fr = s.state === 'sleeping' ? 0 : Math.floor(this.frame / 12) % 2;
       g.drawImage((s.armed ? this.sprites.settlerArmed : this.sprites.settler)[variant][fr], px, py);
-      if (s.state === 'sleeping') {
-        g.fillStyle = '#cfd4e0';
-        g.font = '8px monospace';
-        g.fillText('z', px + 12, py + 2);
+      if (detailZoom) {
+        if (s.state === 'sleeping') {
+          g.fillStyle = '#cfd4e0';
+          g.font = '8px monospace';
+          g.fillText('z', px + 12, py + 2);
+        }
+        if (s.carrying) g.drawImage(this.sprites.items[s.carrying.kind], px - 2, py - 4);
+        if (s.health < 100) this.hpBar(px, py + 2, s.health / 100);
+        if (s.wound?.untreated || s.infection || s.sickUntil > sim.minute) {
+          g.fillStyle = '#e04444';
+          g.fillRect(px + 12, py + 2, 3, 1);
+          g.fillRect(px + 13, py + 1, 1, 3); // tiny red cross
+        }
+        if (this.cam.selectedSettler === s.id) this.outline(px, py + 4, TILE, TILE - 2);
       }
-      if (s.carrying) g.drawImage(this.sprites.items[s.carrying.kind], px - 2, py - 4);
-      if (s.health < 100) this.hpBar(px, py + 2, s.health / 100);
-      if (s.wound?.untreated || s.infection || s.sickUntil > sim.minute) {
-        g.fillStyle = '#e04444';
-        g.fillRect(px + 12, py + 2, 3, 1);
-        g.fillRect(px + 13, py + 1, 1, 3); // tiny red cross
-      }
-      if (this.cam.selectedSettler === s.id) this.outline(px, py + 4, TILE, TILE - 2);
     }
 
     // Weather: precipitation streaks and storm gloom over the whole scene
