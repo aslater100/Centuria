@@ -785,11 +785,17 @@ export class Hud {
     if (s.stock.coke === 0 && s.hasTech('coke_production') && s.stock.iron < 5) {
       w.push({ level: 'yellow', text: 'No coke — smelter idle' });
     }
-    // Unemployment warnings
-    const idle = s.settlers.filter((p) => !p.task && !p.assignedBuildingId).length;
-    const idleFrac = s.settlers.length > 0 ? idle / s.settlers.length : 0;
-    if (idleFrac > TUNING.warnUnemployRed) w.push({ level: 'red', text: `${Math.round(idleFrac * 100)}% settlers idle` });
-    else if (idleFrac > TUNING.warnUnemployYellow) w.push({ level: 'yellow', text: `${Math.round(idleFrac * 100)}% settlers idle` });
+    // Unemployment warnings — only meaningful during work hours. At night (and for
+    // settlers who are asleep, eating, warming up, or unwinding) "no task" is
+    // expected, not unemployment, so those must not inflate the figure.
+    const night = s.hour >= 22 || s.hour < 6;
+    if (!night) {
+      const offDuty = new Set(['sleeping', 'eating', 'warming', 'recreating', 'breakdown']);
+      const idle = s.settlers.filter((p) => !p.task && !p.assignedBuildingId && !offDuty.has(p.state)).length;
+      const idleFrac = s.settlers.length > 0 ? idle / s.settlers.length : 0;
+      if (idleFrac > TUNING.warnUnemployRed) w.push({ level: 'red', text: `${Math.round(idleFrac * 100)}% settlers idle` });
+      else if (idleFrac > TUNING.warnUnemployYellow) w.push({ level: 'yellow', text: `${Math.round(idleFrac * 100)}% settlers idle` });
+    }
     return w;
   }
 
@@ -798,11 +804,13 @@ export class Hud {
     const hh = String(Math.floor(s.hour)).padStart(2, '0');
     const mm = String(Math.floor((s.hour % 1) * 60)).padStart(2, '0');
     const pop = s.settlers.length;
-    const hardCap = TUNING.hardCapPop;
-    const softCap = TUNING.softCapPop;
-    const over = pop - softCap;
-    const popDisplay = pop >= hardCap ? `<span class="tb-over">POP ${pop}/${hardCap}</span>` : `POP ${pop}/${hardCap}`;
-    const capWarn = over > 0 && pop < hardCap ? ` ⚠ −${Math.round((1 - s.softCapWorkMult()) * 100)}%` : '';
+    const housing = s.housingCapacity();
+    // Population is gated by built beds: show pop against housing, not the old soft cap.
+    const popOver = pop >= housing;
+    const popDisplay = popOver
+      ? `<span class="tb-over">POP ${pop}/${housing} 🛏</span>`
+      : `POP ${pop}/${housing} 🛏`;
+    const capWarn = popOver ? ` <span class="tb-warn" title="No spare beds — build housing to grow">no beds</span>` : '';
     const skyIcon = { clear: '☀', overcast: '☁', rain: '☔', storm: '⛈', snow: '❄' }[s.weatherToday().sky];
     const drought = s.weather.isDrought(s.day) && s.growingSeason ? ' <span class="tb-over">DROUGHT</span>' : '';
     const eraNames: Record<number, string> = { 1: 'Pre-Industrial', 2: 'Industrial', 3: 'Modern', 4: 'Post-Industrial' };
