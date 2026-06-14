@@ -5,7 +5,7 @@
 ## Session Handoff (Read This First in a New Session)
 
 **Repo:** `/home/user/Centuria` — TypeScript + Canvas 2D + Vite + Electron city-builder.  
-**Branch:** `claude/continue-wjijeb` — push all work here; never push to main without user approval.  
+**Branch:** `claude/continue-g9fxsh` — push all work here; never push to main without user approval.  
 **Git remote:** `aslater100/centuria`  
 **Plan file:** `PLAN.md` (this file, committed to repo)
 
@@ -29,7 +29,16 @@ Track A is **substantially complete**; the bug fixes landed alongside the govern
 **Track B progress:**
 - ✅ **Phase 1** — `src/ui/worldcam.ts` (WorldCamera + world coordinate system). Additive; not yet wired into `main.ts` (mode switch stays as dev fallback). Tests: `tests/worldcam.test.ts`.
 - ✅ **Phase 2** — `src/sim/parcel.ts` (`Parcel` + `ParcelManager`). 64×64 parcel grid over the region; home parcel auto-owned sharing the live `Simulation.world`; lazy seed-deterministic terrain per parcel; expansion cost formula (`PARCEL_TUNING` in `defs.ts`); **unified economy (Fix 7)** — all gold routes through the home `Simulation.economy.cash`, so expansion can't reset the treasury; `serialize()`/`deserialize()` persist only ownership/exploration (terrain regenerates from seed). Additive; not yet wired into `main.ts`. Tests: `tests/parcel.test.ts`.
-- ⬜ **Phase 3** — Parcel purchase UI (`hud.ts`/`regionview.ts`) + `land_survey`/`road_building`/`cartography` techs. The sim-side cost formula + `canPurchase`/`purchase` already live in `ParcelManager`; Phase 3 is the UI + tech gating on top.
+- 🔶 **Phase 3** — *sim-side landed; UI pending.*
+  - ✅ **Tech gating (sim):** the three expansion techs now drive `ParcelManager`. `land_survey` relaxes purchase from "orthogonally adjacent" to "any explored frontier cell"; `road_building` discounts every acquisition (`PARCEL_TUNING.roadDiscount = 0.8`); `cartography` widens the post-purchase reveal from the 4 orthogonal neighbours to a Chebyshev block (`PARCEL_TUNING.cartographyRevealRadius = 2`). Gating is via an injectable `ParcelManager.hasTech` predicate (default = nothing researched, so the data model stays standalone and its tests stay pure); wire it to `RegionSim.has` at integration time. Tech ids centralised in `EXPANSION_TECHS` (`defs.ts`). Tests: `tests/parcel.test.ts` (4 new cases).
+  - ✅ **Tech tree data:** `land_survey` / `road_building` / `cartography` added to `src/data/techtree.json` (region `tech` tree; `land_survey` ← `steam_power`, the other two ← `land_survey`).
+  - ⬜ **Remaining:** the purchase UI itself (right-click a fog-adjacent cell → cost-breakdown panel → `purchase()`), and pointing `ParcelManager.hasTech` at the live `RegionSim`. Deferred deliberately: the only place to host it today is the 123 K-line `regionview.ts`, which Phase 4 replaces with the seamless `WorldCamera` renderer — building throwaway UI there is wasted effort, and it can't be exercised by the headless CI. Land the UI together with the Phase 4 renderer (or once `ParcelManager` is wired into `main.ts`).
+- 🔶 **Phase 5** — *sim-side landed; main-loop wiring pending.*
+  - ✅ **Dormant tick (sim):** `Simulation.tickDormant()` + `isActive` flag. Once-a-day coarse update — crop growth + auto sow/harvest into the stockpile, plus the existing food-gated population flows — skipping every per-tick agent path (pathfinding, needs/deaths, raids, weather drama, trading). Self-contained and additive, mirroring the Phase 2/3 approach. Tests: `tests/dormant.test.ts`.
+  - ⬜ **Remaining:** the `main.ts` budget loop (active = full ticks, dormant parcels round-robin one `tickDormant()` per game-day) — lands when `ParcelManager` is wired into `main.ts` alongside Phase 4.
+- 🔶 **Phase 6** — *foundation landed; region.ts adoption pending.*
+  - ✅ **Typed-array fog (`src/sim/fogmap.ts`):** `FogMap` — a 100×100 `Uint8Array` with the same three-state `fogged/explored/scouted` semantics as `RegionSim.explorationMap`, a circular `reveal()` matching `revealTiles`, `clearScouted()`, `exploredFraction()` (for the zoom-out gate), compact base64 (de)serialization (scouted persisted as explored, as today), and `fromLegacyRows()`/`toLegacyRows()` migration off the existing `'0'`/`'1'` row-string save format. Portable base64 (no Buffer/btoa) so it runs in Node, browser, and the Phase 7 worker. Additive — the live `region.ts` serializer is untouched. Tests: `tests/fogmap.test.ts`.
+  - ⬜ **Remaining:** swap `region.ts`'s `explorationMap` reads/writes onto `FogMap` and migrate its serializer (v-bump + `fromLegacyRows` on load), plus the multi-zoom fog rendering. A broad refactor across the 6,967-line `region.ts` with save-compat surface — sequence it with the Phase 4 renderer so fog and chunks change together.
 
 ### What this plan covers (two tracks, sequential)
 
