@@ -493,3 +493,30 @@ export const TUNING = {
   festivalMoodBonus: 15,
   festivalMoodDays: 3,
 };
+
+// ---- Parcel / land-expansion tuning (Track B Phase 2–3) ----
+// The price of expanding the realm one cell at a time. Cost grows with
+// distance from the founding town, the terrain's difficulty, and how much
+// land the player already holds (each new parcel is dearer than the last):
+//   cost = BASE × (1 + dist × DISTANCE_SCALE)
+//             × terrain_difficulty
+//             × (1 + owned × EXPANSION_PREMIUM)
+export const PARCEL_TUNING = {
+  /** Floor cost of the cheapest possible parcel (adjacent, easy terrain, first buy). */
+  baseCost: 250,
+  /** Added cost per cell of distance from the home parcel. */
+  distanceScale: 0.35,
+  /** Added cost per parcel already owned (expansion gets pricier). */
+  expansionPremium: 0.18,
+  /** Terrain difficulty multipliers by biome (mirrors RegionMap.cellCost shape). */
+  terrainMult: {
+    plains: 1.0,
+    forest: 1.2,
+    hills: 1.5,
+    marsh: 1.4,
+    mountains: 2.2,
+    river: 1.3,
+    lake: 3.0,
+    sea: 3.0,
+  } as Record<string, number>,
+} as const;
