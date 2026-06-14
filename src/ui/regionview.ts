@@ -29,6 +29,7 @@ export class RegionView {
   conventionOpen = false;
   private g: CanvasRenderingContext2D;
   private panel: HTMLElement;
+  private panelTab: 'overview' | 'economy' | 'people' = 'overview';
   private statePanel: HTMLElement;
   private lastStatePanelBuildFrame = -999;
   /** Active tab in the (dense) state panel — split into Finance/Politics/Diplomacy. */
@@ -36,6 +37,7 @@ export class RegionView {
   private researchPanel: HTMLElement;
   researchOpen = false;
   private lastResearchBuildFrame = -999;
+  private researchTab: 'tech' | 'civics' = 'tech';
   /** Phase A: the region-wide Route Network panel (toggle with the R key). */
   private routeNetworkPanel: HTMLElement;
   routeNetworkOpen = false;
@@ -48,6 +50,7 @@ export class RegionView {
   private economyPanel: HTMLElement;
   economyOpen = false;
   private lastEconomyBuildFrame = -999;
+  private economyTab: 'overview' | 'settlements' = 'overview';
   private ceremony: HTMLElement;
   private convention: HTMLElement;
   private policyModal: HTMLElement;
@@ -1128,6 +1131,24 @@ export class RegionView {
   }
 
   /** Tier-2 dashboard: treasury, taxes, funded services — visible once proclaimed. */
+  /** Wire a panel's `.pal-tab` buttons to show the matching `.pal-section`.
+   *  Sections all stay in the DOM (so ID-bound handlers survive); switching is
+   *  pure CSS, no rebuild. `set` records the choice so the next rebuild matches. */
+  private wireTabs(panel: HTMLElement, set: (tab: string) => void): void {
+    for (const btn of panel.querySelectorAll<HTMLButtonElement>('.pal-tab')) {
+      btn.onclick = () => {
+        const tab = btn.dataset.ptab!;
+        set(tab);
+        for (const t of panel.querySelectorAll<HTMLElement>('.pal-tab')) {
+          t.classList.toggle('active', t.dataset.ptab === tab);
+        }
+        for (const s of panel.querySelectorAll<HTMLElement>('.pal-section')) {
+          s.classList.toggle('hidden', s.dataset.psection !== tab);
+        }
+      };
+    }
+  }
+
   private drawStatePanel(): void {
     const r = this.region;
     if (!r.stateProclaimed) {
@@ -1218,18 +1239,7 @@ export class RegionView {
       sec('politics', politicsBody) +
       sec('diplomacy', this.diplomacyHtml());
 
-    // Tab clicks: swap the visible section without a full rebuild.
-    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.pal-tab')) {
-      btn.onclick = () => {
-        this.statePanelTab = btn.dataset.ptab as 'finance' | 'politics' | 'diplomacy';
-        for (const t of this.statePanel.querySelectorAll<HTMLElement>('.pal-tab')) {
-          t.classList.toggle('active', t.dataset.ptab === this.statePanelTab);
-        }
-        for (const s of this.statePanel.querySelectorAll<HTMLElement>('.pal-section')) {
-          s.classList.toggle('hidden', s.dataset.psection !== this.statePanelTab);
-        }
-      };
-    }
+    this.wireTabs(this.statePanel, (t) => { this.statePanelTab = t as 'finance' | 'politics' | 'diplomacy'; });
     this.statePanel.querySelector<HTMLInputElement>('#tax-slider')!.oninput = (e) => {
       r.taxRate = Number((e.target as HTMLInputElement).value) / 100;
       const taxVal = this.statePanel.querySelector<HTMLElement>('#tax-val');
@@ -2028,6 +2038,7 @@ export class RegionView {
     this.lastPanelBuildFrame = this.frame;
 
     this.panel.innerHTML = this.panelHtml(t);
+    this.wireTabs(this.panel, (tab) => { this.panelTab = tab as 'overview' | 'economy' | 'people'; });
     const btn = this.panel.querySelector<HTMLButtonElement>('#found-btn');
     if (btn) {
       btn.onclick = () => { this.region.foundTown(t.id); this.refreshPanel(); };
@@ -2582,6 +2593,7 @@ export class RegionView {
     this.lastEconomyBuildFrame = this.frame;
     this.economyPanel.innerHTML = this.economyPanelHtml();
     const refresh = () => { this.lastEconomyBuildFrame = -999; };
+    this.wireTabs(this.economyPanel, (t) => { this.economyTab = t as 'overview' | 'settlements'; });
     for (const b of this.economyPanel.querySelectorAll<HTMLButtonElement>('.ep-close')) {
       b.onclick = () => { this.economyOpen = false; };
     }
@@ -2650,14 +2662,21 @@ export class RegionView {
         `</div>`
       );
     }).join('');
-    return (
-      `<div class="pal-title">ECONOMY [E] <button class="mini ep-close" title="close (E)">✕</button></div>` +
+    const etab = this.economyTab;
+    const overviewBody =
       `<p>treasury ` + formatCurrency(Math.floor(r.treasury)) + ` · GDP ` + formatCurrency(Math.floor(r.gdpLastMonth)) + `/mo</p>` +
       `<p>global tax ${Math.round(r.taxRate * 100)}% · trade ` + formatCurrency(Math.floor(r.tradeValueLastMonth)) + `/mo</p>` +
       (factionHtml ? `<p class="insp-skills">FACTION MOOD</p>${factionHtml}` : '') +
-      actionsHtml +
-      `<p class="insp-skills">PER SETTLEMENT</p>` +
-      `<div class="thoughts">${settRows || '<p class="insp-skills">no towns yet</p>'}</div>`
+      actionsHtml;
+    return (
+      `<div class="pal-title">ECONOMY [E] <button class="mini ep-close" title="close (E)">✕</button></div>` +
+      `<div class="pal-tabs">` +
+      `<button class="pal-tab${etab === 'overview' ? ' active' : ''}" data-ptab="overview">Overview</button>` +
+      `<button class="pal-tab${etab === 'settlements' ? ' active' : ''}" data-ptab="settlements">Settlements</button>` +
+      `</div>` +
+      `<div class="pal-section${etab === 'overview' ? '' : ' hidden'}" data-psection="overview">${overviewBody}</div>` +
+      `<div class="pal-section${etab === 'settlements' ? '' : ' hidden'}" data-psection="settlements">` +
+        `<div class="thoughts">${settRows || '<p class="insp-skills">no towns yet</p>'}</div></div>`
     );
   }
 
@@ -2698,16 +2717,20 @@ export class RegionView {
 
     const techNodes = TECH_TREE.filter((n) => n.tree === 'tech').map((n) => nodeRow(n.id)).join('');
     const civicNodes = TECH_TREE.filter((n) => n.tree === 'civics').map((n) => nodeRow(n.id)).join('');
+    const rtab = this.researchTab;
 
     this.researchPanel.innerHTML =
       `<div class="pal-title">RESEARCH</div>` +
       `<p class="insp-skills">${rate} RP/day${active ? ` → <b>${active.name}</b>` : ' (idle)'}</p>` +
       (active ? `<div class="res-bar"><div class="res-bar-fill" style="width:${progressPct}%"></div></div>` : '') +
-      `<p class="insp-skills" style="margin-top:6px">TECHNOLOGY</p>` +
-      techNodes +
-      `<p class="insp-skills" style="margin-top:6px">CIVICS</p>` +
-      civicNodes;
+      `<div class="pal-tabs">` +
+      `<button class="pal-tab${rtab === 'tech' ? ' active' : ''}" data-ptab="tech">Technology</button>` +
+      `<button class="pal-tab${rtab === 'civics' ? ' active' : ''}" data-ptab="civics">Civics</button>` +
+      `</div>` +
+      `<div class="pal-section${rtab === 'tech' ? '' : ' hidden'}" data-psection="tech">${techNodes}</div>` +
+      `<div class="pal-section${rtab === 'civics' ? '' : ' hidden'}" data-psection="civics">${civicNodes}</div>`;
 
+    this.wireTabs(this.researchPanel, (t) => { this.researchTab = t as 'tech' | 'civics'; });
     for (const btn of this.researchPanel.querySelectorAll<HTMLButtonElement>('.res-start-btn')) {
       btn.onclick = () => { r.startResearch(btn.dataset.id!); forceResearchRebuild(); };
     }
@@ -2733,7 +2756,10 @@ export class RegionView {
           ).join('')
         }</ul>`
       : '';
-    return (
+    const ptab = this.panelTab;
+    // Identity header stays visible; the dense sub-panels split into tabs so no
+    // single view needs scrolling.
+    const header =
       `<h3>${t.name} <button id="rename-btn" class="mini" title="Rename this town">✎</button></h3>` +
       `<p class="insp-lvl">${tier} · day ${r.day - t.foundedDay} old</p>` +
       `<p class="insp-state">pop ${Math.round(r.popOf(t))} · housing ${Math.floor(t.housing)} · satisfaction ${Math.round(t.satisfaction)}</p>` +
@@ -2741,7 +2767,9 @@ export class RegionView {
         ? `<p class="${t.grievance > 50 ? 'insp-cond' : 'insp-skills'}">grievance ${Math.round(t.grievance)}${this.region.day < t.strikeUntil ? ' · ON STRIKE' : ''}</p>`
         : '') +
       `<p>food ${Math.floor(t.food)} · wood ${Math.floor(t.wood)} · land ${t.landQuality.toFixed(2)}</p>` +
-      `<p class="insp-skills">market: grain ` + formatCurrency(t.prices.food, 2) + ` · timber ` + formatCurrency(t.prices.wood, 2) + ` /unit</p>` +
+      `<p class="insp-skills">market: grain ` + formatCurrency(t.prices.food, 2) + ` · timber ` + formatCurrency(t.prices.wood, 2) + ` /unit</p>`;
+
+    const overviewBody =
       `<p class="insp-skills">${[
         t.site.river ? 'river (fishery, flood risk)' : '',
         t.site.coastal ? (t.seaWall ? 'coastal (sea wall raised)' : 'coastal (fishery)') : '',
@@ -2755,16 +2783,31 @@ export class RegionView {
           `sea wall ` + formatCurrency(r.seaWallCost(t)) + `</button></p>`
         : '') +
       this.garrisonHtml(t) +
+      this.crisisActionsHtml(t) +
+      recentHtml;
+
+    const economyBody =
       this.sectorsHtml(t) +
       this.policiesHtml(t) +
       this.cityHtml(t) +
-      this.routesHtml(t) +
-      recentHtml +
-      this.crisisActionsHtml(t) +
+      this.routesHtml(t);
+
+    const peopleBody =
       `<p class="insp-skills">COHORTS</p>` + bands +
       (notables ? `<p class="insp-skills">NOTABLES</p><ul class="thoughts">${notables}</ul>` : '') +
       `<button id="found-btn" ${can.ok ? '' : 'disabled'} title="${can.reason}">Found new town (8 pop, 80 food, 80 wood)</button>` +
-      (can.ok ? '' : `<p class="insp-skills">${can.reason}</p>`)
+      (can.ok ? '' : `<p class="insp-skills">${can.reason}</p>`);
+
+    return (
+      header +
+      `<div class="pal-tabs">` +
+      `<button class="pal-tab${ptab === 'overview' ? ' active' : ''}" data-ptab="overview">Overview</button>` +
+      `<button class="pal-tab${ptab === 'economy' ? ' active' : ''}" data-ptab="economy">Economy</button>` +
+      `<button class="pal-tab${ptab === 'people' ? ' active' : ''}" data-ptab="people">People</button>` +
+      `</div>` +
+      `<div class="pal-section${ptab === 'overview' ? '' : ' hidden'}" data-psection="overview">${overviewBody}</div>` +
+      `<div class="pal-section${ptab === 'economy' ? '' : ' hidden'}" data-psection="economy">${economyBody}</div>` +
+      `<div class="pal-section${ptab === 'people' ? '' : ' hidden'}" data-psection="people">${peopleBody}</div>`
     );
   }
 
