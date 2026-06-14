@@ -58,6 +58,17 @@ body {
   font-weight: bold;
 }
 
+.tb-warn {
+  color: #e8b840;
+  font-weight: bold;
+}
+
+.tb-era {
+  color: #7ab8e8;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
 .tb-btn {
   background: #2a2620;
   color: #e8d27a;

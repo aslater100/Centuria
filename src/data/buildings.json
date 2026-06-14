@@ -427,6 +427,21 @@
       ]
     },
     {
+      "id": "coke_furnace",
+      "name": "Coke Furnace",
+      "w": 2,
+      "h": 2,
+      "cost": { "stone": 12, "brick": 4 },
+      "buildWork": 600,
+      "provides": "coke_furnace",
+      "requiredTech": "coke_production",
+      "desc": "Burns 3 coal into 1 coke — the high-heat fuel the smelter needs to render iron from ore. Without coke, iron production halts. Requires Coke Production tech.",
+      "upgrades": [
+        { "cost": { "stone": 10, "brick": 6 }, "capacityBonus": 0, "desc": "Fire-brick lining: coke yield +1 per batch." },
+        { "cost": { "stone": 20, "brick": 10 }, "capacityBonus": 0, "desc": "Regenerative furnace: coal cost −1 per batch." }
+      ]
+    },
+    {
       "id": "blacksmith",
       "name": "Blacksmith",
       "w": 2,
@@ -435,7 +450,7 @@
       "buildWork": 420,
       "provides": "smithing",
       "requiredTech": "blacksmithing",
-      "desc": "Smelts iron ore + coal into iron, then iron into tools. Tools in stock speed all construction by 20%. Requires Blacksmithing tech.",
+      "desc": "Smelts 3 iron ore + 1 coke into iron, then 2 iron into tools. Tools in stock speed all construction by 20%. Requires Blacksmithing tech and coke from a Coke Furnace.",
       "upgrades": [
         { "cost": { "stone": 15 }, "capacityBonus": 0, "desc": "Bellows: smelting 30% faster." },
         { "cost": { "stone": 25 }, "capacityBonus": 0, "desc": "Industrial forge: tools output doubled." }
