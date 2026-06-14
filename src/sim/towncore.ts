@@ -27,13 +27,23 @@
  */
 import { MAP_W, MAP_H } from './world';
 import { BuildGrid, type BuildGridSave } from './build';
-import { AgentStore, AState, type AgentStoreSave } from './agents';
+import { AgentStore, AState, ThoughtKey, type AgentStoreSave } from './agents';
 import { Stockpile } from './stockpile';
 import { JobBoard } from './jobs';
 import { FlowField } from './flowfield';
 import { serveNeeds, serveMedical, aggregateCapacities, type RoomServices } from './needs';
+import { Relations, socialize } from './social';
 import { Rng } from './rng';
-import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID } from './defs';
+import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, TUNING } from './defs';
+
+const TICKS_PER_DAY = MINUTES_PER_DAY / MINUTES_PER_TICK;
+// Grief on a death (mirrors the fat sim): friends mourn harder and longer.
+const GRIEF_FRIEND_DELTA = -18, GRIEF_FRIEND_TICKS = 6 * TICKS_PER_DAY;
+const GRIEF_DELTA = -8, GRIEF_TICKS = 4 * TICKS_PER_DAY;
+// Mental break: a miserable settler may crack (per-point/day chance), souring mood.
+const MENTAL_BREAK_THRESHOLD = TUNING.mentalBreakMoodThreshold;
+const MENTAL_BREAK_CHANCE = TUNING.mentalBreakChancePerPointPerDay;
+const BREAKDOWN_DELTA = -6, BREAKDOWN_TICKS = 2 * TICKS_PER_DAY;
 
 const SAVE_VERSION = 1;
 
@@ -57,6 +67,7 @@ export interface TownCoreSave {
   grid: BuildGridSave;
   agents: AgentStoreSave;
   stock: Partial<Record<string, number>>;
+  relations: [number, number][];
 }
 
 export interface TownCoreOpts {
@@ -71,6 +82,8 @@ export class TownCore {
   readonly agents: AgentStore;
   readonly stock: Stockpile;
   readonly board: JobBoard;
+  /** Sparse pairwise opinions — bonds grow co-recreating, friends grieve harder. */
+  readonly relations = new Relations();
   private readonly jobField: FlowField;
   private readonly rng: Rng;
   private readonly _rand: () => number;
@@ -166,12 +179,33 @@ export class TownCore {
     serveNeeds(this.grid, a, MINUTES_PER_TICK);
     serveMedical(this.grid, a, this.stock);
 
-    // 5. Agent tick: needs decay, mood ease, health, movement.
+    // 4b. Bonding: agents sharing a tavern grow their mutual opinion.
+    socialize(this.grid, a, this.relations, MINUTES_PER_TICK);
+
+    // 5. Agent tick: needs decay, mood ease (incl. thoughts), health, movement.
     a.tick(t, this._rand);
 
-    // 6. Deaths: swap-remove the starved (iterate backwards — splice-safe).
+    // 5b. Mental break: a miserable settler may crack, leaving a sour thought.
+    for (let i = 0; i < a.count; i++) {
+      if (a.mood[i] >= MENTAL_BREAK_THRESHOLD) continue;
+      const pTick = (MENTAL_BREAK_THRESHOLD - a.mood[i]) * MENTAL_BREAK_CHANCE / TICKS_PER_DAY;
+      if (this.rng.next() < pTick) {
+        a.unassignStation(i);
+        a.addThought(i, t, BREAKDOWN_DELTA, BREAKDOWN_TICKS, ThoughtKey.Breakdown);
+      }
+    }
+
+    // 6. Deaths: swap-remove the starved (iterate backwards — splice-safe). Each
+    //    death grieves the survivors — friends mourn harder — and forgets the bond.
     for (let i = a.count - 1; i >= 0; i--) {
       if (a.health[i] <= STARVED_HEALTH) {
+        const deadId = a.id[i];
+        for (let j = 0; j < a.count; j++) {
+          if (j === i) continue;
+          const friend = this.relations.areFriends(deadId, a.id[j]);
+          a.addThought(j, t, friend ? GRIEF_FRIEND_DELTA : GRIEF_DELTA, friend ? GRIEF_FRIEND_TICKS : GRIEF_TICKS);
+        }
+        this.relations.forget(deadId);
         a.remove(i);
         this.deaths++;
       }
@@ -250,6 +284,7 @@ export class TownCore {
       grid: this.grid.serialize(),
       agents: this.agents.serialize(),
       stock: this.stock.serialize(),
+      relations: this.relations.serialize(),
     };
   }
 
@@ -260,6 +295,7 @@ export class TownCore {
     (core as { grid: BuildGrid }).grid = grid;
     (core as { agents: AgentStore }).agents = AgentStore.deserialize(data.agents);
     (core as { stock: Stockpile }).stock = Stockpile.deserialize(data.stock);
+    (core as { relations: Relations }).relations = Relations.deserialize(data.relations);
     core.rng.setState(data.rngState);
     core.tickNo = data.tickNo;
     core.minute = data.minute;

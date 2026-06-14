@@ -89,10 +89,24 @@ behavior. Add headless parity tests.
   `tests/medical.test.ts` (14). **Note:** injured-agents-path-to-a-sickbed AI is a
   later slice — recovery currently triggers when a casualty happens to rest in an
   infirmary. Warmth→freezing death still pending the weather slice.
-- ⬜ **Remaining Stage-4 slices** (each its own PR): relationships/thoughts/mood
-  events; combat power + raids (will use `inflictWound`); weather (temperature →
-  warmth/freezing); trading/economy. Each needs headless parity tests vs the fat
-  sim's behavior before B-6 PART 2 (the live swap).
+- ✅ **Relationships + thoughts + grief (v0.35.0).** New `src/sim/social.ts`:
+  `Relations` — a sparse pairwise opinion store keyed by a packed integer pair key
+  (a flat N×N matrix would waste O(agents²); the social graph is sparse, so a Map is
+  the right data-oriented call here) with `bond`/`opinion`/`areFriends`/`forget`/
+  serialize; and `socialize()` — agents sharing a tavern (recreation room) grow
+  mutual opinion (`bondPerHourTogether`), the SoA analogue of "friendships form
+  around the fire". `AgentStore` gains **bounded thought slots** (`THOUGHT_SLOTS=6`
+  flat `thoughtDelta`/`thoughtExpiry`/`thoughtKey` columns) — the data-oriented port
+  of the fat sim's `Thought[]`: `addThought(i, now, delta, dur, key)` refreshes a
+  keyed thought or fills/evicts a slot, `sumThoughts` folds live deltas into the mood
+  target. `TownCore` owns a `Relations`, runs `socialize` each tick, applies a
+  **mental break** (low-mood settlers crack → sour `Breakdown` thought, mirrors
+  `mentalBreakChancePerPointPerDay`), and on every death **grieves the survivors**
+  (friends −18/6d, others −8/4d) + `relations.forget`. Thought slots + relations are
+  serialized; old saves backfill empty. Tests: `tests/social.test.ts` (14).
+- ⬜ **Remaining Stage-4 slices** (each its own PR): combat power + raids (will use
+  `inflictWound`); weather (temperature → warmth/freezing); trading/economy. Each
+  needs headless parity tests vs the fat sim's behavior before B-6 PART 2 (the swap).
 
 **Stage 5 — Render + bigger maps.** 96×96 holds only ~9k tiles; SoS cities need
 larger worlds. Wire to the chunk-LOD renderer (Phase 4 foundation already landed).
@@ -192,7 +206,7 @@ Stages (extend Track C; the live game is untouched until B-6):
 
 ### Current state (updated 2026-06-14)
 
-**Test baseline: 556 passing** (526 prior + 14 persona + 2 economy/storage + 14 medical). `tsc` + `vite build` clean. B-2→B-6 PART 1 merged. **Stage 4 behavior port underway: traits + skills (v0.33.0, `tests/persona.test.ts`) and wounds/medical (v0.34.0, `tests/medical.test.ts`) landed.**
+**Test baseline: 570 passing** (526 prior + 2 economy/storage + 14 persona + 14 medical + 14 social). `tsc` + `vite build` clean. B-2→B-6 PART 1 merged. **Stage 4 behavior port underway: traits+skills (v0.33.0, `persona.test.ts`), wounds/medical (v0.34.0, `medical.test.ts`), relationships/thoughts (v0.35.0, `social.test.ts`) landed.**
 
 **Scale engine (Track C):**
 - **Stage 1 ✅** — `src/sim/agents.ts` (`AgentStore`, SoA agent core).
