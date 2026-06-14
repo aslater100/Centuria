@@ -448,7 +448,7 @@ export class RegionView {
         let x = W / 2 - totalW / 2;
         const y = H - 25;
         g.textAlign = 'left';
-        g.fillStyle = '#f0e6cc';
+        g.fillStyle = '#fffcf0';
         g.fillText(head, x, y);
         x += g.measureText(head).width;
         for (let i = 0; i < segs.length; i++) {
