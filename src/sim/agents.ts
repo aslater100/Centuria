@@ -56,6 +56,7 @@ export interface AgentStoreSave {
   skill: number[]; trait0: number[]; trait1: number[];
   woundUntreated: number[]; woundAt: number[]; infectionRolled: number[];
   infection: number[]; sickUntilTick: number[];
+  thoughtDelta: number[]; thoughtExpiry: number[]; thoughtKey: number[];
 }
 
 const SPEED = 0.45;              // tiles per game-minute (matches SETTLER_SPEED)
@@ -91,6 +92,15 @@ const SICK_BLEED = TUNING.sickHealthPerHour;             // health/hr while feve
 export const SICK_WORK_MULT = TUNING.sickWorkMult;       // work-speed factor while feverish
 const HEALTH_REGEN = TUNING.healthRegenPerHour;          // baseline recovery
 const STARVE_BLEED = 1.5;                                 // health/hr at 0 food (SoA baseline)
+
+// Thoughts (Stage 4 behavior port) — transient mood modifiers with an expiry.
+// The fat sim keeps a per-settler `Thought[]`; here each agent gets a fixed ring
+// of slots (flat typed arrays, allocation-free) summed into the mood target. A
+// non-zero `key` dedups/refreshes an ongoing thought; key 0 is a one-off that
+// always takes a fresh slot (e.g. grief for a specific death).
+export const THOUGHT_SLOTS = 6;
+/** Stable keys for refreshable thoughts (0 = anonymous one-off). */
+export const enum ThoughtKey { Anon = 0, Breakdown = 1 }
 
 export class AgentStore {
   readonly capacity: number;
@@ -145,6 +155,14 @@ export class AgentStore {
   /** Health-regen multiplier for this tick — set by serveMedical (infirmary/medicine), else 1. */
   readonly healMult: Float32Array;
 
+  // --- thoughts (Stage 4): bounded per-agent mood modifiers, THOUGHT_SLOTS each ---
+  /** Mood delta of each thought slot (small ±). Slot is live iff expiry > current tick. */
+  readonly thoughtDelta: Int8Array;
+  /** Expiry tick of each slot (0 or ≤ now = free). */
+  readonly thoughtExpiry: Float32Array;
+  /** Dedup key of each slot (ThoughtKey; 0 = anonymous one-off). */
+  readonly thoughtKey: Int16Array;
+
   /** Registered flow fields (one per hot destination). Empty = Stage-1 wander. */
   fields: FlowField[] = [];
   // Scratch reused by movement so the tick stays allocation-free.
@@ -185,6 +203,49 @@ export class AgentStore {
     this.sickUntilTick = new Float32Array(capacity);
     this.sick = new Uint8Array(capacity);
     this.healMult = new Float32Array(capacity).fill(1);
+    this.thoughtDelta = new Int8Array(capacity * THOUGHT_SLOTS);
+    this.thoughtExpiry = new Float32Array(capacity * THOUGHT_SLOTS);
+    this.thoughtKey = new Int16Array(capacity * THOUGHT_SLOTS);
+  }
+
+  /**
+   * Add a thought to agent `i`: a `delta` mood modifier living `durationTicks`
+   * from `nowTick`. A non-zero `key` refreshes an existing thought of that key
+   * (no stacking); key 0 always takes a free slot. When every slot is live, the
+   * soonest-to-expire is evicted.
+   */
+  addThought(i: number, nowTick: number, delta: number, durationTicks: number, key = ThoughtKey.Anon): void {
+    const base = i * THOUGHT_SLOTS;
+    const expiry = nowTick + durationTicks;
+    let free = -1;
+    let soonest = -1;
+    let soonestExp = Infinity;
+    for (let j = 0; j < THOUGHT_SLOTS; j++) {
+      const s = base + j;
+      const exp = this.thoughtExpiry[s];
+      if (key !== ThoughtKey.Anon && this.thoughtKey[s] === key && exp > nowTick) {
+        this.thoughtDelta[s] = delta; this.thoughtExpiry[s] = expiry; // refresh in place
+        return;
+      }
+      if (exp <= nowTick) { if (free < 0) free = s; }
+      else if (exp < soonestExp) { soonestExp = exp; soonest = s; }
+    }
+    const slot = free >= 0 ? free : soonest;
+    this.thoughtDelta[slot] = delta;
+    this.thoughtExpiry[slot] = expiry;
+    this.thoughtKey[slot] = key;
+  }
+
+  /** Sum of this agent's live thought deltas; clears expired slots in passing. */
+  private sumThoughts(i: number, nowTick: number): number {
+    const base = i * THOUGHT_SLOTS;
+    let total = 0;
+    for (let j = 0; j < THOUGHT_SLOTS; j++) {
+      const s = base + j;
+      if (this.thoughtExpiry[s] > nowTick) total += this.thoughtDelta[s];
+      else if (this.thoughtExpiry[s] !== 0) { this.thoughtExpiry[s] = 0; this.thoughtKey[s] = 0; this.thoughtDelta[s] = 0; }
+    }
+    return total;
   }
 
   /** Inflict an open wound on agent `i` as of `tickNo` (combat/raids/wildlife/events). */
@@ -276,6 +337,9 @@ export class AgentStore {
     this.sickUntilTick[i] = 0;
     this.sick[i] = 0;
     this.healMult[i] = 1;
+    // No thoughts on arrival.
+    const tb = i * THOUGHT_SLOTS;
+    for (let j = 0; j < THOUGHT_SLOTS; j++) { this.thoughtDelta[tb + j] = 0; this.thoughtExpiry[tb + j] = 0; this.thoughtKey[tb + j] = 0; }
     // Stagger first decision so a cohort spawned together doesn't think in lockstep.
     this.nextThink[i] = i % THINK_INTERVAL;
     return i;
@@ -309,6 +373,12 @@ export class AgentStore {
       this.sickUntilTick[i] = this.sickUntilTick[last];
       this.sick[i] = this.sick[last];
       this.healMult[i] = this.healMult[last];
+      const db = i * THOUGHT_SLOTS, sb = last * THOUGHT_SLOTS;
+      for (let j = 0; j < THOUGHT_SLOTS; j++) {
+        this.thoughtDelta[db + j] = this.thoughtDelta[sb + j];
+        this.thoughtExpiry[db + j] = this.thoughtExpiry[sb + j];
+        this.thoughtKey[db + j] = this.thoughtKey[sb + j];
+      }
     }
   }
 
@@ -346,6 +416,7 @@ export class AgentStore {
   serialize(): AgentStoreSave {
     const n = this.count;
     const slice = (a: ArrayLike<number>) => Array.from({ length: n }, (_, i) => a[i]);
+    const sliceN = (a: ArrayLike<number>, len: number) => Array.from({ length: len }, (_, i) => a[i]);
     // destX/destY use NaN as the "no destination" sentinel; NaN is not JSON-safe
     // (it stringifies to null and reloads as 0), so persist it explicitly as null.
     const sliceDest = (a: ArrayLike<number>) =>
@@ -370,6 +441,10 @@ export class AgentStore {
       woundUntreated: slice(this.woundUntreated), woundAt: slice(this.woundAt),
       infectionRolled: slice(this.infectionRolled), infection: slice(this.infection),
       sickUntilTick: slice(this.sickUntilTick),
+      // Thought slots (count × THOUGHT_SLOTS, row-major) — drive the mood target.
+      thoughtDelta: sliceN(this.thoughtDelta, n * THOUGHT_SLOTS),
+      thoughtExpiry: sliceN(this.thoughtExpiry, n * THOUGHT_SLOTS),
+      thoughtKey: sliceN(this.thoughtKey, n * THOUGHT_SLOTS),
     };
   }
 
@@ -400,6 +475,13 @@ export class AgentStore {
       store.sickUntilTick[i] = data.sickUntilTick?.[i] ?? 0;
       store.sick[i] = 0;
       store.healMult[i] = 1;
+      // Thought slots (row-major, THOUGHT_SLOTS per agent). Absent in old saves → empty.
+      const tb = i * THOUGHT_SLOTS;
+      for (let j = 0; j < THOUGHT_SLOTS; j++) {
+        store.thoughtDelta[tb + j] = data.thoughtDelta?.[tb + j] ?? 0;
+        store.thoughtExpiry[tb + j] = data.thoughtExpiry?.[tb + j] ?? 0;
+        store.thoughtKey[tb + j] = data.thoughtKey?.[tb + j] ?? 0;
+      }
     }
     return store;
   }
@@ -454,7 +536,8 @@ export class AgentStore {
       // --- mood: ease toward the weighted-need target + trait base, clamped 0..100
       //     (matches the fat sim's clamped 0.05 lerp). ---
       let target = this.food[i] * 0.3 + this.rest[i] * 0.25 + this.warmth[i] * 0.2
-        + this.recreation[i] * 0.15 + this.social[i] * 0.1 + this.moodBaseBonus[i];
+        + this.recreation[i] * 0.15 + this.social[i] * 0.1 + this.moodBaseBonus[i]
+        + this.sumThoughts(i, tickNo);
       target = target < 0 ? 0 : target > 100 ? 100 : target;
       this.mood[i] += (target - this.mood[i]) * 0.05;
 
