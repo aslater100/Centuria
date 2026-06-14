@@ -25,7 +25,11 @@ Track A is **substantially complete**; the bug fixes landed alongside the govern
 | **7 — Treasury continuity** | ⬜ Deferred | By design folded into **Track B Phase 2** (no `ParcelManager` / `homeSim` canonical economy exists yet). |
 
 **Net:** the active forward work is **Track B (Seamless World)**, which also subsumes Fix 7.
-Phase 1 (WorldCamera + coordinate system) is the current increment.
+
+**Track B progress:**
+- ✅ **Phase 1** — `src/ui/worldcam.ts` (WorldCamera + world coordinate system). Additive; not yet wired into `main.ts` (mode switch stays as dev fallback). Tests: `tests/worldcam.test.ts`.
+- ✅ **Phase 2** — `src/sim/parcel.ts` (`Parcel` + `ParcelManager`). 64×64 parcel grid over the region; home parcel auto-owned sharing the live `Simulation.world`; lazy seed-deterministic terrain per parcel; expansion cost formula (`PARCEL_TUNING` in `defs.ts`); **unified economy (Fix 7)** — all gold routes through the home `Simulation.economy.cash`, so expansion can't reset the treasury; `serialize()`/`deserialize()` persist only ownership/exploration (terrain regenerates from seed). Additive; not yet wired into `main.ts`. Tests: `tests/parcel.test.ts`.
+- ⬜ **Phase 3** — Parcel purchase UI (`hud.ts`/`regionview.ts`) + `land_survey`/`road_building`/`cartography` techs. The sim-side cost formula + `canPurchase`/`purchase` already live in `ParcelManager`; Phase 3 is the UI + tech gating on top.
 
 ### What this plan covers (two tracks, sequential)
 
