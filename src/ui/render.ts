@@ -85,6 +85,19 @@ function tileColor(t: import('../sim/world').Tile): string {
   return '#466e37'; // grass / sapling
 }
 
+/** Building purpose color for low-zoom icon (matches sprite category). */
+function buildingColor(defId: string): string {
+  if (defId === 'house' || defId === 'cottage' || defId === 'longhouse') return '#8b5e3c'; // brown/shelter
+  if (defId === 'kitchen' || defId === 'bakery' || defId === 'kitchen_garden' || defId === 'mill' || defId === 'brewery') return '#c2a14d'; // golden/food
+  if (defId === 'farm' || defId === 'animal_pen') return '#7a8a3a'; // green/pasture
+  if (defId === 'blacksmith' || defId === 'kiln' || defId === 'coke_furnace' || defId === 'foundry') return '#e07a5a'; // red/industry
+  if (defId === 'mill' || defId === 'sawmill' || defId === 'workshop' || defId === 'tailor' || defId === 'forester') return '#9b6830'; // wood
+  if (defId === 'barracks' || defId === 'watchtower' || defId === 'armory') return '#c25b2e'; // orange/defense
+  if (defId === 'clinic' || defId === 'apothecary' || defId === 'well') return '#8fc26a'; // green/medicine
+  if (defId === 'town_hall' || defId === 'hall' || defId === 'schoolhouse' || defId === 'library') return '#7ab8e8'; // blue/civic
+  return '#666'; // grey/other
+}
+
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
@@ -386,36 +399,51 @@ export class Renderer {
     const detailZoom = this.cam.zoom >= 0.5; // Skip detail overlays below 0.5x
     for (const b of sim.buildings) {
       const def = buildingDef(b.defId);
-      const levelKey = `${b.defId}:${b.level ?? 1}`;
-      const img = b.built
-        ? (this.sprites.buildings[levelKey] ?? this.sprites.buildings[b.defId])
-        : this.sprites.blueprints[b.defId];
       const rot = b.rotation ?? 0;
       const rw = rot % 2 === 1 ? def.h : def.w;
       const rh = rot % 2 === 1 ? def.w : def.h;
       const bx = ox + b.x * TILE;
       const by = oy + b.y * TILE;
       if (!this.isInViewport(bx, by, TILE * (Math.max(rw, rh) + 1))) continue;
-      if (rot !== 0) {
-        g.save();
-        g.translate(bx + rw * TILE / 2, by + rh * TILE / 2);
-        g.rotate(rot * Math.PI / 2);
-        g.drawImage(img, -def.w * TILE / 2, -def.h * TILE / 2);
-        g.restore();
-      } else {
-        g.drawImage(img, bx, by);
-      }
-      if (detailZoom) {
+
+      if (lod) {
+        // Low zoom: simple colored boxes showing building purpose
+        g.fillStyle = buildingColor(b.defId);
+        g.globalAlpha = b.built ? 1 : 0.4;
+        g.fillRect(bx, by, rw * TILE, rh * TILE);
+        g.globalAlpha = 1;
         if (!b.built) {
-          const need = (def.cost.wood ?? 0);
-          g.fillStyle = '#dfe6ee';
-          g.font = '8px monospace';
-          g.fillText(`${b.delivered}/${need}`, bx + 2, by + 8);
+          g.strokeStyle = '#8a8';
+          g.lineWidth = 1;
+          g.strokeRect(bx, by, rw * TILE, rh * TILE);
         }
-        if (b.built && def.maxHp && b.hp < def.maxHp) {
-          this.hpBar(bx, by - 3, b.hp / def.maxHp);
+      } else {
+        // Full detail: draw actual sprite
+        const levelKey = `${b.defId}:${b.level ?? 1}`;
+        const img = b.built
+          ? (this.sprites.buildings[levelKey] ?? this.sprites.buildings[b.defId])
+          : this.sprites.blueprints[b.defId];
+        if (rot !== 0) {
+          g.save();
+          g.translate(bx + rw * TILE / 2, by + rh * TILE / 2);
+          g.rotate(rot * Math.PI / 2);
+          g.drawImage(img, -def.w * TILE / 2, -def.h * TILE / 2);
+          g.restore();
+        } else {
+          g.drawImage(img, bx, by);
         }
-        if (this.cam.selectedBuilding === b.id) this.outline(bx, by, rw * TILE, rh * TILE);
+        if (detailZoom) {
+          if (!b.built) {
+            const need = (def.cost.wood ?? 0);
+            g.fillStyle = '#dfe6ee';
+            g.font = '8px monospace';
+            g.fillText(`${b.delivered}/${need}`, bx + 2, by + 8);
+          }
+          if (b.built && def.maxHp && b.hp < def.maxHp) {
+            this.hpBar(bx, by - 3, b.hp / def.maxHp);
+          }
+          if (this.cam.selectedBuilding === b.id) this.outline(bx, by, rw * TILE, rh * TILE);
+        }
       }
     }
 
@@ -481,28 +509,43 @@ export class Renderer {
       if (detailZoom) this.hpBar(px, py + 2, r.health / 70);
     }
 
-    // Settlers (with detail overlays skipped below 0.5x)
+    // Settlers (dots at low zoom, sprites at higher zoom)
     for (const s of sim.settlers) {
       const px = ox + Math.round(s.pos.x * TILE);
       const py = oy + Math.round(s.pos.y * TILE) - 4;
       if (!this.isInViewport(px, py)) continue;
-      const variant = s.id % this.sprites.settler.length;
-      const fr = s.state === 'sleeping' ? 0 : Math.floor(this.frame / 12) % 2;
-      g.drawImage((s.armed ? this.sprites.settlerArmed : this.sprites.settler)[variant][fr], px, py);
-      if (detailZoom) {
-        if (s.state === 'sleeping') {
-          g.fillStyle = '#cfd4e0';
-          g.font = '8px monospace';
-          g.fillText('z', px + 12, py + 2);
+
+      if (this.cam.zoom < 0.3) {
+        // Very low zoom: render as dots with color indicating status
+        let col = '#9ab0c4'; // neutral settler
+        if (s.state === 'sleeping') col = '#7ab8e8'; // sleeping = blue
+        if (s.armed) col = '#e07a5a'; // armed = red
+        if (s.wound?.untreated || s.infection) col = '#ff8800'; // injured = orange
+        if (s.health < 50) col = '#e04444'; // critical = red
+        g.fillStyle = col;
+        g.beginPath();
+        g.arc(px + TILE / 2, py + TILE / 2, 2.5, 0, Math.PI * 2);
+        g.fill();
+      } else {
+        // Higher zoom: draw actual settler sprite
+        const variant = s.id % this.sprites.settler.length;
+        const fr = s.state === 'sleeping' ? 0 : Math.floor(this.frame / 12) % 2;
+        g.drawImage((s.armed ? this.sprites.settlerArmed : this.sprites.settler)[variant][fr], px, py);
+        if (detailZoom) {
+          if (s.state === 'sleeping') {
+            g.fillStyle = '#cfd4e0';
+            g.font = '8px monospace';
+            g.fillText('z', px + 12, py + 2);
+          }
+          if (s.carrying) g.drawImage(this.sprites.items[s.carrying.kind], px - 2, py - 4);
+          if (s.health < 100) this.hpBar(px, py + 2, s.health / 100);
+          if (s.wound?.untreated || s.infection || s.sickUntil > sim.minute) {
+            g.fillStyle = '#e04444';
+            g.fillRect(px + 12, py + 2, 3, 1);
+            g.fillRect(px + 13, py + 1, 1, 3); // tiny red cross
+          }
+          if (this.cam.selectedSettler === s.id) this.outline(px, py + 4, TILE, TILE - 2);
         }
-        if (s.carrying) g.drawImage(this.sprites.items[s.carrying.kind], px - 2, py - 4);
-        if (s.health < 100) this.hpBar(px, py + 2, s.health / 100);
-        if (s.wound?.untreated || s.infection || s.sickUntil > sim.minute) {
-          g.fillStyle = '#e04444';
-          g.fillRect(px + 12, py + 2, 3, 1);
-          g.fillRect(px + 13, py + 1, 1, 3); // tiny red cross
-        }
-        if (this.cam.selectedSettler === s.id) this.outline(px, py + 4, TILE, TILE - 2);
       }
     }
 
