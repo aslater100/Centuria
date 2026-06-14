@@ -181,12 +181,14 @@ export class Simulation {
   corpses: Corpse[] = [];
   graves: Grave[] = [];
   stock: Record<ResourceKind, number> = {
-    // Founding resources
-    wood: 80, grain: 60, meal: 160, stone: 0, clothes: 0, weapons: 0,
-    // Raw — all start at 0; unlocked by town tech tree
-    clay: 0, coal: 0, iron_ore: 0, flax: 0, herbs: 0,
-    // Processed
+    // Founding resources (GDD §3.1 starting inventory)
+    wood: 80, grain: 60, meal: 160, stone: 5, clothes: 0, weapons: 0,
+    // Raw — iron_ore starts at 10 per GDD critical fix ("don't start with 0!")
+    clay: 0, coal: 0, iron_ore: 10, flax: 0, herbs: 0,
+    // Processed — Era 1
     timber: 0, brick: 0, iron: 0, tools: 0, rope: 0, flour: 0, ale: 0, medicine: 0,
+    // Processed — Era 2
+    coke: 0, petroleum: 0,
     // Food variety
     bread: 0, dairy: 0, produce: 0, game_meal: 0, fish_meal: 0, preserved: 0,
   };
@@ -195,6 +197,8 @@ export class Simulation {
   traffic = new Float32Array(MAP_W * MAP_H);
   log: LogEntry[] = [];
   gameOver = false;
+  /** Current game era (1–4); advances via player action triggers per the GDD. */
+  era: 1 | 2 | 3 | 4 = 1;
   coldSnapUntil = -1;
   raiders: Raider[] = [];
   raidActive = false;
@@ -250,6 +254,7 @@ export class Simulation {
       'wood', 'grain', 'meal', 'stone', 'clothes', 'weapons',
       'clay', 'coal', 'iron_ore', 'flax', 'herbs',
       'timber', 'brick', 'iron', 'tools', 'rope', 'flour', 'ale', 'medicine',
+      'coke', 'petroleum',
       'bread', 'dairy', 'produce', 'game_meal', 'fish_meal', 'preserved',
     ];
     this.priceModifiers = {} as Record<ResourceKind, number>;
@@ -473,6 +478,7 @@ export class Simulation {
   canPlace(defId: string, x: number, y: number, rotation = 0, ignoreTech = false): boolean {
     const def = buildingDef(defId);
     if (!ignoreTech && def.requiredTech && !this.hasTech(def.requiredTech)) return false;
+    if (!ignoreTech && def.requiredEra !== undefined && def.requiredEra > this.era) return false;
     const w = rotation % 2 === 1 ? def.h : def.w;
     const h = rotation % 2 === 1 ? def.w : def.h;
     for (let dy = 0; dy < h; dy++) {
@@ -595,6 +601,7 @@ export class Simulation {
     const def = TOWN_TECH_DEFS.find((d) => d.id === id);
     if (!def) return false;
     if (def.minYear && this.year < def.minYear) return false;
+    if (def.requiredEra !== undefined && def.requiredEra > this.era) return false;
     return def.prereqs.every((p) => this.hasTech(p));
   }
 
@@ -986,6 +993,26 @@ export class Simulation {
    * cash: dumping floods supply (price falls), and hoarding the proceeds
    * debases the currency (inflation lifts what everything costs).
    */
+  private checkEraTransition(): void {
+    if (this.era === 1) {
+      // Era 1 → 2: Iron-age industrial base established (GDD §3.1).
+      // Trigger: tools stockpiled (20+), iron smelting mastered, and coke running.
+      if (
+        this.hasTech('iron_smelting') &&
+        this.hasTech('blacksmithing') &&
+        this.stock.tools >= TUNING.era2ToolsRequired &&
+        this.stock.iron >= TUNING.era2IronRequired
+      ) {
+        this.era = 2;
+        this.addLog(
+          'The Industrial Era begins — coal, coke, and iron transform the colony. New buildings and techs are now available.',
+          'good',
+        );
+      }
+    }
+    // Era 2 → 3 and 3 → 4 will be triggered by future content (coal power, electrification).
+  }
+
   private updateMarketPrices(): void {
     const recovery = TUNING.marketRecoveryPerDay;
     for (const k of Object.keys(this.priceModifiers) as ResourceKind[]) {
@@ -1014,6 +1041,7 @@ export class Simulation {
     }
     this.updatePopulationFlows();
     this.updateMarketPrices();
+    this.checkEraTransition();
     // Animal pens produce dairy from livestock
     for (const pen of this.builtOf('ranching').filter(b => b.defId === 'animal_pen' && b.built)) {
       const livestock = pen.livestock ?? 0;
@@ -2110,10 +2138,16 @@ export class Simulation {
         push({ kind: 'craft', x: kiln.x, y: kiln.y, buildingId: kiln.id, workLeft: TUNING.kilnWorkPerBrick, label: 'fire bricks' }, 'craft');
       }
     }
-    // Blacksmith: smelt iron ore + coal → iron, then iron → tools
+    // Coke Furnace: convert coal → coke (the fuel the smelter needs)
+    for (const cf of this.builtOf('coke_furnace')) {
+      if (cf.built && this.stock.coal >= TUNING.cokeCoalCost && this.stock.coke < TUNING.cokeCap) {
+        push({ kind: 'smelt', x: cf.x, y: cf.y, buildingId: cf.id, workLeft: TUNING.cokeWorkCost, label: 'cook coke' }, 'smelt');
+      }
+    }
+    // Blacksmith: smelt iron ore + coke → iron (GDD: 3 ore + 1 coke → 1 iron), then iron → tools
     for (const bs of this.builtOf('smithing')) {
       if (!bs.built) continue;
-      if (this.hasTech('iron_smelting') && this.stock.iron_ore >= TUNING.smeltOrePerIron && this.stock.coal >= 1 && this.stock.iron < 20) {
+      if (this.hasTech('iron_smelting') && this.stock.iron_ore >= TUNING.smeltOrePerIron && this.stock.coke >= TUNING.smeltCokePerIron && this.stock.iron < 20) {
         push({ kind: 'smelt', x: bs.x, y: bs.y, buildingId: bs.id, workLeft: TUNING.smeltWorkPerIron, label: 'smelt iron' }, 'smelt');
       } else if (this.stock.iron >= TUNING.smithIronPerTools && this.stock.tools < 10) {
         push({ kind: 'smelt', x: bs.x, y: bs.y, buildingId: bs.id, workLeft: TUNING.smithWorkPerTools, label: 'smith tools' }, 'smelt');
@@ -2652,12 +2686,24 @@ export class Simulation {
       case 'smelt': {
         const bs = this.building(task.buildingId);
         if (!bs?.built) return this.finishTask(s);
+        // Coke Furnace: distil coal into coke (3 coal → 1 coke).
+        if (task.label === 'cook coke') {
+          if (this.stock.coal < TUNING.cokeCoalCost) return this.finishTask(s);
+          task.workLeft -= work;
+          if (task.workLeft <= 0) {
+            this.stock.coal -= TUNING.cokeCoalCost;
+            this.stock.coke++;
+            this.finishTask(s);
+          }
+          return;
+        }
         if (task.label === 'smelt iron') {
-          if (this.stock.iron_ore < TUNING.smeltOrePerIron || this.stock.coal < 1) return this.finishTask(s);
+          // GDD §3: smelter now requires coke, not raw coal (3 ore + 1 coke → 1 iron).
+          if (this.stock.iron_ore < TUNING.smeltOrePerIron || this.stock.coke < TUNING.smeltCokePerIron) return this.finishTask(s);
           task.workLeft -= work;
           if (task.workLeft <= 0) {
             this.stock.iron_ore -= TUNING.smeltOrePerIron;
-            this.stock.coal--;
+            this.stock.coke -= TUNING.smeltCokePerIron;
             this.stock.iron++;
             this.finishTask(s);
           }
@@ -3395,6 +3441,7 @@ export class Simulation {
       mayorNotableId: this.mayorNotableId,
       currencySymbol: this.currencySymbol,
       marketDisruptionEnd: this.marketDisruptionEnd,
+      era: this.era,
     });
     // Path cache is not serialized; clear it so the original sim (a) and
     // the loaded sim (b) both recompute paths from scratch, staying in sync.
@@ -3451,6 +3498,7 @@ export class Simulation {
       bread: d.stock.bread ?? 0, dairy: d.stock.dairy ?? 0, produce: d.stock.produce ?? 0,
       game_meal: d.stock.game_meal ?? 0, fish_meal: d.stock.fish_meal ?? 0,
       preserved: d.stock.preserved ?? 0,
+      coke: d.stock.coke ?? 0, petroleum: d.stock.petroleum ?? 0,
     };
     // Economy: restore from save or initialize with defaults
     sim.economy = {
@@ -3487,6 +3535,7 @@ export class Simulation {
     sim.mayorNotableId = d.mayorNotableId ?? null;
     sim.currencySymbol = d.currencySymbol ?? '$';
     sim.marketDisruptionEnd = d.marketDisruptionEnd ?? 0;
+    sim.era = (d.era ?? 1) as 1 | 2 | 3 | 4;
     // Task reservations aren't saved; rebuild them from in-flight tasks.
     sim.reserved = new Set(sim.settlers.filter((s) => s.task).map((s) => sim.taskKey(s.task!)));
     return sim;

@@ -84,7 +84,8 @@ const BUILD_CATEGORIES: BuildCategory[] = [
       { kind: 'building', id: 'sawmill', label: 'Sawmill', cost: '35w', desc: 'Wood→timber (2:1). Enables advanced buildings. Needs Carpentry tech.' },
       { kind: 'building', id: 'kiln', label: 'Kiln', cost: '20w+5s', desc: 'Clay→brick (2:1). Masonry-grade construction. Needs Brickwork tech.' },
       { kind: 'building', id: 'mine', label: 'Mine', cost: '30w', desc: 'Paint mine zones on rock tiles to extract clay and ore. Needs Prospecting tech.' },
-      { kind: 'building', id: 'blacksmith', label: 'Blacksmith', cost: '25w+10s', desc: 'Iron ore+coal→iron→tools. Tools speed construction +20%. Needs Blacksmithing tech.' },
+      { kind: 'building', id: 'coke_furnace', label: 'Coke Furnace', cost: '12s+4b', desc: '3 coal→1 coke. Coke is the smelter\'s fuel — without it, iron halts. Needs Coke Production tech.' },
+      { kind: 'building', id: 'blacksmith', label: 'Blacksmith', cost: '25w+10s', desc: '3 iron ore+1 coke→iron, 2 iron→tools. Tools speed construction +20%. Needs Blacksmithing tech.' },
       { kind: 'building', id: 'warehouse', label: 'Warehouse', cost: '50w+10s', desc: '+500 raw goods storage. Needs Commerce tech.' },
     ],
   },
@@ -673,6 +674,31 @@ export class Hud {
     }
   }
 
+  private activeWarnings(): { level: 'yellow' | 'red'; text: string }[] {
+    const s = this.sim;
+    const w: { level: 'yellow' | 'red'; text: string }[] = [];
+    // Food warnings (GDD thresholds)
+    const totalFood = s.totalFood();
+    if (totalFood === 0) w.push({ level: 'red', text: 'FAMINE — no food!' });
+    else if (totalFood < TUNING.warnFoodYellow) w.push({ level: 'yellow', text: `Food critical (${totalFood} left)` });
+    // Coal warnings
+    if (s.stock.coal === 0 && s.builtOf('mining').some((b) => b.built)) {
+      w.push({ level: 'red', text: 'Coal exhausted — furnaces idle' });
+    } else if (s.stock.coal < TUNING.warnCoalYellow && s.stock.coal > 0 && s.hasTech('iron_mining')) {
+      w.push({ level: 'yellow', text: `Coal low (${s.stock.coal} left)` });
+    }
+    // Coke warnings — if smelting chain is active but coke is empty
+    if (s.stock.coke === 0 && s.hasTech('coke_production') && s.stock.iron < 5) {
+      w.push({ level: 'yellow', text: 'No coke — smelter idle' });
+    }
+    // Unemployment warnings
+    const idle = s.settlers.filter((p) => !p.task && !p.assignedBuildingId).length;
+    const idleFrac = s.settlers.length > 0 ? idle / s.settlers.length : 0;
+    if (idleFrac > TUNING.warnUnemployRed) w.push({ level: 'red', text: `${Math.round(idleFrac * 100)}% settlers idle` });
+    else if (idleFrac > TUNING.warnUnemployYellow) w.push({ level: 'yellow', text: `${Math.round(idleFrac * 100)}% settlers idle` });
+    return w;
+  }
+
   private drawTopBar(): void {
     const s = this.sim;
     const hh = String(Math.floor(s.hour)).padStart(2, '0');
@@ -685,13 +711,21 @@ export class Hud {
     const capWarn = over > 0 && pop < hardCap ? ` ⚠ −${Math.round((1 - s.softCapWorkMult()) * 100)}%` : '';
     const skyIcon = { clear: '☀', overcast: '☁', rain: '☔', storm: '⛈', snow: '❄' }[s.weatherToday().sky];
     const drought = s.weather.isDrought(s.day) && s.growingSeason ? ' <span class="tb-over">DROUGHT</span>' : '';
+    const eraNames: Record<number, string> = { 1: 'Pre-Industrial', 2: 'Industrial', 3: 'Modern', 4: 'Post-Industrial' };
+    const eraLabel = `<span class="tb-era" title="Current game era">Era ${s.era}: ${eraNames[s.era] ?? ''}</span>`;
+    const warnings = this.activeWarnings();
+    const warnHtml = warnings.map((w) =>
+      `<span class="${w.level === 'red' ? 'tb-over' : 'tb-warn'}" title="${w.text}">⚠ ${w.text}</span>`
+    ).join('');
     this.setHtml(this.topBar,
       `<span class="tb-date">${s.dateLabel} ${hh}:${mm}</span>` +
+      eraLabel +
       `<span>${skyIcon} ${Math.round(s.temperature() * 9 / 5 + 32)}°F${drought}</span>` +
       `<span>${popDisplay}${capWarn}</span>` +
       `<span>💰` + formatCurrency(Math.round(s.economy.cash)) + `</span>` +
-      `<span><span class="res-wood">≡</span>${s.stock.wood} ⛏${s.stock.stone} 🌾${s.stock.grain} 🍖${s.stock.meal} 👕${s.stock.clothes}${s.stock.weapons ? ` ⚔${s.stock.weapons}` : ''}</span>` +
+      `<span><span class="res-wood">≡</span>${s.stock.wood} ⛏${s.stock.stone} 🌾${s.stock.grain} 🍖${s.totalFood()} 👕${s.stock.clothes}${s.stock.weapons ? ` ⚔${s.stock.weapons}` : ''}${s.stock.coke ? ` 🔥${s.stock.coke}` : ''}</span>` +
       `<span title="average mood">♥${Math.round(s.avgMood())}</span>` +
+      warnHtml +
       (s.raidActive ? `<span class="tb-over">⚔ RAID ${s.raiders.length}!</span>` : '') +
       `<button id="tb-res" class="tb-btn${this.showResources ? ' active' : ''}" title="Resources panel">RES</button>` +
       `<span class="tb-speed">${this.paused ? '⏸' : '▶'.repeat(this.speed)} <i>(space 1-3)</i></span>`);
@@ -772,7 +806,8 @@ export class Hud {
     type Group = { label: string; kinds: ResourceKind[] };
     const GROUPS: Group[] = [
       { label: 'Basic', kinds: ['wood', 'grain', 'stone', 'clothes', 'weapons', 'flax', 'clay', 'coal', 'iron_ore', 'herbs'] },
-      { label: 'Refined', kinds: ['timber', 'brick', 'iron', 'tools', 'rope', 'flour', 'ale', 'medicine'] },
+      { label: 'Refined (Era 1)', kinds: ['timber', 'brick', 'coke', 'iron', 'tools', 'rope', 'flour', 'ale', 'medicine'] },
+      { label: 'Industrial (Era 2)', kinds: ['petroleum'] },
       { label: 'Food Variety', kinds: ['meal', 'bread', 'dairy', 'produce', 'game_meal', 'fish_meal', 'preserved'] },
     ];
     // A resource is "locked" only until the tech that produces it is researched.
@@ -780,9 +815,9 @@ export class Hud {
       rope: 'textile_farming', preserved: 'food_preservation', ale: 'fermentation',
       produce: 'horticulture', flax: 'textile_farming', timber: 'carpentry',
       brick: 'brickwork', clay: 'prospecting', iron_ore: 'iron_mining',
-      coal: 'iron_mining', iron: 'iron_smelting', tools: 'blacksmithing',
+      coal: 'iron_mining', coke: 'coke_production', iron: 'iron_smelting', tools: 'blacksmithing',
       flour: 'milling', medicine: 'germ_theory', herbs: 'herbalism',
-      dairy: 'animal_husbandry',
+      dairy: 'animal_husbandry', petroleum: 'coal_power',
     };
     let html = `<h3>Resources <button onclick="this.closest('.inspector').dispatchEvent(new CustomEvent('close-res'))" style="float:right;cursor:pointer">✕</button></h3>`;
     for (const g of GROUPS) {

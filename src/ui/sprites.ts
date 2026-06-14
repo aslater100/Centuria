@@ -1886,6 +1886,8 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
       game_meal:  genericItemSprite('#8c5c3c', '#6a4028'),
       fish_meal:  craftedItemSprite('fish_meal'),
       preserved:  genericItemSprite('#6a4030', '#502820'),
+      coke:       genericItemSprite('#2a2010', '#1a1408'),
+      petroleum:  genericItemSprite('#1c1e28', '#14161e'),
     },
     grave:  graveSprite(),
     corpse: corpseSprite(),

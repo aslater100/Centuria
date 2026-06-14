@@ -12,8 +12,10 @@ export type ResourceKind =
   | 'wood' | 'grain' | 'meal' | 'stone' | 'clothes' | 'weapons'
   // Raw — unlocked by town tech tree
   | 'clay' | 'coal' | 'iron_ore' | 'flax' | 'herbs'
-  // Processed — unlocked by town tech tree
+  // Processed — Era 1
   | 'timber' | 'brick' | 'iron' | 'tools' | 'rope' | 'flour' | 'ale' | 'medicine'
+  // Processed — Era 2 (Industrial)
+  | 'coke' | 'petroleum'
   // Food variety — unlocked by respective techs; distinct types for the mood system
   | 'bread' | 'dairy' | 'produce' | 'game_meal' | 'fish_meal' | 'preserved';
 
@@ -24,7 +26,9 @@ export type Provides =
   // New — town expansion
   | 'civic' | 'ranching' | 'milling' | 'brewing' | 'preservation'
   | 'smithing' | 'sawmill' | 'kiln' | 'well' | 'watchtower' | 'warehouse'
-  | 'herbalism' | 'apothecary' | 'mining' | 'education';
+  | 'herbalism' | 'apothecary' | 'mining' | 'education'
+  // Era 2 — Industrial
+  | 'coke_furnace';
 
 export type WorkKind =
   // Existing
@@ -87,7 +91,8 @@ export interface TownDesign {
   difficulty: 'easy' | 'normal' | 'hard';
   /** Map site preference; worldgen picks the best matching start. */
   location: 'river-valley' | 'coastal' | 'highlands' | 'surprise';
-  startingPop: 8 | 12 | 16;
+  /** 8/12/16 are the classic settler counts; 25 and 50 match GDD population targets. */
+  startingPop: 8 | 12 | 16 | 25 | 50;
 }
 
 export interface RegionDesign {
@@ -176,6 +181,7 @@ export interface BuildingDef {
   desc: string;
   upgrades?: UpgradeLevel[];
   requiredTech?: string; // tech id that must be researched before placing
+  requiredEra?: number; // minimum game era (1–4) before this building is placeable
 }
 
 export interface TraitDef {
@@ -216,6 +222,8 @@ export interface TownTechDef {
   cost: Partial<Record<ResourceKind, number>>;
   /** Tech is locked before this calendar year. */
   minYear?: number;
+  /** Tech is locked until the specified game era is reached. */
+  requiredEra?: number;
   desc: string;
   /** Informational list of what this tech enables. */
   unlocks: string[];
@@ -409,7 +417,13 @@ export const TUNING = {
   // Production chains
   sawmillWoodPerTimber: 2,    // 2 wood → 1 timber
   kilnClayPerBrick: 2,        // 3 clay → 2 brick (net ratio)
-  smeltOrePerIron: 2,         // 2 iron_ore + 1 coal → 1 iron
+  // Coke furnace (GDD: 3 coal → 1 coke/12s)
+  cokeCoalCost: 3,            // coal consumed per coke batch
+  cokeWorkCost: 120,          // settler-minutes per coke unit
+  cokeCap: 60,                // stop producing coke above this stock level
+  // Smelter (GDD: 3 ore + 1 coke → 1 iron/12s; coke replaced raw coal as fuel)
+  smeltOrePerIron: 3,         // 3 iron_ore + 1 coke → 1 iron (GDD spec)
+  smeltCokePerIron: 1,        // coke consumed per iron bar
   smithIronPerTools: 2,       // 2 iron → 1 tools
   toolsBuildSpeedBonus: 0.2,  // 20% faster build work while tools in stock
   millGrainPerFlour: 1,       // 1 grain → 1.2 flour equivalent (ratio applied in cook)
@@ -456,6 +470,14 @@ export const TUNING = {
   apothecaryHealMult: 1.5,
   medicineHerbCost: 2,
   medicineWorkCost: 90,
+  // Era system — warning thresholds (GDD Quick Reference Card §5)
+  warnCoalYellow: 5,          // coal stock triggers yellow alert
+  warnFoodYellow: 20,         // total meals triggers yellow alert
+  warnUnemployYellow: 0.20,   // idle fraction triggers yellow alert
+  warnUnemployRed: 0.50,      // idle fraction triggers red alert
+  // Era 1 → 2 unlock requirements (GDD §3.1: industrial revolution milestone)
+  era2ToolsRequired: 20,      // tools in stock
+  era2IronRequired: 10,       // iron bars in stock
   // Tech mechanics
   cropRotationYieldBonus: 0.2,
   combatTrainingBonus: 2,

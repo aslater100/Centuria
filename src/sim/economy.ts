@@ -68,12 +68,14 @@ export const BASE_PRICES: Record<string, number> = {
   weapons: 70,
   timber: 22,    // 2 wood (16) + labour
   brick: 20,     // 2 clay (14) + labour
-  iron: 58,      // 2 ore + coal (51) + labour
-  tools: 140,    // 2 iron (116) + labour — top of the chain
+  coke: 34,      // 3 coal (45) + furnace labour — intermediate fuel
+  iron: 68,      // 3 ore + 1 coke (88) + labour (GDD chain now uses coke)
+  tools: 155,    // 2 iron (136) + labour — top of the chain
   rope: 26,      // 2 flax (18) + labour
   flour: 16,     // grain + milling
   ale: 24,       // 2 grain + fermentation
   medicine: 78,  // 2 herbs (24) + skilled labour
+  petroleum: 45, // Era 2 — refined crude oil
   // Food variety
   bread: 24,     // flour + baking
   dairy: 18,

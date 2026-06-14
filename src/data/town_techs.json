@@ -121,15 +121,37 @@
       "unlocks": ["building:mine", "resource:iron_ore", "resource:coal"]
     },
     {
+      "id": "coke_production",
+      "name": "Coke Production",
+      "branch": "industry",
+      "prereqs": ["iron_mining"],
+      "days": 14,
+      "cost": { "coal": 10 },
+      "desc": "Controlled coal distillation yields coke — a purer, hotter-burning fuel that the smelter needs to render iron from ore. Coal alone burns too cool. Unlocks Coke Furnace.",
+      "unlocks": ["building:coke_furnace", "resource:coke"]
+    },
+    {
       "id": "iron_smelting",
       "name": "Iron Smelting",
       "branch": "industry",
-      "prereqs": ["blacksmithing", "iron_mining"],
+      "prereqs": ["blacksmithing", "coke_production"],
       "days": 18,
-      "cost": { "stone": 10 },
+      "cost": { "stone": 10, "coal": 5 },
       "minYear": 1903,
-      "desc": "Smelting ore into wrought iron enables advanced tools and forged weapons.",
+      "desc": "Coke-fired smelting renders wrought iron from ore — the gateway to the industrial age. Requires a Coke Furnace running before the Blacksmith can smelt.",
       "unlocks": ["mechanic:ironSmelting", "resource:iron"]
+    },
+    {
+      "id": "coal_power",
+      "name": "Coal Power",
+      "branch": "industry",
+      "prereqs": ["iron_smelting", "commerce"],
+      "days": 30,
+      "cost": { "iron": 10, "stone": 20, "brick": 10 },
+      "minYear": 1910,
+      "requiredEra": 2,
+      "desc": "Steam engines driven by coal power factories and lighting. The industrial revolution begins in earnest. Unlocks Era 2 buildings.",
+      "unlocks": ["mechanic:coalPower", "era:2"]
     },
     {
       "id": "stone_masonry",
