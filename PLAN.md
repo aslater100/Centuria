@@ -5,9 +5,23 @@
 ## Session Handoff (Read This First in a New Session)
 
 **Repo:** `/home/user/Centuria` — TypeScript + Canvas 2D + Vite + Electron city-builder.  
-**Branch:** `claude/continue-g9fxsh` — push all work here; never push to main without user approval.  
+**Branch:** `claude/plan-sim-optimization-4mlwny` — push all work here; never push to main without user approval.  
 **Git remote:** `aslater100/centuria`  
 **Plan file:** `PLAN.md` (this file, committed to repo)
+
+### Sim + World Optimization (landed 2026-06-14)
+
+Five concrete hot-path fixes applied and verified (441 tests pass):
+
+| Fix | File | Mechanism | Win |
+|---|---|---|---|
+| **Per-tick tile scan** | `sim.ts` | `buildTileTaskScan()` scans MAP once per tick; `findTask()` reads the cached lists instead of doing 5 separate 9,216-tile sweeps per idle settler | ~5× fewer tile iterations in findTask with any idle settlers |
+| **Remove settlers spread** | `sim.ts` | `tick()` iterated `[...this.settlers]` (new array every tick); replaced with backwards index loop (splice-safe, zero allocation) | GC pressure eliminated |
+| **Fog skip when stationary** | `sim.ts` | `_settlerLastRevealIdx` tracks last tile index per settler; `revealAround()` called only when the settler moves to a new tile | ~70% of reveal calls eliminated for working/sleeping settlers |
+| **Soil tile cache** | `sim.ts` | `soilTiles()` builds a filtered slice once from worldgen output (soil never changes kind); `accrueDormantFarms()` and the winter-kill loop iterate only soil tiles | Dormant tick and daily winter scan skip ~80% of tiles |
+| **A\* road check cache** | `world.ts` | `findPath()` scanned all 9,216 tiles every call to detect any road; now uses `_anyRoadDirty`/`hasAnyRoad()` — recomputed only when `invalidatePathCache()` is called (terrain change) | O(n) per pathfind → O(1) |
+| **FOOD_HAUL_KINDS constant** | `sim.ts` | Module-level `ReadonlySet`; was `new Set(...)` inside `findTask()` per idle settler | Allocation eliminated |
+| **countAssigned precompute** | `sim.ts` | Was `settlers.filter(...)` per building per task; now `Map<buildingId, count>` built once at start of `findTask()` | O(n²) → O(n) |
 
 ### Track A status — verified against source 2026-06-14 (v0.31.0)
 

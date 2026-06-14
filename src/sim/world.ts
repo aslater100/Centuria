@@ -85,6 +85,9 @@ export class World {
   private readonly _pathPrev = new Int32Array(MAP_W * MAP_H);
   // Path result cache; cleared by invalidatePathCache() when terrain changes.
   private _pathCache = new Map<string, Vec[] | null>();
+  // Cached road presence for the A* heuristic — recomputed only after terrain changes.
+  private _anyRoadDirty = true;
+  private _cachedAnyRoad = false;
 
   constructor(rng: Rng, site: TownSite = DEFAULT_SITE) {
     this.site = site;
@@ -262,15 +265,8 @@ export class World {
     dist[startK] = 0;
     prev[startK] = startK;
     // A*: admissible heuristic = manhattan × cheapest possible step.
-    // With no roads on the map the heuristic is exact (BFS-like speed).
-    let anyRoad = false;
-    for (let i = 0; i < this.tiles.length; i++) {
-      if (this.tiles[i].road) {
-        anyRoad = true;
-        break;
-      }
-    }
-    const minStep = anyRoad ? 1 / 1.8 : 1;
+    // With no roads the heuristic is exact (BFS-like speed); road presence is cached.
+    const minStep = this.hasAnyRoad() ? 1 / 1.8 : 1;
     const hCost = (k: number) =>
       (Math.abs((k % MAP_W) - target.x) + Math.abs(Math.floor(k / MAP_W) - target.y)) * minStep;
     // binary min-heap keyed on f = g + h; d carries g for stale checks
@@ -345,6 +341,15 @@ export class World {
   /** Clear path cache; call after any tile passability or speed change. */
   invalidatePathCache(): void {
     this._pathCache.clear();
+    this._anyRoadDirty = true;
+  }
+
+  private hasAnyRoad(): boolean {
+    if (this._anyRoadDirty) {
+      this._cachedAnyRoad = this.tiles.some(t => t.road !== null);
+      this._anyRoadDirty = false;
+    }
+    return this._cachedAnyRoad;
   }
 
   /** Mark all tiles within radius r of (cx, cy) as explored (fog of war lift). */
