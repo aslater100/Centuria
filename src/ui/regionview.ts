@@ -34,6 +34,8 @@ export class RegionView {
   private lastStatePanelBuildFrame = -999;
   /** Active tab in the (dense) state panel — split into Finance/Politics/Diplomacy. */
   private statePanelTab: 'finance' | 'politics' | 'diplomacy' = 'finance';
+  /** Sub-tab within Finance: Treasury (dashboard + controls) vs Credit (lenders/monetary/freight). */
+  private financeSubTab: 'treasury' | 'credit' = 'treasury';
   private researchPanel: HTMLElement;
   researchOpen = false;
   private lastResearchBuildFrame = -999;
@@ -1131,18 +1133,24 @@ export class RegionView {
   }
 
   /** Tier-2 dashboard: treasury, taxes, funded services — visible once proclaimed. */
-  /** Wire a panel's `.pal-tab` buttons to show the matching `.pal-section`.
-   *  Sections all stay in the DOM (so ID-bound handlers survive); switching is
-   *  pure CSS, no rebuild. `set` records the choice so the next rebuild matches. */
-  private wireTabs(panel: HTMLElement, set: (tab: string) => void): void {
-    for (const btn of panel.querySelectorAll<HTMLButtonElement>('.pal-tab')) {
+  /** Wire a panel's tab buttons to show the matching section. Sections all stay
+   *  in the DOM (so ID-bound handlers survive); switching is pure CSS, no
+   *  rebuild. `set` records the choice so the next rebuild matches. The class
+   *  pair is parameterised so a panel can nest a second (sub-tab) level. */
+  private wireTabs(
+    panel: HTMLElement,
+    set: (tab: string) => void,
+    tabClass = 'pal-tab',
+    sectionClass = 'pal-section',
+  ): void {
+    for (const btn of panel.querySelectorAll<HTMLButtonElement>(`.${tabClass}`)) {
       btn.onclick = () => {
         const tab = btn.dataset.ptab!;
         set(tab);
-        for (const t of panel.querySelectorAll<HTMLElement>('.pal-tab')) {
+        for (const t of panel.querySelectorAll<HTMLElement>(`.${tabClass}`)) {
           t.classList.toggle('active', t.dataset.ptab === tab);
         }
-        for (const s of panel.querySelectorAll<HTMLElement>('.pal-section')) {
+        for (const s of panel.querySelectorAll<HTMLElement>(`.${sectionClass}`)) {
           s.classList.toggle('hidden', s.dataset.psection !== tab);
         }
       };
@@ -1177,7 +1185,9 @@ export class RegionView {
     const sec = (id: string, body: string) =>
       `<div class="pal-section${tab === id ? '' : ' hidden'}" data-psection="${id}">${body}</div>`;
 
-    const financeBody =
+    const ftab = this.financeSubTab;
+    // Treasury sub-tab: the at-a-glance dashboard + the tax/services/militia dials.
+    const treasuryBody =
       `<p>treasury ` + formatCurrency(Math.floor(r.treasury)) + ` · coin ${r.currencySymbol}</p>` +
       (r.currencyTransition && r.day < r.currencyTransition.endDay
         ? `<p style="color:#e0a040" title="The currency switch is still settling: output runs at ${Math.round(r.currencyEfficiency() * 100)}% and prices swing until markets stabilize.">` +
@@ -1194,13 +1204,15 @@ export class RegionView {
         ? `<p><button class="mini" id="geo-deploy-btn" title="Deploy stratospheric aerosols: −${GEOENGINEER_COOLING}°C over 2 years, but all rivals lose 15 relations (one-time)">⚗ deploy geoengineering</button></p>`
         : '') +
       `<p>trade ` + formatCurrency(Math.floor(r.tradeValueLastMonth)) + `/mo turnover</p>` +
-      this.monetaryHtml() +
-      this.lendersHtml() +
       `<p>tax <span id="tax-val">${Math.round(r.taxRate * 100)}%</span></p>` +
       `<input id="tax-slider" type="range" min="0" max="30" value="${Math.round(r.taxRate * 100)}">` +
       `<p>services: <b>${lvl(r.servicesLevel)}</b> <button class="mini" id="svc-up">+</button><button class="mini" id="svc-dn">−</button></p>` +
       `<p>militia: <b>${lvl(r.militiaLevel)}</b> <button class="mini" id="mil-up">+</button><button class="mini" id="mil-dn">−</button></p>` +
-      `<p class="insp-skills">high taxes breed strikes; services cost coin but save lives</p>` +
+      `<p class="insp-skills">high taxes breed strikes; services cost coin but save lives</p>`;
+    // Credit sub-tab: the lengthy monetary / lenders / freight machinery.
+    const creditBody =
+      this.monetaryHtml() +
+      this.lendersHtml() +
       `<p class="insp-skills">${r.maglevUnlocked()
         ? 'THE FLOATING FREIGHT — maglev guideways from any town panel'
         : r.highwayUnlocked()
@@ -1209,6 +1221,13 @@ export class RegionView {
             ? 'RAILWORKS chartered — lay rail from any town panel'
             : `railworks expected ~${RAIL_ERA_YEAR}`}</p>` +
       this.freightHtml();
+    const financeBody =
+      `<div class="pal-subtabs">` +
+      `<button class="pal-subtab${ftab === 'treasury' ? ' active' : ''}" data-ptab="treasury">Treasury</button>` +
+      `<button class="pal-subtab${ftab === 'credit' ? ' active' : ''}" data-ptab="credit">Credit</button>` +
+      `</div>` +
+      `<div class="pal-subsection${ftab === 'treasury' ? '' : ' hidden'}" data-psection="treasury">${treasuryBody}</div>` +
+      `<div class="pal-subsection${ftab === 'credit' ? '' : ' hidden'}" data-psection="credit">${creditBody}</div>`;
 
     const politicsBody =
       (!r.nationProclaimed && r.stateProclaimed && !r.proclamationReady
@@ -1240,6 +1259,7 @@ export class RegionView {
       sec('diplomacy', this.diplomacyHtml());
 
     this.wireTabs(this.statePanel, (t) => { this.statePanelTab = t as 'finance' | 'politics' | 'diplomacy'; });
+    this.wireTabs(this.statePanel, (t) => { this.financeSubTab = t as 'treasury' | 'credit'; }, 'pal-subtab', 'pal-subsection');
     this.statePanel.querySelector<HTMLInputElement>('#tax-slider')!.oninput = (e) => {
       r.taxRate = Number((e.target as HTMLInputElement).value) / 100;
       const taxVal = this.statePanel.querySelector<HTMLElement>('#tax-val');

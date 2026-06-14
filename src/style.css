@@ -721,6 +721,36 @@ body {
   color: #e8d27a;
 }
 
+/* Second-level (sub) tabs — smaller, recessed under the main tab strip. */
+.pal-subtabs {
+  display: flex;
+  gap: 2px;
+  margin: 4px 0;
+}
+
+.pal-subtab {
+  flex: 1;
+  padding: 2px 5px;
+  background: #181612;
+  color: #8a7d62;
+  border: 1px solid #3a2a1c;
+  border-bottom: 2px solid #3a2a1c;
+  font-family: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.pal-subtab:hover {
+  background: #26221c;
+  color: #dfe6ee;
+}
+
+.pal-subtab.active {
+  background: #2e2616;
+  border-bottom-color: #c2a14d;
+  color: #d8c896;
+}
+
 /* ---- Ceremony & menu overlays ---- */
 .ceremony {
   position: fixed;
