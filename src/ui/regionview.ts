@@ -31,6 +31,8 @@ export class RegionView {
   private panel: HTMLElement;
   private statePanel: HTMLElement;
   private lastStatePanelBuildFrame = -999;
+  /** Active tab in the (dense) state panel — split into Finance/Politics/Diplomacy. */
+  private statePanelTab: 'finance' | 'politics' | 'diplomacy' = 'finance';
   private researchPanel: HTMLElement;
   researchOpen = false;
   private lastResearchBuildFrame = -999;
@@ -1141,12 +1143,20 @@ export class RegionView {
     this.lastStatePanelBuildFrame = this.frame;
     const forceRebuild = () => { this.lastStatePanelBuildFrame = -999; };
     const lvl = (v: number) => ['none', 'basic', 'funded'][v];
-    this.statePanel.innerHTML =
-      `<div class="pal-title">${r.nationProclaimed ? r.nationName.toUpperCase() : r.stateName.toUpperCase()}</div>` +
-      `<p class="insp-skills">${r.nationProclaimed && r.govType
-        ? GOV_TYPES.find((g) => g.id === r.govType)!.name
-        : r.govLean ? GOV_LEANS[r.govLean].name : ''}</p>` +
-      (r.nationProclaimed ? this.nationHtml() : '') +
+    const tab = this.statePanelTab;
+    // Tab strip: Finance / Politics / Diplomacy. Sections always render (so the
+    // ~25 ID-bound handlers below still find their nodes) but only the active one
+    // is shown — switching just toggles CSS, no rebuild.
+    const tabStrip =
+      `<div class="pal-tabs">` +
+      `<button class="pal-tab${tab === 'finance' ? ' active' : ''}" data-ptab="finance">Finance</button>` +
+      `<button class="pal-tab${tab === 'politics' ? ' active' : ''}" data-ptab="politics">Politics</button>` +
+      `<button class="pal-tab${tab === 'diplomacy' ? ' active' : ''}" data-ptab="diplomacy">Diplomacy</button>` +
+      `</div>`;
+    const sec = (id: string, body: string) =>
+      `<div class="pal-section${tab === id ? '' : ' hidden'}" data-psection="${id}">${body}</div>`;
+
+    const financeBody =
       `<p>treasury ` + formatCurrency(Math.floor(r.treasury)) + ` · coin ${r.currencySymbol}</p>` +
       (r.currencyTransition && r.day < r.currencyTransition.endDay
         ? `<p style="color:#e0a040" title="The currency switch is still settling: output runs at ${Math.round(r.currencyEfficiency() * 100)}% and prices swing until markets stabilize.">` +
@@ -1177,14 +1187,9 @@ export class RegionView {
           : r.railUnlocked()
             ? 'RAILWORKS chartered — lay rail from any town panel'
             : `railworks expected ~${RAIL_ERA_YEAR}`}</p>` +
-      `<p>` +
-      `<button class="mini" id="research-toggle" title="Research tree (T)">${this.researchOpen ? '▲' : '▼'} T:research</button> ` +
-      `<button class="mini" id="routenet-toggle" title="Route network (R)">${this.routeNetworkOpen ? '▲' : '▼'} R:routes</button>` +
-      `</p>` +
-      `<p>` +
-      `<button class="mini" id="settlements-toggle" title="Settlement list (S)">${this.settlementListOpen ? '▲' : '▼'} S:towns</button> ` +
-      `<button class="mini" id="economy-toggle" title="Economy panel (E)">${this.economyOpen ? '▲' : '▼'} E:econ</button>` +
-      `</p>` +
+      this.freightHtml();
+
+    const politicsBody =
       (!r.nationProclaimed && r.stateProclaimed && !r.proclamationReady
         ? `<p style="color:#bfae86;font-size:10px">territory ${(r.playerTerritoryControl() * 100).toFixed(0)}% / 50% needed for nation gate</p>`
         : '') +
@@ -1193,9 +1198,38 @@ export class RegionView {
         : '') +
       (r.canCallConvention() ? `<p><button id="convention-btn" style="font-size:10px;background:#8b5cf6;color:#fff;border:none;padding:4px 8px;cursor:pointer">★ CONVENE CONSTITUTIONAL CONVENTION</button></p>` : '') +
       this.politicsHtml() +
-      this.diplomacyHtml() +
-      this.factionIntelHtml() +
-      this.freightHtml();
+      this.factionIntelHtml();
+
+    this.statePanel.innerHTML =
+      `<div class="pal-title">${r.nationProclaimed ? r.nationName.toUpperCase() : r.stateName.toUpperCase()}</div>` +
+      `<p class="insp-skills">${r.nationProclaimed && r.govType
+        ? GOV_TYPES.find((g) => g.id === r.govType)!.name
+        : r.govLean ? GOV_LEANS[r.govLean].name : ''}</p>` +
+      (r.nationProclaimed ? this.nationHtml() : '') +
+      // Navigation to the other windows stays always-visible.
+      `<p>` +
+      `<button class="mini" id="research-toggle" title="Research tree (T)">${this.researchOpen ? '▲' : '▼'} T:research</button> ` +
+      `<button class="mini" id="routenet-toggle" title="Route network (R)">${this.routeNetworkOpen ? '▲' : '▼'} R:routes</button> ` +
+      `<button class="mini" id="settlements-toggle" title="Settlement list (S)">${this.settlementListOpen ? '▲' : '▼'} S:towns</button> ` +
+      `<button class="mini" id="economy-toggle" title="Economy panel (E)">${this.economyOpen ? '▲' : '▼'} E:econ</button>` +
+      `</p>` +
+      tabStrip +
+      sec('finance', financeBody) +
+      sec('politics', politicsBody) +
+      sec('diplomacy', this.diplomacyHtml());
+
+    // Tab clicks: swap the visible section without a full rebuild.
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.pal-tab')) {
+      btn.onclick = () => {
+        this.statePanelTab = btn.dataset.ptab as 'finance' | 'politics' | 'diplomacy';
+        for (const t of this.statePanel.querySelectorAll<HTMLElement>('.pal-tab')) {
+          t.classList.toggle('active', t.dataset.ptab === this.statePanelTab);
+        }
+        for (const s of this.statePanel.querySelectorAll<HTMLElement>('.pal-section')) {
+          s.classList.toggle('hidden', s.dataset.psection !== this.statePanelTab);
+        }
+      };
+    }
     this.statePanel.querySelector<HTMLInputElement>('#tax-slider')!.oninput = (e) => {
       r.taxRate = Number((e.target as HTMLInputElement).value) / 100;
       const taxVal = this.statePanel.querySelector<HTMLElement>('#tax-val');

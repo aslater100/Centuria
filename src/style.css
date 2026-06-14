@@ -692,6 +692,35 @@ body {
   cursor: pointer;
 }
 
+/* ---- Palette panel tabs (state/economy/etc. dense panels) ---- */
+.pal-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 6px 0;
+}
+
+.pal-tab {
+  flex: 1;
+  padding: 4px 6px;
+  background: #1e1c18;
+  color: #998c6e;
+  border: 1px solid #4d3320;
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.pal-tab:hover {
+  background: #2e2a24;
+  color: #dfe6ee;
+}
+
+.pal-tab.active {
+  background: #3d3020;
+  border-color: #e8d27a;
+  color: #e8d27a;
+}
+
 /* ---- Ceremony & menu overlays ---- */
 .ceremony {
   position: fixed;
