@@ -60,6 +60,42 @@ behavior. Add headless parity tests.
 larger worlds. Wire to the chunk-LOD renderer (Phase 4 foundation already landed).
 Swap the live town tier to the new core once it wins on speed + parity.
 
+### Build-system rewrite — layered rooms (decided 2026-06-14)
+
+**Decision:** drop pre-built building objects for the Songs-of-Syx model — the
+player paints **walls → floors → room designations → workstations**, and the useful
+spaces emerge from their combination. A room does nothing on its own; **its output
+is the SUM of the workstations inside it** (place another oven, get another bread
+slot — the bakery scales with the floor you give it). Built natively on the scale
+engine, where it unifies the remaining stages: a craft station with no worker *is* an
+open job (Stage 3 job board), station tiles *are* flow-field goals (Stage 2), and
+beds/desks/sickbeds *are* the need capacities (Stage 4). The live `Simulation` and
+its 33 discrete buildings stay playable until the final swap.
+
+Stages (extend Track C; the live game is untouched until B-6):
+- **B-1 — Foundation. ✅ LANDED.** `src/sim/build.ts` (`BuildGrid`): four flat
+  typed-array layers (`wall`/`floor`/`roomType`/`station`) + a `roomId` derived by
+  O(map) flood-fill into `rooms` (connected same-designation floor; walls and type
+  changes are boundaries; enclosure tested for warmth later). `roomOutput()` sums a
+  room's valid stations into sleep/recreation/education/medical/storage capacities +
+  a net resource `flow`. Stations resolve to the room under their origin and are
+  inert if the room type doesn't accept them. Pure, DOM-free, `passable()` exposed
+  for `FlowField`; same ethos as `agents.ts`/`flowfield.ts`. Data: `src/data/rooms.json`
+  (14 room types) + `src/data/stations.json` (19 workstations: craft recipes +
+  capacity slots), loaded via `ROOM_DEFS`/`STATION_DEFS` in `defs.ts` with 1-based
+  numeric layer ids and load-time cross-ref validation. Tests: `tests/build.test.ts`
+  (13 cases). Additive — not wired into the live sim.
+- **B-2 — Production.** Station recipes consume/produce against the stockpile on the
+  SoA core; replaces `provides`-based building output.
+- **B-3 — Job board (= Stage 3).** Open jobs = unmanned craft stations + haul jobs;
+  agents pull the nearest by flow-field cost.
+- **B-4 — Needs from rooms (= part of Stage 4).** Beds→rest, enclosed+heated→warmth,
+  recreation/education/medical stations→the matching needs.
+- **B-5 — Render + paint UI.** Wall/floor/room/station tools + room overlay; lands
+  with the Phase-4 chunk renderer.
+- **B-6 — Swap + retire `buildings.json`.** Once at parity, the room-based scale-engine
+  town tier replaces the discrete-building `Simulation`; save-format v-bump.
+
 ---
 
 

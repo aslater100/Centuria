@@ -2,6 +2,8 @@ import buildingsJson from '../data/buildings.json';
 import traitsJson from '../data/traits.json';
 import namesJson from '../data/names.json';
 import townTechsJson from '../data/town_techs.json';
+import roomsJson from '../data/rooms.json';
+import stationsJson from '../data/stations.json';
 
 /** All content defs load from JSON so they are moddable without touching code (GDD §8.8). */
 
@@ -238,6 +240,79 @@ export function townTechDef(id: string): TownTechDef {
   const def = TOWN_TECH_DEFS.find((d) => d.id === id);
   if (!def) throw new Error(`unknown town tech: ${id}`);
   return def;
+}
+
+// ---- Rooms & workstations (Songs-of-Syx build model: walls + floors + designated
+// rooms whose output is the sum of the workstations inside them) ----
+
+/** A room TYPE the player paints over a floored area. Numeric id = array index + 1. */
+export interface RoomTypeDef {
+  id: string;
+  name: string;
+  desc: string;
+  /** Needs walls all round to function (homes, libraries) vs open yards (mills). */
+  enclosedRequired?: boolean;
+}
+
+/** Passive capacity a `capacity` station contributes to its room. */
+export type CapacityKind = 'sleep' | 'recreation' | 'education' | 'medical' | 'storage';
+
+/** A recipe a `craft` station runs: inputs → outputs over `work` settler-minutes. */
+export interface StationRecipe {
+  inputs: Partial<Record<ResourceKind, number>>;
+  outputs: Partial<Record<ResourceKind, number>>;
+  work: number;
+}
+
+/** A workstation placed inside a room. Numeric typeId = array index + 1. */
+export interface StationDef {
+  id: string;
+  name: string;
+  /** Room type ids this station may be placed in. */
+  roomTypes: string[];
+  w: number;
+  h: number;
+  cost: Partial<Record<ResourceKind, number>>;
+  buildWork: number;
+  kind: 'craft' | 'capacity';
+  recipe?: StationRecipe;
+  capacity?: { kind: CapacityKind; amount: number };
+}
+
+export const ROOM_DEFS: RoomTypeDef[] = (roomsJson.rooms as RoomTypeDef[]);
+export const STATION_DEFS: StationDef[] = (stationsJson.stations as StationDef[]);
+
+// String id ↔ numeric layer id. 0 is reserved for "none" in the Uint8 tile layers.
+export const ROOM_TYPE_ID = new Map(ROOM_DEFS.map((d, i) => [d.id, i + 1] as const));
+export const STATION_TYPE_ID = new Map(STATION_DEFS.map((d, i) => [d.id, i + 1] as const));
+
+const _roomDefById = new Map(ROOM_DEFS.map((d) => [d.id, d]));
+const _stationDefById = new Map(STATION_DEFS.map((d) => [d.id, d]));
+
+export function roomDef(id: string): RoomTypeDef {
+  const def = _roomDefById.get(id);
+  if (!def) throw new Error(`unknown room type: ${id}`);
+  return def;
+}
+
+export function stationDef(id: string): StationDef {
+  const def = _stationDefById.get(id);
+  if (!def) throw new Error(`unknown station def: ${id}`);
+  return def;
+}
+
+/** Numeric room-type id → def (for fast tile-layer lookups). 1-based; 0 = none. */
+export const ROOM_DEF_BY_NUM: (RoomTypeDef | null)[] = [null, ...ROOM_DEFS];
+/** Numeric station-type id → def. 1-based; 0 = none. */
+export const STATION_DEF_BY_NUM: (StationDef | null)[] = [null, ...STATION_DEFS];
+
+// Validate cross-references once at load (cheap; catches data typos in CI).
+for (const s of STATION_DEFS) {
+  for (const rt of s.roomTypes) {
+    if (!ROOM_TYPE_ID.has(rt)) throw new Error(`station ${s.id} references unknown room type ${rt}`);
+  }
+  if (s.kind === 'craft' && !s.recipe) throw new Error(`craft station ${s.id} has no recipe`);
+  if (s.kind === 'capacity' && !s.capacity) throw new Error(`capacity station ${s.id} has no capacity`);
 }
 
 // ---- Time constants (GDD §8.6: Town tier ≈ 45 real seconds per game day at speed 1) ----

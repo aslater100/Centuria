@@ -1,0 +1,19 @@
+{
+  "_comment": "Room TYPES the player designates over a floored, walled area (Songs-of-Syx model). A room does nothing on its own — its output is the sum of the workstations placed inside it (see stations.json). Numeric ids are assigned by array order (0 = undesignated).",
+  "rooms": [
+    { "id": "home", "name": "Home", "enclosedRequired": true, "desc": "Sleeping quarters. Each bed or bunk inside houses settlers; warm when enclosed." },
+    { "id": "kitchen", "name": "Kitchen", "enclosedRequired": false, "desc": "Cooks raw grain into meals. Output scales with the ovens inside." },
+    { "id": "bakery", "name": "Bakery", "enclosedRequired": false, "desc": "Bakes flour into bread. Needs baking ovens." },
+    { "id": "mill", "name": "Mill", "enclosedRequired": false, "desc": "Grinds grain into flour. Needs millstones." },
+    { "id": "smithy", "name": "Smithy", "enclosedRequired": false, "desc": "Forges iron into tools and weapons. Needs anvils and weapon benches." },
+    { "id": "foundry", "name": "Foundry", "enclosedRequired": false, "desc": "Smelts ore into iron. Needs smelters." },
+    { "id": "sawmill", "name": "Sawmill", "enclosedRequired": false, "desc": "Saws logs into timber. Needs saw benches." },
+    { "id": "workshop", "name": "Workshop", "enclosedRequired": false, "desc": "Spins flax into rope and cloth. Needs looms and rope walks." },
+    { "id": "kilnhouse", "name": "Kilnhouse", "enclosedRequired": false, "desc": "Fires clay into brick and bakes coal into coke. Needs kilns and coke ovens." },
+    { "id": "library", "name": "Library", "enclosedRequired": true, "desc": "Study and research. Desks give education; shelves store knowledge." },
+    { "id": "infirmary", "name": "Infirmary", "enclosedRequired": true, "desc": "Treats the sick and wounded. Each sickbed adds a care slot." },
+    { "id": "apothecary", "name": "Apothecary", "enclosedRequired": false, "desc": "Brews herbs into medicine. Needs herb tables." },
+    { "id": "tavern", "name": "Tavern", "enclosedRequired": true, "desc": "Rest and recreation. Tables give recreation; brew vats make ale." },
+    { "id": "storehouse", "name": "Storehouse", "enclosedRequired": false, "desc": "Bulk storage. Each shelf adds stockpile capacity." }
+  ]
+}
