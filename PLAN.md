@@ -2,6 +2,49 @@
 
 ---
 
+## Track C — Scale Engine (Songs-of-Syx-scale town tier)
+
+**Decision (2026-06-14):** build a fresh data-oriented town engine alongside the
+current `Simulation`, prove each stage on the bench, swap when it beats the old
+core on both speed AND behavior parity. The current game stays untouched and
+playable throughout. Region tier (politics/econ/central banks/exchanges) is
+month-cadence over 4–8 factions — cheap, sits on top, not part of this track.
+
+**Why:** `scripts/bench-scale.ts` showed the fat-object sim costs 13ms/tick at
+just 200 agents and grows superlinearly (629MB heap at 5k). Two walls: GC from
+fat per-agent objects, and per-agent A* every idle tick.
+
+**Stage 1 — SoA agent core. ✅ LANDED.** `src/sim/agents.ts` (`AgentStore`):
+every agent field in flat typed arrays, allocation-free tick, swap-remove deaths,
+time-sliced decisions. `scripts/bench-agents.ts` proves the floor:
+
+| agents | fat-object | SoA core | heap old→new |
+|---|---|---|---|
+| 200 | 13.2 ms | 0.018 ms | 16 → 7 MB |
+| 5000 | 1663 ms | 0.098 ms | 629 → 9 MB |
+| 10000 | n/a | 0.194 ms | 7 MB flat |
+
+Caveat: cost FLOOR only — straight-line movement, no jobs/pathing yet.
+
+**Stage 2 — Flow-field pathing.** One flow field per hot destination (stockpile,
+hearth, job clusters), computed O(map) once, all agents read it. Replaces
+per-agent A* — the measured superlinear term. Reuse `world.ts` passability.
+
+**Stage 3 — Job board.** Central open-job list; agents pull nearest matching job
+(O(agents+jobs)) instead of each scanning the map (O(agents×map)). Replaces
+`findTask`'s per-settler full scan.
+
+**Stage 4 — Behavior port.** Move full-fidelity needs/mood/thoughts/skills/combat/
+traits onto the SoA columns until the new core matches the old sim's 441-test
+behavior. Add headless parity tests.
+
+**Stage 5 — Render + bigger maps.** 96×96 holds only ~9k tiles; SoS cities need
+larger worlds. Wire to the chunk-LOD renderer (Phase 4 foundation already landed).
+Swap the live town tier to the new core once it wins on speed + parity.
+
+---
+
+
 ## Session Handoff (Read This First in a New Session)
 
 **Repo:** `/home/user/Centuria` — TypeScript + Canvas 2D + Vite + Electron city-builder.  
