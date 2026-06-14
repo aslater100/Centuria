@@ -36,7 +36,7 @@ import { Relations, socialize } from './social';
 import { Weather } from './weather';
 import { Rng } from './rng';
 import { BASE_PRICES } from './economy';
-import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, TUNING } from './defs';
+import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, TUNING, type ResourceKind } from './defs';
 
 const TICKS_PER_DAY = MINUTES_PER_DAY / MINUTES_PER_TICK;
 // Grief on a death (mirrors the fat sim): friends mourn harder and longer.
@@ -290,7 +290,7 @@ export class TownCore {
    * Market price for one unit of a resource, adjusted for local supply/demand.
    * Low stock → higher price (scarce), high stock → lower price (surplus).
    */
-  marketPrice(kind: string): number {
+  marketPrice(kind: ResourceKind): number {
     const base = BASE_PRICES[kind] ?? 10;
     const mod = this.priceModifiers.get(kind) ?? 1.0;
     return base * Math.max(0.5, Math.min(2.0, mod)); // clamp 0.5×..2.0×
@@ -301,10 +301,10 @@ export class TownCore {
    * progressively lower price as supply increases, so dumping large amounts
    * yields less per unit. Returns gold received (0 if insufficient stock).
    */
-  sellToMarket(kind: string, qty: number): number {
+  sellToMarket(kind: ResourceKind, qty: number): number {
     if (qty <= 0 || !this.stock.remove(kind, qty)) return 0;
     const base = BASE_PRICES[kind] ?? 10;
-    const e = TUNING.marketSellElasticity ?? 0.02; // default elasticity
+    const e = TUNING.marketSellElasticity;
     let mod = this.priceModifiers.get(kind) ?? 1.0;
     let revenue = 0;
     for (let i = 0; i < qty; i++) {
@@ -320,10 +320,10 @@ export class TownCore {
    * Buy `qty` units of a resource from the market with gold. Each unit bought
    * bids the price up. Returns true if successful, false if insufficient gold.
    */
-  buyFromMarket(kind: string, qty: number): boolean {
+  buyFromMarket(kind: ResourceKind, qty: number): boolean {
     if (qty <= 0) return false;
     const base = BASE_PRICES[kind] ?? 10;
-    const e = TUNING.marketBuyElasticity ?? 0.02;
+    const e = TUNING.marketBuyElasticity;
     let mod = this.priceModifiers.get(kind) ?? 1.0;
     let cost = 0;
     for (let i = 0; i < qty; i++) {
