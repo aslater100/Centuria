@@ -1866,3 +1866,71 @@ describe('TownCore strategic focus bonuses (additional)', () => {
     expect(mult).toBeCloseTo(1.2, 5);
   });
 });
+
+describe('TownCore evtChoiceHealer', () => {
+  function makeColony() {
+    const c = new TownCore({ width: 20, height: 20, seed: 42 });
+    c.seedColony(10, 10, 4);
+    c.stock.add('meal', 5000);
+    c.stock.add('herbs', 10);
+    return c;
+  }
+
+  it('falls back to wanderer when no settlers are sick or wounded', () => {
+    const c = makeColony();
+    (c as unknown as { evtChoiceHealer(): void }).evtChoiceHealer();
+    // No sick/wounded settlers → no pendingChoice
+    expect(c.pendingChoice).toBeNull();
+  });
+
+  it('presents choice when a settler is wounded', () => {
+    const c = makeColony();
+    c.agents.inflictWound(0, c.tickNo);
+    (c as unknown as { evtChoiceHealer(): void }).evtChoiceHealer();
+    expect(c.pendingChoice).not.toBeNull();
+    expect(c.pendingChoice?.id).toBe('healer');
+  });
+
+  it('paying herbs cures all sick and wounded settlers', () => {
+    const c = makeColony();
+    c.agents.inflictWound(0, c.tickNo);
+    c.agents.makeSick(1, c.tickNo + 1000); // sick until far in the future
+    (c as unknown as { evtChoiceHealer(): void }).evtChoiceHealer();
+    const herbsBefore = c.stock.count('herbs');
+    c.resolveEventChoice(0); // pay herbs
+    expect(c.stock.count('herbs')).toBe(herbsBefore - 3);
+    expect(c.agents.woundUntreated[0]).toBe(0);
+    expect(c.agents.sickUntilTick[1]).toBe(0);
+    expect(c.log.some(l => l.text.includes('treats'))).toBe(true);
+  });
+
+  it('declining logs a polite departure and leaves settlers hurt', () => {
+    const c = makeColony();
+    c.agents.inflictWound(0, c.tickNo);
+    (c as unknown as { evtChoiceHealer(): void }).evtChoiceHealer();
+    c.resolveEventChoice(1); // decline
+    expect(c.agents.woundUntreated[0]).not.toBe(0);
+    expect(c.log.some(l => l.text.includes('tips their hat'))).toBe(true);
+  });
+
+  it('not enough herbs logs decline even when choice 0 is picked', () => {
+    const c = makeColony();
+    c.agents.inflictWound(0, c.tickNo);
+    c.stock.remove('herbs', c.stock.count('herbs')); // drain all herbs
+    (c as unknown as { evtChoiceHealer(): void }).evtChoiceHealer();
+    c.resolveEventChoice(0);
+    expect(c.agents.woundUntreated[0]).not.toBe(0); // still wounded
+    expect(c.log.some(l => l.text.includes('tips their hat'))).toBe(true);
+  });
+});
+
+describe('TownCore evtMineralStrike', () => {
+  it('adds iron_ore to stock and logs the discovery', () => {
+    const c = new TownCore({ width: 20, height: 20, seed: 1 });
+    c.seedColony(10, 10, 2);
+    const before = c.stock.count('iron_ore');
+    (c as unknown as { evtMineralStrike(): void }).evtMineralStrike();
+    expect(c.stock.count('iron_ore')).toBeGreaterThan(before + 5);
+    expect(c.log.some(l => l.text.includes('mineral seam'))).toBe(true);
+  });
+});

@@ -162,6 +162,7 @@ addEventListener('keydown', (e) => {
   if (e.key === '1') { speed = 1; return; }
   if (e.key === '2') { speed = 3; return; }
   if (e.key === '3') { speed = 8; return; }
+  if (e.key === '4') { speed = 16; return; }
   if (k === 'r') { core.musterRaid(); return; }
   if (k === 'n') { core.seedColony(core.homeX, core.homeY, 1); return; }
   if (k === 'y') {
@@ -438,7 +439,11 @@ function draw(): void {
     return f === 0 ? '' : (f > 0 ? `+${f.toFixed(1)}` : f.toFixed(1));
   };
   const meal = core.stock.count('meal'), grain = core.stock.count('grain');
-  line(1, `meal ${meal.toFixed(0)}/${core.mealCap()}${flowStr('meal') ? `(${flowStr('meal')})` : ''}  grain ${grain.toFixed(0)}${flowStr('grain') ? `(${flowStr('grain')})` : ''}  bread ${core.stock.count('bread').toFixed(0)}  ale ${core.stock.count('ale').toFixed(0)}`);
+  const mealFlow = core.netFlow('meal');
+  const mealTotal = meal + core.stock.count('game_meal') + core.stock.count('fish_meal') + core.stock.count('bread') + core.stock.count('ale');
+  const foodDaysStr = mealFlow < -0.5 && mealTotal > 0 ? `  [${Math.floor(mealTotal / -mealFlow)}d left]` : '';
+  const foodColor = foodDaysStr && Math.floor(mealTotal / -mealFlow) < 7 ? '#ff6b6b' : '#ddd';
+  line(1, `meal ${meal.toFixed(0)}/${core.mealCap()}${flowStr('meal') ? `(${flowStr('meal')})` : ''}  grain ${grain.toFixed(0)}${flowStr('grain') ? `(${flowStr('grain')})` : ''}  bread ${core.stock.count('bread').toFixed(0)}  ale ${core.stock.count('ale').toFixed(0)}${foodDaysStr}`, foodColor);
   const gameMeal = core.stock.count('game_meal'), fishMeal = core.stock.count('fish_meal');
   const deerCount = [...core.deerViews()].length;
   line(2, `game_meal ${gameMeal.toFixed(0)}  fish_meal ${fishMeal.toFixed(0)}  deer ${deerCount}`, gameMeal > 0 || fishMeal > 0 ? '#aed6a0' : '#888');
@@ -487,7 +492,7 @@ function draw(): void {
   // Key hints
   ctx.fillStyle = '#888'; ctx.font = '11px monospace';
   ctx.fillText('W wall  E erase  G gate  D floor  T trap  Z room([ ])  A station(, .)', 8, 20 + 10 * 17);
-  ctx.fillText('F field  C chop  Q quarry  B fishery  L flax  R raid  N settler  X queue  Y focus  space pause', 8, 20 + 11 * 17);
+  ctx.fillText('F field  C chop  Q quarry  B fishery  L flax  R raid  N settler  X queue  Y focus  1-4 speed  space pause', 8, 20 + 11 * 17);
 
   // ── Settler inspector panel (top-right) ──────────────────────────────────
   if (inspected) {

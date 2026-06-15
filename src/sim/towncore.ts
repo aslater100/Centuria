@@ -1289,8 +1289,10 @@ export class TownCore {
     else if (roll < 0.77) this.evtSkillBreakthrough();
     else if (roll < 0.83) this.evtStormDamage();
     else if (roll < 0.87) this.evtInjuredWorker();
-    else if (roll < 0.91) this.evtPlague();
-    else if (roll < 0.95) this.evtFoundGold();
+    else if (roll < 0.88) this.evtPlague();
+    else if (roll < 0.91) this.evtChoiceHealer();
+    else if (roll < 0.94) this.evtFoundGold();
+    else if (roll < 0.97) this.evtMineralStrike();
     else                  this.evtHeatwave();
   }
 
@@ -1515,6 +1517,30 @@ export class TownCore {
     };
   }
 
+  private evtChoiceHealer(): void {
+    let sickOrWounded = 0;
+    for (let i = 0; i < this.agents.count; i++) {
+      if (this.agents.sickUntilTick[i] > this.tickNo || this.agents.woundUntreated[i]) sickOrWounded++;
+    }
+    if (sickOrWounded === 0) { this.evtWanderer(); return; }
+    const HERB_COST = 3;
+    this.pendingChoice = {
+      id: 'healer',
+      title: 'Wandering Healer',
+      text: `A healer offers to treat ${sickOrWounded} sick/wounded settler${sickOrWounded > 1 ? 's' : ''} for ${HERB_COST} herbs.`,
+      choices: [
+        { label: `Pay ${HERB_COST} herbs`, desc: 'All sick and wounded settlers are cured immediately.' },
+        { label: 'Decline', desc: 'The healer moves on to the next town.' },
+      ],
+    };
+  }
+
+  private evtMineralStrike(): void {
+    const gain = 8 + this.rng.int(8);
+    this.stock.add('iron_ore', gain);
+    this.addLog(`Settlers strike a rich mineral seam while digging foundations — ${gain} iron ore added.`, 'good');
+  }
+
   /**
    * Resolve a pending player-choice event. Returns true if the choice was valid.
    * Clears `pendingChoice` so the next event can fire.
@@ -1584,6 +1610,24 @@ export class TownCore {
           this.addLog(`${this.agents.name(best)} is tutored by the scholar — skill rises to ${this.agents.skill[best].toFixed(1)}.`, 'good');
         } else {
           this.addLog('The scholar tips their hat and continues down the road.', 'info');
+        }
+        break;
+      }
+      case 'healer': {
+        const HERB_COST = 3;
+        if (choiceIndex === 0 && this.stock.count('herbs') >= HERB_COST) {
+          this.stock.remove('herbs', HERB_COST);
+          let healed = 0;
+          for (let i = 0; i < this.agents.count; i++) {
+            if (this.agents.sickUntilTick[i] > this.tickNo || this.agents.woundUntreated[i]) {
+              this.agents.treat(i);
+              this.agents.sickUntilTick[i] = 0;
+              healed++;
+            }
+          }
+          this.addLog(`The healer treats ${healed} settler${healed > 1 ? 's' : ''} — colony health restored.`, 'good');
+        } else {
+          this.addLog('The healer tips their hat and continues down the road.', 'info');
         }
         break;
       }
