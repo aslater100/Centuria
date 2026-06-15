@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TownCore } from '../src/sim/towncore';
-import { BuildGrid } from '../src/sim/build';
+import { BuildGrid, TERRAIN, ZONE } from '../src/sim/build';
 import { AgentStore, AState } from '../src/sim/agents';
 import { Stockpile } from '../src/sim/stockpile';
 import { ROOM_TYPE_ID } from '../src/sim/defs';
@@ -178,5 +178,197 @@ describe('scale-engine module serialization', () => {
     expect(r.rooms.length).toBe(1);
     expect(r.stations.length).toBe(1);
     expect(r.roomOutput(r.rooms[0]).flow.meal).toBe(g.roomOutput(g.rooms[0]).flow.meal);
+  });
+});
+
+// --- B-6 PART 3: opt-in terrain generation ---
+describe('TownCore terrain', () => {
+  it('is all grass by default (no behaviour change for existing cores)', () => {
+    const c = new TownCore({ seed: 5 });
+    let nonGrass = 0;
+    for (let i = 0; i < c.grid.size; i++) if (c.grid.terrain[i] !== 0) nonGrass++;
+    expect(nonGrass).toBe(0);
+  });
+
+  it('opts.terrain paints a landscape without perturbing the main rng stream', () => {
+    const plain = new TownCore({ seed: 5 });
+    const wild = new TownCore({ seed: 5, terrain: true });
+    // The terrain stream is independent, so schedule/raids are byte-identical.
+    expect(wild.nextRaidDay).toBe(plain.nextRaidDay);
+    let nonGrass = 0;
+    for (let i = 0; i < wild.grid.size; i++) if (wild.grid.terrain[i] !== 0) nonGrass++;
+    expect(nonGrass).toBeGreaterThan(0);
+  });
+
+  it('terrain survives a serialize/deserialize round-trip', () => {
+    const c = new TownCore({ seed: 8, terrain: true });
+    const r = TownCore.deserialize(c.serialize());
+    expect(Array.from(r.grid.terrain)).toEqual(Array.from(c.grid.terrain));
+    expect(Array.from(r.grid.ore)).toEqual(Array.from(c.grid.ore));
+  });
+});
+
+// --- B-6 PART 3: event log feed ---
+describe('TownCore event log', () => {
+  it('logs the founding when settlers are seeded', () => {
+    const c = new TownCore({ seed: 3 });
+    c.seedColony(48, 48, 4);
+    expect(c.log.length).toBeGreaterThan(0);
+    const founding = c.log[0];
+    expect(founding.kind).toBe('good');
+    expect(founding.text).toMatch(/wagon/i);
+    expect(founding.day).toBe(0);
+  });
+
+  it('logs a raid when one musters', () => {
+    const c = new TownCore({ seed: 3 });
+    c.seedColony(48, 48, 4);
+    c.musterRaid();
+    const raidLine = c.log.find((l) => /raiders/i.test(l.text));
+    expect(raidLine).toBeDefined();
+    expect(raidLine!.kind).toBe('bad');
+  });
+
+  it('logs deaths and the colony perishing', () => {
+    const c = new TownCore({ seed: 3 });
+    c.seedColony(48, 48, 3);
+    for (let i = 0; i < c.agents.count; i++) {
+      c.agents.health[i] = 0; // doomed...
+      c.agents.food[i] = 0;   // ...and starving, so no regen rescues them
+    }
+    c.tick();
+    expect(c.deaths).toBe(3);
+    const deathLine = c.log.find((l) => /died/i.test(l.text));
+    expect(deathLine).toBeDefined();
+    expect(deathLine!.kind).toBe('bad');
+    expect(c.log.some((l) => /perished/i.test(l.text))).toBe(true);
+  });
+
+  it('round-trips the event log through serialize/deserialize', () => {
+    const c = new TownCore({ seed: 3 });
+    c.seedColony(48, 48, 4);
+    c.musterRaid();
+    const r = TownCore.deserialize(c.serialize());
+    expect(r.log).toEqual(c.log);
+  });
+});
+
+// --- B-6 PART 3: settler inspect view (SoA columns → HUD record) ---
+describe('TownCore.inspect', () => {
+  it('reconstructs a displayable settler record from the SoA columns', () => {
+    const c = new TownCore({ seed: 11 });
+    c.seedColony(48, 48, 1); // spawnPerson already rolls two distinct traits
+    const v = c.inspect(0)!;
+    expect(v).not.toBeNull();
+    expect(v.name).toBe(c.agents.name(0));
+    expect(v.id).toBe(c.agents.id[0]);
+    expect(v.state).toBe('idle');
+    expect(v.armed).toBe('unarmed');
+    expect(v.traits.length).toBe(2);
+    expect(typeof v.mood).toBe('number');
+    expect(v.wounded).toBe(false);
+  });
+
+  it('returns null for an out-of-range index', () => {
+    const c = new TownCore({ seed: 11 });
+    c.seedColony(48, 48, 2);
+    expect(c.inspect(5)).toBeNull();
+    expect(c.inspect(-1)).toBeNull();
+  });
+});
+
+// --- B-6 PART 3: harvest zones turn terrain into raw goods ---
+describe('TownCore harvest zones', () => {
+  it('a worked field yields grain each day and renews', () => {
+    const c = new TownCore({ width: 24, height: 24, seed: 7 });
+    c.seedColony(12, 12, 4);
+    let fields = 0;
+    for (let x = 2; x < 8; x++) { c.grid.setTerrain(x, 2, TERRAIN.SOIL); if (c.grid.setZone(x, 2, ZONE.FIELD)) fields++; }
+    expect(fields).toBe(6);
+    const before = c.stock.count('grain');
+    c.run(360); // one day
+    expect(c.stock.count('grain')).toBe(before + fields * 1); // 1 grain/tile/day
+    // Renewable: the field tiles are still fields.
+    for (let x = 2; x < 8; x++) expect(c.grid.zoneAt(x, 2)).toBe(ZONE.FIELD);
+  });
+
+  it('a woodcutter consumes the forest: wood now, bare grass after', () => {
+    const c = new TownCore({ width: 24, height: 24, seed: 7 });
+    c.seedColony(12, 12, 4);
+    c.grid.setTerrain(3, 3, TERRAIN.TREE);
+    c.grid.setZone(3, 3, ZONE.WOODCUTTER);
+    const before = c.stock.count('wood');
+    c.run(360);
+    expect(c.stock.count('wood')).toBe(before + 1);
+    expect(c.grid.terrainAt(3, 3)).toBe(TERRAIN.GRASS); // felled
+    expect(c.grid.zoneAt(3, 3)).toBe(ZONE.NONE);        // zone cleared
+  });
+
+  it('a quarry on an ore tile pulls iron ore, not stone', () => {
+    const c = new TownCore({ width: 24, height: 24, seed: 7 });
+    c.seedColony(12, 12, 4);
+    c.grid.setTerrain(5, 5, TERRAIN.ROCK);
+    c.grid.ore[c.grid.index(5, 5)] = 1;
+    c.grid.setZone(5, 5, ZONE.QUARRY);
+    c.run(360);
+    expect(c.stock.count('iron_ore')).toBe(1);
+    expect(c.stock.count('stone')).toBe(0);
+  });
+
+  it('labour caps the daily harvest: more zones than hands → only some worked', () => {
+    const c = new TownCore({ width: 24, height: 24, seed: 7 });
+    c.seedColony(12, 12, 1); // 1 settler → 4 tiles/day budget
+    let n = 0;
+    for (let x = 2; x < 12; x++) { c.grid.setTerrain(x, 2, TERRAIN.SOIL); if (c.grid.setZone(x, 2, ZONE.FIELD)) n++; }
+    expect(n).toBe(10);
+    const before = c.stock.count('grain');
+    c.run(360);
+    expect(c.stock.count('grain')).toBe(before + 4); // capped at 1×4, not 10
+  });
+});
+
+// --- B-6 PART 3: blueprint construction (paint → materials + labour → built) ---
+describe('TownCore blueprint construction', () => {
+  it('builds a queued wall once materials and labour are spent', () => {
+    const c = new TownCore({ width: 16, height: 16, seed: 7 });
+    c.seedColony(8, 8, 4);
+    c.stock.add('wood', 10);
+    expect(c.blueprintWall(2, 2)).toBe(true);
+    expect(c.grid.wall[c.grid.index(2, 2)]).toBe(0); // not built yet
+    c.run(360); // a day of labour
+    expect(c.grid.wall[c.grid.index(2, 2)]).toBe(1); // built
+    expect(c.builds.length).toBe(0);
+    expect(c.stock.count('wood')).toBe(9); // one wood spent
+  });
+
+  it('a blueprint with no materials waits, then builds when stocked', () => {
+    const c = new TownCore({ width: 16, height: 16, seed: 7 });
+    c.seedColony(8, 8, 4); // no wood
+    c.blueprintWall(3, 3);
+    c.run(360);
+    expect(c.grid.wall[c.grid.index(3, 3)]).toBe(0); // stalled, no wood
+    expect(c.builds.length).toBe(1);
+    c.stock.add('wood', 5);
+    c.run(360);
+    expect(c.grid.wall[c.grid.index(3, 3)]).toBe(1); // now built
+  });
+
+  it('builds a station blueprint from its def cost/work', () => {
+    const c = new TownCore({ width: 16, height: 16, seed: 7 });
+    c.seedColony(8, 8, 6);
+    c.grid.designateRect(2, 2, 6, 5, ROOM_TYPE_ID.get('kitchen')!);
+    c.grid.rebuildRooms();
+    c.stock.add('stone', 50); c.stock.add('wood', 50);
+    expect(c.blueprintStation('oven', 2, 2)).toBe(true);
+    c.run(360 * 2); // ovens have higher buildWork
+    expect(c.grid.stations.some((s) => s.x === 2 && s.y === 2)).toBe(true);
+  });
+
+  it('round-trips the blueprint queue', () => {
+    const c = new TownCore({ width: 16, height: 16, seed: 7 });
+    c.seedColony(8, 8, 1); // tiny labour so it doesn't finish instantly
+    c.blueprintWall(4, 4);
+    const r = TownCore.deserialize(c.serialize());
+    expect(r.builds).toEqual(c.builds);
   });
 });

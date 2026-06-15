@@ -1,7 +1,7 @@
 # Handoff — Centuria Development Guide
 
 **Last updated:** 2026-06-15  
-**Current test count:** 652 passing  
+**Current test count:** 685 passing  
 **Branch pattern:** feature branches off `main` via `claude/...` naming; merge via draft PR  
 **Model guidance:** See PLAN.md § Model Assignment for context ceilings per task
 
@@ -209,6 +209,46 @@ if (detailZoom) {
 - Zoom in/out; watch FPS at each threshold (goal ≥ 30fps at zoom 0.1–0.3)
 
 ---
+
+## B-6 PART 3 — the swap, re-scoped (2026-06-15)
+
+**Verdict from this session's verification:** repo is green (tsc + build clean, **685 tests** after
+this session's stages) and
+every PART 2 parity port is real. The raid GUI play-test is cleared. **But the swap is blocked
+*structurally*, not by tuning** — a direct `TownCore`-for-`Simulation` swap would delete the playable
+game because the live UI reads fat-sim shapes the SoA core lacks: a **World/terrain layer**, a
+**building layer** (`buildings.json`), **fat settler objects** (vs SoA columns), an **event log**
+(`sim.log`), **corpse/grave/item/animal arrays**, and **player build verbs**.
+
+**Design decision (user):** target is **Songs of Syx** — *painted blueprints* for buildings (the
+`BuildGrid` paint model wins; pre-placed buildings retire) **on complex terrain**. Full staged
+roadmap in `PLAN.md` § *B-6 PART 3*. Status:
+- **Stage 1 — terrain layer on `BuildGrid`** ✅ landed: `terrain`/`ore` Uint8 layers (grass/tree/
+  water/soil/rock), terrain-aware `passable()`, deterministic `generateTerrain()`, base64
+  serialization (old saves backfill to all-grass), opt-in `new TownCore({ terrain: true })`.
+- **Stage 2 — harvest zones (Songs-of-Syx)** ✅ landed: a `zone` layer (field/woodcutter/quarry/
+  fishery) designable only on matching terrain; `TownCore.harvestZones()` works them into raw goods
+  daily (grain/wood/stone/iron_ore/meal), labour-capped, consuming zones deplete. `core.html` has
+  paint tools + auto-zone. Yields are GUI-tunable flat constants.
+- **Stage 3 — event log on `TownCore`** ✅ landed: `log: LogEntry[]` (`{ day, text, kind }`, the fat
+  sim's shape) fed on founding/raids/wolves/deaths/births; save **v5** (old saves → empty log).
+- **Stage 3b — settler names** ✅ landed: `AgentStore.names[]` (deterministic from id), through
+  swap-remove, serialized; deaths/births named in the log.
+- **Stage 4 (partial) — settler view** ✅ landed: `TownCore.inspect(i) → SettlerView` for the HUD
+  inspector. The rest of the view adapter (tiles/stations/raiders/zones/builds iterables) is still
+  TODO and should be built **with** the renderer (Stage 5) so it isn't speculative.
+- **Stage 7 — blueprint construction** ✅ landed: `TownCore.builds[]` + `blueprintWall/Floor/Station`
+  + `tickConstruction()` (materials + labour → real build), `cancelBlueprint`; save **v6**.
+  `core.html`'s wall tool now paints blueprints the colony builds.
+- **Remaining: Stages 5, 6, 8 — renderer / live wiring / destructive swap.** These touch
+  `render.ts`/`main.ts` (no test catches a regression), so land them in a session where the result
+  can be watched. `core.html` + `src/coreview.ts` is the working SoA reference renderer to port from;
+  the model layer (`TownCore`) is feature-complete and deterministic.
+
+**Current SoA-core feature set (all on `TownCore`, deterministic + serialized):** terrain, harvest
+zones + primary production, blueprint construction, room/station crafting, needs/mood/thoughts,
+traits/skills, wounds/medical, relationships, weather, raids, wolves, town economy (loans/inflation),
+settler names, event log, `inspect()` view. Save format **v6**.
 
 ## Next Steps (B-6 PART 2 Swap + Beyond)
 
