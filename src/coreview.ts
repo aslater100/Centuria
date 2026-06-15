@@ -373,6 +373,10 @@ function draw(): void {
       ctx.strokeStyle = '#ff4040';
       ctx.strokeRect(a.posX[i] * px, a.posY[i] * px, px, px);
     }
+    if (a.sickUntilTick[i] > core.tickNo) {
+      ctx.fillStyle = '#ddcc00';
+      ctx.fillText('~', a.posX[i] * px + px - 4, a.posY[i] * px + px);
+    }
     if (a.state[i] === AState.Sleeping) {
       ctx.fillStyle = '#5aa0ff';
       ctx.fillText('z', a.posX[i] * px + px, a.posY[i] * px);
@@ -427,8 +431,19 @@ function draw(): void {
   line(2, `game_meal ${gameMeal.toFixed(0)}  fish_meal ${fishMeal.toFixed(0)}  deer ${deerCount}`, gameMeal > 0 || fishMeal > 0 ? '#aed6a0' : '#888');
   line(3, `wood ${core.stock.count('wood').toFixed(0)}${flowStr('wood') ? `(${flowStr('wood')})` : ''}  stone ${core.stock.count('stone').toFixed(0)}  iron ${core.stock.count('iron').toFixed(0)}  ore ${core.stock.count('iron_ore').toFixed(0)}  tools ${core.stock.count('tools').toFixed(0)}`);
   line(4, `clothes ${core.stock.count('clothes').toFixed(0)}  weapons ${core.stock.count('weapons').toFixed(0)}  medicine ${core.stock.count('medicine').toFixed(0)}  flax ${core.stock.count('flax').toFixed(0)}  rope ${core.stock.count('rope').toFixed(0)}`);
-  const unburied = core.unburiedCount > 0 ? `  ⚠ unburied ${core.unburiedCount}` : '';
-  line(5, `births ${core.births}  deaths ${core.deaths}  prestige ${core.prestige}  inflation ${(core.inflation * 100).toFixed(1)}%${unburied}`, core.unburiedCount > 0 ? '#ff8844' : '#ddd');
+  { const a = core.agents;
+    let wounded = 0, sick = 0;
+    for (let i = 0; i < a.count; i++) {
+      if (a.woundUntreated[i]) wounded++;
+      if (a.sickUntilTick[i] > core.tickNo) sick++;
+    }
+    const healthWarn = wounded > 0 || sick > 0
+      ? `  ⚠ ${[wounded > 0 && `${wounded}W`, sick > 0 && `${sick}S`].filter(Boolean).join('/')}`
+      : '';
+    const unburied = core.unburiedCount > 0 ? `  ⚠ unburied ${core.unburiedCount}` : '';
+    const crisis = healthWarn || unburied;
+    line(5, `births ${core.births}  deaths ${core.deaths}  prestige ${core.prestige}  inflation ${(core.inflation * 100).toFixed(1)}%${unburied}${healthWarn}`, crisis ? '#ff8844' : '#ddd');
+  }
   const raidLine = core.raidActive
     ? `RAID — ${core.raids.raiders.length} raiders (slain ${core.raids.slain})`
     : `next raid day ${core.nextRaidDay}`;
