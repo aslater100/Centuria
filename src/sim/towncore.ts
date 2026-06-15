@@ -35,6 +35,7 @@ import { serveNeeds, serveMedical, aggregateCapacities, type RoomServices } from
 import { Relations, socialize } from './social';
 import { Weather } from './weather';
 import { RaidForce, raidSize, type RaidForceSave } from './raid';
+import { WolfPack, type WolfPackSave } from './wolves';
 import { Rng } from './rng';
 import { BASE_PRICES } from './economy';
 import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, TUNING, type ResourceKind } from './defs';
@@ -52,7 +53,7 @@ const RAID_FEAR_DELTA = -10, RAID_FEAR_TICKS = 2 * TICKS_PER_DAY;
 // Market price modifiers drift back toward 1.0 each day as supply/demand settles.
 const PRICE_RECOVERY = TUNING.marketRecoveryPerDay;
 
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 
 // Behavior thresholds for the integration loop (modest, deterministic — full
 // mood/skills/trait fidelity is the remaining parity work, not this stage).
@@ -81,6 +82,8 @@ export interface TownCoreSave {
   /** v2+: raid schedule + any in-progress incursion. */
   nextRaidDay?: number;
   raids?: RaidForceSave;
+  /** v3+: any in-progress wolf pack (schedule is a per-day roll, nothing to persist). */
+  wolves?: WolfPackSave;
 }
 
 export interface TownCoreOpts {
@@ -101,6 +104,8 @@ export class TownCore {
   readonly weather: Weather;
   /** Hostile incursions: raiders converge on the colony; walls + settlers repel them. */
   readonly raids = new RaidForce();
+  /** Predator packs: wolves prowl in from the edge and pick off strays. */
+  readonly wolves = new WolfPack();
   /** Game-day the next raid musters (rescheduled after each one). */
   nextRaidDay: number;
   private readonly jobField: FlowField;
@@ -256,6 +261,17 @@ export class TownCore {
       }
     }
 
+    // 5d. Wolves: a prowling pack stalks strays and mauls whoever it catches.
+    //     Casualties fall through the death pass below; the bitten carry the dread.
+    if (this.wolves.active) {
+      this.wolves.tick(this.grid, a, t, this.rng);
+      for (let i = 0; i < a.count; i++) {
+        if (a.woundUntreated[i] === 1 && a.woundAt[i] === t) {
+          a.addThought(i, t, RAID_FEAR_DELTA, RAID_FEAR_TICKS);
+        }
+      }
+    }
+
     // 6. Deaths: swap-remove the starved (iterate backwards — splice-safe). Each
     //    death grieves the survivors — friends mourn harder — and forgets the bond.
     for (let i = a.count - 1; i >= 0; i--) {
@@ -290,9 +306,33 @@ export class TownCore {
   /** Muster a raid now and reschedule the next (the tick scheduler + the UI's "raid" key). */
   musterRaid(): void {
     if (this.raids.active) return;
+    this.armColony();
     const n = raidSize(this.wealth(), this.day, this.agents.count);
     this.raids.start(n, this.grid.width, this.grid.height, this.rng, this.tickNo);
     this.nextRaidDay = this.day + TUNING.raidIntervalDays + this.rng.int(5);
+  }
+
+  /** Loose a wolf pack now (the daily scheduler + the play-test's "wolves" key). */
+  summonWolves(n = 2 + this.rng.int(2)): void {
+    if (this.wolves.active) return;
+    this.wolves.start(n, this.grid.width, this.grid.height, this.rng, this.tickNo);
+  }
+
+  /**
+   * Arm whoever is still bare-handed from the stores when the horn sounds: a
+   * forged weapon first (sharper edge), else an improvised spear whittled from
+   * wood. Mirrors the fat sim's militia grabbing arms as they rally; once armed a
+   * settler keeps the weapon. Stops when the materials run out — the rest fight
+   * bare-handed.
+   */
+  private armColony(): void {
+    const a = this.agents;
+    for (let i = 0; i < a.count; i++) {
+      if (a.armed[i] !== 0) continue;
+      if (this.stock.remove('weapons', 1)) a.armed[i] = 2;
+      else if (this.stock.remove('wood', TUNING.spearWoodCost)) a.armed[i] = 1;
+      else break;
+    }
   }
 
   // ── daily coarse update: feeding + population flows ──────────────────────────
@@ -324,6 +364,12 @@ export class TownCore {
     const fed = this.stock.count('meal') >= a.count;
     if (a.count < housing && a.count < a.capacity && avgMood >= BIRTH_MOOD_MIN && fed) {
       if (this.spawnPerson(this.homeX, this.homeY) >= 0) this.births++;
+    }
+
+    // Wildlife: past the first prowl day, a wolf pack may slip in from the edge
+    // (per-day chance, mirrors the fat sim). Only one pack prowls at a time.
+    if (this.day >= TUNING.wolfFirstDay && !this.wolves.active && this.rng.chance(TUNING.wolfPackChancePerDay)) {
+      this.summonWolves();
     }
   }
 
@@ -421,6 +467,7 @@ export class TownCore {
       priceModifiers: this.priceModifiers.size > 0 ? Object.fromEntries(this.priceModifiers) : undefined,
       nextRaidDay: this.nextRaidDay,
       raids: this.raids.serialize(),
+      wolves: this.wolves.serialize(),
     };
   }
 
@@ -449,6 +496,8 @@ export class TownCore {
     // the freshly-rolled schedule and an empty force).
     if (data.nextRaidDay !== undefined) core.nextRaidDay = data.nextRaidDay;
     if (data.raids) (core as { raids: RaidForce }).raids = RaidForce.deserialize(data.raids);
+    // v3+: restore any in-progress wolf pack (old saves keep the empty pack).
+    if (data.wolves) (core as { wolves: WolfPack }).wolves = WolfPack.deserialize(data.wolves);
     return core;
   }
 }

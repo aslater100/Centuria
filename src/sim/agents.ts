@@ -54,6 +54,7 @@ export interface AgentStoreSave {
   state: number[]; nextThink: number[];
   field: number[]; stationId: number[];
   skill: number[]; trait0: number[]; trait1: number[];
+  armed: number[];
   woundUntreated: number[]; woundAt: number[]; infectionRolled: number[];
   infection: number[]; sickUntilTick: number[];
   thoughtDelta: number[]; thoughtExpiry: number[]; thoughtKey: number[];
@@ -132,6 +133,9 @@ export class AgentStore {
   /** Two trait def indices (into TRAIT_DEFS), -1 = none. Identity + serialization only. */
   readonly trait0: Int8Array;
   readonly trait1: Int8Array;
+  /** Weapon in hand for melee: 0 = bare, 1 = improvised spear, 2 = forged weapon.
+   *  Drawn from the stores when a raid musters; adds a flat combat bonus (see raid.ts). */
+  readonly armed: Uint8Array;
   // Collapsed trait effects — derived from trait0/trait1 once at spawn/load so the
   // hot tick reads a single multiplier instead of re-walking the trait list.
   readonly workSpeedMult: Float32Array;   // ∏ trait.workSpeed   (production speed)
@@ -192,6 +196,7 @@ export class AgentStore {
     this.skill = new Float32Array(capacity);
     this.trait0 = new Int8Array(capacity);
     this.trait1 = new Int8Array(capacity);
+    this.armed = new Uint8Array(capacity);
     this.workSpeedMult = new Float32Array(capacity);
     this.moodBaseBonus = new Float32Array(capacity);
     this.warmthDecayMult = new Float32Array(capacity);
@@ -325,6 +330,7 @@ export class AgentStore {
     this.skill[i] = STARTING_SKILL;
     this.trait0[i] = -1;
     this.trait1[i] = -1;
+    this.armed[i] = 0; // unarmed until a raid muster hands out spears/weapons
     this.workSpeedMult[i] = 1;
     this.moodBaseBonus[i] = 0;
     this.warmthDecayMult[i] = 1;
@@ -362,6 +368,7 @@ export class AgentStore {
       this.stationId[i] = this.stationId[last];
       this.skill[i] = this.skill[last];
       this.trait0[i] = this.trait0[last]; this.trait1[i] = this.trait1[last];
+      this.armed[i] = this.armed[last];
       this.workSpeedMult[i] = this.workSpeedMult[last];
       this.moodBaseBonus[i] = this.moodBaseBonus[last];
       this.warmthDecayMult[i] = this.warmthDecayMult[last];
@@ -438,6 +445,7 @@ export class AgentStore {
       // a pure function of the traits, so they're re-derived on load (smaller save,
       // and no chance of mults drifting out of sync with the traits).
       skill: slice(this.skill), trait0: slice(this.trait0), trait1: slice(this.trait1),
+      armed: slice(this.armed),
       // Medical state (sick/healMult are transient — recomputed every tick).
       woundUntreated: slice(this.woundUntreated), woundAt: slice(this.woundAt),
       infectionRolled: slice(this.infectionRolled), infection: slice(this.infection),
@@ -467,6 +475,7 @@ export class AgentStore {
       store.skill[i] = data.skill?.[i] ?? STARTING_SKILL;
       store.trait0[i] = data.trait0?.[i] ?? -1;
       store.trait1[i] = data.trait1?.[i] ?? -1;
+      store.armed[i] = data.armed?.[i] ?? 0; // pre-armament saves → bare-handed
       store.applyTraits(i); // re-derive the collapsed multiplier columns
       // Medical state — pre-medical saves backfill to healthy/unhurt.
       store.woundUntreated[i] = data.woundUntreated?.[i] ?? 0;

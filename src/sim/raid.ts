@@ -8,8 +8,10 @@
  * world, A* paths and the discrete-building stores, none of which the SoA core
  * has. This module is the same threat at the core's altitude: a small band of
  * raiders converges on the living agents, painted walls (`BuildGrid`) slow them
- * by forcing them to bash through, and any nearby awake settler fights back.
- * Raiders that run out the clock — or out of targets — flee off the map.
+ * by forcing them to bash through, spike traps (`BuildGrid.trap`) bite the first
+ * raider onto them, and any nearby awake settler fights back — harder if armed
+ * with a forged weapon or improvised spear from the stores. Raiders that run out
+ * the clock — or out of targets — flee off the map.
  *
  * Pure and DOM-free like the modules it sits beside: it mutates only the
  * `AgentStore` health/wound columns and the `BuildGrid` it's handed, draws all
@@ -40,6 +42,20 @@ const WALL_HP = TUNING.wallMaxHp;
 /** Defender melee: base damage/hour, plus craft `skill` standing in for grit. */
 const DEFENDER_DAMAGE_PER_HOUR = TUNING.combatDamagePerHour;
 const DEFENDER_DAMAGE_PER_SKILL = TUNING.combatDamagePerSkill;
+
+/**
+ * Melee damage per hour a settler deals — base + craft skill (grit) + a flat bonus
+ * for whatever weapon they grabbed when the horn sounded (forged > improvised
+ * spear > bare hands). Mirrors the fat sim's `settlerDamagePerHour`. Shared by the
+ * raid defense and the wolf-pack defense so both threats face the same militia.
+ */
+export function settlerMeleeDamagePerHour(agents: AgentStore, i: number): number {
+  let dmg = DEFENDER_DAMAGE_PER_HOUR + agents.skill[i] * DEFENDER_DAMAGE_PER_SKILL;
+  const arm = agents.armed[i];
+  if (arm === 2) dmg += TUNING.forgedWeaponBonus;       // forged weapon from the armoury stores
+  else if (arm === 1) dmg += TUNING.spearDamageBonus;   // improvised spear whittled from wood
+  return dmg;
+}
 
 export interface Raider {
   id: number;
@@ -147,7 +163,7 @@ export class RaidForce {
       if (agents.state[i] === AState.Sleeping || agents.health[i] <= 0) continue;
       const r = nearestRaider(this.raiders, agents.posX[i], agents.posY[i], DEFEND_REACH);
       if (!r) continue;
-      r.health -= (DEFENDER_DAMAGE_PER_HOUR + agents.skill[i] * DEFENDER_DAMAGE_PER_SKILL) * HOURS_PER_TICK;
+      r.health -= settlerMeleeDamagePerHour(agents, i) * HOURS_PER_TICK;
     }
 
     // Cull the freshly killed so a slain raider can't deal a parting blow next tick.
@@ -172,6 +188,8 @@ export class RaidForce {
     }
     r.x = nx;
     r.y = ny;
+    // Spike trap: the first raider onto an armed tile takes a heavy one-shot hit.
+    if (grid.tripTrap(Math.round(r.x), Math.round(r.y))) r.health -= TUNING.trapDamage;
   }
 
   /** Fleeing: walk straight toward the nearest map edge, bashing out if walled. */
