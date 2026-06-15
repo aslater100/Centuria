@@ -326,3 +326,49 @@ describe('TownCore harvest zones', () => {
     expect(c.stock.count('grain')).toBe(before + 4); // capped at 1×4, not 10
   });
 });
+
+// --- B-6 PART 3: blueprint construction (paint → materials + labour → built) ---
+describe('TownCore blueprint construction', () => {
+  it('builds a queued wall once materials and labour are spent', () => {
+    const c = new TownCore({ width: 16, height: 16, seed: 7 });
+    c.seedColony(8, 8, 4);
+    c.stock.add('wood', 10);
+    expect(c.blueprintWall(2, 2)).toBe(true);
+    expect(c.grid.wall[c.grid.index(2, 2)]).toBe(0); // not built yet
+    c.run(360); // a day of labour
+    expect(c.grid.wall[c.grid.index(2, 2)]).toBe(1); // built
+    expect(c.builds.length).toBe(0);
+    expect(c.stock.count('wood')).toBe(9); // one wood spent
+  });
+
+  it('a blueprint with no materials waits, then builds when stocked', () => {
+    const c = new TownCore({ width: 16, height: 16, seed: 7 });
+    c.seedColony(8, 8, 4); // no wood
+    c.blueprintWall(3, 3);
+    c.run(360);
+    expect(c.grid.wall[c.grid.index(3, 3)]).toBe(0); // stalled, no wood
+    expect(c.builds.length).toBe(1);
+    c.stock.add('wood', 5);
+    c.run(360);
+    expect(c.grid.wall[c.grid.index(3, 3)]).toBe(1); // now built
+  });
+
+  it('builds a station blueprint from its def cost/work', () => {
+    const c = new TownCore({ width: 16, height: 16, seed: 7 });
+    c.seedColony(8, 8, 6);
+    c.grid.designateRect(2, 2, 6, 5, ROOM_TYPE_ID.get('kitchen')!);
+    c.grid.rebuildRooms();
+    c.stock.add('stone', 50); c.stock.add('wood', 50);
+    expect(c.blueprintStation('oven', 2, 2)).toBe(true);
+    c.run(360 * 2); // ovens have higher buildWork
+    expect(c.grid.stations.some((s) => s.x === 2 && s.y === 2)).toBe(true);
+  });
+
+  it('round-trips the blueprint queue', () => {
+    const c = new TownCore({ width: 16, height: 16, seed: 7 });
+    c.seedColony(8, 8, 1); // tiny labour so it doesn't finish instantly
+    c.blueprintWall(4, 4);
+    const r = TownCore.deserialize(c.serialize());
+    expect(r.builds).toEqual(c.builds);
+  });
+});

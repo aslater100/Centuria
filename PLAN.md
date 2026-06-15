@@ -261,7 +261,13 @@ PART 3, not a one-commit wire-up.
    walls/floors/rooms/stations + agents + raiders). Large; **GUI-verify required** (not headless).
 6. **Live wiring behind a flag** — boot `TownCore` in `main.ts` parallel to `Simulation` behind a
    flag, with the SoA renderer + paint/blueprint input verbs. Non-destructive; the play-test surface.
-7. **Blueprint build flow** — painted blueprints get hauled + built by settlers (construction jobs).
+7. **Blueprint build flow** ✅ *(this session)* — `TownCore.builds: BuildOrder[]` + `blueprintWall/
+   blueprintFloor/blueprintStation`. `tickConstruction()` (daily) spends labour-capped work on the
+   queue: an order needs its materials in stock to progress, and on completion the goods are consumed
+   and the wall/floor/station becomes real (`rebuildRooms`). Walls/floors cost wood; stations use
+   their def's cost + buildWork. Serialized at save **v6**. *Note:* per-tile hauling is still
+   abstracted (labour-capped colony-wide, like harvest/production); the GUI input layer that calls
+   these is Stage 6. Tests: `towncore.test.ts` (construction).
 8. **The destructive swap** — `TownCore` becomes default; retire `buildings.json` + fat `Simulation`
    + the `region.fromTown` flip; save v-bump. Final, gated on play-verify.
 

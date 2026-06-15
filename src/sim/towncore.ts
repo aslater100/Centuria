@@ -39,7 +39,7 @@ import { WolfPack, type WolfPackSave } from './wolves';
 import { Ledger, type LedgerSave, type BorrowResult, type RepayResult } from './ledger';
 import { Rng } from './rng';
 import { BASE_PRICES } from './economy';
-import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, TRAIT_DEFS, TUNING, type ResourceKind } from './defs';
+import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, STATION_DEF_BY_NUM, STATION_TYPE_ID, TRAIT_DEFS, TUNING, type ResourceKind } from './defs';
 
 const TICKS_PER_DAY = MINUTES_PER_DAY / MINUTES_PER_TICK;
 // Grief on a death (mirrors the fat sim): friends mourn harder and longer.
@@ -65,7 +65,7 @@ const INFLATION_MAX = 0.5;           // hard cap (50%) so it can't run away
 // The economy settles on a 30-day month, matching the ledger's payment cadence.
 const ECONOMY_MONTH_DAYS = 30;
 
-const SAVE_VERSION = 5;
+const SAVE_VERSION = 6;
 
 // Behavior thresholds for the integration loop (modest, deterministic — full
 // mood/skills/trait fidelity is the remaining parity work, not this stage).
@@ -75,6 +75,10 @@ const BIRTH_MOOD_MIN = 50;     // colony must be reasonably content to grow
 const STARVED_HEALTH = 0;      // health at/under this → death (swap-removed)
 const HARVEST_TILES_PER_WORKER = 4; // zone tiles one settler can work per day (labour cap)
 const HARVEST_YIELD = 1;            // raw goods a worked zone tile yields per day
+const BUILD_WORK_PER_WORKER = 30;   // construction work one settler delivers per day
+const WALL_WORK = 20, FLOOR_WORK = 10;
+const WALL_COST: Partial<Record<ResourceKind, number>> = { wood: 1 };
+const FLOOR_COST: Partial<Record<ResourceKind, number>> = { wood: 1 };
 
 /** A dated event line for the HUD feed + audio cues. Shape mirrors the fat sim's
  *  `LogEntry` ({ day, text, kind }) so the existing HUD log box can consume a
@@ -108,6 +112,18 @@ export interface SettlerView {
   sick: boolean;
 }
 
+/** A pending construction: a painted blueprint awaiting materials + labour before
+ *  it becomes a real wall / floor / station (Songs-of-Syx build flow). */
+export interface BuildOrder {
+  kind: 'wall' | 'floor' | 'station';
+  x: number;
+  y: number;
+  stationId: number; // station-type id for 'station'; 0 otherwise
+  roomType: number;  // designation applied with a 'floor'; 0 otherwise
+  workLeft: number;
+  cost: Partial<Record<ResourceKind, number>>;
+}
+
 export interface TownCoreSave {
   v: number;
   tickNo: number;
@@ -135,6 +151,8 @@ export interface TownCoreSave {
   inflation?: number;
   /** v5+: the event log feed (old saves restore an empty log). */
   log?: LogEntry[];
+  /** v6+: the pending blueprint queue (old saves restore none). */
+  builds?: BuildOrder[];
 }
 
 export interface TownCoreOpts {
@@ -167,6 +185,8 @@ export class TownCore {
   inflation = 0;
   /** Append-only event feed (raids, deaths, births, milestones) for the HUD + audio. */
   readonly log: LogEntry[] = [];
+  /** Painted blueprints awaiting materials + labour (Songs-of-Syx construction). */
+  readonly builds: BuildOrder[] = [];
   /** Game-day the next raid musters (rescheduled after each one). */
   nextRaidDay: number;
   private readonly jobField: FlowField;
@@ -459,6 +479,8 @@ export class TownCore {
     // Primary production: the colony works its designated harvest zones into raw
     // goods (run before feeding so the day's grain/meals are on hand).
     this.harvestZones();
+    // Construction: spend the day's labour on the blueprint queue.
+    this.tickConstruction();
 
     // Market: price modifiers heal a fraction of the way back to 1.0 each day, so
     // a single panic buy/sell doesn't dislocate prices forever (mirrors the fat sim).
@@ -526,6 +548,71 @@ export class TownCore {
       budget--;
       if (!def.renewable) { grid.setTerrain(x, y, TERRAIN.GRASS); grid.zone[i] = ZONE.NONE; }
     }
+  }
+
+  // ── construction: painted blueprints → real build over time ──────────────────
+
+  /** Queue a wall blueprint (no-op if off-grid or already walled). */
+  blueprintWall(x: number, y: number): boolean {
+    if (!this.grid.inBounds(x, y) || this.grid.wall[this.grid.index(x, y)]) return false;
+    this.builds.push({ kind: 'wall', x, y, stationId: 0, roomType: 0, workLeft: WALL_WORK, cost: { ...WALL_COST } });
+    return true;
+  }
+
+  /** Queue a floor blueprint, optionally designating it a room type once built. */
+  blueprintFloor(x: number, y: number, roomType = 0): boolean {
+    if (!this.grid.inBounds(x, y) || this.grid.floor[this.grid.index(x, y)]) return false;
+    this.builds.push({ kind: 'floor', x, y, stationId: 0, roomType, workLeft: FLOOR_WORK, cost: { ...FLOOR_COST } });
+    return true;
+  }
+
+  /** Queue a station blueprint (id or numeric type). Cost + work come from its def. */
+  blueprintStation(station: string | number, x: number, y: number): boolean {
+    const typeId = typeof station === 'number' ? station : (STATION_TYPE_ID.get(station) ?? 0);
+    const def = STATION_DEF_BY_NUM[typeId];
+    if (!def || !this.grid.inBounds(x, y)) return false;
+    this.builds.push({ kind: 'station', x, y, stationId: typeId, roomType: 0, workLeft: def.buildWork, cost: { ...def.cost } });
+    return true;
+  }
+
+  private _canAfford(cost: Partial<Record<ResourceKind, number>>): boolean {
+    for (const k in cost) if (this.stock.count(k as ResourceKind) < (cost[k as ResourceKind] ?? 0)) return false;
+    return true;
+  }
+
+  private _materialize(o: BuildOrder): boolean {
+    if (o.kind === 'wall') return this.grid.setWall(o.x, o.y);
+    if (o.kind === 'floor') {
+      this.grid.setFloor(o.x, o.y);
+      if (o.roomType) this.grid.designate(o.x, o.y, o.roomType);
+      return true;
+    }
+    return this.grid.placeStation(o.stationId, o.x, o.y) !== null; // may fail if the tile's unfit
+  }
+
+  /**
+   * Spend the day's construction labour on the blueprint queue. Each order needs
+   * its materials in stock to make progress (no materials → it waits); once the
+   * work is done the goods are consumed and the wall/floor/station becomes real.
+   * Labour-capped by headcount like harvesting. ponytail: flat per-worker budget,
+   * materials charged on completion — fine until the GUI says otherwise.
+   */
+  private tickConstruction(): void {
+    let budget = Math.floor(this.agents.count * BUILD_WORK_PER_WORKER);
+    if (budget <= 0 || this.builds.length === 0) return;
+    let built = false;
+    for (let k = 0; k < this.builds.length && budget > 0;) {
+      const o = this.builds[k];
+      if (!this._canAfford(o.cost)) { k++; continue; } // stalled on materials
+      const spend = Math.min(budget, o.workLeft);
+      o.workLeft -= spend;
+      budget -= spend;
+      if (o.workLeft > 0) { k++; continue; }
+      // Finished: place it, then pay for it (only if placement stuck).
+      if (this._materialize(o)) { this.stock.removeAll(o.cost); built = true; }
+      this.builds.splice(k, 1); // drop whether placed or rejected (bad tile)
+    }
+    if (built) this.grid.rebuildRooms();
   }
 
   /** Monthly credit + inflation update (loans accrue, get serviced, prices reckon). */
@@ -689,6 +776,7 @@ export class TownCore {
       ledger: this.ledger.serialize(),
       inflation: this.inflation,
       log: this.log.length > 0 ? this.log : undefined,
+      builds: this.builds.length > 0 ? this.builds : undefined,
     };
   }
 
@@ -724,6 +812,8 @@ export class TownCore {
     core.inflation = data.inflation ?? 0;
     // v5+: restore the event feed (old saves restore an empty log).
     if (data.log) core.log.push(...data.log);
+    // v6+: restore the blueprint queue.
+    if (data.builds) core.builds.push(...data.builds);
     return core;
   }
 }
