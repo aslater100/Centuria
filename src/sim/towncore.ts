@@ -1234,7 +1234,8 @@ export class TownCore {
    */
   private tickConstruction(): void {
     const toolBonus = this.stock.count('tools') > 0 ? TUNING.toolsBuildSpeedBonus : 0;
-    let budget = Math.floor(this.agents.count * BUILD_WORK_PER_WORKER * (1 + toolBonus));
+    const ropeBonus = this.stock.count('rope') > 0 ? TUNING.ropeBuildSpeedBonus : 0; // scaffolding
+    let budget = Math.floor(this.agents.count * BUILD_WORK_PER_WORKER * (1 + toolBonus + ropeBonus));
     if (budget <= 0 || this.builds.length === 0) return;
     let built = false;
     for (let k = 0; k < this.builds.length && budget > 0;) {

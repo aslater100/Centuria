@@ -622,6 +622,7 @@ export const TUNING = {
   smeltCokePerIron: 1,        // coke consumed per iron bar
   smithIronPerTools: 2,       // 2 iron → 1 tools
   toolsBuildSpeedBonus: 0.2,  // 20% faster build work while tools in stock
+  ropeBuildSpeedBonus: 0.1,   // 10% faster build work from rope scaffolding (stacks with tools)
   millGrainPerFlour: 1,       // 1 grain → 1.2 flour equivalent (ratio applied in cook)
   brewGrainPerAle: 2,         // 2 grain → 1 ale
   herbsHealBonus: 0.5,        // apothecary adds 50% regen on top of clinic base

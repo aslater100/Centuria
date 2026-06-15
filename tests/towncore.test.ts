@@ -1314,6 +1314,36 @@ describe('TownCore emigration', () => {
 
 // ── Tools build-speed bonus ───────────────────────────────────────────────────
 
+describe('TownCore carpentry bench', () => {
+  it('workshop carpentry_bench converts wood into tools', () => {
+    const c = new TownCore({ width: 20, height: 20, seed: 1 });
+    const g = c.grid;
+    // Build a workshop with a carpentry bench
+    for (let x = 2; x <= 5; x++) g.setFloor(x, 2);
+    g.designateRect(2, 2, 5, 2, ROOM_TYPE_ID.get('workshop')!);
+    g.placeStation('carpentry_bench', 2, 2);
+    g.rebuildRooms();
+    c.seedColony(10, 10, 2);
+    c.stock.add('wood', 40);
+    c.stock.add('meal', 5000);
+    c.run(360 * 10); // 10 days
+    expect(c.stock.count('tools')).toBeGreaterThan(0);
+  });
+
+  it('rope in stock gives a build speed bonus', () => {
+    // tools bonus = 0.2, rope bonus = 0.1 → combined 0.3× boost
+    const c = new TownCore({ width: 20, height: 20, seed: 1 });
+    c.seedColony(10, 10, 4);
+    c.stock.add('grain', 2000);
+    c.stock.add('tools', 5);
+    c.stock.add('rope', 5);
+    c.blueprintWall(5, 5);
+    c.stock.add('wood', 5);
+    c.run(360);
+    expect(c.builds.length).toBe(0); // wall completes quickly with bonus
+  });
+});
+
 describe('TownCore tools build-speed bonus', () => {
   function daysToComplete(withTools: boolean): number {
     const c = new TownCore({ width: 20, height: 20, seed: 1 });
