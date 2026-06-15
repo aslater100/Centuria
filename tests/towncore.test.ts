@@ -134,6 +134,18 @@ describe('scale-engine module serialization', () => {
     expect(r.count('meal')).toBe(4);
   });
 
+  it('an agent with a dangling field index goes Idle instead of crashing', () => {
+    // Repro of the GUI play-test crash: TownCore clears `fields` when there are
+    // no open jobs, but an agent mid-move still held field index 0 → dirAt on undefined.
+    const a = new AgentStore(4);
+    const i = a.spawn(5, 5);
+    a.field[i] = 0;            // index into the (empty) fields[]
+    a.state[i] = AState.Moving;
+    expect(() => a.tick(0, () => 0.5)).not.toThrow();
+    expect(a.state[i]).toBe(AState.Idle);
+    expect(a.field[i]).toBe(-1);
+  });
+
   it('AgentStore round-trips every live column', () => {
     const a = new AgentStore(8);
     const i = a.spawn(5, 6);
