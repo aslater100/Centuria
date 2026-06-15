@@ -195,8 +195,9 @@ describe('TownCore research integration', () => {
 
     const before = core.stock.count('grain');
     core.run(360);
-    // 1 tile × (1 + 0.25 + 0.20) = 1.45 grain
-    expect(core.stock.count('grain')).toBeCloseTo(before + 1.45, 2);
+    // 1 tile × (1 + 0.25 + 0.20) × weather.growthMult(day 0)
+    const expected = before + 1.45 * core.weather.growthMult(0);
+    expect(core.stock.count('grain')).toBeCloseTo(expected, 2);
   });
 
   it('serialize/deserialize preserves the research book at save v7', () => {

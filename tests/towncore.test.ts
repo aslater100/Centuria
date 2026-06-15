@@ -352,10 +352,29 @@ describe('TownCore harvest zones', () => {
     expect(fields).toBe(6);
     const before = c.stock.count('grain');
     c.run(360); // one day
-    // crop_rotation is free at colony start → 1.25 grain/tile/day
-    expect(c.stock.count('grain')).toBe(before + fields * 1.25);
+    // crop_rotation free → 1.25/tile/day, then scaled by weather.growthMult(day 0)
+    expect(c.stock.count('grain')).toBeCloseTo(before + fields * 1.25 * c.weather.growthMult(0), 1);
     // Renewable: the field tiles are still fields.
     for (let x = 2; x < 8; x++) expect(c.grid.zoneAt(x, 2)).toBe(ZONE.FIELD);
+  });
+
+  it('weather growthMult modulates field yield: drought suppresses, well-watered boosts', () => {
+    // seed 9 → growthMult 0.35 (drought) on day 0; seed 7 → growthMult 1.1 (well-watered).
+    const dry = new TownCore({ width: 20, height: 20, seed: 9 });
+    dry.seedColony(10, 10, 4);
+    dry.grid.setTerrain(3, 3, TERRAIN.SOIL); dry.grid.setZone(3, 3, ZONE.FIELD);
+    const dryBefore = dry.stock.count('grain');
+    dry.run(360);
+    const dryYield = dry.stock.count('grain') - dryBefore;
+
+    const wet = new TownCore({ width: 20, height: 20, seed: 7 }); // growthMult 1.1
+    wet.seedColony(10, 10, 4);
+    wet.grid.setTerrain(3, 3, TERRAIN.SOIL); wet.grid.setZone(3, 3, ZONE.FIELD);
+    const wetBefore = wet.stock.count('grain');
+    wet.run(360);
+    const wetYield = wet.stock.count('grain') - wetBefore;
+
+    expect(wetYield).toBeGreaterThan(dryYield);
   });
 
   it('a woodcutter consumes the forest: wood now, bare grass after', () => {
@@ -389,7 +408,8 @@ describe('TownCore harvest zones', () => {
     expect(n).toBe(10);
     const before = c.stock.count('grain');
     c.run(360);
-    expect(c.stock.count('grain')).toBe(before + 5); // capped at 1 worker × 4 tiles × 1.25 (crop_rotation)
+    // capped at 1 worker × 4 tiles × 1.25 (crop_rotation) × weather.growthMult(day 0)
+    expect(c.stock.count('grain')).toBeCloseTo(before + 4 * 1.25 * c.weather.growthMult(0), 1);
   });
 });
 

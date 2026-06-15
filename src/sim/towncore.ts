@@ -613,9 +613,12 @@ export class TownCore {
     let budget = Math.floor(this.agents.count * HARVEST_TILES_PER_WORKER);
     if (budget <= 0) return;
     // crop_rotation tech grants a 25% field yield bonus; crop_science stacks another 20%.
-    const fieldMult = 1
+    const techMult = 1
       + (this.researchBook.hasTech('crop_rotation') ? 0.25 : 0)
       + (this.researchBook.hasTech('crop_science') ? 0.20 : 0);
+    // Drought suppresses field yields; good rain gives a small boost (growthMult: 0.35–1.1).
+    const growthMult = this.weather.growthMult(this.day);
+    const fieldMult = techMult * growthMult;
     for (let i = 0; i < grid.size && budget > 0; i++) {
       const z = grid.zone[i];
       if (z === ZONE.NONE) continue;
