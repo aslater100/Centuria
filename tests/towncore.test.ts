@@ -1934,3 +1934,32 @@ describe('TownCore evtMineralStrike', () => {
     expect(c.log.some(l => l.text.includes('mineral seam'))).toBe(true);
   });
 });
+
+describe('TownCore market stalls gold income', () => {
+  const MARKET = ROOM_TYPE_ID.get('market')!;
+  function makeMarket() {
+    const c = new TownCore({ width: 20, height: 20, seed: 1 });
+    c.seedColony(10, 10, 4);
+    c.stock.add('meal', 5000);
+    const g = c.grid;
+    // Build a small market with 2 stalls
+    for (let x = 2; x <= 6; x++) g.setFloor(x, 2);
+    g.designateRect(2, 2, 6, 2, MARKET);
+    g.placeStation('market_stall', 2, 2);
+    g.placeStation('market_stall', 4, 2);
+    g.rebuildRooms();
+    return c;
+  }
+
+  it('market stalls appear in services().trade', () => {
+    const c = makeMarket();
+    expect(c.services().trade).toBe(2);
+  });
+
+  it('gold increases each day with market stalls', () => {
+    const c = makeMarket();
+    const goldBefore = c.gold;
+    c.run(360 * 7); // 7 days
+    expect(c.gold).toBeGreaterThan(goldBefore + 7); // at least 1g/day from market
+  });
+});

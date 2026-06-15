@@ -65,6 +65,7 @@ const ROOM_COLORS: Record<string, string> = {
   outpost: '#705020',
   watchtower: '#506080',
   yard: '#507050',
+  market: '#d4a020',
 };
 
 // ── Starter town ──────────────────────────────────────────────────────────
@@ -481,6 +482,7 @@ function draw(): void {
     if (svc.storage > 0) parts.push(`storage ${svc.storage}`);
     if (svc.education > 0) parts.push(`edu ${svc.education}`);
     if (svc.medical > 0) parts.push(`med ${svc.medical}`);
+    if (svc.trade > 0) parts.push(`trade ${svc.trade} (+${svc.trade * 2}g/day)`);
     line(8, parts.join('  '), '#aaa'); }
 
   // Tool info

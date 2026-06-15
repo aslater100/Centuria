@@ -32,6 +32,8 @@
 
     { "id": "watch_post", "name": "Watch Post", "roomTypes": ["watchtower"], "w": 1, "h": 1, "cost": { "wood": 4, "timber": 1 }, "buildWork": 100, "kind": "capacity", "capacity": { "kind": "watch", "amount": 1 } },
 
-    { "id": "well", "name": "Well", "roomTypes": ["yard", "storehouse"], "w": 1, "h": 1, "cost": { "stone": 6, "wood": 4 }, "buildWork": 120, "kind": "capacity", "capacity": { "kind": "well", "amount": 1 } }
+    { "id": "well", "name": "Well", "roomTypes": ["yard", "storehouse"], "w": 1, "h": 1, "cost": { "stone": 6, "wood": 4 }, "buildWork": 120, "kind": "capacity", "capacity": { "kind": "well", "amount": 1 } },
+
+    { "id": "market_stall", "name": "Market Stall", "roomTypes": ["market"], "w": 2, "h": 1, "cost": { "wood": 8 }, "buildWork": 120, "kind": "capacity", "capacity": { "kind": "trade", "amount": 1 } }
   ]
 }

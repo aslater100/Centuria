@@ -356,7 +356,7 @@ export interface RoomTypeDef {
 }
 
 /** Passive capacity a `capacity` station contributes to its room. */
-export type CapacityKind = 'sleep' | 'recreation' | 'education' | 'medical' | 'storage' | 'burial' | 'watch' | 'well';
+export type CapacityKind = 'sleep' | 'recreation' | 'education' | 'medical' | 'storage' | 'burial' | 'watch' | 'well' | 'trade';
 
 /** A recipe a `craft` station runs: inputs → outputs over `work` settler-minutes. */
 export interface StationRecipe {
@@ -701,6 +701,8 @@ export const TUNING = {
   wagnerExp: 1.15, // upkeep outpaces build cost (public-sector share rises)
   researchBaseRate: 2, // ≈ a young state's raw RP/day, with headroom so early game is unscaled
   researchScaleExp: 0.6, // RP-cost growth vs. nation size (<1: net speedup remains)
+  // Market stalls: each stall generates passive gold income from passing trade
+  goldPerMarketStallPerDay: 2,
 };
 
 // ---- Parcel / land-expansion tuning (Track B Phase 2–3) ----

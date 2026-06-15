@@ -997,6 +997,14 @@ export class TownCore {
       }
     }
 
+    // Market: each stall generates 2 gold per day from passing trade.
+    if (services.trade > 0) {
+      const income = services.trade * TUNING.goldPerMarketStallPerDay;
+      this.gold += income;
+      if (this.day % 7 === 0) // weekly summary to avoid log spam
+        this.addLog(`Market earns ${(income * 7).toFixed(0)} gold this week (${services.trade} stall${services.trade > 1 ? 's' : ''}).`, 'good');
+    }
+
     // Research: library desks (education capacity) generate points daily.
     // Auto-research if a queue target is now affordable (player set via core.researchBook.queue).
     this.researchBook.addPoints(services.education);
