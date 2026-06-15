@@ -32,7 +32,7 @@ import { TERRAIN, ZONE } from './sim/build';
 import {
   ROOM_TYPE_ID, ROOM_DEF_BY_NUM, ROOM_DEFS,
   STATION_DEF_BY_NUM, STATION_DEFS,
-  TICKS_PER_SECOND,
+  TICKS_PER_SECOND, SEASONS, START_YEAR, DAYS_PER_SEASON, DAYS_PER_YEAR,
 } from './sim/defs';
 import { buildSprites } from './ui/sprites';
 import { applyOverrides } from './ui/spriteOverrides';
@@ -339,7 +339,10 @@ function draw(): void {
   ctx.fillStyle = '#ddd'; ctx.font = '13px monospace';
   const line = (n: number, s: string, color = '#ddd') => { ctx.fillStyle = color; ctx.fillText(s, 8, 20 + n * 17); };
 
-  line(0, `day ${core.day}  pop ${core.population}  mood ${core.averageMood().toFixed(0)}  gold ${core.gold.toFixed(0)}`);
+  const seasonIdx = Math.floor((core.day % DAYS_PER_YEAR) / DAYS_PER_SEASON);
+  const year = START_YEAR + Math.floor(core.day / DAYS_PER_YEAR);
+  const seasonLabel = `${SEASONS[seasonIdx]} ${year}`;
+  line(0, `${seasonLabel}  day ${core.day}  pop ${core.population}  mood ${core.averageMood().toFixed(0)}  gold ${core.gold.toFixed(0)}`);
   line(1, `meal ${core.stock.count('meal').toFixed(0)}  grain ${core.stock.count('grain').toFixed(0)}  flour ${core.stock.count('flour').toFixed(0)}  bread ${core.stock.count('bread').toFixed(0)}`);
   line(2, `wood ${core.stock.count('wood').toFixed(0)}  stone ${core.stock.count('stone').toFixed(0)}  iron ${core.stock.count('iron').toFixed(0)}  ore ${core.stock.count('iron_ore').toFixed(0)}`);
   line(3, `clothes ${core.stock.count('clothes').toFixed(0)}  weapons ${core.stock.count('weapons').toFixed(0)}  medicine ${core.stock.count('medicine').toFixed(0)}`);

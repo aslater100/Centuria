@@ -265,8 +265,12 @@ export class TownCore {
   pendingChoice: PendingEventChoice | null = null;
   /** Tracks current drought state to log transitions (drought start/end). */
   private _droughtActive = false;
+  /** Tracks flood-risk state to log transitions. */
+  private _floodActive = false;
   /** Last logged season index, to detect season changes. */
   private _lastSeasonIdx = -1;
+  /** Last logged population milestone (10, 25, 50, 100…). */
+  private _lastPopMilestone = 0;
 
   private readonly weatherSeed: number;
 
@@ -638,6 +642,21 @@ export class TownCore {
     if (nowDrought && !this._droughtActive) this.addLog('Drought. The soil cracks and crops slow to a crawl.', 'bad');
     else if (!nowDrought && this._droughtActive) this.addLog('The drought breaks. Rain returns to the fields.', 'good');
     this._droughtActive = nowDrought;
+
+    const nowFlood = growingSeason && this.weather.isFloodRisk(this.day);
+    if (nowFlood && !this._floodActive) this.addLog('Heavy rains threaten to flood the low-lying fields.', 'bad');
+    else if (!nowFlood && this._floodActive) this.addLog('The rains ease. Flood threat passes.', 'info');
+    this._floodActive = nowFlood;
+
+    // Population milestones.
+    const pop = this.agents.count;
+    const MILESTONES = [10, 25, 50, 100, 200, 500];
+    for (const m of MILESTONES) {
+      if (pop >= m && this._lastPopMilestone < m) {
+        this._lastPopMilestone = m;
+        this.addLog(`Colony reaches ${m} settlers — a growing community.`, 'good');
+      }
+    }
   }
 
   /**
