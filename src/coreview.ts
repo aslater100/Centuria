@@ -427,7 +427,10 @@ function draw(): void {
   const sky = core.weather.forDay(core.day).sky;
   const skyLabel = sky === 'storm' ? '[storm]' : sky === 'snow' ? '[snow]' : sky === 'rain' ? '[rain]' : sky === 'overcast' ? '[overcast]' : '[clear]';
   const skyColor = sky === 'storm' ? '#ff8844' : sky === 'snow' ? '#aaddff' : sky === 'rain' ? '#88bbff' : '#ddd';
-  line(6, `${raidLine}  ${skyLabel}`, core.raidActive ? '#ff6b6b' : skyColor);
+  const isDrought = core.weather.isDrought(core.day), isFloodRisk = core.weather.isFloodRisk(core.day);
+  const droughtFlood = isDrought ? '  [DROUGHT]' : isFloodRisk ? '  [FLOOD RISK]' : '';
+  const weatherColor = core.raidActive ? '#ff6b6b' : isDrought ? '#cc8833' : isFloodRisk ? '#44aacc' : skyColor;
+  line(6, `${raidLine}  ${skyLabel}${droughtFlood}`, weatherColor);
   line(7, `${paused ? 'PAUSED' : 'speed ' + speed + '×'}${core.builds.length > 0 ? `  blueprints: ${core.builds.length}` : ''}`);
   { const svc = core.services();
     const parts: string[] = [`sleep ${svc.sleep}`];
