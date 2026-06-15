@@ -104,7 +104,7 @@ export function aggregateCapacities(grid: BuildGrid): RoomServices {
  *   agent must be standing in a usable room with a free slot. Warmth is always
  *   enclosure-local. Off by default so existing callers/tests are unchanged.
  */
-export function serveNeeds(grid: BuildGrid, agents: AgentStore, minutesPerTick: number, tempAnomalyC: number = 0, colonyWide = false): void {
+export function serveNeeds(grid: BuildGrid, agents: AgentStore, minutesPerTick: number, tempAnomalyC: number = 0, colonyWide = false, clothingDecayMult = 1.0): void {
   const hours = minutesPerTick / 60;
   // Warmth ambient floor driven by temperature: ±4°C scales ±10 warmth, clamped 20..80.
   const ambientFloor = Math.max(20, Math.min(80, WARMTH_AMBIENT_FLOOR + tempAnomalyC * 2.5));
@@ -127,12 +127,12 @@ export function serveNeeds(grid: BuildGrid, agents: AgentStore, minutesPerTick: 
     const room = rid >= 0 ? grid.rooms[rid] : null;
 
     // Warmth: enclosure shelters all occupants; otherwise drift to the temperature-scaled floor.
+    // Clothing (clothingDecayMult < 1) slows warmth loss for exposed settlers.
     if (room && room.enclosed) {
       const w = agents.warmth[i] + WARMTH_REGEN_ENCLOSED * hours;
       agents.warmth[i] = w < 100 ? w : 100;
     } else {
-      // Hardy settlers (warmthDecayMult < 1) shrug off the cold; the floor is temperature-driven.
-      const w = agents.warmth[i] - WARMTH_DECAY_EXPOSED * hours * agents.warmthDecayMult[i];
+      const w = agents.warmth[i] - WARMTH_DECAY_EXPOSED * hours * agents.warmthDecayMult[i] * clothingDecayMult;
       agents.warmth[i] = w > ambientFloor ? w : ambientFloor;
     }
 

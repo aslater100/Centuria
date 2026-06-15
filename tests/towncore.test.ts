@@ -590,6 +590,50 @@ describe('TownCore food variety', () => {
   });
 });
 
+// --- clothing system ---
+describe('TownCore clothing', () => {
+  it('distributes clothes on the first day and gives a mood thought', () => {
+    const core = colony({ ovens: 2, beds: 2, grain: 500, pop: 4, seed: 3 });
+    core.stock.add('clothes', 20);
+    for (let i = 0; i < core.agents.count; i++) core.agents.mood[i] = 50;
+    core.run(360); // one day → clothing distribution fires
+    // Mood should have improved via the "Warm new clothes" thought.
+    const avgMood = Array.from({ length: core.agents.count }, (_, i) => core.agents.mood[i])
+      .reduce((a, b) => a + b, 0) / core.agents.count;
+    expect(avgMood).toBeGreaterThan(50);
+  });
+
+  it('clothed settlers lose warmth slower in the open than threadbare ones', () => {
+    // Two identical colonies: one with clothes, one without.
+    function warmthColony(hasClothes: boolean): TownCore {
+      const core = new TownCore({ width: 16, height: 16, seed: 4 });
+      core.stock.add('meal', 1000);
+      core.seedColony(8, 8, 2); // agents spawn in open air (no rooms)
+      if (hasClothes) core.stock.add('clothes', 10);
+      // Start warmth at 80 so we can measure decay.
+      for (let i = 0; i < core.agents.count; i++) core.agents.warmth[i] = 80;
+      return core;
+    }
+    const clothed = warmthColony(true);
+    const bare = warmthColony(false);
+    clothed.run(360); // one day of outdoor warmth decay
+    bare.run(360);
+    const clothedWarmth = Array.from({ length: clothed.agents.count }, (_, i) => clothed.agents.warmth[i])
+      .reduce((a, b) => a + b, 0) / clothed.agents.count;
+    const bareWarmth = Array.from({ length: bare.agents.count }, (_, i) => bare.agents.warmth[i])
+      .reduce((a, b) => a + b, 0) / bare.agents.count;
+    expect(clothedWarmth).toBeGreaterThanOrEqual(bareWarmth);
+  });
+
+  it('consumes one clothes per settler every clothesWearDays days', () => {
+    const core = colony({ ovens: 2, beds: 2, grain: 500, pop: 2, seed: 3 });
+    core.stock.add('clothes', 10);
+    const beforeClothes = core.stock.count('clothes');
+    core.run(360); // day 1 → first distribution (2 clothes consumed)
+    expect(core.stock.count('clothes')).toBe(beforeClothes - 2);
+  });
+});
+
 // --- B-6 PART 3: blueprint construction (paint → materials + labour → built) ---
 describe('TownCore blueprint construction', () => {
   it('builds a queued wall once materials and labour are spent', () => {

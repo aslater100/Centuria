@@ -277,6 +277,10 @@ export class TownCore {
   private _lastPopMilestone = 0;
   /** Rolling 7-day food-type log for variety mood effects. */
   private _foodVarietyLog: string[] = [];
+  /** Whether all settlers are currently clothed (set daily by clothing distribution). */
+  private _settlersClothed = false;
+  /** Game-day the current round of clothes wears out and the next batch is due. */
+  private _clothingDay = 0;
 
   private readonly weatherSeed: number;
 
@@ -444,7 +448,7 @@ export class TownCore {
     // 4. Needs from rooms: warmth (enclosure), rest (beds), recreation (tables),
     //    and medical recovery (infirmary sickbeds + apothecary medicine).
     const dayWeather = this.weather.forDay(this.day);
-    serveNeeds(this.grid, a, MINUTES_PER_TICK, dayWeather.tempAnomalyC, true /* colony-wide beds/tables */);
+    serveNeeds(this.grid, a, MINUTES_PER_TICK, dayWeather.tempAnomalyC, true /* colony-wide beds/tables */, this._settlersClothed ? 0.5 : 1.0);
     serveMedical(this.grid, a, this.stock, this.researchBook.hasTech('germ_theory') ? 1.5 : 1.0);
 
     // 4b. Bonding: agents sharing a tavern grow their mutual opinion.
@@ -632,6 +636,19 @@ export class TownCore {
           a.addThought(i, this.tickNo, TUNING.foodVarietyBonus3, 2 * TICKS_PER_DAY, ThoughtKey.FoodVariety);
         }
       }
+    }
+
+    // Clothing: every clothesWearDays the colony needs a fresh batch of clothes.
+    // If stock covers everyone, distribute them and grant a brief mood boost.
+    // If not, settlers go threadbare — warmth decay doubles in the open.
+    if (this.day >= this._clothingDay) {
+      if (this.stock.remove('clothes', a.count)) {
+        this._settlersClothed = true;
+        for (let i = 0; i < a.count; i++) a.addThought(i, this.tickNo, 3, 2 * TICKS_PER_DAY);
+      } else {
+        this._settlersClothed = false;
+      }
+      this._clothingDay = this.day + TUNING.clothesWearDays;
     }
 
     // Growth: a content, well-housed, well-fed colony attracts a newcomer.
