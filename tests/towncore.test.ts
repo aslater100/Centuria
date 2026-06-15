@@ -137,6 +137,44 @@ describe('TownCore serialization', () => {
   });
 });
 
+describe('TownCore spike traps', () => {
+  it('paintTrap costs wood and damages a raider that steps on it', () => {
+    const core = colony({ pop: 4 });
+    core.stock.add('meal', 500);
+    core.stock.add('wood', 20);
+    const woodBefore = core.stock.count('wood');
+
+    // Place trap at (4,3), between raider approach and settler at (3,3).
+    // Verify wood was deducted.
+    const ok = core.paintTrap(4, 3);
+    expect(ok).toBe(true);
+    expect(core.stock.count('wood')).toBe(woodBefore - TUNING.trapWoodCost);
+    core.musterRaid();
+    const raiderBefore = core.raids.raiders[0].health;
+    core.raids.raiders[0].x = 5.0;
+    core.raids.raiders[0].y = 3.0;
+    // Run until the trap fires (raider advances left through (4,3)) — cap at 60 ticks
+    let trapFired = false;
+    for (let i = 0; i < 60 && !trapFired; i++) {
+      core.run(1);
+      trapFired = !core.grid.hasTrap(4, 3);
+    }
+    expect(trapFired).toBe(true);
+    const raiderAfter = core.raids.raiders[0]?.health ?? 0; // may be dead
+    expect(raiderAfter).toBeLessThan(raiderBefore);
+  });
+
+  it('clearTrap refunds wood', () => {
+    const core = colony();
+    core.stock.add('wood', 10);
+    core.paintTrap(5, 5);
+    const woodAfter = core.stock.count('wood');
+    core.clearTrap(5, 5);
+    expect(core.stock.count('wood')).toBe(woodAfter + TUNING.trapWoodCost);
+    expect(core.grid.hasTrap(5, 5)).toBe(false);
+  });
+});
+
 describe('scale-engine module serialization', () => {
   it('Stockpile round-trips its sparse contents', () => {
     const s = new Stockpile();
@@ -1185,5 +1223,54 @@ describe('TownCore watchtower', () => {
     core.run(TICKS_PER_DAY);
     const warningEntry = core.log.slice(logsBefore).find(e => e.text.includes('sentinels') || e.text.includes('raid approaches'));
     expect(warningEntry).toBeUndefined();
+  });
+});
+
+// ── Meal spoilage cap ─────────────────────────────────────────────────────────
+
+const STOREHOUSE = ROOM_TYPE_ID.get('storehouse')!;
+
+describe('TownCore meal spoilage', () => {
+  it('meals above the base cap spoil on the next daily update', () => {
+    const c = new TownCore({ width: 20, height: 20, seed: 1 });
+    c.seedColony(10, 10, 1);
+    const cap = c.mealCap(); // 200 base
+    c.stock.add('meal', cap + 50);
+    c.run(360); // one day triggers dailyUpdate → spoilage
+    expect(c.stock.count('meal')).toBeLessThanOrEqual(cap);
+  });
+
+  it('a storehouse room extends the cap', () => {
+    const c = new TownCore({ width: 20, height: 20, seed: 1 });
+    c.seedColony(10, 10, 1);
+    const baseCap = c.mealCap(); // 200
+    // Build a storehouse room with one shelf
+    c.grid.designateRect(1, 1, 3, 3, STOREHOUSE);
+    c.grid.placeStation('shelf', 1, 1);
+    c.grid.rebuildRooms();
+    expect(c.mealCap()).toBeGreaterThan(baseCap);
+  });
+
+  it('spoilage log message appears when meals exceed cap', () => {
+    const c = new TownCore({ width: 20, height: 20, seed: 1 });
+    c.seedColony(10, 10, 1);
+    c.stock.add('meal', c.mealCap() + 100);
+    c.run(360);
+    const spoilLog = c.log.find(e => e.text.includes('spoiled'));
+    expect(spoilLog).toBeDefined();
+  });
+});
+
+// ── Emigration when overcrowded ───────────────────────────────────────────────
+
+describe('TownCore emigration', () => {
+  it('population drops when hardCapPop is exceeded', () => {
+    const c = new TownCore({ width: 32, height: 32, seed: 42 });
+    c.seedColony(16, 16, TUNING.hardCapPop + 10);
+    c.stock.add('meal', 5000);
+    const popBefore = c.population;
+    // Run many days until at least one emigrant leaves (10% chance/day)
+    c.run(360 * 30);
+    expect(c.population).toBeLessThan(popBefore);
   });
 });

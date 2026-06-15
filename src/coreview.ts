@@ -123,7 +123,7 @@ let speed = 3;
 let painting: 0 | 1 | 2 = 0; // 0=none, 1=apply, 2=erase
 
 type Tool = 'wall' | 'erase' | 'gate' | 'floor' | 'room' | 'station'
-           | 'field' | 'woodcutter' | 'quarry' | 'fishery' | 'flax';
+           | 'field' | 'woodcutter' | 'quarry' | 'fishery' | 'flax' | 'trap';
 let tool: Tool = 'wall';
 
 // Room designation sub-tool: cycle through room type names.
@@ -172,6 +172,7 @@ addEventListener('keydown', (e) => {
   if (k === 'q') { tool = 'quarry'; return; }
   if (k === 'b') { tool = 'fishery'; return; }
   if (k === 'l') { tool = 'flax'; return; }
+  if (k === 't') { tool = 'trap'; return; }
   // Cycle room type
   if (e.key === '[') { roomTypeIdx = (roomTypeIdx - 1 + ROOM_TYPE_NAMES.length) % ROOM_TYPE_NAMES.length; return; }
   if (e.key === ']') { roomTypeIdx = (roomTypeIdx + 1) % ROOM_TYPE_NAMES.length; return; }
@@ -222,6 +223,7 @@ function paintAt(e: MouseEvent): void {
     g.clearZone(t.x, t.y);
     g.clearDesignation(t.x, t.y);
     core.cancelBlueprint(t.x, t.y);
+    core.clearTrap(t.x, t.y);
     return;
   }
 
@@ -232,6 +234,7 @@ function paintAt(e: MouseEvent): void {
       g.clearWall(t.x, t.y); g.clearGate(t.x, t.y);
       g.clearFloor(t.x, t.y); g.clearZone(t.x, t.y);
       g.clearDesignation(t.x, t.y); core.cancelBlueprint(t.x, t.y);
+      core.clearTrap(t.x, t.y);
       break;
     case 'gate':    g.setGate(t.x, t.y);  break;
     case 'floor':   g.setFloor(t.x, t.y); break;
@@ -251,6 +254,7 @@ function paintAt(e: MouseEvent): void {
     case 'quarry':     g.setZone(t.x, t.y, ZONE.QUARRY);      break;
     case 'fishery':    g.setZone(t.x, t.y, ZONE.FISHERY);     break;
     case 'flax':       g.setZone(t.x, t.y, ZONE.FLAX);        break;
+    case 'trap':       core.paintTrap(t.x, t.y);               break;
   }
 }
 
@@ -298,6 +302,18 @@ function draw(): void {
 
     if (g.gate[i]) blit(sprites.gate, x, y);
     else if (g.wall[i]) blit(sprites.interiorWall, x, y);
+  }
+
+  // Spike traps (rendered as a red X over the tile)
+  ctx.strokeStyle = '#cc2222';
+  ctx.lineWidth = 1;
+  for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+    if (g.trap[y * MAP + x]) {
+      ctx.beginPath();
+      ctx.moveTo(x * px + 2, y * px + 2); ctx.lineTo((x + 1) * px - 2, (y + 1) * px - 2);
+      ctx.moveTo((x + 1) * px - 2, y * px + 2); ctx.lineTo(x * px + 2, (y + 1) * px - 2);
+      ctx.stroke();
+    }
   }
 
   // Stations
@@ -357,7 +373,7 @@ function draw(): void {
     return f === 0 ? '' : (f > 0 ? `+${f.toFixed(1)}` : f.toFixed(1));
   };
   const meal = core.stock.count('meal'), grain = core.stock.count('grain');
-  line(1, `meal ${meal.toFixed(0)}${flowStr('meal') ? `(${flowStr('meal')})` : ''}  grain ${grain.toFixed(0)}${flowStr('grain') ? `(${flowStr('grain')})` : ''}  bread ${core.stock.count('bread').toFixed(0)}  ale ${core.stock.count('ale').toFixed(0)}`);
+  line(1, `meal ${meal.toFixed(0)}/${core.mealCap()}${flowStr('meal') ? `(${flowStr('meal')})` : ''}  grain ${grain.toFixed(0)}${flowStr('grain') ? `(${flowStr('grain')})` : ''}  bread ${core.stock.count('bread').toFixed(0)}  ale ${core.stock.count('ale').toFixed(0)}`);
   const gameMeal = core.stock.count('game_meal'), fishMeal = core.stock.count('fish_meal');
   const deerCount = [...core.deerViews()].length;
   line(2, `game_meal ${gameMeal.toFixed(0)}  fish_meal ${fishMeal.toFixed(0)}  deer ${deerCount}`, gameMeal > 0 || fishMeal > 0 ? '#aed6a0' : '#888');
@@ -379,7 +395,7 @@ function draw(): void {
 
   // Key hints
   ctx.fillStyle = '#888'; ctx.font = '11px monospace';
-  ctx.fillText('W wall  E erase  G gate  D floor  Z room([ ])  A station(, .)', 8, 20 + 9 * 17);
+  ctx.fillText('W wall  E erase  G gate  D floor  T trap  Z room([ ])  A station(, .)', 8, 20 + 9 * 17);
   ctx.fillText('F field  C chop  Q quarry  B fishery  L flax  R raid  N settler  X research  space pause', 8, 20 + 10 * 17);
 
   // ── Settler inspector panel (top-right) ──────────────────────────────────

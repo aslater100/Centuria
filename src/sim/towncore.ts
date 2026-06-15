@@ -878,6 +878,29 @@ export class TownCore {
       }
     }
 
+    // Meal spoilage: prepared food only keeps so long. Without a storehouse the larder
+    // holds TUNING.mealCapBase meals; each storehouse room with at least one shelf adds
+    // TUNING.mealCapPerGranary. Excess meals spoil daily (mirrors the fat sim's mealCap).
+    {
+      const cap = this.mealCap();
+      const mealStock = this.stock.count('meal');
+      if (mealStock > cap) {
+        const spoiled = Math.round(mealStock - cap);
+        this.stock.remove('meal', spoiled);
+        this.addLog(`${spoiled} meals spoiled — the larder holds only ${cap}. A storehouse would keep more.`, 'bad');
+      }
+    }
+
+    // Emigration: an overcrowded colony loses families until the hard cap is broken.
+    if (a.count >= TUNING.hardCapPop && this.rng.chance(0.1)) {
+      const idx = this.rng.int(a.count);
+      const name = a.name(idx);
+      this.relations.forget(a.id[idx]);
+      a.remove(idx);
+      this.deaths++;
+      this.addLog(`${name}'s family packs their wagon — too crowded here.`, 'info');
+    }
+
     // Cultural focus: shared arts and festivities lift everyone's spirits daily.
     if (this.focus === 'cultural') {
       for (let i = 0; i < a.count; i++) {
@@ -1063,6 +1086,22 @@ export class TownCore {
 
   private _pendingAt(x: number, y: number): boolean {
     return this.builds.some((o) => o.x === x && o.y === y);
+  }
+
+  /** Arm a spike trap at (x, y), consuming wood immediately. Returns true if placed. */
+  paintTrap(x: number, y: number): boolean {
+    if (!this.grid.inBounds(x, y) || this.grid.hasTrap(x, y)) return false;
+    if (!this.stock.remove('wood', TUNING.trapWoodCost)) return false;
+    this.grid.setTrap(x, y);
+    return true;
+  }
+
+  /** Remove a spike trap, refunding the wood cost. */
+  clearTrap(x: number, y: number): void {
+    if (this.grid.inBounds(x, y) && this.grid.hasTrap(x, y)) {
+      this.grid.clearTrap(x, y);
+      this.stock.add('wood', TUNING.trapWoodCost);
+    }
   }
 
   /** Queue a wall blueprint (no-op if off-grid, already walled, or already queued). */
@@ -1487,6 +1526,16 @@ export class TownCore {
   }
 
   // ── read-only views ──────────────────────────────────────────────────────────
+
+  /** Max meals the larder holds before spoilage (base + storehouse rooms). */
+  mealCap(): number {
+    let cap = TUNING.mealCapBase;
+    for (const room of this.grid.rooms) {
+      if (ROOM_DEF_BY_NUM[room.typeId]?.id === 'storehouse' && room.stationIds.length > 0)
+        cap += TUNING.mealCapPerGranary;
+    }
+    return cap;
+  }
 
   get population(): number {
     return this.agents.count;
