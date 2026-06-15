@@ -3,7 +3,7 @@ import { TownCore } from '../src/sim/towncore';
 import { BuildGrid, TERRAIN, ZONE } from '../src/sim/build';
 import { AgentStore, AState } from '../src/sim/agents';
 import { Stockpile } from '../src/sim/stockpile';
-import { ROOM_TYPE_ID, type TownFocus } from '../src/sim/defs';
+import { ROOM_TYPE_ID, STATION_TYPE_ID, TUNING, type TownFocus } from '../src/sim/defs';
 
 // Build-system B-6: the integrated room-based town core that composes every
 // scale-engine module (BuildGrid + AgentStore + Stockpile + JobBoard + needs +
@@ -919,5 +919,68 @@ describe('TownCore prestige and era', () => {
     const twin = TownCore.deserialize(core.serialize());
     expect(twin.prestige).toBe(7);
     expect(twin.era).toBe(2);
+  });
+});
+
+describe('TownCore deer and hunting', () => {
+  const OUTPOST = ROOM_TYPE_ID.get('outpost')!;
+  const TICKS_PER_DAY = 144; // MINUTES_PER_DAY(1440) / MINUTES_PER_TICK(10)
+
+  it('seedColony spawns exactly deerStartCount deer', () => {
+    const core = new TownCore({ width: 32, height: 32, seed: 5 });
+    expect(core.deer.length).toBe(0); // none before colony is seeded
+    core.seedColony(16, 16, 4);
+    expect(core.deer.length).toBe(TUNING.deerStartCount);
+    // All deer have full health and valid positions.
+    for (const d of core.deer) {
+      expect(d.health).toBe(TUNING.deerHealth);
+      expect(d.x).toBeGreaterThanOrEqual(1);
+      expect(d.y).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('deer respawn daily up to deerMaxCount', () => {
+    const core = new TownCore({ width: 32, height: 32, seed: 77 });
+    core.seedColony(16, 16, 2);
+    // Remove all deer to start from 0.
+    core.deer.length = 0;
+    expect(core.deer.length).toBe(0);
+    // Run 120 days — at 12% chance/day we expect several deer to respawn.
+    core.run(120 * TICKS_PER_DAY);
+    expect(core.deer.length).toBeGreaterThan(0);
+    expect(core.deer.length).toBeLessThanOrEqual(TUNING.deerMaxCount);
+  });
+
+  it('hunting_lodge in an outpost room produces game_meal', () => {
+    const core = new TownCore({ width: 32, height: 32, seed: 55 });
+    const g = core.grid;
+    // Build an outpost (4×4 floored area, no walls required).
+    for (let x = 2; x <= 5; x++) for (let y = 14; y <= 17; y++) g.setFloor(x, y);
+    g.designateRect(2, 14, 5, 17, OUTPOST);
+    g.placeStation('hunting_lodge', 2, 14);
+    g.rebuildRooms();
+    // Seed colony with grain supply and a worker.
+    core.stock.add('grain', 500);
+    core.seedColony(3, 3, 2);
+    // Run enough ticks for at least one hunt trip (240 settler-minutes at skill > 0).
+    core.run(Math.ceil(300 / 10) * 2); // ~600 ticks = ~60 minutes of work, well past one trip
+    expect(core.stock.count('game_meal')).toBeGreaterThan(0);
+  });
+
+  it('deer position and rng state survive a save/load round-trip', () => {
+    const core = colony({ ovens: 2, beds: 2, grain: 500, pop: 2, seed: 13 });
+    core.run(20);
+    const snap = core.serialize();
+    const twin = TownCore.deserialize(snap);
+    expect(twin.deer.length).toBe(core.deer.length);
+    // Run both forward identically; results must be byte-identical.
+    core.run(30);
+    twin.run(30);
+    expect(JSON.stringify(core.serialize())).toBe(JSON.stringify(twin.serialize()));
+  });
+
+  it('deer hunting_lodge station is registered in STATION_TYPE_ID', () => {
+    expect(STATION_TYPE_ID.has('hunting_lodge')).toBe(true);
+    expect(OUTPOST).toBeGreaterThan(0); // outpost room type is registered
   });
 });

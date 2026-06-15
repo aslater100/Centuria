@@ -144,6 +144,14 @@ export interface RaiderView {
   fleeing: boolean;
 }
 
+/** A live deer on the map — position + health tracked for hunting. */
+export interface Deer {
+  id: number;
+  x: number;
+  y: number;
+  health: number;
+}
+
 /** A pending construction: a painted blueprint awaiting materials + labour before
  *  it becomes a real wall / floor / station (Songs-of-Syx build flow). */
 export interface BuildOrder {
@@ -211,6 +219,12 @@ export interface TownCoreSave {
   focus?: TownFocus;
   /** v8+: selected difficulty (defaults to 'normal' on old saves). */
   difficulty?: 'easy' | 'normal' | 'hard';
+  /** v9+: current deer herd (empty on old saves). */
+  deer?: Deer[];
+  /** v9+: next deer id counter. */
+  deerNextId?: number;
+  /** v9+: deer-stream rng state (fresh on old saves). */
+  deerRngState?: number;
 }
 
 export interface TownCoreOpts {
@@ -237,6 +251,12 @@ export class TownCore {
   readonly raids = new RaidForce();
   /** Predator packs: wolves prowl in from the edge and pick off strays. */
   readonly wolves = new WolfPack();
+  /** Deer herd: roam the map, flee settlers, and can be hunted from an outpost. */
+  deer: Deer[] = [];
+  private _deerNextId = 1;
+  /** Separate RNG stream for deer so their wander/spawn calls never disturb the
+   *  main rng sequence (raids, births, weather). Serialized independently. */
+  private _deerRng: Rng;
   /** Credit book: NPC lenders the colony can borrow gold from, serviced monthly. */
   readonly ledger = new Ledger();
   /** Town-tier inflation rate (0 = none); applied on top of market prices. */
@@ -345,6 +365,9 @@ export class TownCore {
     this.weather = new Weather(seed);
     this.rng = new Rng(seed);
     this._rand = () => this.rng.next();
+    // Deer use a dedicated stream (seed derived, never overlapping) so their
+    // wander/spawn calls leave the main rng (raids, births, weather) unchanged.
+    this._deerRng = new Rng((seed ^ 0xd33f_cafe) >>> 0);
     this.homeX = Math.floor(width / 2);
     this.homeY = Math.floor(height / 2);
     this.nextRaidDay = TUNING.firstRaidDay + this.rng.int(5);
@@ -429,6 +452,11 @@ export class TownCore {
     }
   }
 
+  /** Iterate all live deer on the map (for renderer overlay). */
+  *deerViews(): Generator<{ x: number; y: number; health: number }, void, unknown> {
+    for (const d of this.deer) yield { x: d.x, y: d.y, health: d.health };
+  }
+
   /**
    * Spawn one settler at (x, y) with a rolled persona: two distinct traits and a
    * green-to-competent starting skill (0..7, like the fat sim's birth roll). Uses
@@ -442,7 +470,8 @@ export class TownCore {
     return i;
   }
 
-  /** Spawn `n` founding settlers clustered around (cx, cy). Returns the count placed. */
+  /** Spawn `n` founding settlers clustered around (cx, cy). Returns the count placed.
+   *  Also spawns the starting deer herd (deerStartCount deer scattered across the map). */
   seedColony(cx: number, cy: number, n: number): number {
     this.homeX = cx;
     this.homeY = cy;
@@ -453,6 +482,17 @@ export class TownCore {
       if (this.spawnPerson(cx + dx, cy + dy) >= 0) placed++;
     }
     if (placed > 0) this.addLog(`${placed} settlers step off the wagon and make camp.`, 'good');
+    // Spawn the starting deer herd via the dedicated deer rng stream so the main
+    // rng (raids, births, weather) stays byte-for-byte identical regardless of deer count.
+    const W = this.grid.width, H = this.grid.height;
+    for (let i = 0; i < TUNING.deerStartCount; i++) {
+      this.deer.push({
+        id: this._deerNextId++,
+        x: 2 + this._deerRng.int(W - 4),
+        y: 2 + this._deerRng.int(H - 4),
+        health: TUNING.deerHealth,
+      });
+    }
     return placed;
   }
 
@@ -572,6 +612,10 @@ export class TownCore {
       }
     }
 
+    // 5e. Deer: hunters at a lodge damage nearby deer; all deer roam/flee settlers.
+    this._tickHunting();
+    this._tickDeer();
+
     // A repelled raid / a pack that has slunk off: log the all-clear once.
     if (wasRaiding && !this.raids.active) this.addLog('The raiders break and flee. The colony holds.', 'good');
     if (wasWolves && !this.wolves.active) this.addLog('The wolves slink back into the wilds.', 'info');
@@ -633,6 +677,79 @@ export class TownCore {
     if (this.wolves.active) return;
     this.wolves.start(n, this.grid.width, this.grid.height, this.rng, this.tickNo);
     this.addLog('A wolf pack prowls in from the forest edge.', 'bad');
+  }
+
+  /**
+   * Advance deer one tick: each deer flees the nearest settler within deerFleeRadius,
+   * or wanders slowly at random. Deer health is reduced by hunting_lodge workers in
+   * _tickHunting(); health-zero deer are culled here and yield game_meal.
+   * Uses the main rng for wander so the rng state survives save/load correctly.
+   */
+  private _tickDeer(): void {
+    if (this.deer.length === 0) return;
+    const a = this.agents;
+    const W = this.grid.width, H = this.grid.height;
+    const FLEE_SPEED = 0.40;
+    const WANDER_SPEED = 0.15;
+    const surviving: Deer[] = [];
+    for (const d of this.deer) {
+      if (d.health <= 0) {
+        this.stock.add('game_meal', TUNING.huntMealYield);
+        continue; // cull; game_meal added by the kill
+      }
+      // Flee the nearest settler inside the radius.
+      let fled = false;
+      for (let i = 0; i < a.count; i++) {
+        const dx = d.x - a.posX[i];
+        const dy = d.y - a.posY[i];
+        const dist = Math.hypot(dx, dy);
+        if (dist < TUNING.deerFleeRadius) {
+          const len = Math.max(0.01, dist);
+          d.x = Math.max(1, Math.min(W - 2, d.x + (dx / len) * FLEE_SPEED));
+          d.y = Math.max(1, Math.min(H - 2, d.y + (dy / len) * FLEE_SPEED));
+          fled = true;
+          break;
+        }
+      }
+      if (!fled) {
+        d.x = Math.max(1, Math.min(W - 2, d.x + (this._deerRng.next() * 2 - 1) * WANDER_SPEED));
+        d.y = Math.max(1, Math.min(H - 2, d.y + (this._deerRng.next() * 2 - 1) * WANDER_SPEED));
+      }
+      surviving.push(d);
+    }
+    this.deer = surviving;
+  }
+
+  /**
+   * Per-tick hunting: each working settler at a hunting_lodge damages the nearest
+   * deer within huntRange. The deer's health drops across ticks; when it hits 0
+   * _tickDeer() removes it and adds game_meal to the stockpile.
+   */
+  private _tickHunting(): void {
+    if (this.deer.length === 0) return;
+    const lodgeTypeId = STATION_TYPE_ID.get('hunting_lodge') ?? 0;
+    if (!lodgeTypeId) return;
+    const a = this.agents;
+    const HOURS_PER_TICK = MINUTES_PER_TICK / 60;
+    for (const station of this.grid.stations) {
+      if (station.typeId !== lodgeTypeId) continue;
+      // Find the worker assigned to this station.
+      let workerIdx = -1;
+      for (let i = 0; i < a.count; i++) {
+        if (a.stationId[i] === station.id && a.state[i] === AState.Working) { workerIdx = i; break; }
+      }
+      if (workerIdx < 0) continue;
+      // Find the nearest deer within hunt range.
+      let target: Deer | null = null, bestDist = TUNING.huntRange;
+      for (const d of this.deer) {
+        const dist = Math.hypot(d.x - station.x, d.y - station.y);
+        if (dist <= bestDist) { target = d; bestDist = dist; }
+      }
+      if (!target) continue;
+      // Skill scales damage: skill 0 → 0.5×, skill 10 → 1.5×.
+      const skillMult = 0.5 + a.skill[workerIdx] * 0.1;
+      target.health -= TUNING.huntDamagePerHour * HOURS_PER_TICK * skillMult;
+    }
   }
 
   /**
@@ -770,6 +887,17 @@ export class TownCore {
     // (per-day chance, mirrors the fat sim). Only one pack prowls at a time.
     if (this.day >= TUNING.wolfFirstDay && !this.wolves.active && this.rng.chance(TUNING.wolfPackChancePerDay)) {
       this.summonWolves();
+    }
+    // Deer: respawn one per day up to deerMaxCount (models natural herd regrowth).
+    // Uses the deer stream so the main rng (raids, births, weather) is unaffected.
+    if (this.deer.length < TUNING.deerMaxCount && this._deerRng.chance(TUNING.deerSpawnChancePerDay)) {
+      const W = this.grid.width, H = this.grid.height;
+      this.deer.push({
+        id: this._deerNextId++,
+        x: 2 + this._deerRng.int(W - 4),
+        y: 2 + this._deerRng.int(H - 4),
+        health: TUNING.deerHealth,
+      });
     }
 
     // Research: library desks (education capacity) generate points daily.
@@ -1549,6 +1677,9 @@ export class TownCore {
       townName: this.townName !== 'New Settlement' ? this.townName : undefined,
       focus: this.focus !== 'balanced' ? this.focus : undefined,
       difficulty: this.difficulty !== 'normal' ? this.difficulty : undefined,
+      deer: this.deer.length > 0 ? this.deer.map((d) => ({ ...d })) : undefined,
+      deerNextId: this._deerNextId > 1 ? this._deerNextId : undefined,
+      deerRngState: this._deerRng.getState(),
     };
   }
 
@@ -1604,6 +1735,9 @@ export class TownCore {
     core.townName = data.townName ?? 'New Settlement';
     core.focus = data.focus ?? 'balanced';
     core.difficulty = data.difficulty ?? 'normal';
+    if (data.deer) { core.deer = data.deer.map((d) => ({ ...d })); }
+    (core as unknown as { _deerNextId: number })._deerNextId = data.deerNextId ?? 1;
+    if (data.deerRngState != null) (core as unknown as { _deerRng: Rng })._deerRng.setState(data.deerRngState);
     return core;
   }
 }
