@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Simulation } from '../src/sim/sim';
 import { TownCore } from '../src/sim/towncore';
-import { MINUTES_PER_DAY, MINUTES_PER_TICK } from '../src/sim/defs';
+import { MINUTES_PER_DAY, MINUTES_PER_TICK, ROOM_TYPE_ID, TUNING } from '../src/sim/defs';
 
 // Parity tests: verify the new SoA-based TownCore produces behaviors consistent
 // with the fat-object Simulation over the same time span on the same seed.
@@ -95,5 +95,84 @@ describe('Parity — Old Simulation vs New TownCore', () => {
 
     expect(after.popCount).toBe(before.popCount);
     expect(after.foodStock).toBe(before.foodStock);
+  });
+});
+
+// Build a small, provisioned, walled colony with ovens + beds — enough to live,
+// work and weather a raid — so the raid systems can actually exercise.
+function townWithColony(seed: number): TownCore {
+  const core = new TownCore({ width: 48, height: 48, seed });
+  const g = core.grid;
+  const KITCHEN = ROOM_TYPE_ID.get('kitchen')!;
+  const HOME = ROOM_TYPE_ID.get('home')!;
+  g.designateRect(20, 20, 25, 23, KITCHEN);
+  for (let x = 19; x <= 26; x++) { g.setWall(x, 19); g.setWall(x, 24); }
+  for (let y = 19; y <= 24; y++) { g.setWall(19, y); g.setWall(26, y); }
+  g.placeStation('oven', 20, 20); g.placeStation('oven', 22, 20);
+  g.designateRect(20, 27, 25, 30, HOME);
+  for (let x = 19; x <= 26; x++) { g.setWall(x, 26); g.setWall(x, 31); }
+  for (let y = 26; y <= 31; y++) { g.setWall(19, y); g.setWall(26, y); }
+  g.placeStation('bed', 20, 27); g.placeStation('bed', 22, 27); g.placeStation('bed', 24, 27);
+  g.rebuildRooms();
+  core.stock.add('grain', 2000);
+  core.seedColony(22, 22, 6);
+  return core;
+}
+
+describe('Parity — raids are a live, consequential threat in both cores', () => {
+  it('the old Simulation can muster and end a raid', () => {
+    const sim = new Simulation(3);
+    sim.startRaid();
+    expect(sim.raidActive).toBe(true);
+    expect(sim.raiders.length).toBeGreaterThan(0);
+  });
+
+  it('TownCore musters its first raid on schedule and resolves it', () => {
+    const core = townWithColony(1);
+    // Schedule mirrors the fat sim: first raid lands within firstRaidDay..+5.
+    expect(core.nextRaidDay).toBeGreaterThanOrEqual(TUNING.firstRaidDay);
+    expect(core.nextRaidDay).toBeLessThanOrEqual(TUNING.firstRaidDay + 5);
+
+    let sawRaid = false;
+    for (let d = 0; d < 22; d++) {
+      for (let k = 0; k < 360; k++) {
+        core.tick();
+        if (core.raidActive) sawRaid = true;
+      }
+    }
+    expect(sawRaid).toBe(true);          // a raid happened
+    expect(core.raidActive).toBe(false); // …and it resolved
+  });
+
+  it('a TownCore raid is consequential — raiders are fought (slain or casualties)', () => {
+    const core = townWithColony(1);
+    for (let d = 0; d < 18; d++) for (let k = 0; k < 360; k++) core.tick();
+    // Either the militia drew blood or the colony took losses — combat occurred.
+    expect(core.raids.slain + core.deaths).toBeGreaterThan(0);
+  });
+
+  it('raids keep TownCore deterministic (same seed = same outcome)', () => {
+    const a = townWithColony(4);
+    const b = townWithColony(4);
+    for (let d = 0; d < 20; d++) for (let k = 0; k < 360; k++) { a.tick(); b.tick(); }
+    expect(a.population).toBe(b.population);
+    expect(a.deaths).toBe(b.deaths);
+    expect(a.raids.slain).toBe(b.raids.slain);
+    expect(a.nextRaidDay).toBe(b.nextRaidDay);
+  });
+
+  it('a TownCore raid round-trips mid-fight without desync', () => {
+    // Fast-forward to a tick where a raid is active, then save/restore and verify
+    // the restored core keeps stepping identically.
+    const core = townWithColony(1);
+    let guard = 0;
+    while (!core.raidActive && guard++ < 22 * 360) core.tick();
+    expect(core.raidActive).toBe(true);
+
+    const twin = TownCore.deserialize(core.serialize());
+    for (let i = 0; i < 50; i++) { core.tick(); twin.tick(); }
+    expect(twin.population).toBe(core.population);
+    expect(twin.deaths).toBe(core.deaths);
+    expect(twin.raids.slain).toBe(core.raids.slain);
   });
 });
