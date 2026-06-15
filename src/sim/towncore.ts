@@ -1046,7 +1046,19 @@ export class TownCore {
     this._droughtActive = nowDrought;
 
     const nowFlood = growingSeason && this.weather.isFloodRisk(this.day);
-    if (nowFlood && !this._floodActive) this.addLog('Heavy rains threaten to flood the low-lying fields.', 'bad');
+    if (nowFlood && !this._floodActive) {
+      // Flood: wash out 1-2 random crop tiles
+      const cropTiles: number[] = [];
+      for (let fi = 0; fi < this.grid.size; fi++) {
+        if (this.grid.zone[fi] === ZONE.FIELD || this.grid.zone[fi] === ZONE.FLAX) cropTiles.push(fi);
+      }
+      const washed = Math.min(cropTiles.length, 1 + this.rng.int(2));
+      for (let w = 0; w < washed; w++) {
+        const pick = cropTiles.splice(this.rng.int(cropTiles.length), 1)[0];
+        this.grid.clearZone(pick % this.grid.width, (pick / this.grid.width) | 0);
+      }
+      this.addLog(`Heavy rains flood the fields — ${washed} field tile${washed > 1 ? 's' : ''} washed out.`, 'bad');
+    }
     else if (!nowFlood && this._floodActive) this.addLog('The rains ease. Flood threat passes.', 'info');
     this._floodActive = nowFlood;
 

@@ -404,7 +404,10 @@ function draw(): void {
   const seasonIdx = Math.floor((core.day % DAYS_PER_YEAR) / DAYS_PER_SEASON);
   const year = START_YEAR + Math.floor(core.day / DAYS_PER_YEAR);
   const seasonLabel = `${SEASONS[seasonIdx]} ${year}`;
-  line(0, `${core.townName}  ${seasonLabel}  day ${core.day}  pop ${core.population}  mood ${core.averageMood().toFixed(0)}  gold ${core.gold.toFixed(0)}  era ${core.era}  [${core.focus}]`);
+  const SEASON_BASE_C = [10, 22, 8, -8]; // spring/summer/fall/winter base °C
+  const tempC = Math.round(SEASON_BASE_C[seasonIdx] + core.weather.forDay(core.day).tempAnomalyC);
+  const tempLabel = `${tempC > 0 ? '+' : ''}${tempC}°C`;
+  line(0, `${core.townName}  ${seasonLabel}  day ${core.day}  ${tempLabel}  pop ${core.population}  mood ${core.averageMood().toFixed(0)}  gold ${core.gold.toFixed(0)}  era ${core.era}  [${core.focus}]`);
   const flowStr = (kind: Parameters<typeof core.netFlow>[0]) => {
     const f = core.netFlow(kind);
     return f === 0 ? '' : (f > 0 ? `+${f.toFixed(1)}` : f.toFixed(1));
