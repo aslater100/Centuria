@@ -93,6 +93,15 @@ export interface LogEntry {
   kind: 'info' | 'good' | 'bad';
 }
 
+/** A player-facing choice presented by a random event. Set on `TownCore.pendingChoice`
+ *  when an event needs input; cleared by `resolveEventChoice(index)`. */
+export interface PendingEventChoice {
+  id: string;
+  title: string;
+  text: string;
+  choices: { label: string; desc: string }[];
+}
+
 /** A displayable snapshot of one settler, reconstructed from the SoA columns —
  *  what a HUD inspector panel needs without reaching into the typed arrays. */
 export interface SettlerView {
@@ -252,6 +261,8 @@ export class TownCore {
   homeY: number;
   /** Day the next random event fires. */
   nextEventDay: number = FIRST_EVENT_DAY;
+  /** If set, the current event waiting for a player choice. Cleared by resolveEventChoice(). */
+  pendingChoice: PendingEventChoice | null = null;
   /** Tracks current drought state to log transitions (drought start/end). */
   private _droughtActive = false;
   /** Last logged season index, to detect season changes. */
@@ -771,19 +782,23 @@ export class TownCore {
   // ── random events ─────────────────────────────────────────────────────────────
 
   private fireRandomEvent(): void {
+    // Choice events block further auto-events until resolved.
+    if (this.pendingChoice) return;
     const [min, max] = EVENT_INTERVAL;
     this.nextEventDay = this.day + min + this.rng.int(max - min + 1);
     const roll = this.rng.next();
-    if      (roll < 0.12) this.evtMerchant();
-    else if (roll < 0.22) this.evtWanderer();
-    else if (roll < 0.32) this.evtColdSnap();
+    if      (roll < 0.08) this.evtChoiceTrader();
+    else if (roll < 0.14) this.evtChoiceBandits();
+    else if (roll < 0.18) this.evtMerchant();
+    else if (roll < 0.26) this.evtWanderer();
+    else if (roll < 0.34) this.evtColdSnap();
     else if (roll < 0.42) this.evtRats();
-    else if (roll < 0.52) this.evtFestival();
-    else if (roll < 0.62) this.evtFeverOutbreak();
-    else if (roll < 0.72) this.evtBumperHarvest();
-    else if (roll < 0.82) this.evtWindfallTimber();
-    else if (roll < 0.91) this.evtSkillBreakthrough();
-    else if (roll < 0.96) this.evtStormDamage();
+    else if (roll < 0.50) this.evtFestival();
+    else if (roll < 0.58) this.evtFeverOutbreak();
+    else if (roll < 0.66) this.evtBumperHarvest();
+    else if (roll < 0.74) this.evtWindfallTimber();
+    else if (roll < 0.82) this.evtSkillBreakthrough();
+    else if (roll < 0.90) this.evtStormDamage();
     else                  this.evtInjuredWorker();
   }
 
@@ -893,6 +908,71 @@ export class TownCore {
     const i = healthy[this.rng.int(healthy.length)];
     this.agents.inflictWound(i, this.tickNo);
     this.addLog(`${this.agents.name(i)} takes a bad fall at work — they need treatment.`, 'bad');
+  }
+
+  private evtChoiceTrader(): void {
+    this.pendingChoice = {
+      id: 'trader',
+      title: 'Merchant Caravan',
+      text: 'A well-supplied merchant caravan passes through. Trade with them?',
+      choices: [
+        { label: 'Trade 5 wood', desc: 'Get 8 grain (requires 5 wood in stock).' },
+        { label: 'Decline', desc: 'The merchant moves on.' },
+      ],
+    };
+  }
+
+  private evtChoiceBandits(): void {
+    this.pendingChoice = {
+      id: 'bandits',
+      title: 'Bandits at the Gate',
+      text: 'A gang of armed outlaws demands tribute or promises violence.',
+      choices: [
+        { label: 'Pay 10 gold', desc: 'They take the coin and leave (requires 10 gold).' },
+        { label: 'Stand your ground', desc: 'They attack. Two settlers fight them off but may be wounded.' },
+      ],
+    };
+  }
+
+  /**
+   * Resolve a pending player-choice event. Returns true if the choice was valid.
+   * Clears `pendingChoice` so the next event can fire.
+   */
+  resolveEventChoice(choiceIndex: number): boolean {
+    const ev = this.pendingChoice;
+    if (!ev || choiceIndex < 0 || choiceIndex >= ev.choices.length) return false;
+    this.pendingChoice = null;
+
+    switch (ev.id) {
+      case 'trader':
+        if (choiceIndex === 0 && this.stock.count('wood') >= 5) {
+          this.stock.remove('wood', 5);
+          this.stock.add('grain', 8);
+          this.addLog('Traded 5 wood for 8 grain with the merchant caravan.', 'good');
+        } else {
+          this.addLog('The merchant caravan moves on without a trade.', 'info');
+        }
+        break;
+      case 'bandits':
+        if (choiceIndex === 0 && this.gold >= 10) {
+          this.gold -= 10;
+          this.addLog('Paid 10 gold tribute — the bandits leave without bloodshed.', 'info');
+        } else {
+          // Stand and fight: wound up to two settlers, log the skirmish.
+          let wounded = 0;
+          for (let i = 0; i < this.agents.count && wounded < 2; i++) {
+            if (this.agents.health[i] > 20 && this.agents.woundUntreated[i] === 0) {
+              this.agents.inflictWound(i, this.tickNo);
+              wounded++;
+            }
+          }
+          this.addLog(wounded > 0
+            ? `The colony stands firm — ${wounded} settler(s) wounded driving off the bandits.`
+            : 'The colony stands firm and drives off the bandits.', wounded > 0 ? 'bad' : 'good');
+        }
+        break;
+    }
+    return true;
   }
 
   // ── research ──────────────────────────────────────────────────────────────────
