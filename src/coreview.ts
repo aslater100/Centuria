@@ -9,15 +9,21 @@
  *   space pause · 1/2/3 speed · R raid now · N add settler ·
  *   left-drag paint wall · right-drag erase
  *
- * ponytail: deliberately minimal — direct canvas rects/dots, no shared Renderer
- * (that one is welded to the fat Simulation). It exists to validate behavior, not
- * to be pretty; the real renderer lands with PART 2.
+ * Renders with the game's real procedural sprites (`buildSprites`) so TownCore
+ * looks like the live game — reachable in the real app via `?core` (see main.ts)
+ * or the standalone `core.html`. ponytail: reuses the sprite generator + BuildGrid
+ * render path; no fork of the 800-line fat-sim Renderer.
  */
 import './style.css';
 import { TownCore } from './sim/towncore';
 import { AState } from './sim/agents';
 import { TERRAIN, ZONE } from './sim/build';
-import { ROOM_TYPE_ID, TICKS_PER_SECOND } from './sim/defs';
+import { ROOM_TYPE_ID, STATION_DEF_BY_NUM, TICKS_PER_SECOND } from './sim/defs';
+import { buildSprites } from './ui/sprites';
+
+// Real game art, generated procedurally (no asset files). [] skips building
+// sprites — TownCore renders from the BuildGrid (floor/wall/stations) + terrain.
+const sprites = buildSprites([]);
 
 const MAP = 64;
 // B-6 PART 3: boot WITH terrain so the play-test shows the Songs-of-Syx world
@@ -119,43 +125,44 @@ function paintAt(e: MouseEvent): void {
   else g.setZone(t.x, t.y, ZONE[tool.toUpperCase() as keyof typeof ZONE]); // succeeds only on matching terrain
 }
 
-// ── render ──
+// ── render (real game sprites, scaled to the fit-to-screen tile size) ──
 function draw(): void {
   const px = tilePx();
   const g = core.grid;
+  const blit = (img: CanvasImageSource, x: number, y: number) => ctx.drawImage(img, x * px, y * px, px, px);
   ctx.fillStyle = '#15151a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  // Terrain underlay (grass / tree / water / soil / rock), index-aligned with TERRAIN.
-  const TERRAIN_COLORS = ['#243a22', '#1c3a1c', '#1d3a5c', '#3a3320', '#4a4a52'];
+  const anim = (performance.now() / 350 | 0) % sprites.water.length;
   // Zone outline colours, index-aligned with ZONE (none/field/woodcutter/quarry/fishery).
   const ZONE_COLORS = ['', '#d4d46a', '#6ad48a', '#c8c8d8', '#6ad4d4'];
   for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
     const i = y * MAP + x;
     const t = g.terrain[i];
-    if (t !== TERRAIN.GRASS || !g.floor[i]) { // grass under a floor is hidden anyway
-      ctx.fillStyle = TERRAIN_COLORS[t];
-      ctx.fillRect(x * px, y * px, px, px);
-    }
-    if (g.ore[i]) { ctx.fillStyle = '#b8924a'; ctx.fillRect(x * px + px / 3, y * px + px / 3, px / 3, px / 3); }
+    // Ground: water/soil/rock get their own tile; grass also backs trees.
+    if (t === TERRAIN.WATER) blit(sprites.water[anim], x, y);
+    else if (t === TERRAIN.SOIL) blit(sprites.soil, x, y);
+    else if (t === TERRAIN.ROCK) blit(g.ore[i] ? sprites.rockMarked : sprites.rock, x, y);
+    else blit(sprites.grass[(x * 3 + y) % 4], x, y);
+    if (t === TERRAIN.TREE) blit(sprites.tree, x, y);
     if (g.zone[i]) { ctx.strokeStyle = ZONE_COLORS[g.zone[i]]; ctx.strokeRect(x * px + 0.5, y * px + 0.5, px - 1, px - 1); }
-    if (g.floor[i]) { ctx.fillStyle = '#2a2a32'; ctx.fillRect(x * px, y * px, px, px); }
-    if (g.wall[i]) { ctx.fillStyle = '#6b5b4b'; ctx.fillRect(x * px, y * px, px, px); }
-    if (g.gate[i]) { ctx.fillStyle = '#9a7b3b'; ctx.fillRect(x * px + px / 4, y * px + px / 4, px / 2, px / 2); }
+    if (g.gate[i]) blit(sprites.gate, x, y);
+    else if (g.wall[i]) blit(sprites.interiorWall, x, y);
+    else if (g.floor[i]) blit(sprites.interiorFloor, x, y);
   }
-  for (const s of g.stations) { ctx.fillStyle = '#3a8f5a'; ctx.fillRect(s.x * px + 1, s.y * px + 1, s.w * px - 2, s.h * px - 2); }
+  for (const s of g.stations) {
+    const def = STATION_DEF_BY_NUM[s.typeId];
+    const img = def && sprites.stations[def.id];
+    if (img) blit(img, s.x, s.y);
+  }
 
   const a = core.agents;
   for (let i = 0; i < a.count; i++) {
-    const st = a.state[i];
-    ctx.fillStyle = st === AState.Sleeping ? '#5aa0ff' : st === AState.Working ? '#7fe07f' : '#e8e8e8';
-    const cxp = a.posX[i] * px + px / 2, cyp = a.posY[i] * px + px / 2;
-    ctx.fillRect(cxp - 2, cyp - 2, 4, 4);
-    if (a.woundUntreated[i]) { ctx.strokeStyle = '#ff4040'; ctx.strokeRect(cxp - 3, cyp - 3, 6, 6); }
+    const variant = i % sprites.settler.length;
+    blit(sprites.settler[variant][0], a.posX[i], a.posY[i]);
+    if (a.woundUntreated[i]) { ctx.strokeStyle = '#ff4040'; ctx.strokeRect(a.posX[i] * px, a.posY[i] * px, px, px); }
+    if (a.state[i] === AState.Sleeping) { ctx.fillStyle = '#5aa0ff'; ctx.fillText('z', a.posX[i] * px + px, a.posY[i] * px); }
   }
-  for (const r of core.raids.raiders) {
-    ctx.fillStyle = r.fleeing ? '#aa6600' : '#ff3030';
-    ctx.fillRect(r.x * px + px / 2 - 3, r.y * px + px / 2 - 3, 6, 6);
-  }
+  for (const r of core.raids.raiders) blit(sprites.raider[r.fleeing ? 0 : (performance.now() / 200 | 0) % sprites.raider.length], r.x, r.y);
   // Pending blueprints: dashed ghosts the colony hasn't built yet.
   ctx.strokeStyle = '#88aaff'; ctx.setLineDash([2, 2]);
   for (const o of core.builds) ctx.strokeRect(o.x * px + 1, o.y * px + 1, px - 2, px - 2);
