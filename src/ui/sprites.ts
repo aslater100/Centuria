@@ -34,50 +34,78 @@ function grid(rows: string[], pal: Record<string, string>): Px[][] {
   return rows.map((r) => [...r].map((ch) => (ch === '.' ? null : pal[ch] ?? null)));
 }
 
-// Muted, naturalistic palette — earthy, not saturated
+// ---------------------------------------------------------------------------
+// COHESIVE, HUE-SHIFTED PALETTE
+// Single light direction: top-left, warm. Shadows shift cool (toward blue/
+// violet) and desaturate; highlights shift warm (toward yellow) and saturate.
+// Outline is a shared near-black warm-brown so every sprite belongs to one set.
+// ---------------------------------------------------------------------------
 const P = {
-  outline: '#26201a',
-  shadow: 'rgba(20,16,10,0.35)',
-  grassA: '#566445',
-  grassB: '#5d6b4a',
-  grassC: '#515f42',
-  grassD: '#4e5c40',
-  blade: '#6b7a52',
-  bladeLight: '#7a8a5e',
-  dirtPatch: '#6b5a40',
-  dirtMid: '#5e4e36',
+  outline: '#231c16',         // shared warm near-black outline
+  outlineSoft: '#352a20',     // softer interior outline / occlusion
+  shadow: 'rgba(28,22,40,0.34)', // cast shadow, faintly cool/violet
+  shadowSoft: 'rgba(28,22,40,0.22)',
+  // Grass ramp — warm-lit green, shadow side cools toward blue-green
+  grassA: '#586848',
+  grassB: '#60704e',
+  grassC: '#506044',
+  grassD: '#4a5c42',
+  grassShadow: '#42543e',     // cool, slightly blue shadow patch
+  blade: '#74855a',
+  bladeLight: '#8a9c66',       // warm highlight on blade tips
+  dirtPatch: '#6e5a3e',
+  dirtMid: '#5c4a32',
+  dirtLight: '#806a48',
   soil: '#6b5138',
-  soilDark: '#5a4129',
-  soilMid: '#614830',
+  soilDark: '#523c28',         // cooler/deeper furrow shadow
+  soilMid: '#7a5c3e',          // warm furrow crest
   crop: '#7e8c4a',
-  cropRipe: '#c2a14d',
-  water1: '#3d586b',
-  water2: '#446076',
-  water3: '#3a5464',
-  waterGlint: '#5d7d94',
-  waterGlint2: '#6d8fa6',
-  rock: '#787469',
-  rockDark: '#5e5a50',
-  rockLight: '#8c887c',
-  rockHighlight: '#9e9a8e',
-  treeLeafLight: '#55703f',
-  treeLeaf: '#466034',
-  treeLeafDark: '#364d28',
-  treeLeafDeep: '#2c3f20',
-  trunk: '#4d3a26',
-  trunkDark: '#3a2a1a',
-  skin: '#c9a07a',
-  skinB: '#a87f5c',
-  skinShad: '#b8906a',
+  cropDark: '#5e6c38',
+  cropRipe: '#c8a850',
+  // Water ramp — cool, desaturated depths, warm-cool glints
+  water1: '#3a5468',           // deep
+  water2: '#446076',           // mid
+  water3: '#33485a',           // deepest trough
+  waterGlint: '#6688a0',
+  waterGlint2: '#8aacc0',      // brightest sky reflection
+  // Rock ramp — neutral stone, cool shadow, warm top highlight
+  rock: '#7c776a',
+  rockDark: '#565249',         // cool shadow
+  rockDarker: '#403d36',
+  rockLight: '#969182',
+  rockHighlight: '#b0ab98',    // warm lit crest
+  // Foliage ramp — deep cool shadow up to warm-yellow lit top
+  treeLeafLight: '#6c8a48',
+  treeLeafTop: '#88a458',      // warm sunlit highlight
+  treeLeaf: '#4c6838',
+  treeLeafDark: '#37502a',
+  treeLeafDeep: '#2a3e22',     // cool deep shadow
+  trunk: '#503c28',
+  trunkDark: '#392a1b',
+  trunkLight: '#6a5036',       // warm lit side of trunk
+  // Skin ramp — warm midtone, cool-violet shadow, warm highlight
+  skin: '#cda383',
+  skinShad: '#a67c5e',         // cooler, desaturated shadow
+  skinLight: '#e0bc98',        // warm cheek/forehead highlight
+  skinB: '#b08866',            // darker complexion midtone
+  skinBShad: '#8a6448',
+  skinBLight: '#c8a07c',
   hairA: '#3a2c1c',
   hairB: '#6b4a2a',
-  hairC: '#8c8478',
-  cloth1: '#7a6248',
-  cloth2: '#5d6b6e',
-  cloth3: '#735a66',
-  clothRaider: '#8c3a2c',
-  clothDark1: '#5e4c38',
-  clothDark2: '#445052',
+  hairC: '#9a9286',
+  // Clothing ramps (mid / shadow / highlight) — each a distinct hue family
+  cloth1: '#8a6a44',           // ochre tunic
+  clothDark1: '#5e4830',
+  clothLight1: '#a8855a',
+  cloth2: '#566a72',           // teal-blue tunic
+  clothDark2: '#3c4e56',
+  clothLight2: '#789098',
+  cloth3: '#7a5868',           // mauve tunic
+  clothDark3: '#56384a',
+  clothLight3: '#9a7488',
+  clothRaider: '#9a3a2a',      // blood-red raider
+  clothRaiderDk: '#6a2018',
+  clothRaiderLt: '#c25240',
   wood: '#9c7544',
   woodDark: '#7a5a32',
   woodLight: '#b08858',
@@ -164,150 +192,207 @@ export interface SpriteSet {
   stations: Record<string, HTMLCanvasElement>;
 }
 
-/** Soft ground: organic tone patches + sparse grass blades at 32×32. */
+// Tiny deterministic PRNG so grass/texture is stable across builds.
+function mulberry(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Soft ground at 32×32. A cohesive green base with gently mottled clumps
+ * (cool-shadow patches + warm-lit patches) and a scatter of upright blades
+ * whose tips catch warm light. Variants rotate the base tone and the seed so
+ * adjacent tiles don't tile-repeat obviously.
+ */
 function grassTile(variant: number): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = TILE; c.height = TILE;
   const g = c.getContext('2d')!;
+  const rnd = mulberry(1000 + variant * 97);
   const base = [P.grassA, P.grassB, P.grassC, P.grassD][variant % 4];
-  const mid  = [P.grassB, P.grassC, P.grassA, P.grassB][variant % 4];
   g.fillStyle = base;
   g.fillRect(0, 0, TILE, TILE);
-  // irregular tone blobs — organic patches, not checkerboard
-  g.fillStyle = mid;
-  const blobs = [
-    [2, 4, 10, 7], [14, 2, 11, 8], [4, 16, 8, 9],
-    [20, 18, 10, 8], [0, 26, 7, 6], [24, 8, 8, 6],
-  ];
-  for (const [x, y, w, h] of blobs) {
-    g.fillRect((x + variant * 5) % 26, (y + variant * 7) % 26, w, h);
+  // soft mottling: scattered 2-3px clumps, cool shadow + warm light
+  for (let i = 0; i < 26; i++) {
+    const x = Math.floor(rnd() * TILE);
+    const y = Math.floor(rnd() * TILE);
+    const s = 1 + Math.floor(rnd() * 2);
+    const roll = rnd();
+    g.fillStyle = roll < 0.45 ? P.grassShadow : roll < 0.8 ? P.grassC : P.grassB;
+    g.fillRect(x, y, s + 1, s);
   }
-  // subtle darker edge detail
-  g.fillStyle = P.grassC;
-  for (let i = 0; i < 3; i++) {
-    g.fillRect((i * 11 + variant * 9) % 28, (i * 13 + variant * 3) % 28, 3, 2);
-  }
-  // grass blades
-  g.fillStyle = P.blade;
-  for (let i = 0; i < 7; i++) {
-    const bx = (i * 7 + variant * 11) % 29 + 1;
-    const by = (i * 11 + variant * 5) % 29 + 1;
-    g.fillRect(bx, by, 1, 3);
-    if (i % 3 === 0) { g.fillStyle = P.bladeLight; g.fillRect(bx, by, 1, 1); g.fillStyle = P.blade; }
+  // grass blades — short verticals, warm-lit tip on some
+  for (let i = 0; i < 10; i++) {
+    const bx = Math.floor(rnd() * (TILE - 1));
+    const by = Math.floor(rnd() * (TILE - 4));
+    const h = 2 + Math.floor(rnd() * 2);
+    g.fillStyle = P.blade;
+    g.fillRect(bx, by, 1, h);
+    if (rnd() < 0.5) { g.fillStyle = P.bladeLight; g.fillRect(bx, by, 1, 1); }
   }
   return c;
 }
 
+/** Worn bare-earth patch fading into grass at the edges. */
 function dirtPatchTile(): HTMLCanvasElement {
   const c = grassTile(0);
   const g = c.getContext('2d')!;
-  g.fillStyle = P.dirtPatch;
-  g.fillRect(6, 8, 20, 16);
-  g.fillRect(10, 4, 12, 24);
-  g.fillStyle = P.dirtMid;
-  g.fillRect(10, 10, 12, 10);
-  // wheel ruts
-  g.fillStyle = P.rutDark;
-  g.fillRect(10, 9, 3, 14);
-  g.fillRect(19, 9, 3, 14);
-  g.fillStyle = P.rutLight;
-  g.fillRect(11, 9, 1, 14);
+  const rnd = mulberry(404);
+  // ragged dirt blob (lighter mid centre, darker rim)
+  fillDisc(g, 16, 16, 14, 13, P.dirtMid);
+  fillDisc(g, 15, 15, 11, 10, P.dirtPatch);
+  fillDisc(g, 13, 13, 6, 5, P.dirtLight); // warm-lit centre
+  // scattered pebbles + scuff specks for texture
+  for (let i = 0; i < 16; i++) {
+    const x = 5 + Math.floor(rnd() * 22);
+    const y = 5 + Math.floor(rnd() * 22);
+    g.fillStyle = rnd() < 0.5 ? P.dirtMid : P.gravelC;
+    g.fillRect(x, y, 1 + (rnd() < 0.3 ? 1 : 0), 1);
+  }
+  // ragged grass tufts intruding at the edges
+  g.fillStyle = P.blade;
+  for (let i = 0; i < 5; i++) {
+    const ang = rnd() * Math.PI * 2;
+    const x = Math.round(16 + Math.cos(ang) * 13);
+    const y = Math.round(16 + Math.sin(ang) * 12);
+    g.fillRect(x, y, 1, 2);
+  }
   return c;
 }
 
+/**
+ * Animated water. Cool desaturated body with gentle horizontal wave bands
+ * (deep troughs + lighter crests) that drift, plus a few bright sky glints.
+ * Two frames offset so the surface shimmers; tiles seamlessly horizontally.
+ */
 function waterTile(frame: number): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = TILE; c.height = TILE;
   const g = c.getContext('2d')!;
   g.fillStyle = P.water1;
   g.fillRect(0, 0, TILE, TILE);
-  // ripple bands
-  g.fillStyle = P.water2;
-  for (let i = 0; i < 4; i++) {
-    const rx = (i * 9 + frame * 5) % 28;
-    const ry = 4 + i * 7;
-    g.fillRect(rx, ry, 9, 2);
+  const off = frame * 4;
+  // wave crests (lighter mid) and troughs (deepest), sinusoidal drift
+  for (let y = 0; y < TILE; y += 4) {
+    const phase = Math.sin((y + off) * 0.6);
+    const sx = Math.floor(phase * 3);
+    g.fillStyle = P.water2;
+    for (let x = -8; x < TILE; x += 8) g.fillRect(((x + sx + off) % TILE + TILE) % TILE, y, 5, 1);
+    g.fillStyle = P.water3;
+    for (let x = -8; x < TILE; x += 8) g.fillRect(((x + sx + off + 4) % TILE + TILE) % TILE, y + 2, 4, 1);
   }
-  g.fillStyle = P.water3;
-  for (let i = 0; i < 3; i++) {
-    const rx = (i * 13 + frame * 3 + 5) % 26;
-    const ry = 8 + i * 9;
-    g.fillRect(rx, ry, 5, 1);
-  }
-  // glints
+  // sky glints — brightest, drift faster
+  const rnd = mulberry(7 + frame);
   g.fillStyle = P.waterGlint;
-  g.fillRect((6 + frame * 7) % 26, (10 + frame * 5) % 24, 4, 2);
+  for (let i = 0; i < 4; i++) {
+    const gx = (Math.floor(rnd() * TILE) + off * 2) % TILE;
+    const gy = Math.floor(rnd() * TILE);
+    g.fillRect(gx, gy, 3, 1);
+  }
   g.fillStyle = P.waterGlint2;
-  g.fillRect((18 + frame * 4) % 28, (3 + frame * 6) % 26, 2, 1);
+  g.fillRect((10 + off * 2) % TILE, 6, 2, 1);
+  g.fillRect((22 + off) % TILE, 18, 2, 1);
   return c;
 }
 
-/** Big rounded canopy overhanging the tile (40×44, drawn offset by renderer). */
+/** Filled-disc helper used by several round sprites (no antialias, pixel-crisp). */
+function fillDisc(g: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number, col: string) {
+  g.fillStyle = col;
+  for (let dy = -ry; dy <= ry; dy++) {
+    const t = dy / ry;
+    const w = Math.floor(rx * Math.sqrt(Math.max(0, 1 - t * t)) + 0.5);
+    if (w <= 0) continue;
+    g.fillRect(Math.round(cx - w), Math.round(cy + dy), w * 2, 1);
+  }
+}
+
+/**
+ * Big rounded canopy overhanging the tile (40×44, drawn offset by renderer).
+ * Hue-shifted foliage: cool deep shadow at the lower-right rim climbing to a
+ * warm sunlit highlight on the upper-left crown. Clumped, not a flat blob.
+ */
 function treeSprite(marked: boolean): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = 40; c.height = 44;
   const g = c.getContext('2d')!;
-  // ground shadow
+  // soft cool ground shadow, offset to the lower-right (top-left light)
   g.fillStyle = P.shadow;
-  g.fillRect(8, 34, 24, 8);
-  // trunk
+  fillDisc(g, 22, 38, 13, 5, P.shadow);
+  // trunk — lit left edge, cool right shadow
   g.fillStyle = marked ? '#c25b2e' : P.trunkDark;
   g.fillRect(17, 28, 6, 14);
   g.fillStyle = marked ? '#d06a3a' : P.trunk;
-  g.fillRect(18, 28, 4, 14);
-  g.fillStyle = marked ? '#e07848' : P.woodLight;
-  g.fillRect(19, 28, 2, 10);
-  // canopy: deep layered ovals lit from upper-left
-  const layers: [number, number, number, number, string][] = [
-    [4, 8, 30, 22, P.treeLeafDeep],
-    [3, 6, 28, 20, P.treeLeafDark],
-    [4, 4, 26, 18, P.treeLeaf],
-    [6, 2, 22, 16, P.treeLeaf],
-    [8, 1, 18, 13, P.treeLeafLight],
-    [10, 1, 10, 7, P.treeLeafLight],
-  ];
-  for (const [x, y, w, h, col] of layers) {
-    g.fillStyle = col;
-    g.fillRect(x + 2, y, w - 4, h);
-    g.fillRect(x, y + 2, w, h - 4);
-    g.fillRect(x + 1, y + 1, w - 2, h - 2);
-  }
-  // highlight fleck top-left
-  g.fillStyle = '#70904a';
-  g.fillRect(10, 2, 5, 3);
-  g.fillRect(8, 4, 3, 4);
+  g.fillRect(18, 28, 4, 13);
+  g.fillStyle = marked ? '#e07848' : P.trunkLight;
+  g.fillRect(18, 28, 2, 11);
+
+  const cx = 19, cy = 16;
+  // base/deep canopy (cool, occluded underside)
+  fillDisc(g, cx + 1, cy + 3, 17, 14, P.treeLeafDeep);
+  fillDisc(g, cx + 2, cy + 4, 14, 11, P.treeLeafDark);
+  // main body
+  fillDisc(g, cx, cy + 1, 16, 13, P.treeLeaf);
+  // a few overlapping clumps to break the silhouette
+  fillDisc(g, cx - 6, cy - 2, 8, 7, P.treeLeaf);
+  fillDisc(g, cx + 7, cy + 1, 8, 7, P.treeLeafDark);
+  fillDisc(g, cx - 1, cy - 6, 9, 7, P.treeLeaf);
+  // warm-lit upper-left highlights (sun)
+  fillDisc(g, cx - 5, cy - 4, 7, 6, P.treeLeafLight);
+  fillDisc(g, cx - 3, cy - 5, 5, 4, P.treeLeafTop);
+  // dappled flecks of warm light
+  g.fillStyle = P.treeLeafTop;
+  g.fillRect(cx - 8, cy + 2, 2, 2);
+  g.fillRect(cx + 2, cy - 7, 2, 2);
+  g.fillRect(cx - 1, cy + 1, 2, 2);
+  // a couple of cool shadow dapples lower-right
+  g.fillStyle = P.treeLeafDeep;
+  g.fillRect(cx + 9, cy + 6, 2, 2);
+  g.fillRect(cx + 4, cy + 9, 2, 2);
+
   if (marked) {
     g.fillStyle = '#c25b2e';
-    g.fillRect(30, 0, 8, 8);
+    g.fillRect(31, 0, 8, 8);
     g.fillStyle = '#f08040';
-    g.fillRect(32, 1, 4, 4);
+    g.fillRect(33, 1, 4, 4);
   }
   return c;
 }
 
+/**
+ * A clustered boulder on grass. Faceted, not a smooth blob: a big lit slab on
+ * the upper-left, cooler faces dropping to the lower-right, with a cast shadow.
+ */
 function rockSprite(marked: boolean): HTMLCanvasElement {
   const c = grassTile(2);
   const g = c.getContext('2d')!;
-  // shadow
-  g.fillStyle = P.shadow;
-  g.fillRect(4, 22, 26, 8);
-  // body layers — rounded boulder shape
-  g.fillStyle = P.rockDark;
-  g.fillRect(4, 10, 24, 18);
-  g.fillRect(7, 7, 18, 22);
-  g.fillStyle = P.rock;
-  g.fillRect(6, 11, 20, 15);
-  g.fillRect(9, 8, 14, 20);
-  // light face (upper-left)
+  // cool cast shadow, lower-right
+  fillDisc(g, 17, 25, 13, 4, P.shadow);
+  // base boulder body (cool dark)
+  fillDisc(g, 16, 17, 13, 11, P.rockDarker);
+  fillDisc(g, 15, 16, 12, 10, P.rockDark);
+  // main facet (midtone)
+  fillDisc(g, 14, 15, 10, 8, P.rock);
+  // upper-left lit facet — angular slab
   g.fillStyle = P.rockLight;
-  g.fillRect(9, 9, 10, 7);
-  g.fillRect(7, 13, 6, 6);
+  g.fillRect(8, 9, 11, 7);
+  g.fillRect(7, 12, 8, 5);
   g.fillStyle = P.rockHighlight;
-  g.fillRect(10, 9, 5, 3);
-  // crack detail
-  g.fillStyle = P.rockDark;
-  g.fillRect(16, 12, 1, 8);
-  g.fillRect(17, 16, 3, 1);
+  g.fillRect(9, 9, 7, 3);
+  g.fillRect(8, 11, 4, 2);
+  // small companion rock, front-right
+  fillDisc(g, 23, 22, 6, 4, P.rockDark);
+  fillDisc(g, 22, 21, 5, 3, P.rock);
+  g.fillStyle = P.rockLight; g.fillRect(20, 19, 4, 2);
+  // facet break lines (cool)
+  g.fillStyle = P.rockDarker;
+  g.fillRect(15, 12, 1, 9);
+  g.fillRect(15, 18, 6, 1);
+  g.fillRect(11, 16, 4, 1);
   if (marked) {
     g.fillStyle = '#c25b2e';
     g.fillRect(24, 2, 6, 6);
@@ -317,32 +402,45 @@ function rockSprite(marked: boolean): HTMLCanvasElement {
   return c;
 }
 
+/**
+ * Plowed field. Furrows run horizontally: each ridge has a warm-lit crest
+ * (top edge, facing the light) and a cool shadow in the trough below. Crops
+ * grow in rows along the ridges, advancing through the four stages.
+ */
 function soilTile(stage: 'bare' | 'sown' | 'grown' | 'ripe'): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = TILE; c.height = TILE;
   const g = c.getContext('2d')!;
   g.fillStyle = P.soil;
   g.fillRect(0, 0, TILE, TILE);
-  // plowed furrow rows every 6px, alternating tones
+  // furrow ridges every 6px: lit crest on top, cool trough below
   for (let y = 0; y < TILE; y += 6) {
-    g.fillStyle = P.soilDark;
-    g.fillRect(0, y, TILE, 3);
-    g.fillStyle = P.soilMid;
-    g.fillRect(0, y + 1, TILE, 1);
+    g.fillStyle = P.soilDark;            // trough shadow
+    g.fillRect(0, y + 4, TILE, 2);
+    g.fillStyle = P.soilMid;             // warm ridge crest
+    g.fillRect(0, y, TILE, 2);
+    g.fillStyle = P.dirtLight;           // crest highlight fleck
+    for (let x = 2; x < TILE; x += 9) g.fillRect(x, y, 2, 1);
   }
   if (stage !== 'bare') {
-    const col = stage === 'sown' ? P.treeLeafDark : stage === 'grown' ? P.crop : P.cropRipe;
-    const hgt = stage === 'sown' ? 3 : stage === 'grown' ? 6 : 9;
-    g.fillStyle = col;
-    for (let y = 4; y < TILE; y += 6) {
-      for (let x = 3; x < TILE - 2; x += 7) {
-        g.fillRect(x, y - hgt + 3, 3, hgt);
-        if (stage === 'ripe') {
-          g.fillStyle = P.grain;
-          g.fillRect(x, y - hgt + 2, 3, 2);
-          g.fillRect(x - 1, y - hgt + 3, 1, 1);
-          g.fillRect(x + 3, y - hgt + 3, 1, 1);
-          g.fillStyle = col;
+    const rnd = mulberry(stage === 'sown' ? 11 : stage === 'grown' ? 22 : 33);
+    for (let y = 3; y < TILE; y += 6) {
+      for (let x = 3; x < TILE - 2; x += 6) {
+        const jx = x + (rnd() < 0.5 ? 0 : 1);
+        if (stage === 'sown') {
+          // small sprouts
+          g.fillStyle = P.cropDark; g.fillRect(jx + 1, y, 1, 2);
+          g.fillStyle = P.crop; g.fillRect(jx + 1, y, 1, 1);
+        } else if (stage === 'grown') {
+          // leafy clumps, lit left
+          g.fillStyle = P.cropDark; g.fillRect(jx, y - 3, 4, 5);
+          g.fillStyle = P.crop;     g.fillRect(jx, y - 3, 3, 4);
+          g.fillStyle = P.bladeLight; g.fillRect(jx, y - 3, 1, 2);
+        } else {
+          // ripe: golden ears on green stalks
+          g.fillStyle = P.cropDark; g.fillRect(jx + 1, y - 1, 1, 4);
+          g.fillStyle = P.cropRipe; g.fillRect(jx, y - 5, 3, 4);
+          g.fillStyle = P.grain;    g.fillRect(jx, y - 5, 2, 2);
         }
       }
     }
@@ -432,60 +530,105 @@ function roadTile(kind: string, plan: boolean): HTMLCanvasElement {
 }
 
 /**
- * Capsule pawn at 32×32, RimWorld-ish: large round head, stubby torso,
- * 2-frame walk bob, drop shadow below feet.
+ * Top-down pawn at 32×32. Read as a figure seen from above-front: a hair-capped
+ * head (hair frames the crown and back, face/shoulders catch the warm top-left
+ * light), a tunic torso with shaded sides, two arms, and feet that swing for the
+ * 2-frame walk. Light is top-left: left side highlighted, right side shadowed.
+ * Drop shadow sits under the feet. `armed` adds a slung spear on the right.
  */
-function pawnSprite(cloth: string, clothDk: string, frame: number, skin: string, skinShad: string, hair: string, armed = false): HTMLCanvasElement {
-  // 32-row grid, each char = 1px
-  const lL = frame === 0 ? 'LL..' : '..LL';
-  const lR = frame === 0 ? '..RR' : 'RR..';
-  const a1 = armed ? 'W' : '.';
-  const a2 = armed ? 'W' : '.';
-  const rows = [
-    '................................',
-    '................................',
-    '..........OOOOOOOO..............',
-    '.........OOOOOOOOOO.............',
-    '.........OHHHHHHHHO.............',
-    '.........OHHHHHHHHO.............',
-    '.........OFFFFFFF HO............',
-    '.........OFFFFFFF HO............',
-    '.........OFFFFFFF HO............',
-    '..........OFFFFFFO..............',
-    '..........OFFFFFFO..............',
-    `........${a1}OOCCCCCCOO${a2}..........`,
-    `........${a1}OCCCCCCCCO${a2}..........`,
-    `........${a1}OCCCCCCCCO${a2}..........`,
-    `........${a1}OCCCCCCCCO${a2}..........`,
-    `........${a1}OOCCCCCCOO${a2}..........`,
-    `..........OOCCCCOO..............`,
-    `..........O${lL}${lR}O..............`,
-    `..........O${lL}${lR}O..............`,
-    `..........O${lL}${lR}O..............`,
-    '..........SSSSSSSS..............',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-  ];
-  return sheet(grid(rows, {
-    O: P.outline,
-    F: skin,
-    H: hair,
-    ' ': skinShad,
-    C: cloth,
-    L: clothDk,
-    R: clothDk,
-    W: '#b8b4ac',
-    S: 'rgba(20,16,10,0.3)',
-  }));
+interface PawnLook {
+  skin: string; skinShad: string; skinLight: string;
+  hair: string; hairDk: string;
+  cloth: string; clothDk: string; clothLt: string;
+}
+function pawnSprite(look: PawnLook, frame: number, armed = false): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const px = (x: number, y: number, w: number, h: number, col: string) => {
+    g.fillStyle = col; g.fillRect(x, y, w, h);
+  };
+  const f0 = frame === 0;
+  // Centre column ~ 15.5. Light from top-left.
+
+  // --- ground shadow (under feet), faintly cool ---
+  px(9, 27, 14, 3, 'rgba(28,22,40,0.30)');
+  px(11, 26, 10, 1, 'rgba(28,22,40,0.18)');
+
+  // --- slung spear (drawn behind body so it reads as carried over shoulder) ---
+  if (armed) {
+    px(21, 4, 2, 22, P.trunk);          // shaft
+    px(21, 4, 1, 22, P.trunkLight);     // lit edge
+    px(20, 1, 4, 5, P.rockDark);        // spearhead base
+    px(21, 0, 2, 5, P.rockLight);       // spearhead
+    px(21, 0, 1, 3, P.rockHighlight);   // glint
+  }
+
+  // --- legs / feet (under torso). Trousers darker than tunic. ---
+  const trouser = look.clothDk, trouserDk = P.trunkDark;
+  // left leg lane cols 11-14, right leg lane cols 17-20
+  const lLeg = f0 ? 0 : 2;   // forward foot reaches +rows
+  const rLeg = f0 ? 2 : 0;
+  px(11, 22, 4, 4 + lLeg, trouser);
+  px(17, 22, 4, 4 + rLeg, trouser);
+  px(11, 22, 1, 4 + lLeg, look.clothLt); // lit edge on left leg
+  // boots
+  px(11, 26 + lLeg, 4, 2, trouserDk);
+  px(17, 26 + rLeg, 4, 2, trouserDk);
+
+  // --- torso / tunic ---
+  // outline silhouette
+  px(8, 12, 16, 12, P.outline);
+  // shoulders slightly wider at top
+  px(7, 13, 18, 9, P.outline);
+  // tunic fill (inset)
+  px(9, 13, 14, 10, look.cloth);
+  // left highlight rim (warm, lit)
+  px(9, 13, 2, 10, look.clothLt);
+  // right shadow side (cool)
+  px(21, 13, 2, 10, look.clothDk);
+  px(20, 13, 1, 10, look.clothDk);
+  // shoulder tops catch light
+  px(9, 13, 14, 1, look.clothLt);
+  // centre chest fold highlight
+  px(15, 14, 2, 6, look.clothLt);
+  // belt
+  px(9, 21, 14, 2, P.trunkDark);
+  px(15, 21, 2, 2, P.grain);
+
+  // --- arms (sit at sides, slight swing opposite to legs) ---
+  const armSwing = f0 ? 1 : -1;
+  // left arm
+  px(7, 14 + (armSwing > 0 ? 1 : 0), 3, 6, look.cloth);
+  px(7, 14 + (armSwing > 0 ? 1 : 0), 1, 6, look.clothLt);
+  // right arm
+  px(22, 14 + (armSwing < 0 ? 1 : 0), 3, 6, look.clothDk);
+  // hands (skin)
+  px(7, 20 + (armSwing > 0 ? 1 : 0), 3, 2, look.skinShad);
+  px(22, 20 + (armSwing < 0 ? 1 : 0), 3, 2, look.skinShad);
+
+  // --- head ---
+  // hair/skull outline
+  px(9, 3, 14, 11, P.outline);
+  // hair (back/crown), shadow-shifted
+  px(10, 4, 12, 9, look.hairDk);
+  px(10, 4, 12, 5, look.hair);        // lit upper hair
+  px(10, 4, 6, 4, look.hair);
+  // warm top-left hair highlight
+  px(11, 4, 4, 2, look.hair);
+  // face oval (skin), inset, leaving hair fringe on sides + top
+  px(11, 7, 10, 6, look.skin);
+  // warm forehead/cheek highlight (top-left)
+  px(11, 7, 5, 2, look.skinLight);
+  px(11, 9, 3, 2, look.skinLight);
+  // right-side cheek shadow (cool)
+  px(19, 8, 2, 5, look.skinShad);
+  px(11, 12, 10, 1, look.skinShad);   // jaw/chin shade
+  // eyes (small, hint of facing forward)
+  px(13, 10, 1, 1, P.outline);
+  px(18, 10, 1, 1, P.outline);
+
+  return c;
 }
 
 function buildingSprite(defId: string, w: number, h: number, ghost: boolean): HTMLCanvasElement {
@@ -1452,13 +1595,17 @@ function corpseSprite(): HTMLCanvasElement {
   g.fillStyle = P.cloth1;
   g.fillRect(7, 13, 18, 8);
   g.fillStyle = P.clothDark1;
-  g.fillRect(7, 13, 18, 2);
-  g.fillStyle = P.skinB;
+  g.fillRect(7, 19, 18, 2);     // underside shadow
+  g.fillStyle = P.clothLight1;
+  g.fillRect(7, 13, 18, 1);     // lit top edge
+  g.fillStyle = P.skinBShad;
   g.fillRect(1, 14, 7, 7);
+  g.fillStyle = P.skinB;
+  g.fillRect(1, 14, 7, 2);
   g.fillStyle = P.hairA;
   g.fillRect(1, 12, 7, 4);
-  g.fillStyle = P.wallDark;
-  g.fillRect(25, 16, 5, 5);
+  g.fillStyle = P.clothDark1;
+  g.fillRect(25, 16, 5, 5);     // boots
   return c;
 }
 
@@ -1714,8 +1861,8 @@ function deerSprite(frame: number): HTMLCanvasElement {
     '................................',
   ];
   return sheet(grid(rows, {
-    b: '#a87f50', h: '#96714a', n: '#26201a', e: '#6b4a2a',
-    t: '#e8e2d4', L: '#7a5a36', S: 'rgba(20,16,10,0.3)',
+    b: '#b48a58', h: '#9c7448', n: '#231c16', e: '#6b4a2a',
+    t: '#efe7d6', L: '#7a5a36', S: 'rgba(28,22,40,0.30)',
   }));
 }
 
@@ -1757,8 +1904,8 @@ function wolfSprite(frame: number): HTMLCanvasElement {
     '................................',
   ];
   return sheet(grid(rows, {
-    b: '#6e6e72', h: '#5d5d62', n: '#26201a', e: '#5d5d62',
-    t: '#8c8c90', L: '#4d4d52', S: 'rgba(20,16,10,0.3)',
+    b: '#72717a', h: '#5e5d66', n: '#231c16', e: '#5e5d66',
+    t: '#92929c', L: '#4a4a52', S: 'rgba(28,22,40,0.30)',
   }));
 }
 
@@ -1766,22 +1913,19 @@ function saplingSprite(): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = TILE; c.height = TILE;
   const g = c.getContext('2d')!;
-  g.fillStyle = P.shadow;
-  g.fillRect(12, 26, 10, 4);
+  fillDisc(g, 16, 27, 7, 2, P.shadow);
   g.fillStyle = P.trunkDark;
   g.fillRect(15, 16, 3, 12);
   g.fillStyle = P.trunk;
-  g.fillRect(15, 16, 2, 10);
-  // leaf cluster
-  g.fillStyle = P.treeLeafDark;
-  g.fillRect(10, 8, 12, 10);
-  g.fillRect(12, 5, 8, 12);
-  g.fillStyle = P.treeLeaf;
-  g.fillRect(11, 7, 10, 8);
-  g.fillRect(13, 4, 6, 12);
-  g.fillStyle = P.treeLeafLight;
-  g.fillRect(13, 5, 6, 6);
-  g.fillRect(12, 7, 3, 4);
+  g.fillRect(15, 16, 1, 11);
+  // small round canopy, hue-shifted
+  fillDisc(g, 16, 12, 7, 8, P.treeLeafDeep);
+  fillDisc(g, 16, 11, 6, 7, P.treeLeaf);
+  fillDisc(g, 14, 9, 4, 4, P.treeLeafLight);
+  g.fillStyle = P.treeLeafTop;
+  g.fillRect(13, 7, 3, 2);
+  g.fillStyle = P.treeLeafDeep;
+  g.fillRect(19, 14, 2, 2);
   return c;
 }
 
@@ -2053,11 +2197,23 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     roads[k]     = roadTile(k, false);
     roadPlans[k] = roadTile(k, true);
   }
-  const pawnLooks: [string, string, string, string, string][] = [
-    [P.cloth1,      P.clothDark1, P.skin,  P.skinShad, P.hairA],
-    [P.cloth2,      P.clothDark2, P.skinB, P.skin,     P.hairB],
-    [P.cloth3,      P.wallDark,   P.skin,  P.skinShad, P.hairC],
+  // Three distinct settler looks: ochre/dark-hair, teal/auburn, mauve/grey.
+  const pawnLooks: PawnLook[] = [
+    { cloth: P.cloth1, clothDk: P.clothDark1, clothLt: P.clothLight1,
+      skin: P.skin,  skinShad: P.skinShad,  skinLight: P.skinLight,
+      hair: P.hairB, hairDk: P.hairA },
+    { cloth: P.cloth2, clothDk: P.clothDark2, clothLt: P.clothLight2,
+      skin: P.skinB, skinShad: P.skinBShad, skinLight: P.skinBLight,
+      hair: '#8a5e34', hairDk: '#5a3a1e' },
+    { cloth: P.cloth3, clothDk: P.clothDark3, clothLt: P.clothLight3,
+      skin: P.skin,  skinShad: P.skinShad,  skinLight: P.skinLight,
+      hair: P.hairC, hairDk: '#6e665a' },
   ];
+  const raiderLook: PawnLook = {
+    cloth: P.clothRaider, clothDk: P.clothRaiderDk, clothLt: P.clothRaiderLt,
+    skin: P.skinB, skinShad: P.skinBShad, skinLight: P.skinBLight,
+    hair: P.hairA, hairDk: '#241a12',
+  };
   return {
     grass: [0, 1, 2, 3].map(grassTile),
     dirtPatch: dirtPatchTile(),
@@ -2081,18 +2237,9 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     gateVariants: Array.from({ length: 16 }, (_, i) => gateVariantTile(i)),
     gatePlan: gatePlanTile(),
     sapling: saplingSprite(),
-    settler: pawnLooks.map(([c, cd, s, ss, h]) => [
-      pawnSprite(c, cd, 0, s, ss, h),
-      pawnSprite(c, cd, 1, s, ss, h),
-    ]),
-    settlerArmed: pawnLooks.map(([c, cd, s, ss, h]) => [
-      pawnSprite(c, cd, 0, s, ss, h, true),
-      pawnSprite(c, cd, 1, s, ss, h, true),
-    ]),
-    raider: [
-      pawnSprite(P.clothRaider, '#6a2018', 0, P.skinB, P.skin, P.hairA, true),
-      pawnSprite(P.clothRaider, '#6a2018', 1, P.skinB, P.skin, P.hairA, true),
-    ],
+    settler: pawnLooks.map((lk) => [pawnSprite(lk, 0), pawnSprite(lk, 1)]),
+    settlerArmed: pawnLooks.map((lk) => [pawnSprite(lk, 0, true), pawnSprite(lk, 1, true)]),
+    raider: [pawnSprite(raiderLook, 0, true), pawnSprite(raiderLook, 1, true)],
     deer: [deerSprite(0), deerSprite(1)],
     wolf: [wolfSprite(0), wolfSprite(1)],
     items: {

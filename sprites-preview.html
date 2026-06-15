@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Centuria — Sprite Contact Sheet</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        padding: 24px 28px 64px;
+        background: #2b2620;
+        color: #e8e0d0;
+        font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      .lead { color: #b8ad98; margin: 0 0 20px; max-width: 70ch; }
+      h2 {
+        font-size: 15px; margin: 28px 0 10px; padding-bottom: 4px;
+        border-bottom: 1px solid #4a4236; color: #f0c878;
+      }
+      .group { margin: 0 0 18px; }
+      .cap { color: #cdbf9c; margin: 0 0 6px; font-weight: 600; }
+      .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+      .cell { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+      /* checkerboard so transparency is visible */
+      .spr {
+        image-rendering: pixelated;
+        background-color: #3a342b;
+        background-image:
+          linear-gradient(45deg, #332e26 25%, transparent 25%, transparent 75%, #332e26 75%),
+          linear-gradient(45deg, #332e26 25%, transparent 25%, transparent 75%, #332e26 75%);
+        background-size: 16px 16px;
+        background-position: 0 0, 8px 8px;
+        border: 1px solid #4a4236;
+      }
+      .sub { color: #8f856e; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <h1>Centuria — Sprite Contact Sheet</h1>
+    <p class="lead">
+      Every sprite in <code>buildSprites([])</code>, scaled 6× with
+      nearest-neighbour. Light direction is top-left across the set. Checkerboard
+      shows transparency. The art cannot be self-verified by the build — eyeball
+      it here.
+    </p>
+    <div id="sheet"></div>
+    <script type="module" src="/src/sprites-preview.ts"></script>
+  </body>
+</html>
