@@ -65,7 +65,7 @@ const INFLATION_MAX = 0.5;           // hard cap (50%) so it can't run away
 // The economy settles on a 30-day month, matching the ledger's payment cadence.
 const ECONOMY_MONTH_DAYS = 30;
 
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 5;
 
 // Behavior thresholds for the integration loop (modest, deterministic — full
 // mood/skills/trait fidelity is the remaining parity work, not this stage).
@@ -73,6 +73,15 @@ const REST_SLEEP_BELOW = 30;   // rest under this → go to sleep, releasing any
 const REST_WAKE_AT = 95;       // rest at/over this → wake up and look for work
 const BIRTH_MOOD_MIN = 50;     // colony must be reasonably content to grow
 const STARVED_HEALTH = 0;      // health at/under this → death (swap-removed)
+
+/** A dated event line for the HUD feed + audio cues. Shape mirrors the fat sim's
+ *  `LogEntry` ({ day, text, kind }) so the existing HUD log box can consume a
+ *  TownCore's log unchanged when the swap wires it in. */
+export interface LogEntry {
+  day: number;
+  text: string;
+  kind: 'info' | 'good' | 'bad';
+}
 
 export interface TownCoreSave {
   v: number;
@@ -99,6 +108,8 @@ export interface TownCoreSave {
   /** v4+: the credit book (lenders + loans) and the current inflation rate. */
   ledger?: LedgerSave;
   inflation?: number;
+  /** v5+: the event log feed (old saves restore an empty log). */
+  log?: LogEntry[];
 }
 
 export interface TownCoreOpts {
@@ -129,6 +140,8 @@ export class TownCore {
   readonly ledger = new Ledger();
   /** Town-tier inflation rate (0 = none); applied on top of market prices. */
   inflation = 0;
+  /** Append-only event feed (raids, deaths, births, milestones) for the HUD + audio. */
+  readonly log: LogEntry[] = [];
   /** Game-day the next raid musters (rescheduled after each one). */
   nextRaidDay: number;
   private readonly jobField: FlowField;
@@ -185,6 +198,11 @@ export class TownCore {
     return this.raids.active;
   }
 
+  /** Append a dated line to the event feed (used by the HUD + audio cues). */
+  private addLog(text: string, kind: LogEntry['kind'] = 'info'): void {
+    this.log.push({ day: this.day, text, kind });
+  }
+
   /**
    * Spawn one settler at (x, y) with a rolled persona: two distinct traits and a
    * green-to-competent starting skill (0..7, like the fat sim's birth roll). Uses
@@ -208,6 +226,7 @@ export class TownCore {
       const dy = (Math.floor(i / 3) % 3) - 1;
       if (this.spawnPerson(cx + dx, cy + dy) >= 0) placed++;
     }
+    if (placed > 0) this.addLog(`${placed} settlers step off the wagon and make camp.`, 'good');
     return placed;
   }
 
@@ -273,6 +292,8 @@ export class TownCore {
     // 5c. Raids: muster on schedule, then resolve combat. Raiders converge on the
     //     settlers, walls slow them, and awake settlers fight back. Casualties fall
     //     through the death pass below; the wounded carry a dread thought.
+    const wasRaiding = this.raids.active;
+    const wasWolves = this.wolves.active;
     if (this.day >= this.nextRaidDay && !this.raids.active) {
       this.musterRaid();
     }
@@ -298,8 +319,13 @@ export class TownCore {
       }
     }
 
+    // A repelled raid / a pack that has slunk off: log the all-clear once.
+    if (wasRaiding && !this.raids.active) this.addLog('The raiders break and flee. The colony holds.', 'good');
+    if (wasWolves && !this.wolves.active) this.addLog('The wolves slink back into the wilds.', 'info');
+
     // 6. Deaths: swap-remove the starved (iterate backwards — splice-safe). Each
     //    death grieves the survivors — friends mourn harder — and forgets the bond.
+    let died = 0;
     for (let i = a.count - 1; i >= 0; i--) {
       if (a.health[i] <= STARVED_HEALTH) {
         const deadId = a.id[i];
@@ -311,7 +337,12 @@ export class TownCore {
         this.relations.forget(deadId);
         a.remove(i);
         this.deaths++;
+        died++;
       }
+    }
+    if (died > 0) {
+      this.addLog(died === 1 ? 'A settler has died.' : `${died} settlers have died.`, 'bad');
+      if (a.count === 0) this.addLog('The colony has perished.', 'bad');
     }
 
     // 7. Clock + day rollover.
@@ -336,12 +367,14 @@ export class TownCore {
     const n = raidSize(this.wealth(), this.day, this.agents.count);
     this.raids.start(n, this.grid.width, this.grid.height, this.rng, this.tickNo);
     this.nextRaidDay = this.day + TUNING.raidIntervalDays + this.rng.int(5);
+    this.addLog(`Raiders close on the colony — ${n} of them!`, 'bad');
   }
 
   /** Loose a wolf pack now (the daily scheduler + the play-test's "wolves" key). */
   summonWolves(n = 2 + this.rng.int(2)): void {
     if (this.wolves.active) return;
     this.wolves.start(n, this.grid.width, this.grid.height, this.rng, this.tickNo);
+    this.addLog('A wolf pack prowls in from the forest edge.', 'bad');
   }
 
   /**
@@ -389,7 +422,10 @@ export class TownCore {
     const avgMood = this.averageMood();
     const fed = this.stock.count('meal') >= a.count;
     if (a.count < housing && a.count < a.capacity && avgMood >= BIRTH_MOOD_MIN && fed) {
-      if (this.spawnPerson(this.homeX, this.homeY) >= 0) this.births++;
+      if (this.spawnPerson(this.homeX, this.homeY) >= 0) {
+        this.births++;
+        this.addLog('A new settler is drawn to the colony.', 'good');
+      }
     }
 
     // Wildlife: past the first prowl day, a wolf pack may slip in from the edge
@@ -563,6 +599,7 @@ export class TownCore {
       wolves: this.wolves.serialize(),
       ledger: this.ledger.serialize(),
       inflation: this.inflation,
+      log: this.log.length > 0 ? this.log : undefined,
     };
   }
 
@@ -596,6 +633,8 @@ export class TownCore {
     // v4+: restore the credit book + inflation (old saves keep fresh lenders, 0%).
     if (data.ledger) (core as { ledger: Ledger }).ledger = Ledger.deserialize(data.ledger);
     core.inflation = data.inflation ?? 0;
+    // v5+: restore the event feed (old saves restore an empty log).
+    if (data.log) core.log.push(...data.log);
     return core;
   }
 }

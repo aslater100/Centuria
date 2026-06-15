@@ -236,8 +236,11 @@ PART 3, not a one-commit wire-up.
    byte-identical when off). Tests: `tests/build.test.ts` (terrain suite) + `tests/towncore.test.ts`.
 2. **Terrain-aware resources** — trees→wood (chop), rock/ore→stone/metal (mine), water→fishing +
    soil fertility for farms. Wire into `JobBoard`/production so the painted world feeds the economy.
-3. **Event log on `TownCore`** — append-only `log: LogEntry[]` (raids/deaths/births/milestones) so a
-   HUD feed + audio have a source. Pure, additive, testable.
+3. **Event log on `TownCore`** ✅ *(this session)* — append-only `log: LogEntry[]` whose shape
+   (`{ day, text, kind }`) mirrors the fat sim's `LogEntry`, so the existing HUD log box + audio can
+   consume it unchanged at swap time. Entries on founding, raid muster, raid repelled, wolves in/out,
+   deaths (+ colony perished), and births. Serialized at save **v5** (old saves restore an empty log).
+   Tests: `tests/towncore.test.ts` (event-log suite).
 4. **View adapter (`TownCoreView`)** — read-model exposing what a renderer needs (agents/stations/
    rooms/terrain/raiders as plain iterables) so the renderer never reaches into SoA internals.
 5. **SoA renderer** — a render path that draws a `TownCore` via the adapter (terrain + painted

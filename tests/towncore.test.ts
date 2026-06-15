@@ -207,3 +207,48 @@ describe('TownCore terrain', () => {
     expect(Array.from(r.grid.ore)).toEqual(Array.from(c.grid.ore));
   });
 });
+
+// --- B-6 PART 3: event log feed ---
+describe('TownCore event log', () => {
+  it('logs the founding when settlers are seeded', () => {
+    const c = new TownCore({ seed: 3 });
+    c.seedColony(48, 48, 4);
+    expect(c.log.length).toBeGreaterThan(0);
+    const founding = c.log[0];
+    expect(founding.kind).toBe('good');
+    expect(founding.text).toMatch(/wagon/i);
+    expect(founding.day).toBe(0);
+  });
+
+  it('logs a raid when one musters', () => {
+    const c = new TownCore({ seed: 3 });
+    c.seedColony(48, 48, 4);
+    c.musterRaid();
+    const raidLine = c.log.find((l) => /raiders/i.test(l.text));
+    expect(raidLine).toBeDefined();
+    expect(raidLine!.kind).toBe('bad');
+  });
+
+  it('logs deaths and the colony perishing', () => {
+    const c = new TownCore({ seed: 3 });
+    c.seedColony(48, 48, 3);
+    for (let i = 0; i < c.agents.count; i++) {
+      c.agents.health[i] = 0; // doomed...
+      c.agents.food[i] = 0;   // ...and starving, so no regen rescues them
+    }
+    c.tick();
+    expect(c.deaths).toBe(3);
+    const deathLine = c.log.find((l) => /died/i.test(l.text));
+    expect(deathLine).toBeDefined();
+    expect(deathLine!.kind).toBe('bad');
+    expect(c.log.some((l) => /perished/i.test(l.text))).toBe(true);
+  });
+
+  it('round-trips the event log through serialize/deserialize', () => {
+    const c = new TownCore({ seed: 3 });
+    c.seedColony(48, 48, 4);
+    c.musterRaid();
+    const r = TownCore.deserialize(c.serialize());
+    expect(r.log).toEqual(c.log);
+  });
+});
