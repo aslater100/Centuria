@@ -433,11 +433,11 @@ describe('TownCore random events', () => {
     // Instead: run long enough that a merchant event fires.
     const grainBefore = core.stock.count('grain');
     core.stock.add('grain', 100);
-    // Run until a merchant log line appears.
+    // Run until a merchant log line appears (up to 120 days — 12% chance per event, ~1 event/5 days).
     let merchantFired = false;
-    for (let d = 0; d < 50; d++) {
+    for (let d = 0; d < 120; d++) {
       core.run(360);
-      if (core.log.some((e) => e.text.includes('merchant') || e.text.includes("tinker"))) {
+      if (core.log.some((e) => e.text.includes('merchant') || e.text.includes('tinker'))) {
         merchantFired = true;
         break;
       }

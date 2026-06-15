@@ -749,12 +749,17 @@ export class TownCore {
     const [min, max] = EVENT_INTERVAL;
     this.nextEventDay = this.day + min + this.rng.int(max - min + 1);
     const roll = this.rng.next();
-    if      (roll < 0.18) this.evtMerchant();
-    else if (roll < 0.35) this.evtBumperHarvest();
-    else if (roll < 0.50) this.evtWanderer();
-    else if (roll < 0.65) this.evtFeverOutbreak();
-    else if (roll < 0.82) this.evtFestival();
-    else                  this.evtStormDamage();
+    if      (roll < 0.12) this.evtMerchant();
+    else if (roll < 0.22) this.evtWanderer();
+    else if (roll < 0.32) this.evtColdSnap();
+    else if (roll < 0.42) this.evtRats();
+    else if (roll < 0.52) this.evtFestival();
+    else if (roll < 0.62) this.evtFeverOutbreak();
+    else if (roll < 0.72) this.evtBumperHarvest();
+    else if (roll < 0.82) this.evtWindfallTimber();
+    else if (roll < 0.91) this.evtSkillBreakthrough();
+    else if (roll < 0.96) this.evtStormDamage();
+    else                  this.evtInjuredWorker();
   }
 
   private evtMerchant(): void {
@@ -820,6 +825,49 @@ export class TownCore {
     const y = (idx / this.grid.width) | 0;
     this.grid.clearWall(x, y);
     this.addLog('A storm collapses part of the colony walls — repairs needed.', 'bad');
+  }
+
+  private evtColdSnap(): void {
+    // Drop every settler's warmth to simulate three bitter days.
+    for (let i = 0; i < this.agents.count; i++) {
+      this.agents.warmth[i] = Math.max(0, this.agents.warmth[i] - 30);
+    }
+    this.addLog('A cold snap rolls in from the mountains. Settlers feel the bitter chill.', 'bad');
+  }
+
+  private evtRats(): void {
+    const inStores = this.stock.count('grain');
+    const lost = Math.ceil(inStores * 0.1);
+    if (lost > 0) {
+      this.stock.remove('grain', lost);
+      this.addLog(`Rats in the stores — ${lost} grain spoiled.`, 'bad');
+    }
+  }
+
+  private evtWindfallTimber(): void {
+    const logs = 10 + this.rng.int(11); // 10–20 wood
+    this.stock.add('wood', logs);
+    this.addLog(`A deadfall near the tree line yields ${logs} wood — settlers haul it in.`, 'good');
+  }
+
+  private evtSkillBreakthrough(): void {
+    if (this.agents.count === 0) return;
+    const i = this.rng.int(this.agents.count);
+    // Boost craft skill (capped at 10), which improves work speed.
+    this.agents.skill[i] = Math.min(10, this.agents.skill[i] + 1);
+    this.agents.addThought(i, this.tickNo, 10, 3 * TICKS_PER_DAY);
+    this.addLog(`${this.agents.name(i)} has a breakthrough — their craft improves.`, 'good');
+  }
+
+  private evtInjuredWorker(): void {
+    const healthy: number[] = [];
+    for (let i = 0; i < this.agents.count; i++) {
+      if (this.agents.woundUntreated[i] === 0 && this.agents.health[i] > 20) healthy.push(i);
+    }
+    if (healthy.length === 0) return;
+    const i = healthy[this.rng.int(healthy.length)];
+    this.agents.inflictWound(i, this.tickNo);
+    this.addLog(`${this.agents.name(i)} takes a bad fall at work — they need treatment.`, 'bad');
   }
 
   // ── research ──────────────────────────────────────────────────────────────────
