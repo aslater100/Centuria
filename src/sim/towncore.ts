@@ -193,6 +193,8 @@ export interface TownCoreSave {
   lastSeasonIdx?: number;
   /** v8+: number of dead settlers not yet interred (defaults to 0 on old saves). */
   unburiedCount?: number;
+  /** v8+: any pending player-choice event (null/missing = no pending choice). */
+  pendingChoice?: PendingEventChoice | null;
 }
 
 export interface TownCoreOpts {
@@ -267,6 +269,8 @@ export class TownCore {
   nextEventDay: number = FIRST_EVENT_DAY;
   /** If set, the current event waiting for a player choice. Cleared by resolveEventChoice(). */
   pendingChoice: PendingEventChoice | null = null;
+  /** Day the festival can fire again (prevents back-to-back celebrations). */
+  private _festivalCooldown = 0;
   /** Tracks current drought state to log transitions (drought start/end). */
   private _droughtActive = false;
   /** Tracks flood-risk state to log transitions. */
@@ -890,18 +894,20 @@ export class TownCore {
     const [min, max] = EVENT_INTERVAL;
     this.nextEventDay = this.day + min + this.rng.int(max - min + 1);
     const roll = this.rng.next();
-    if      (roll < 0.08) this.evtChoiceTrader();
-    else if (roll < 0.14) this.evtChoiceBandits();
-    else if (roll < 0.18) this.evtMerchant();
-    else if (roll < 0.26) this.evtWanderer();
-    else if (roll < 0.34) this.evtColdSnap();
-    else if (roll < 0.42) this.evtRats();
-    else if (roll < 0.50) this.evtFestival();
-    else if (roll < 0.58) this.evtFeverOutbreak();
-    else if (roll < 0.66) this.evtBumperHarvest();
-    else if (roll < 0.74) this.evtWindfallTimber();
-    else if (roll < 0.82) this.evtSkillBreakthrough();
-    else if (roll < 0.90) this.evtStormDamage();
+    if      (roll < 0.06) this.evtChoiceTrader();
+    else if (roll < 0.11) this.evtChoiceBandits();
+    else if (roll < 0.16) this.evtChoiceRefugees();
+    else if (roll < 0.21) this.evtChoiceFeud();
+    else if (roll < 0.25) this.evtMerchant();
+    else if (roll < 0.33) this.evtWanderer();
+    else if (roll < 0.41) this.evtColdSnap();
+    else if (roll < 0.49) this.evtRats();
+    else if (roll < 0.57) { if (this.day >= this._festivalCooldown) this.evtFestival(); else this.evtMerchant(); }
+    else if (roll < 0.65) this.evtFeverOutbreak();
+    else if (roll < 0.73) this.evtBumperHarvest();
+    else if (roll < 0.81) this.evtWindfallTimber();
+    else if (roll < 0.89) this.evtSkillBreakthrough();
+    else if (roll < 0.96) this.evtStormDamage();
     else                  this.evtInjuredWorker();
   }
 
@@ -953,6 +959,7 @@ export class TownCore {
       this.agents.mood[i] = Math.min(100, this.agents.mood[i] + MOOD_BOOST);
     }
     this.addLog('The colony holds a festival — settlers are in high spirits.', 'good');
+    this._festivalCooldown = this.day + 10; // no back-to-back celebrations
   }
 
   private evtStormDamage(): void {
@@ -1037,6 +1044,32 @@ export class TownCore {
     };
   }
 
+  private evtChoiceRefugees(): void {
+    const available = Math.max(1, Math.floor(this.agents.count * 0.3));
+    this.pendingChoice = {
+      id: 'refugees',
+      title: 'Refugees Seeking Shelter',
+      text: `A group of ${available} refugees asks to join your colony. Accept or turn away?`,
+      choices: [
+        { label: 'Welcome them', desc: `+${available} settlers, higher food consumption.` },
+        { label: 'Turn away', desc: 'Keep resources stable.' },
+      ],
+    };
+  }
+
+  private evtChoiceFeud(): void {
+    if (this.agents.count < 2) { this.evtInjuredWorker(); return; }
+    this.pendingChoice = {
+      id: 'feud',
+      title: 'Settlement Conflict',
+      text: 'Two families nearly come to blows over land. How to resolve it?',
+      choices: [
+        { label: 'Mediate fairly', desc: 'Morale improves across the colony.' },
+        { label: 'Ignore it', desc: 'Conflict lingers and morale suffers.' },
+      ],
+    };
+  }
+
   /**
    * Resolve a pending player-choice event. Returns true if the choice was valid.
    * Clears `pendingChoice` so the next event can fire.
@@ -1072,6 +1105,26 @@ export class TownCore {
           this.addLog(wounded > 0
             ? `The colony stands firm — ${wounded} settler(s) wounded driving off the bandits.`
             : 'The colony stands firm and drives off the bandits.', wounded > 0 ? 'bad' : 'good');
+        }
+        break;
+      case 'refugees':
+        if (choiceIndex === 0) {
+          const n = Math.max(1, Math.floor(this.agents.count * 0.3));
+          for (let i = 0; i < n; i++) this.spawnPerson(this.homeX, this.homeY);
+          this.addLog(`${n} refugee${n === 1 ? '' : 's'} settle in. The colony grows.`, 'good');
+        } else {
+          this.addLog('Turned away the refugees. A difficult but practical choice.', 'info');
+        }
+        break;
+      case 'feud':
+        if (choiceIndex === 0) {
+          for (let i = 0; i < Math.min(2, this.agents.count); i++)
+            this.agents.addThought(i, this.tickNo, 3, 3 * TICKS_PER_DAY);
+          this.addLog('Mediated the dispute fairly. Tensions ease across the colony.', 'good');
+        } else {
+          for (let i = 0; i < Math.min(2, this.agents.count); i++)
+            this.agents.addThought(i, this.tickNo, -3, 5 * TICKS_PER_DAY);
+          this.addLog('The feud continues to fester in the colony.', 'bad');
         }
         break;
     }
@@ -1235,6 +1288,7 @@ export class TownCore {
       nextEventDay: this.nextEventDay,
       lastSeasonIdx: this._lastSeasonIdx,
       unburiedCount: this.unburiedCount > 0 ? this.unburiedCount : undefined,
+      pendingChoice: this.pendingChoice ?? undefined,
     };
   }
 
@@ -1280,6 +1334,8 @@ export class TownCore {
     // Restore _lastSeasonIdx to avoid re-logging the current season on load.
     (core as unknown as { _lastSeasonIdx: number })._lastSeasonIdx =
       data.lastSeasonIdx ?? Math.floor((core.day % DAYS_PER_YEAR) / DAYS_PER_SEASON);
+    // v8+: restore any pending player-choice (old saves had no pending events).
+    core.pendingChoice = data.pendingChoice ?? null;
     return core;
   }
 }
