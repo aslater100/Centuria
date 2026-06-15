@@ -217,6 +217,20 @@ export class TownCore {
   private readonly jobField: FlowField;
   private readonly rng: Rng;
   private readonly _rand: () => number;
+  /** Station-type speed multiplier from unlocked production techs. Called once per tick by tickProduction. */
+  private readonly _stationSpeedMult = (stationId: string): number => {
+    const rb = this.researchBook;
+    switch (stationId) {
+      case 'loom': case 'rope_walk': return rb.hasTech('textile_farming') ? 1.25 : 1;
+      case 'herb_table': return rb.hasTech('herbalism') ? 1.30 : 1;
+      case 'saw_bench': return rb.hasTech('carpentry') ? 1.25 : 1;
+      case 'anvil': case 'weapon_bench': return rb.hasTech('blacksmithing') ? 1.25 : 1;
+      case 'millstone': return rb.hasTech('milling') ? 1.30 : 1;
+      case 'brew_vat': return rb.hasTech('fermentation') ? 1.30 : 1;
+      case 'smelter': return rb.hasTech('iron_smelting') ? 1.30 : 1;
+      default: return 1;
+    }
+  };
 
   tickNo = 0;
   minute = 0;
@@ -391,19 +405,21 @@ export class TownCore {
     this.board.assignIdle(this.grid, a);
 
     // 3. Production: manned craft stations consume/produce against the stockpile.
-    this.grid.tickProduction(a, this.stock, MINUTES_PER_TICK);
+    this.grid.tickProduction(a, this.stock, MINUTES_PER_TICK, this._stationSpeedMult);
 
     // 4. Needs from rooms: warmth (enclosure), rest (beds), recreation (tables),
     //    and medical recovery (infirmary sickbeds + apothecary medicine).
     const dayWeather = this.weather.forDay(this.day);
     serveNeeds(this.grid, a, MINUTES_PER_TICK, dayWeather.tempAnomalyC, true /* colony-wide beds/tables */);
-    serveMedical(this.grid, a, this.stock);
+    serveMedical(this.grid, a, this.stock, this.researchBook.hasTech('germ_theory') ? 1.5 : 1.0);
 
     // 4b. Bonding: agents sharing a tavern grow their mutual opinion.
     socialize(this.grid, a, this.relations, MINUTES_PER_TICK);
 
     // 5. Agent tick: needs decay, mood ease (incl. thoughts), health, movement.
-    a.tick(t, this._rand);
+    a.tick(t, this._rand,
+      this.researchBook.hasTech('first_aid') ? 0.6 : 1.0,
+      this.researchBook.hasTech('germ_theory') ? 0.5 : 1.0);
 
     // 5b. Mental break: a miserable settler may crack, leaving a sour thought.
     for (let i = 0; i < a.count; i++) {
@@ -428,7 +444,8 @@ export class TownCore {
     if (this.raids.active) {
       // The horn rallies the colony: nobody sleeps through a raid.
       for (let i = 0; i < a.count; i++) if (a.state[i] === AState.Sleeping) a.state[i] = AState.Idle;
-      this.raids.tick(this.grid, a, t, militiaMult);
+      const fortified = this.researchBook.hasTech('fortification');
+      this.raids.tick(this.grid, a, t, militiaMult, fortified ? 1.5 : 1.0, fortified ? 0.8 : 1.0);
       for (let i = 0; i < a.count; i++) {
         if (a.woundUntreated[i] === 1 && a.woundAt[i] === t) {
           a.addThought(i, t, RAID_FEAR_DELTA, RAID_FEAR_TICKS);

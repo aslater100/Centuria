@@ -528,7 +528,7 @@ export class AgentStore {
    * and side-effect-free). Returns nothing — death handling is the caller's job
    * via a post-pass over `health` (kept simple for the proof).
    */
-  tick(tickNo: number, rand: () => number): void {
+  tick(tickNo: number, rand: () => number, infectionChanceMult = 1.0, infectionBleedMult = 1.0): void {
     const n = this.count;
     for (let i = 0; i < n; i++) {
       // --- needs decay (tight, branch-light: the part that vectorizes) ---
@@ -552,10 +552,10 @@ export class AgentStore {
           this.woundUntreated[i] = 0; // scarred over on its own
         } else if (this.infectionRolled[i] === 0 && elapsedHr > INFECTION_WINDOW_HR) {
           this.infectionRolled[i] = 1; // one-shot fester roll
-          if (rand() < INFECTION_CHANCE) this.infection[i] = 1;
+          if (rand() < INFECTION_CHANCE * infectionChanceMult) this.infection[i] = 1;
         }
       }
-      if (this.infection[i] === 1) bleed += INFECTION_BLEED;
+      if (this.infection[i] === 1) bleed += INFECTION_BLEED * infectionBleedMult;
       const feverish = this.sickUntilTick[i] > tickNo;
       this.sick[i] = feverish ? 1 : 0; // tickProduction reads this for the work penalty
       if (feverish) bleed += SICK_BLEED;

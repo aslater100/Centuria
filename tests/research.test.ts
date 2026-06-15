@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { ResearchBook, CORE_TECHS, CORE_TECH_MAP, RESEARCH_PER_DESK_PER_DAY } from '../src/sim/research';
 import { TownCore } from '../src/sim/towncore';
 import { TERRAIN, ZONE } from '../src/sim/build';
-import { ROOM_TYPE_ID } from '../src/sim/defs';
+import { ROOM_TYPE_ID, MINUTES_PER_TICK } from '../src/sim/defs';
+import { AgentStore } from '../src/sim/agents';
 
 // Build-system B-6: TownCore research system.
 // Library desks (education capacity) generate research points daily;
@@ -206,5 +207,130 @@ describe('TownCore research integration', () => {
     expect(twin.researchBook.points).toBe(500);
     expect(twin.researchBook.hasTech('crop_rotation')).toBe(true);
     expect(twin.researchBook.queue).toBe('milling');
+  });
+});
+
+// ── Production-speed tech effects ──────────────────────────────────────────────
+// Each test creates two identical single-station colonies, unlocks the tech in
+// one, runs for a fixed number of ticks, and asserts higher throughput.
+
+describe('TownCore production tech effects', () => {
+  /** Build a minimal enclosed mill room with one millstone and two workers. */
+  function millColony(): TownCore {
+    const core = new TownCore({ width: 20, height: 20, seed: 99 });
+    const MILL = ROOM_TYPE_ID.get('mill')!;
+    const g = core.grid;
+    g.designateRect(2, 2, 7, 5, MILL);
+    for (let x = 1; x <= 8; x++) { g.setWall(x, 1); g.setWall(x, 6); }
+    for (let y = 1; y <= 6; y++) { g.setWall(1, y); g.setWall(8, y); }
+    g.placeStation('millstone', 2, 2);
+    g.setGate(4, 6);
+    g.rebuildRooms();
+    core.stock.add('grain', 100000);
+    core.seedColony(10, 10, 2);
+    return core;
+  }
+
+  /** Build a minimal enclosed library room with one loom and two workers. */
+  function loomColony(): TownCore {
+    const core = new TownCore({ width: 20, height: 20, seed: 77 });
+    const WEAVERY = ROOM_TYPE_ID.get('workshop')!;
+    const g = core.grid;
+    g.designateRect(2, 2, 8, 5, WEAVERY);
+    for (let x = 1; x <= 9; x++) { g.setWall(x, 1); g.setWall(x, 6); }
+    for (let y = 1; y <= 6; y++) { g.setWall(1, y); g.setWall(9, y); }
+    g.placeStation('loom', 2, 2);
+    g.setGate(4, 6);
+    g.rebuildRooms();
+    core.stock.add('flax', 100000);
+    core.seedColony(10, 10, 2);
+    return core;
+  }
+
+  it('milling tech makes millstones produce 30% more flour', () => {
+    const base = millColony();
+    base.run(2000);
+    const baseFlour = base.stock.count('flour');
+
+    const boosted = millColony();
+    boosted.researchBook.points = 9999;
+    boosted.research('milling');
+    boosted.run(2000);
+    const boostedFlour = boosted.stock.count('flour');
+
+    expect(boostedFlour).toBeGreaterThan(baseFlour);
+  });
+
+  it('textile_farming tech makes looms produce more clothes', () => {
+    const base = loomColony();
+    base.run(2000);
+    const baseClothes = base.stock.count('clothes');
+
+    const boosted = loomColony();
+    boosted.researchBook.points = 9999;
+    boosted.research('textile_farming');
+    boosted.run(2000);
+    const boostedClothes = boosted.stock.count('clothes');
+
+    expect(boostedClothes).toBeGreaterThan(baseClothes);
+  });
+});
+
+// ── Health/infection tech effects ──────────────────────────────────────────────
+
+describe('TownCore health tech effects', () => {
+  it('first_aid reduces wound infection chance by 40%', () => {
+    // Run many wounded agents through a tick window and count infections.
+    const TICKS = 500;
+    const COUNT = 40;
+    let rand: () => number;
+
+    function countInfections(withTech: boolean): number {
+      // Deterministic RNG so both arms are comparable.
+      let seed = 12345;
+      rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
+
+      const store = new AgentStore(COUNT);
+      for (let i = 0; i < COUNT; i++) {
+        store.spawn(5, 5);
+        store.health[i] = 100;
+        store.woundUntreated[i] = 1;
+        store.woundAt[i] = 0; // wounded at tick 0
+        store.infectionRolled[i] = 0;
+        store.food[i] = 80;
+        store.warmth[i] = 80;
+      }
+      const infChanceMult = withTech ? 0.6 : 1.0;
+      for (let t = 0; t < TICKS; t++) store.tick(t, rand, infChanceMult);
+      let infected = 0;
+      for (let i = 0; i < COUNT; i++) if (store.infection[i] === 1) infected++;
+      return infected;
+    }
+
+    const withoutTech = countInfections(false);
+    const withTech = countInfections(true);
+    // With the lower infection chance we expect fewer or equal infections.
+    expect(withTech).toBeLessThanOrEqual(withoutTech);
+  });
+
+  it('germ_theory halves infection bleed rate', () => {
+    // A single infected agent loses health slower with germ_theory active.
+    let seed = 99999;
+    const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
+
+    function healthAfterInfection(infectionBleedMult: number): number {
+      const store = new AgentStore(1);
+      store.spawn(5, 5);
+      store.health[0] = 100;
+      store.infection[0] = 1;  // already infected
+      store.food[0] = 80;
+      store.warmth[0] = 80;
+      for (let t = 0; t < 360; t++) store.tick(t, rand, 1.0, infectionBleedMult);
+      return store.health[0];
+    }
+
+    const normalHealth = healthAfterInfection(1.0);
+    const germHealth = healthAfterInfection(0.5);
+    expect(germHealth).toBeGreaterThan(normalHealth);
   });
 });

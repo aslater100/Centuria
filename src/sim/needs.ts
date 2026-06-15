@@ -188,7 +188,7 @@ export function serveNeeds(grid: BuildGrid, agents: AgentStore, minutesPerTick: 
  * Like `serveNeeds`: one small Map per call (room count), O(1) per agent. Runs
  * before `AgentStore.tick` so a cure lands before that tick's bleed is charged.
  */
-export function serveMedical(grid: BuildGrid, agents: AgentStore, stock: Stockpile): void {
+export function serveMedical(grid: BuildGrid, agents: AgentStore, stock: Stockpile, medicineHealMult = 1.0): void {
   for (let i = 0; i < agents.count; i++) agents.healMult[i] = 1;
 
   // Cache each room's medical capacity once (rooms ≪ agents).
@@ -215,7 +215,7 @@ export function serveMedical(grid: BuildGrid, agents: AgentStore, stock: Stockpi
     if (injured && stock.count('medicine') >= MEDICINE_PER_TREAT) {
       stock.remove('medicine', MEDICINE_PER_TREAT);
       agents.treat(i); // apothecary clears the wound + infection
-      agents.healMult[i] *= APOTHECARY_HEAL_MULT;
+      agents.healMult[i] *= APOTHECARY_HEAL_MULT * medicineHealMult;
     }
   }
 }

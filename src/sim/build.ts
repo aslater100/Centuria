@@ -617,7 +617,7 @@ export class BuildGrid {
    *
    * `AState.Working = 3`; agents in any other state are not counted as workers.
    */
-  tickProduction(agents: WorkerSource, stockpile: Stockpile, minutesPerTick: number): void {
+  tickProduction(agents: WorkerSource, stockpile: Stockpile, minutesPerTick: number, stationSpeedMult?: (stationId: string) => number): void {
     // Sum worker *effort* per station in one O(agents) pass. With no skill/trait
     // columns each worker is 1.0 effort (so progress = minutes × headcount, exactly
     // as before); with them, a skilled or industrious settler advances the recipe
@@ -641,7 +641,8 @@ export class BuildGrid {
       if (workers <= 0) continue;
 
       const recipe = def.recipe;
-      let progress = (this._progress.get(s.id) ?? 0) + minutesPerTick * workers;
+      const speedMult = stationSpeedMult ? stationSpeedMult(def.id) : 1;
+      let progress = (this._progress.get(s.id) ?? 0) + minutesPerTick * workers * speedMult;
 
       if (progress >= recipe.work) {
         if (stockpile.removeAll(recipe.inputs)) {
