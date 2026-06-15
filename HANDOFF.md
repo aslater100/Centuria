@@ -1,7 +1,7 @@
 # Handoff — Centuria Development Guide
 
 **Last updated:** 2026-06-15  
-**Current test count:** 616 passing  
+**Current test count:** 637 passing  
 **Branch pattern:** feature branches off `main` via `claude/...` naming; merge via draft PR  
 **Model guidance:** See PLAN.md § Model Assignment for context ceilings per task
 
@@ -222,7 +222,19 @@ blind swap would *delete the playable game*. Do it incrementally, behind a flag,
   relationships/thoughts, weather, market (buy/sell + daily price recovery), and **raids/combat**
   (`src/sim/raid.ts` — `RaidForce`/`raidSize()`; raiders converge, walls slow them, settlers rally
   as a militia, attackers flee on timeout; wired into `TownCore.tick` before the death pass).
-  Tests: `tests/raid.test.ts` (10) + raid cases in `tests/parity.test.ts`.
+  Tests: `tests/raid.test.ts` (15) + raid cases in `tests/parity.test.ts`.
+- **Defense parity ports — done.** Three fat-sim threats/defenses now live on the SoA core:
+  - **Spike traps** (`BuildGrid.trap` layer + `setTrap`/`tripTrap`, serialized): one-shot tiles that
+    bite the first raider onto them for `TUNING.trapDamage`. Tripped in `RaidForce.advance`.
+  - **Forged-weapon / spear bonuses** (`AgentStore.armed` column 0/1/2, serialized): `TownCore`
+    arms the militia from the stores when a raid musters (`armColony` — forged `weapons` first, then
+    wood `spears`); `settlerMeleeDamagePerHour` (exported from `raid.ts`) adds the tuned bonus for
+    both raid and wolf defense.
+  - **Wolf packs** (`src/sim/wolves.ts` — `WolfPack`, a smaller sibling of `RaidForce`): packs prowl
+    in from an edge on a per-day roll (`TUNING.wolfFirstDay`/`wolfPackChancePerDay`), stalk and maul
+    strays, the bitten fight back, and a mauled/overstayed wolf flees. Wired into `TownCore.tick` +
+    `summonWolves`, serialized at save v3. Tests: `tests/wolves.test.ts` (8) + weapon/trap cases in
+    `tests/raid.test.ts`.
 - **Play-test fixes (found by running `/core.html`):**
   - `BuildGrid` now has a **gate** (`setGate`/`clearGate`, serialized): a passable opening that still
     seals a room for enclosure — without it a fully-walled room was unreachable, so doored rooms
@@ -232,8 +244,9 @@ blind swap would *delete the playable game*. Do it incrementally, behind a flag,
     same global model already used for feeding. Before this, settlers slept where they collapsed,
     never recovered rest, and the colony starved. Regression: `towncore.test.ts` "survives and grows
     over 30 days" (the long-horizon test whose absence hid the bug).
-- **Still missing before a swap is safe:** spike traps, forged-weapon/spear bonuses, wolf packs,
-  the `region.ts` flip, and **raid balance tuning** (headless numbers are conservative — tune in the GUI).
+- **Still missing before a swap is safe:** the `region.ts` flip and **raid balance tuning** (headless
+  numbers are conservative — tune in the GUI). Spike traps, forged-weapon/spear bonuses and wolf packs
+  are now ported (see the Defense parity ports note above).
 - **Gate that remains: GUI play-test.** A *non-destructive parallel mode* now exists: `core.html`
   + `src/coreview.ts` boot a `TownCore` with a starter town and render it (agents/walls/stations/
   raiders + a stats overlay) in a real browser — `npm run dev` → `/core.html`. Controls: space

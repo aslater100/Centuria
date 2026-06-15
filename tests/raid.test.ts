@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RaidForce, raidSize } from '../src/sim/raid';
+import { RaidForce, raidSize, settlerMeleeDamagePerHour } from '../src/sim/raid';
 import { AgentStore } from '../src/sim/agents';
 import { BuildGrid } from '../src/sim/build';
 import { Rng } from '../src/sim/rng';
@@ -118,3 +118,68 @@ function colonyArgs(n: number, skill: number, walled: boolean): [AgentStore, Bui
   const { agents, grid } = colony(n, skill, walled);
   return [agents, grid];
 }
+
+describe('settlerMeleeDamagePerHour — weapons sharpen the militia', () => {
+  it('a forged weapon beats a spear beats bare hands by the tuned bonus', () => {
+    const a = new AgentStore(4);
+    const i = a.spawn(0, 0);
+    a.skill[i] = 3;
+    a.armed[i] = 0; const bare = settlerMeleeDamagePerHour(a, i);
+    a.armed[i] = 1; const spear = settlerMeleeDamagePerHour(a, i);
+    a.armed[i] = 2; const forged = settlerMeleeDamagePerHour(a, i);
+    expect(spear - bare).toBeCloseTo(TUNING.spearDamageBonus);
+    expect(forged - bare).toBeCloseTo(TUNING.forgedWeaponBonus);
+    expect(forged).toBeGreaterThan(spear);
+  });
+
+  it('armed defenders slay at least as many raiders, usually more', () => {
+    // Aggregate over seeds: the spatial outcome varies, but forged weapons should
+    // never make the militia worse and clearly help over the long run.
+    // A small, outnumbered colony so the baseline leaves raiders standing (an
+    // already-victorious militia would saturate at the raider count and hide the buff).
+    let bareSlain = 0, armedSlain = 0;
+    for (let s = 1; s <= 8; s++) {
+      bareSlain += fight(...colonyArgs(3, 1, false), 12, s).slain;
+      const { agents, grid } = colony(3, 1, false);
+      for (let i = 0; i < agents.count; i++) agents.armed[i] = 2; // forged
+      armedSlain += fight(agents, grid, 12, s).slain;
+    }
+    expect(armedSlain).toBeGreaterThan(bareSlain);
+  });
+});
+
+describe('spike traps — a one-shot bite on contact', () => {
+  it('a trap fires exactly once, then is consumed', () => {
+    const g = new BuildGrid(10, 10);
+    g.setTrap(5, 5);
+    expect(g.hasTrap(5, 5)).toBe(true);
+    expect(g.tripTrap(5, 5)).toBe(true);  // fires
+    expect(g.hasTrap(5, 5)).toBe(false);  // consumed
+    expect(g.tripTrap(5, 5)).toBe(false); // nothing left to trip
+  });
+
+  it('survives a serialize round-trip', () => {
+    const g = new BuildGrid(16, 16);
+    g.setTrap(3, 4);
+    g.setTrap(10, 11);
+    const twin = BuildGrid.deserialize(g.serialize());
+    expect(twin.hasTrap(3, 4)).toBe(true);
+    expect(twin.hasTrap(10, 11)).toBe(true);
+    expect(twin.hasTrap(0, 0)).toBe(false);
+  });
+
+  it('a mined approach bloodies the raiders crossing it', () => {
+    // Same colony and raid, but mine the interior the raiders must cross. The
+    // one-shot bites should raise raider casualties over an unmined field.
+    // A weak, outnumbered colony so the bare baseline can't kill the whole band —
+    // the mined approach should then visibly raise the body count.
+    let bareSlain = 0, trappedSlain = 0;
+    for (let s = 1; s <= 8; s++) {
+      bareSlain += fight(...colonyArgs(2, 0, false), 10, s).slain;
+      const { agents, grid } = colony(2, 0, false);
+      for (let y = 20; y < 76; y++) for (let x = 20; x < 76; x++) grid.setTrap(x, y);
+      trappedSlain += fight(agents, grid, 10, s).slain;
+    }
+    expect(trappedSlain).toBeGreaterThan(bareSlain);
+  });
+});

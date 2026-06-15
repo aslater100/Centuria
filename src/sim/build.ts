@@ -92,6 +92,8 @@ export interface BuildGridSave {
   wall: string;
   /** base64 of the gate layer (optional: absent in pre-gate saves). */
   gate?: string;
+  /** base64 of the spike-trap layer (optional: absent in pre-trap saves). */
+  trap?: string;
   floor: string;
   roomType: string;
   stations: Array<{ id: number; typeId: number; x: number; y: number; w: number; h: number }>;
@@ -144,6 +146,9 @@ export class BuildGrid {
   readonly wall: Uint8Array;
   /** 1 = a gate: passable like a gap, but counts as a wall for room enclosure. */
   readonly gate: Uint8Array;
+  /** 1 = a player-placed spike trap: damages the first raider to step on it, then
+   *  is consumed (one-shot). Passable; does not affect rooms or pathing. */
+  readonly trap: Uint8Array;
   /** 0 = none, else floor material id (1+). Required for a room to form. */
   readonly floor: Uint8Array;
   /** 0 = undesignated, else room-type id (see ROOM_TYPE_ID). */
@@ -169,6 +174,7 @@ export class BuildGrid {
     this.size = width * height;
     this.wall = new Uint8Array(this.size);
     this.gate = new Uint8Array(this.size);
+    this.trap = new Uint8Array(this.size);
     this.floor = new Uint8Array(this.size);
     this.roomType = new Uint8Array(this.size);
     this.roomId = new Int32Array(this.size).fill(-1);
@@ -221,6 +227,31 @@ export class BuildGrid {
   clearGate(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false;
     this.gate[this.index(x, y)] = 0;
+    return true;
+  }
+
+  /** Arm a spike trap on a tile (one-shot; consumed when a raider trips it). */
+  setTrap(x: number, y: number): boolean {
+    if (!this.inBounds(x, y)) return false;
+    this.trap[this.index(x, y)] = 1;
+    return true;
+  }
+
+  /** Disarm a spike trap (e.g. the player recovers the wood). */
+  clearTrap(x: number, y: number): boolean {
+    if (!this.inBounds(x, y)) return false;
+    this.trap[this.index(x, y)] = 0;
+    return true;
+  }
+
+  hasTrap(x: number, y: number): boolean {
+    return this.inBounds(x, y) && this.trap[this.index(x, y)] === 1;
+  }
+
+  /** If a spike trap is armed here, consume it and return true (it fired). */
+  tripTrap(x: number, y: number): boolean {
+    if (!this.hasTrap(x, y)) return false;
+    this.trap[this.index(x, y)] = 0;
     return true;
   }
 
@@ -476,6 +507,7 @@ export class BuildGrid {
       height: this.height,
       wall: bytesToB64(this.wall),
       gate: bytesToB64(this.gate),
+      trap: bytesToB64(this.trap),
       floor: bytesToB64(this.floor),
       roomType: bytesToB64(this.roomType),
       stations: this.stations.map((s) => ({ id: s.id, typeId: s.typeId, x: s.x, y: s.y, w: s.w, h: s.h })),
@@ -488,6 +520,7 @@ export class BuildGrid {
     const g = new BuildGrid(data.width, data.height);
     g.wall.set(b64ToBytes(data.wall, g.size));
     if (data.gate) g.gate.set(b64ToBytes(data.gate, g.size)); // backfill: old saves have no gates
+    if (data.trap) g.trap.set(b64ToBytes(data.trap, g.size)); // backfill: old saves have no traps
     g.floor.set(b64ToBytes(data.floor, g.size));
     g.roomType.set(b64ToBytes(data.roomType, g.size));
     for (const s of data.stations) {
