@@ -8,7 +8,18 @@
  * every other system spends against.
  */
 
-export const REGION_N = 64; // region is REGION_N × REGION_N cells over 0..100 coords
+export const REGION_N = 128; // region is REGION_N × REGION_N cells over 0..100 coords
+// Higher resolution = a larger, more detailed continent that fits more towns
+// (spacing is cell-based). Map-gen is O(N²) but one-time (~40ms); the strategic
+// map renders from a static cache, so this is ~free per frame. See regionview.ts.
+
+/** The grid resolution everything was originally tuned against. */
+const BASE_REGION_N = 64;
+/** Cells per base-cell. Distances/costs that live in cell-space (travel time,
+ *  corridor build/upkeep) are divided by this so they stay constant in the
+ *  fixed 0..100 logical world regardless of REGION_N. Town *spacing* stays in
+ *  raw cells, so a finer grid genuinely fits more settlements. */
+export const CELL_SCALE = REGION_N / BASE_REGION_N;
 
 export type Biome =
   | 'sea' | 'lake' | 'river' | 'marsh' | 'plains' | 'forest' | 'hills' | 'mountains';
@@ -298,7 +309,7 @@ export class RegionMap {
   }
 
   /** Best unclaimed site within reach — expeditions read the land, not dice. */
-  bestSiteNear(fromX: number, fromY: number, claimed: { x: number; y: number }[], range = 18): TownSite | null {
+  bestSiteNear(fromX: number, fromY: number, claimed: { x: number; y: number }[], range = Math.round(REGION_N * 0.28)): TownSite | null {
     let best: { x: number; y: number; score: number } | null = null;
     for (let y = Math.max(2, fromY - range); y < Math.min(REGION_N - 2, fromY + range); y++) {
       for (let x = Math.max(2, fromX - range); x < Math.min(REGION_N - 2, fromX + range); x++) {
@@ -424,7 +435,9 @@ export class RegionMap {
       const c = this.at(x, y);
       cost += this.isWater(x, y) ? 2.2 : 1 + c.roughness * 1.6;
     }
-    return Math.max(2, Math.round((cost / steps) * (dist / 4)));
+    // Normalize cell-distance to the base grid so travel time tracks the logical
+    // world, not the resolution.
+    return Math.max(2, Math.round((cost / steps) * (dist / CELL_SCALE / 4)));
   }
 
   cellToCoord(x: number, y: number): { rx: number; ry: number } {

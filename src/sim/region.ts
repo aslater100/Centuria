@@ -12,7 +12,7 @@ import type { CurrencySymbol, RegionDesign, NationDesign, AiDifficulty } from '.
 import { computePenalty, transitionEfficiency, ANNOUNCE_LEAD_DAYS } from './currency';
 import type { CurrencyChangeCause, CurrencyAnnouncement, CurrencyTransition } from './currency';
 import type { Simulation, Settler, LogEntry } from './sim';
-import { RegionMap, REGION_N } from './worldgen';
+import { RegionMap, REGION_N, CELL_SCALE } from './worldgen';
 import type { TownSite } from './worldgen';
 import { Weather } from './weather';
 import type { Lender, Loan } from './economy';
@@ -1533,8 +1533,9 @@ export const ROLE_BONUS_DESC: Record<NotableRole, string> = {
   Reeve: '+10% immigration appeal',
 };
 
-/** Hard cap on settlements per region — see docs/design/map-scale.md. */
-export const MAX_SETTLEMENTS = 9;
+/** Hard cap on settlements per region — see docs/design/map-scale.md. Raised
+ *  with the larger REGION_N map (more room) and the viewport-bound renderer. */
+export const MAX_SETTLEMENTS = 24;
 
 export class RegionSim {
   rng: Rng;
@@ -2170,7 +2171,7 @@ export class RegionSim {
       counts[label] = (counts[label] ?? 0) + 1;
     }
     const breakdown = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ');
-    return { total: Math.ceil(c.cost * ROUTE_SPECS[kind].buildPerCost * this.devFactor()), cells: c.path.length, breakdown };
+    return { total: Math.ceil((c.cost / CELL_SCALE) * ROUTE_SPECS[kind].buildPerCost * this.devFactor()), cells: c.path.length, breakdown };
   }
 
   roadCost(aId: number, bId: number): { total: number; cells: number; breakdown: string } | null {
@@ -2762,9 +2763,8 @@ export class RegionSim {
    *  Freight research swaps the work crews for machines at 60% the cost. */
   maintBill(r: Route): number {
     const automation = this.has('automated_logistics') ? 0.6 : 1;
-    // Wagner tilt: running costs outpace build costs as the nation develops.
-    const wagner = this.devFactor() ** TUNING.wagnerExp;
-    return r.path.length * ROUTE_SPECS[r.kind].maintPerCell * automation * wagner;
+    // Normalized to the base grid so a finer map doesn't inflate upkeep.
+    return (r.path.length / CELL_SCALE) * ROUTE_SPECS[r.kind].maintPerCell * automation;
   }
 
   /** Monthly upkeep on built links from the treasury — an unmaintained
