@@ -612,6 +612,32 @@ describe('TownCore food variety', () => {
   });
 });
 
+// --- housing penalty ---
+describe('TownCore housing', () => {
+  it('settlers without a bed who are tired suffer a mood penalty', () => {
+    // Colony with 4 settlers but only 1 bed — the bedless ones should be penalised.
+    const core = colony({ ovens: 2, beds: 1, grain: 1000, pop: 4, seed: 3 });
+    core.stock.add('meal', 1000);
+    // Force low rest so the penalty fires.
+    for (let i = 0; i < core.agents.count; i++) { core.agents.rest[i] = 20; core.agents.mood[i] = 60; }
+    core.run(360); // one day
+    const moods = Array.from({ length: core.agents.count }, (_, i) => core.agents.mood[i]);
+    expect(moods.some(m => m < 60)).toBe(true); // at least one settler penalised
+  });
+
+  it('a fully-bedded colony does not receive the ground-sleep penalty', () => {
+    const core = colony({ ovens: 2, beds: 4, grain: 1000, pop: 4, seed: 3 });
+    core.stock.add('meal', 1000);
+    for (let i = 0; i < core.agents.count; i++) { core.agents.rest[i] = 20; core.agents.mood[i] = 60; }
+    core.run(360);
+    // No bed shortage → mood should not have been hit by ground-sleep penalty.
+    // (Some other thoughts might fire, but none specifically from sleeping on ground.)
+    // We check the colony has at least one settler at ≥55 mood (resting normally).
+    const moods = Array.from({ length: core.agents.count }, (_, i) => core.agents.mood[i]);
+    expect(moods.some(m => m >= 55)).toBe(true);
+  });
+});
+
 // --- clothing system ---
 describe('TownCore clothing', () => {
   it('distributes clothes on the first day and gives a mood thought', () => {

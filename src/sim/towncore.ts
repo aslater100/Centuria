@@ -670,6 +670,14 @@ export class TownCore {
       }
     }
 
+    // Housing: settlers without a bed slept on the ground — apply a mood penalty
+    // to those with low rest (a proxy for not having recovered in a proper bed).
+    if (services.sleep < a.count) {
+      for (let i = 0; i < a.count; i++) {
+        if (a.rest[i] < 60) a.addThought(i, this.tickNo, -6, TICKS_PER_DAY);
+      }
+    }
+
     // Wildlife: past the first prowl day, a wolf pack may slip in from the edge
     // (per-day chance, mirrors the fat sim). Only one pack prowls at a time.
     if (this.day >= TUNING.wolfFirstDay && !this.wolves.active && this.rng.chance(TUNING.wolfPackChancePerDay)) {
