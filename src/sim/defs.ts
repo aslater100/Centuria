@@ -154,6 +154,8 @@ export interface TradeOrder {
   thresholdMin?: number;
   thresholdMax?: number;
   enabled: boolean;
+  /** Game-day the order last executed (for periodic throttling). */
+  lastFiredDay?: number;
 }
 
 export interface TradeRecord {

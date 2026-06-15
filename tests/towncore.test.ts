@@ -728,6 +728,66 @@ describe('TownCore blueprint construction', () => {
   });
 });
 
+// --- standing trade orders ---
+describe('TownCore trade orders', () => {
+  it('a periodic sell order fires every N days and records history', () => {
+    const core = colony({ ovens: 2, beds: 4, grain: 500, pop: 4, seed: 3 });
+    core.gold = 0;
+    core.stock.add('meal', 50);
+    core.stock.add('meal', 0); // ensure it's in stock
+    core.addTradeOrder({
+      kind: 'sell', resource: 'meal', quantity: 5,
+      trigger: 'periodic', periodDays: 1, enabled: true,
+    });
+    core.stock.add('meal', 100); // plenty to sell
+    core.run(360 * 3); // 3 days
+    expect(core.gold).toBeGreaterThan(0); // sold for gold
+    expect(core.tradeHistory.length).toBeGreaterThan(0);
+  });
+
+  it('a threshold buy order triggers when stock falls below min', () => {
+    const core = colony({ ovens: 2, beds: 4, grain: 500, pop: 4, seed: 3 });
+    core.gold = 10000;
+    // Ensure no grain so the buy fires.
+    core.stock.remove('grain', core.stock.count('grain'));
+    core.addTradeOrder({
+      kind: 'buy', resource: 'grain', quantity: 10,
+      trigger: 'threshold', thresholdMin: 50, enabled: true,
+    });
+    core.stock.add('meal', 500); // settlers eat meals so grain stays low
+    core.run(360); // one day — stock < thresholdMin → buy fires
+    expect(core.stock.count('grain')).toBeGreaterThan(0);
+    expect(core.tradeHistory.some((r) => r.kind === 'buy' && r.resource === 'grain')).toBe(true);
+  });
+
+  it('a disabled order never fires', () => {
+    const core = colony({ ovens: 2, beds: 4, grain: 500, pop: 4, seed: 3 });
+    core.gold = 0;
+    core.stock.add('meal', 100);
+    core.addTradeOrder({
+      kind: 'sell', resource: 'meal', quantity: 5,
+      trigger: 'periodic', periodDays: 1, enabled: false,
+    });
+    core.run(360 * 3);
+    expect(core.gold).toBe(0); // no sells
+  });
+
+  it('cancelTradeOrder removes the order', () => {
+    const core = colony({ ovens: 2, beds: 4, grain: 500, pop: 4, seed: 3 });
+    const id = core.addTradeOrder({ kind: 'sell', resource: 'grain', quantity: 1, trigger: 'periodic', periodDays: 1, enabled: true });
+    expect(core.tradeOrders.length).toBe(1);
+    expect(core.cancelTradeOrder(id)).toBe(true);
+    expect(core.tradeOrders.length).toBe(0);
+  });
+
+  it('trade orders survive a save/load round-trip', () => {
+    const core = colony({ ovens: 2, beds: 4, grain: 500, pop: 4, seed: 3 });
+    core.addTradeOrder({ kind: 'buy', resource: 'wood', quantity: 20, trigger: 'threshold', thresholdMin: 10, enabled: true });
+    const twin = TownCore.deserialize(core.serialize());
+    expect(twin.tradeOrders).toEqual(core.tradeOrders);
+  });
+});
+
 // --- prestige + era progression ---
 describe('TownCore prestige and era', () => {
   it('prestige starts at 0 and increments when research() succeeds', () => {

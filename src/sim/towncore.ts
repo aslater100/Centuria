@@ -40,7 +40,7 @@ import { Ledger, type LedgerSave, type BorrowResult, type RepayResult } from './
 import { ResearchBook, type ResearchBookSave } from './research';
 import { Rng } from './rng';
 import { BASE_PRICES } from './economy';
-import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, ROOM_DEF_BY_NUM, STATION_DEF_BY_NUM, STATION_TYPE_ID, TRAIT_DEFS, TUNING, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, type ResourceKind } from './defs';
+import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, ROOM_DEF_BY_NUM, STATION_DEF_BY_NUM, STATION_TYPE_ID, TRAIT_DEFS, TUNING, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, type ResourceKind, type TradeOrder, type TradeRecord } from './defs';
 
 const TICKS_PER_DAY = MINUTES_PER_DAY / MINUTES_PER_TICK;
 // Grief on a death (mirrors the fat sim): friends mourn harder and longer.
@@ -199,6 +199,12 @@ export interface TownCoreSave {
   prestige?: number;
   /** v8+: game era 1–4 (defaults to 1 on old saves). */
   era?: 1 | 2 | 3 | 4;
+  /** v8+: standing trade orders (empty on old saves). */
+  tradeOrders?: TradeOrder[];
+  /** v8+: trade execution history (empty on old saves). */
+  tradeHistory?: TradeRecord[];
+  /** v8+: next auto-increment id for trade orders. */
+  nextOrderId?: number;
 }
 
 export interface TownCoreOpts {
@@ -271,6 +277,12 @@ export class TownCore {
   era: 1 | 2 | 3 | 4 = 1;
   /** Market price modifiers: track supply/demand shifts (recover daily toward 1.0). */
   priceModifiers = new Map<string, number>();
+  /** Standing trade orders: auto-executed daily (sell surplus / buy when low). */
+  tradeOrders: TradeOrder[] = [];
+  /** Rolling history of completed trades (capped at 100 entries). */
+  tradeHistory: TradeRecord[] = [];
+  /** Auto-increment counter for trade order IDs. */
+  private _nextOrderId = 1;
   /** Colony anchor — where newcomers appear and the camera first looks. */
   homeX: number;
   homeY: number;
@@ -728,6 +740,9 @@ export class TownCore {
     // Economy: once a month, accrue loan interest, auto-service the debt from the
     // treasury, and re-reckon inflation from the money supply.
     if (this.day > 0 && this.day % ECONOMY_MONTH_DAYS === 0) this.monthlyEconomy();
+
+    // Standing trade orders: auto-execute sell/buy orders that are due today.
+    this.processTradeOrders();
 
     // Random events: merchant visits, weather surprises, wanderers, etc.
     if (this.day >= this.nextEventDay) this.fireRandomEvent();
@@ -1293,6 +1308,78 @@ export class TownCore {
     return this.gold - this.totalDebt();
   }
 
+  // ── trade orders ──────────────────────────────────────────────────────────────
+
+  /**
+   * Register a standing trade order. Returns the assigned id.
+   *
+   * Periodic orders fire every `periodDays` days — useful for regular supply
+   * top-ups or selling surplus on a schedule. Threshold orders fire when the
+   * resource stock crosses a boundary: a sell order fires when stock exceeds
+   * `thresholdMax`; a buy order fires when stock falls below `thresholdMin`.
+   */
+  addTradeOrder(order: Omit<TradeOrder, 'id'>): number {
+    const id = this._nextOrderId++;
+    this.tradeOrders.push({ ...order, id });
+    return id;
+  }
+
+  /** Remove a standing order by id. Returns true if found and removed. */
+  cancelTradeOrder(id: number): boolean {
+    const k = this.tradeOrders.findIndex((o) => o.id === id);
+    if (k < 0) return false;
+    this.tradeOrders.splice(k, 1);
+    return true;
+  }
+
+  /** Clear the trade history log. */
+  clearTradeHistory(): void {
+    this.tradeHistory.length = 0;
+  }
+
+  /**
+   * Execute all standing trade orders that are due today (called from dailyUpdate).
+   * Threshold orders run whenever the condition is satisfied; periodic orders respect
+   * their `periodDays` cadence. Records each successful execution in `tradeHistory`.
+   */
+  private processTradeOrders(): void {
+    for (const order of this.tradeOrders) {
+      if (!order.enabled) continue;
+      let shouldFire = false;
+
+      if (order.trigger === 'periodic') {
+        const period = order.periodDays ?? 1;
+        const lastFired = order.lastFiredDay ?? -Infinity;
+        shouldFire = this.day - lastFired >= period;
+      } else {
+        // threshold
+        const stock = this.stock.count(order.resource);
+        if (order.kind === 'sell' && order.thresholdMax !== undefined) {
+          shouldFire = stock > order.thresholdMax;
+        } else if (order.kind === 'buy' && order.thresholdMin !== undefined) {
+          shouldFire = stock < order.thresholdMin;
+        }
+      }
+
+      if (!shouldFire) continue;
+
+      let executed = false;
+      if (order.kind === 'sell') {
+        const revenue = this.sellToMarket(order.resource, order.quantity);
+        executed = revenue > 0;
+      } else {
+        executed = this.buyFromMarket(order.resource, order.quantity);
+      }
+
+      if (executed) {
+        order.lastFiredDay = this.day;
+        const rec: TradeRecord = { day: this.day, kind: order.kind, resource: order.resource, quantity: order.quantity, auto: true };
+        this.tradeHistory.push(rec);
+        if (this.tradeHistory.length > 100) this.tradeHistory.shift();
+      }
+    }
+  }
+
   // ── serialization ────────────────────────────────────────────────────────────
 
   serialize(): TownCoreSave {
@@ -1327,6 +1414,9 @@ export class TownCore {
       pendingChoice: this.pendingChoice ?? undefined,
       prestige: this.prestige > 0 ? this.prestige : undefined,
       era: this.era > 1 ? this.era : undefined,
+      tradeOrders: this.tradeOrders.length > 0 ? this.tradeOrders : undefined,
+      tradeHistory: this.tradeHistory.length > 0 ? this.tradeHistory : undefined,
+      nextOrderId: this._nextOrderId > 1 ? this._nextOrderId : undefined,
     };
   }
 
@@ -1376,6 +1466,9 @@ export class TownCore {
     core.pendingChoice = data.pendingChoice ?? null;
     core.prestige = data.prestige ?? 0;
     core.era = data.era ?? 1;
+    if (data.tradeOrders) core.tradeOrders.push(...data.tradeOrders);
+    if (data.tradeHistory) core.tradeHistory.push(...data.tradeHistory);
+    (core as unknown as { _nextOrderId: number })._nextOrderId = data.nextOrderId ?? 1;
     return core;
   }
 }
