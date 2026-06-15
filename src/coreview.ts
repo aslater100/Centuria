@@ -221,7 +221,13 @@ addEventListener('mouseup', () => {
     core.grid.rebuildRooms();
   }
 });
-canvas.addEventListener('mousemove', (e) => { if (painting) paintAt(e); });
+let hoverX = -1, hoverY = -1;
+canvas.addEventListener('mousemove', (e) => {
+  const r = canvas.getBoundingClientRect();
+  const t = tileAt(e.clientX - r.left, e.clientY - r.top);
+  hoverX = t.x; hoverY = t.y;
+  if (painting) paintAt(e);
+});
 
 /** Click near a settler to open the inspector. Used when no paint action fired. */
 function maybeInspect(e: MouseEvent): void {
@@ -528,6 +534,40 @@ function draw(): void {
   if (done.length > 0) {
     ctx.fillStyle = '#888'; ctx.font = '11px monospace';
     ctx.fillText(`Unlocked: ${done.slice(0, 3).join(', ')}${done.length > 3 ? '…' : ''}`, rpx + 6, rpy + 14 + row++ * RPH);
+  }
+
+  // ── Tile hover tooltip ───────────────────────────────────────────────
+  if (hoverX >= 0 && hoverX < MAP && hoverY >= 0 && hoverY < MAP) {
+    const g = core.grid;
+    const i = hoverY * MAP + hoverX;
+    const parts: string[] = [];
+    const terrainNames = ['', 'grass', 'tree', 'water', 'rock', 'soil'];
+    const zoneNames = ['', 'field', 'woodcutter', 'quarry', 'fishery', 'flax'];
+    const t = g.terrain[i];
+    if (t) parts.push(terrainNames[t] ?? `terrain:${t}`);
+    if (g.ore[i]) parts.push('ore');
+    if (g.zone[i]) parts.push(zoneNames[g.zone[i]] ?? `zone:${g.zone[i]}`);
+    if (g.floor[i]) {
+      const rd = ROOM_DEF_BY_NUM[g.roomId[i]];
+      parts.push(rd ? rd.id : 'floor');
+    }
+    const stationsHere = g.stations.filter(s => s.x === hoverX && s.y === hoverY);
+    for (const s of stationsHere) {
+      const sd = STATION_DEF_BY_NUM[s.typeId];
+      parts.push(sd?.id ?? `station:${s.typeId}`);
+    }
+    if (g.wall[i]) parts.push('wall');
+    if (g.gate[i]) parts.push('gate');
+    if (g.trap[i]) parts.push('spike trap');
+    if (parts.length > 0) {
+      const tip = `(${hoverX},${hoverY}) ${parts.join(' · ')}`;
+      ctx.font = '11px monospace';
+      const tw = ctx.measureText(tip).width;
+      const tx = Math.min(hoverX * px + px + 4, canvas.width - tw - 8);
+      const ty = Math.max(hoverY * px - 4, 20);
+      ctx.fillStyle = '#000c'; ctx.fillRect(tx - 2, ty - 13, tw + 4, 16);
+      ctx.fillStyle = '#ddd'; ctx.fillText(tip, tx, ty);
+    }
   }
 
   // ── Flash message (center-top) ───────────────────────────────────────
