@@ -693,10 +693,7 @@ export class TownCore {
     const WANDER_SPEED = 0.15;
     const surviving: Deer[] = [];
     for (const d of this.deer) {
-      if (d.health <= 0) {
-        this.stock.add('game_meal', TUNING.huntMealYield);
-        continue; // cull; game_meal added by the kill
-      }
+      if (d.health <= 0) continue; // culled by hunting; game_meal is produced by the lodge recipe
       // Flee the nearest settler inside the radius.
       let fled = false;
       for (let i = 0; i < a.count; i++) {
@@ -872,6 +869,35 @@ export class TownCore {
       for (let i = 0; i < a.count; i++) {
         a.recreation[i] = Math.min(100, a.recreation[i] + 2);
         a.social[i] = Math.min(100, a.social[i] + 2);
+      }
+    }
+
+    // Housing preference: the colony's home-room style either matches or clashes with
+    // a settler's trait-derived preference (private / communal / military=3). Derive the
+    // dominant style from the average sleep capacity per home room: ≤1.5 beds/room is a
+    // private feel; ≥3 beds/room is communal (bunks). Settlers whose preference matches
+    // get a small daily mood lift (mirrors the fat sim's bed-style bonus at town altitude).
+    {
+      let totalSleepCap = 0, homeRoomCount = 0;
+      for (const room of this.grid.rooms) {
+        if (ROOM_DEF_BY_NUM[room.typeId]?.id !== 'home') continue;
+        homeRoomCount++;
+        for (const sid of room.stationIds) {
+          const st = this.grid.stations.find((s) => s.id === sid);
+          if (!st) continue;
+          const sdef = STATION_DEF_BY_NUM[st.typeId];
+          if (sdef?.capacity?.kind === 'sleep') totalSleepCap += sdef.capacity.amount;
+        }
+      }
+      const avgPerRoom = homeRoomCount > 0 ? totalSleepCap / homeRoomCount : 0;
+      // 1=private feel (≤1.5 avg), 2=communal feel (≥3 avg), 0=neutral / no homes
+      const colonyStyle = avgPerRoom <= 0 ? 0 : avgPerRoom <= 1.5 ? 1 : avgPerRoom >= 3 ? 2 : 0;
+      if (colonyStyle > 0) {
+        for (let i = 0; i < a.count; i++) {
+          if (a.housingPref[i] === colonyStyle) {
+            a.addThought(i, this.tickNo, 2, 2 * TICKS_PER_DAY);
+          }
+        }
       }
     }
 

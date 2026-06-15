@@ -984,3 +984,65 @@ describe('TownCore deer and hunting', () => {
     expect(OUTPOST).toBeGreaterThan(0); // outpost room type is registered
   });
 });
+
+describe('TownCore housing preference', () => {
+  const HOME = ROOM_TYPE_ID.get('home')!;
+  const KITCHEN = ROOM_TYPE_ID.get('kitchen')!;
+  // housingPref codes from agents.ts HOUSING_PREF: 1=private, 2=communal, 3=military
+  const PRIVATE = 1, COMMUNAL = 2;
+
+  /** Colony with an oven (food supply) and one home room using the given bed type.
+   *  Plenty of meals so the settler stays fed and mood comparisons are clean. */
+  function homeCore(bedId: 'bed' | 'bunk', seed = 20): TownCore {
+    const core = new TownCore({ width: 16, height: 16, seed });
+    const g = core.grid;
+    // Kitchen so grain → meals each day.
+    g.designateRect(2, 2, 4, 3, KITCHEN);
+    for (let x = 1; x <= 5; x++) { g.setWall(x, 1); g.setWall(x, 4); }
+    for (let y = 1; y <= 4; y++) { g.setWall(1, y); g.setWall(5, y); }
+    g.placeStation('oven', 2, 2);
+    // One walled home room.
+    g.designateRect(2, 7, 5, 10, HOME);
+    for (let x = 1; x <= 6; x++) { g.setWall(x, 6); g.setWall(x, 11); }
+    for (let y = 6; y <= 11; y++) { g.setWall(1, y); g.setWall(6, y); }
+    g.placeStation(bedId, 2, 7);
+    g.rebuildRooms();
+    core.stock.add('grain', 500);
+    core.stock.add('meal', 200); // pre-cooked meals to keep settler fed
+    core.seedColony(3, 5, 1);
+    return core;
+  }
+
+  it('private pref gives a mood advantage in single-bed rooms over no preference', () => {
+    // Both cores have identical setup; one settler has private pref, other has none.
+    const withPref = homeCore('bed', 20);
+    const withoutPref = homeCore('bed', 20);
+    withPref.agents.housingPref[0] = PRIVATE;
+    withoutPref.agents.housingPref[0] = 0;
+    withPref.run(5 * 360); // 5 days
+    withoutPref.run(5 * 360);
+    // The settler with matching pref should have accumulated +2 mood/day boost
+    expect(withPref.agents.mood[0]).toBeGreaterThan(withoutPref.agents.mood[0]);
+  });
+
+  it('communal pref gives a mood advantage in bunk rooms over no preference', () => {
+    const withPref = homeCore('bunk', 21);
+    const withoutPref = homeCore('bunk', 21);
+    withPref.agents.housingPref[0] = COMMUNAL;
+    withoutPref.agents.housingPref[0] = 0;
+    withPref.run(5 * 360);
+    withoutPref.run(5 * 360);
+    expect(withPref.agents.mood[0]).toBeGreaterThan(withoutPref.agents.mood[0]);
+  });
+
+  it('mismatched pref (private in communal room) gives no advantage over no preference', () => {
+    const mismatch = homeCore('bunk', 22); // communal-style room
+    const noPref = homeCore('bunk', 22);
+    mismatch.agents.housingPref[0] = PRIVATE; // private preference in a communal room
+    noPref.agents.housingPref[0] = 0;
+    mismatch.run(5 * 360);
+    noPref.run(5 * 360);
+    // No housing bonus fires → mood delta should be identical (both start at same value)
+    expect(mismatch.agents.mood[0]).toBeCloseTo(noPref.agents.mood[0], 0);
+  });
+});
