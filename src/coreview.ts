@@ -6,72 +6,91 @@
  *
  * Builds a working starter town, runs the core on a fixed timestep, and draws
  * the BuildGrid + agents + raiders with a stats overlay. Controls:
- *   space pause · 1/2/3 speed · R raid now · N add settler ·
- *   left-drag paint wall · right-drag erase
  *
- * Renders with the game's real procedural sprites (`buildSprites`) so TownCore
- * looks like the live game — reachable in the real app via `?core` (see main.ts)
- * or the standalone `core.html`. ponytail: reuses the sprite generator + BuildGrid
- * render path; no fork of the 800-line fat-sim Renderer.
+ *   Simulation:
+ *     space pause · 1/2/3 speed · R raid now · N add settler
+ *
+ *   Paint tools (left-drag paint, right-drag erase):
+ *     W  wall blueprint     E  erase tile
+ *     G  gate (passable)    D  floor (bare, no designation)
+ *     Z  room floor+designation  [ ] cycle room type
+ *     A  place station      , . cycle station type
+ *     F  field zone    C  woodcutter zone
+ *     Q  quarry zone   B  fishery zone
+ *
+ *   Inspect:  click an agent to open the settler inspector
+ *
+ * Renders with the game's real procedural sprites so TownCore looks like the
+ * live game. Reachable from index.html via the `?core` URL param (main.ts
+ * redirects) or the standalone core.html.
  */
 import './style.css';
 import { TownCore } from './sim/towncore';
+import type { SettlerView } from './sim/towncore';
 import { AState } from './sim/agents';
 import { TERRAIN, ZONE } from './sim/build';
-import { ROOM_TYPE_ID, STATION_DEF_BY_NUM, TICKS_PER_SECOND } from './sim/defs';
+import {
+  ROOM_TYPE_ID, ROOM_DEF_BY_NUM, ROOM_DEFS,
+  STATION_DEF_BY_NUM, STATION_DEFS,
+  TICKS_PER_SECOND,
+} from './sim/defs';
 import { buildSprites } from './ui/sprites';
 import { applyOverrides } from './ui/spriteOverrides';
 
-// Real game art, generated procedurally (no asset files). [] skips building
-// sprites — TownCore renders from the BuildGrid (floor/wall/stations) + terrain.
 const sprites = buildSprites([]);
-void applyOverrides(sprites); // overlay any public/sprites/*.png; no-op by default
+void applyOverrides(sprites);
 
 const MAP = 64;
-// B-6 PART 3: boot WITH terrain so the play-test shows the Songs-of-Syx world
-// (forests/water/rock/ore) the colony is painted onto, not a featureless plane.
 const core = new TownCore({ width: MAP, height: MAP, seed: Date.now() % 100000, terrain: true });
-(window as unknown as { core: TownCore }).core = core; // debug/automation hook
+(window as unknown as { core: TownCore }).core = core;
 
-// ── starter town: doored kitchen + home + tavern, sized so a real colony lives ──
-// Each room is fully walled with a single gate cut into the south side: a gate is
-// passable (settlers path through) yet still seals the room for the enclosure
-// (warmth) bonus, so the colony stays both reachable and warm.
+// ── Room type colors (semi-transparent tint over floor tiles) ──────────────
+const ROOM_COLORS: Record<string, string> = {
+  home: '#b87030',
+  kitchen: '#e08020',
+  bakery: '#c8a030',
+  mill: '#b0b030',
+  smithy: '#808080',
+  foundry: '#d04010',
+  sawmill: '#804010',
+  workshop: '#408080',
+  kilnhouse: '#c05020',
+  library: '#4080d0',
+  infirmary: '#40c040',
+  apothecary: '#80c840',
+  tavern: '#8030c0',
+  storehouse: '#a08060',
+};
+
+// ── Starter town ──────────────────────────────────────────────────────────
 {
   const g = core.grid;
   const cx = MAP >> 1, cy = MAP >> 1;
-  // Clear the starter-town footprint back to grass so generated water/rock can't
-  // land under the demo rooms (the heart clearing already handles trees/rock, but
-  // not water). The wider world keeps its forests/lakes/outcrops.
   for (let y = cy - 12; y <= cy + 12; y++) for (let x = cx - 12; x <= cx + 16; x++) g.setTerrain(x, y, TERRAIN.GRASS);
-  // Floor [x0..x1, y0..y1], wall the perimeter just outside it, then cut a south door.
   const room = (x0: number, y0: number, x1: number, y1: number, type: string): void => {
     g.designateRect(x0, y0, x1, y1, ROOM_TYPE_ID.get(type)!);
     for (let x = x0 - 1; x <= x1 + 1; x++) { g.setWall(x, y0 - 1); g.setWall(x, y1 + 1); }
     for (let y = y0 - 1; y <= y1 + 1; y++) { g.setWall(x0 - 1, y); g.setWall(x1 + 1, y); }
-    g.setGate((x0 + x1) >> 1, y1 + 1); // gate: passable, but keeps the room enclosed (warmth + services)
+    g.setGate((x0 + x1) >> 1, y1 + 1);
   };
   const fill = (id: string, x0: number, y0: number, x1: number, y1: number, dx: number, dy: number): void => {
     for (let y = y0; y <= y1; y += dy) for (let x = x0; x <= x1; x += dx) g.placeStation(id, x, y);
   };
 
-  room(cx - 4, cy - 9, cx + 3, cy - 6, 'kitchen');   // 8×4 kitchen
-  fill('oven', cx - 4, cy - 9, cx + 3, cy - 9, 2, 1); // 4 ovens
+  room(cx - 4, cy - 9, cx + 3, cy - 6, 'kitchen');
+  fill('oven', cx - 4, cy - 9, cx + 3, cy - 9, 2, 1);
 
-  room(cx - 5, cy + 4, cx + 4, cy + 9, 'home');       // 10×6 home
-  fill('bunk', cx - 5, cy + 4, cx + 4, cy + 8, 2, 3); // bunks (sleep 3 each) → ~36 beds
+  room(cx - 5, cy + 4, cx + 4, cy + 9, 'home');
+  fill('bunk', cx - 5, cy + 4, cx + 4, cy + 8, 2, 3);
 
-  room(cx + 8, cy - 2, cx + 14, cy + 2, 'tavern');    // 7×5 tavern
-  fill('table', cx + 8, cy - 2, cx + 13, cy + 2, 3, 2); // tables (recreation 2 each)
+  room(cx + 8, cy - 2, cx + 14, cy + 2, 'tavern');
+  fill('table', cx + 8, cy - 2, cx + 13, cy + 2, 3, 2);
 
   g.rebuildRooms();
   core.stock.add('grain', 5000);
-  core.stock.add('wood', 200); // seed lumber so painted wall blueprints can be built
-  core.seedColony(cx, cy, 8); // spawn on open ground at the centre — reachable via the doors
+  core.stock.add('wood', 200);
+  core.seedColony(cx, cy, 8);
 
-  // Auto-designate the nearest patches of each resource so the harvest loop runs
-  // out of the box (the player can paint more with F/C/Q/B). ponytail: just grab
-  // the first matching tiles by scan order; no nearest-search.
   const autoZone = (type: number, cap: number): void => {
     for (let i = 0, n = 0; i < g.size && n < cap; i++) {
       if (g.setZone(i % MAP, (i / MAP) | 0, type)) n++;
@@ -83,7 +102,7 @@ const core = new TownCore({ width: MAP, height: MAP, seed: Date.now() % 100000, 
   autoZone(ZONE.FISHERY, 6);
 }
 
-// ── canvas ──
+// ── Canvas ────────────────────────────────────────────────────────────────
 const app = document.getElementById('app')!;
 const canvas = document.createElement('canvas');
 app.appendChild(canvas);
@@ -95,104 +114,270 @@ addEventListener('resize', resize);
 const tilePx = () => Math.floor(Math.min(canvas.width, canvas.height) / MAP);
 const tileAt = (mx: number, my: number) => ({ x: Math.floor(mx / tilePx()), y: Math.floor(my / tilePx()) });
 
-// ── input ──
+// ── Tool state ────────────────────────────────────────────────────────────
 let paused = false;
 let speed = 3;
-let painting: 0 | 1 | 2 = 0; // 0 none, 1 apply tool, 2 erase
-// Current paint tool: 'wall' or a harvest-zone type (designate matching terrain).
-type Tool = 'wall' | 'field' | 'woodcutter' | 'quarry' | 'fishery';
+let painting: 0 | 1 | 2 = 0; // 0=none, 1=apply, 2=erase
+
+type Tool = 'wall' | 'erase' | 'gate' | 'floor' | 'room' | 'station'
+           | 'field' | 'woodcutter' | 'quarry' | 'fishery';
 let tool: Tool = 'wall';
-const TOOL_KEYS: Record<string, Tool> = { w: 'wall', f: 'field', c: 'woodcutter', q: 'quarry', b: 'fishery' };
+
+// Room designation sub-tool: cycle through room type names.
+const ROOM_TYPE_NAMES = ROOM_DEFS.map(d => d.id);
+let roomTypeIdx = 0; // index into ROOM_TYPE_NAMES
+
+// Station placement sub-tool: cycle through station type names.
+const STATION_TYPE_NAMES = STATION_DEFS.map(d => d.id);
+let stationTypeIdx = 0; // index into STATION_TYPE_NAMES
+
+// Settler inspector state.
+let inspected: SettlerView | null = null;
+
+// ── Input ─────────────────────────────────────────────────────────────────
 addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase();
-  if (e.key === ' ') { paused = !paused; e.preventDefault(); }
-  else if (e.key === '1') speed = 1;
-  else if (e.key === '2') speed = 3;
-  else if (e.key === '3') speed = 8;
-  else if (k === 'r') core.musterRaid();
-  else if (k === 'n') core.seedColony(core.homeX, core.homeY, 1);
-  else if (TOOL_KEYS[k]) tool = TOOL_KEYS[k];
+  if (e.key === ' ') { paused = !paused; e.preventDefault(); return; }
+  if (e.key === '1') { speed = 1; return; }
+  if (e.key === '2') { speed = 3; return; }
+  if (e.key === '3') { speed = 8; return; }
+  if (k === 'r') { core.musterRaid(); return; }
+  if (k === 'n') { core.seedColony(core.homeX, core.homeY, 1); return; }
+  // Tool keys
+  if (k === 'w') { tool = 'wall'; return; }
+  if (k === 'e') { tool = 'erase'; return; }
+  if (k === 'g') { tool = 'gate'; return; }
+  if (k === 'd') { tool = 'floor'; return; }
+  if (k === 'z') { tool = 'room'; return; }
+  if (k === 'a') { tool = 'station'; return; }
+  if (k === 'f') { tool = 'field'; return; }
+  if (k === 'c') { tool = 'woodcutter'; return; }
+  if (k === 'q') { tool = 'quarry'; return; }
+  if (k === 'b') { tool = 'fishery'; return; }
+  // Cycle room type
+  if (e.key === '[') { roomTypeIdx = (roomTypeIdx - 1 + ROOM_TYPE_NAMES.length) % ROOM_TYPE_NAMES.length; return; }
+  if (e.key === ']') { roomTypeIdx = (roomTypeIdx + 1) % ROOM_TYPE_NAMES.length; return; }
+  // Cycle station type
+  if (e.key === ',') { stationTypeIdx = (stationTypeIdx - 1 + STATION_TYPE_NAMES.length) % STATION_TYPE_NAMES.length; return; }
+  if (e.key === '.') { stationTypeIdx = (stationTypeIdx + 1) % STATION_TYPE_NAMES.length; return; }
 });
+
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('mousedown', (e) => { painting = e.button === 2 ? 2 : 1; paintAt(e); });
-addEventListener('mouseup', () => { painting = 0; core.grid.rebuildRooms(); });
+canvas.addEventListener('mousedown', (e) => {
+  painting = e.button === 2 ? 2 : 1;
+  paintAt(e);
+  if (e.button === 0 && tool === 'wall') maybeInspect(e); // click in non-paint = inspect
+});
+addEventListener('mouseup', () => {
+  painting = 0;
+  if (tool === 'room' || tool === 'wall' || tool === 'floor' || tool === 'station') {
+    core.grid.rebuildRooms();
+  }
+});
 canvas.addEventListener('mousemove', (e) => { if (painting) paintAt(e); });
+
+/** Click near a settler to open the inspector. Used when no paint action fired. */
+function maybeInspect(e: MouseEvent): void {
+  const r = canvas.getBoundingClientRect();
+  const t = tileAt(e.clientX - r.left, e.clientY - r.top);
+  const a = core.agents;
+  let bestDist = 2; // Manhattan tiles, threshold for "near"
+  let bestIdx = -1;
+  for (let i = 0; i < a.count; i++) {
+    const d = Math.abs(a.posX[i] - t.x) + Math.abs(a.posY[i] - t.y);
+    if (d < bestDist) { bestDist = d; bestIdx = i; }
+  }
+  inspected = bestIdx >= 0 ? core.inspect(bestIdx) : null;
+}
+
 function paintAt(e: MouseEvent): void {
   const r = canvas.getBoundingClientRect();
   const t = tileAt(e.clientX - r.left, e.clientY - r.top);
   const g = core.grid;
   if (!g.inBounds(t.x, t.y)) return;
-  if (painting === 2) { g.clearWall(t.x, t.y); g.clearZone(t.x, t.y); core.cancelBlueprint(t.x, t.y); return; }
-  if (tool === 'wall') core.blueprintWall(t.x, t.y); // Songs-of-Syx: a ghost the colony builds
-  else g.setZone(t.x, t.y, ZONE[tool.toUpperCase() as keyof typeof ZONE]); // succeeds only on matching terrain
+
+  // Right-drag always erases regardless of tool
+  if (painting === 2) {
+    g.clearWall(t.x, t.y);
+    g.clearGate(t.x, t.y);
+    g.clearFloor(t.x, t.y);
+    g.clearZone(t.x, t.y);
+    g.clearDesignation(t.x, t.y);
+    core.cancelBlueprint(t.x, t.y);
+    return;
+  }
+
+  // Left-drag: apply current tool
+  switch (tool) {
+    case 'wall':    core.blueprintWall(t.x, t.y); break;
+    case 'erase':
+      g.clearWall(t.x, t.y); g.clearGate(t.x, t.y);
+      g.clearFloor(t.x, t.y); g.clearZone(t.x, t.y);
+      g.clearDesignation(t.x, t.y); core.cancelBlueprint(t.x, t.y);
+      break;
+    case 'gate':    g.setGate(t.x, t.y);  break;
+    case 'floor':   g.setFloor(t.x, t.y); break;
+    case 'room': {
+      const rid = ROOM_TYPE_ID.get(ROOM_TYPE_NAMES[roomTypeIdx]) ?? 1;
+      g.setFloor(t.x, t.y);
+      g.designate(t.x, t.y, rid);
+      break;
+    }
+    case 'station': {
+      const sid = STATION_TYPE_NAMES[stationTypeIdx];
+      g.placeStation(sid, t.x, t.y);
+      break;
+    }
+    case 'field':      g.setZone(t.x, t.y, ZONE.FIELD);      break;
+    case 'woodcutter': g.setZone(t.x, t.y, ZONE.WOODCUTTER);  break;
+    case 'quarry':     g.setZone(t.x, t.y, ZONE.QUARRY);      break;
+    case 'fishery':    g.setZone(t.x, t.y, ZONE.FISHERY);     break;
+  }
 }
 
-// ── render (real game sprites, scaled to the fit-to-screen tile size) ──
+// ── Render ────────────────────────────────────────────────────────────────
+const ZONE_OUTLINE = ['', '#d4d46a', '#6ad48a', '#c8c8d8', '#6ad4d4'];
+
 function draw(): void {
   const px = tilePx();
   const g = core.grid;
   const blit = (img: CanvasImageSource, x: number, y: number) => ctx.drawImage(img, x * px, y * px, px, px);
   ctx.fillStyle = '#15151a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
   const anim = (performance.now() / 350 | 0) % sprites.water.length;
-  // Zone outline colours, index-aligned with ZONE (none/field/woodcutter/quarry/fishery).
-  const ZONE_COLORS = ['', '#d4d46a', '#6ad48a', '#c8c8d8', '#6ad4d4'];
+
   for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
     const i = y * MAP + x;
     const t = g.terrain[i];
-    // Ground: water/soil/rock get their own tile; grass also backs trees.
+
+    // Ground layer
     if (t === TERRAIN.WATER) blit(sprites.water[anim], x, y);
     else if (t === TERRAIN.SOIL) blit(sprites.soil, x, y);
     else if (t === TERRAIN.ROCK) blit(g.ore[i] ? sprites.rockMarked : sprites.rock, x, y);
     else blit(sprites.grass[(x * 3 + y) % 4], x, y);
     if (t === TERRAIN.TREE) blit(sprites.tree, x, y);
-    if (g.zone[i]) { ctx.strokeStyle = ZONE_COLORS[g.zone[i]]; ctx.strokeRect(x * px + 0.5, y * px + 0.5, px - 1, px - 1); }
+
+    // Zone outline
+    if (g.zone[i]) {
+      ctx.strokeStyle = ZONE_OUTLINE[g.zone[i]];
+      ctx.strokeRect(x * px + 0.5, y * px + 0.5, px - 1, px - 1);
+    }
+
+    // Floor with room tint
+    if (g.floor[i]) {
+      blit(sprites.interiorFloor, x, y);
+      const roomDef = ROOM_DEF_BY_NUM[g.roomId[i]];
+      if (roomDef) {
+        const color = ROOM_COLORS[roomDef.id];
+        if (color) {
+          ctx.fillStyle = color + '44'; // ~27% opacity tint
+          ctx.fillRect(x * px, y * px, px, px);
+        }
+      }
+    }
+
     if (g.gate[i]) blit(sprites.gate, x, y);
     else if (g.wall[i]) blit(sprites.interiorWall, x, y);
-    else if (g.floor[i]) blit(sprites.interiorFloor, x, y);
   }
+
+  // Stations
   for (const s of g.stations) {
     const def = STATION_DEF_BY_NUM[s.typeId];
     const img = def && sprites.stations[def.id];
     if (img) blit(img, s.x, s.y);
   }
 
+  // Agents
   const a = core.agents;
   for (let i = 0; i < a.count; i++) {
     const variant = i % sprites.settler.length;
     blit(sprites.settler[variant][0], a.posX[i], a.posY[i]);
-    if (a.woundUntreated[i]) { ctx.strokeStyle = '#ff4040'; ctx.strokeRect(a.posX[i] * px, a.posY[i] * px, px, px); }
-    if (a.state[i] === AState.Sleeping) { ctx.fillStyle = '#5aa0ff'; ctx.fillText('z', a.posX[i] * px + px, a.posY[i] * px); }
+    if (a.woundUntreated[i]) {
+      ctx.strokeStyle = '#ff4040';
+      ctx.strokeRect(a.posX[i] * px, a.posY[i] * px, px, px);
+    }
+    if (a.state[i] === AState.Sleeping) {
+      ctx.fillStyle = '#5aa0ff';
+      ctx.fillText('z', a.posX[i] * px + px, a.posY[i] * px);
+    }
+    // Highlight inspected settler
+    if (inspected && a.posX[i] === inspected.x && a.posY[i] === inspected.y) {
+      ctx.strokeStyle = '#ffff00';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(a.posX[i] * px - 1, a.posY[i] * px - 1, px + 2, px + 2);
+      ctx.lineWidth = 1;
+    }
   }
-  for (const r of core.raids.raiders) blit(sprites.raider[r.fleeing ? 0 : (performance.now() / 200 | 0) % sprites.raider.length], r.x, r.y);
-  // Pending blueprints: dashed ghosts the colony hasn't built yet.
+
+  // Raiders
+  for (const r of core.raids.raiders) {
+    blit(sprites.raider[r.fleeing ? 0 : (performance.now() / 200 | 0) % sprites.raider.length], r.x, r.y);
+  }
+
+  // Blueprint ghosts
   ctx.strokeStyle = '#88aaff'; ctx.setLineDash([2, 2]);
   for (const o of core.builds) ctx.strokeRect(o.x * px + 1, o.y * px + 1, px - 2, px - 2);
   ctx.setLineDash([]);
 
-  ctx.fillStyle = '#000a'; ctx.fillRect(0, 0, 320, 168);
-  ctx.fillStyle = '#fff'; ctx.font = '13px monospace';
-  const line = (n: number, s: string) => ctx.fillText(s, 8, 20 + n * 18);
-  line(0, `day ${core.day}  pop ${core.population}  mood ${core.averageMood().toFixed(0)}`);
-  line(1, `meal ${core.stock.count('meal')} grain ${core.stock.count('grain')} wood ${core.stock.count('wood')} stone ${core.stock.count('stone')}`);
-  line(2, `births ${core.births}  deaths ${core.deaths}  ore ${core.stock.count('iron_ore')}`);
-  line(3, core.raidActive ? `RAID — ${core.raids.raiders.length} raiders (slain ${core.raids.slain})` : `next raid day ${core.nextRaidDay}`);
-  line(4, `${paused ? 'PAUSED' : 'speed ' + speed + '×'}  ·  tool: ${tool}`);
-  line(5, `space pause · 1/2/3 speed · R raid · N settler`);
-  line(6, `tools: W wall · F field · C chop · Q quarry · B fishery · drag to paint, right-erase`);
+  // ── Stats overlay (top-left) ────────────────────────────────────────────
+  ctx.fillStyle = '#000a'; ctx.fillRect(0, 0, 340, 248);
+  ctx.fillStyle = '#ddd'; ctx.font = '13px monospace';
+  const line = (n: number, s: string, color = '#ddd') => { ctx.fillStyle = color; ctx.fillText(s, 8, 20 + n * 17); };
 
-  // Event log: last few entries, bottom-left, colour-coded like the live HUD.
-  const recent = core.log.slice(-6);
-  const logColor = { good: '#7fe07f', bad: '#ff6b6b', info: '#d8d8d8' };
+  line(0, `day ${core.day}  pop ${core.population}  mood ${core.averageMood().toFixed(0)}  gold ${core.gold.toFixed(0)}`);
+  line(1, `meal ${core.stock.count('meal').toFixed(0)}  grain ${core.stock.count('grain').toFixed(0)}  flour ${core.stock.count('flour').toFixed(0)}  bread ${core.stock.count('bread').toFixed(0)}`);
+  line(2, `wood ${core.stock.count('wood').toFixed(0)}  stone ${core.stock.count('stone').toFixed(0)}  iron ${core.stock.count('iron').toFixed(0)}  ore ${core.stock.count('iron_ore').toFixed(0)}`);
+  line(3, `clothes ${core.stock.count('clothes').toFixed(0)}  weapons ${core.stock.count('weapons').toFixed(0)}  medicine ${core.stock.count('medicine').toFixed(0)}`);
+  line(4, `births ${core.births}  deaths ${core.deaths}  inflation ${(core.inflation * 100).toFixed(1)}%`);
+  const raidLine = core.raidActive
+    ? `RAID — ${core.raids.raiders.length} raiders (slain ${core.raids.slain})`
+    : `next raid day ${core.nextRaidDay}`;
+  line(5, raidLine, core.raidActive ? '#ff6b6b' : '#ddd');
+  line(6, `${paused ? 'PAUSED' : 'speed ' + speed + '×'}`);
+
+  // Tool info
+  let toolLabel: string = tool;
+  if (tool === 'room') toolLabel = `room:${ROOM_TYPE_NAMES[roomTypeIdx]}`;
+  if (tool === 'station') toolLabel = `station:${STATION_TYPE_NAMES[stationTypeIdx]}`;
+  line(7, `tool: ${toolLabel}`);
+
+  // Key hints
+  ctx.fillStyle = '#888'; ctx.font = '11px monospace';
+  ctx.fillText('W wall  E erase  G gate  D floor  Z room([ ])  A station(, .)', 8, 20 + 8 * 17);
+  ctx.fillText('F field  C chop  Q quarry  B fishery  R raid  N settler  space pause', 8, 20 + 9 * 17);
+
+  // ── Settler inspector panel (top-right) ──────────────────────────────────
+  if (inspected) {
+    const PW = 240, PH = 180;
+    const px2 = canvas.width - PW - 8;
+    ctx.fillStyle = '#000c'; ctx.fillRect(px2, 8, PW, PH);
+    ctx.fillStyle = '#ffd700'; ctx.font = 'bold 13px monospace';
+    ctx.fillText(inspected.name, px2 + 8, 28);
+    ctx.fillStyle = '#ddd'; ctx.font = '12px monospace';
+    const iline = (n: number, s: string) => ctx.fillText(s, px2 + 8, 46 + n * 16);
+    iline(0, `mood ${inspected.mood.toFixed(0)}  skill ${inspected.skill.toFixed(1)}  ${inspected.state}`);
+    iline(1, `food ${inspected.food.toFixed(0)}  rest ${inspected.rest.toFixed(0)}  warmth ${inspected.warmth.toFixed(0)}`);
+    iline(2, `rec ${inspected.recreation.toFixed(0)}  social ${inspected.social.toFixed(0)}  hp ${inspected.health.toFixed(0)}`);
+    iline(3, `armed: ${inspected.armed}  traits: ${inspected.traits.join(', ') || 'none'}`);
+    const flags = [inspected.wounded && 'wounded', inspected.infected && 'infected', inspected.sick && 'sick'].filter(Boolean);
+    if (flags.length) { ctx.fillStyle = '#ff6b6b'; iline(4, flags.join(' · ')); ctx.fillStyle = '#ddd'; }
+    ctx.fillStyle = '#888'; ctx.font = '11px monospace';
+    ctx.fillText('click agent to inspect', px2 + 8, 8 + PH - 10);
+  }
+
+  // ── Event log (bottom-left) ───────────────────────────────────────────
+  const logColors = { good: '#7fe07f', bad: '#ff6b6b', info: '#d8d8d8' };
   ctx.font = '12px monospace';
+  const recent = core.log.slice(-6);
   for (let k = 0; k < recent.length; k++) {
-    const e = recent[recent.length - 1 - k];
-    ctx.fillStyle = logColor[e.kind];
-    ctx.fillText(`d${e.day} ${e.text}`, 8, canvas.height - 10 - k * 16);
+    const entry = recent[recent.length - 1 - k];
+    ctx.fillStyle = logColors[entry.kind];
+    ctx.fillText(`d${entry.day} ${entry.text}`, 8, canvas.height - 10 - k * 16);
   }
 }
 
-// ── loop: fixed-timestep sim, rAF render ──
+// ── Loop ──────────────────────────────────────────────────────────────────
 let acc = 0, last = performance.now();
 function loop(now: number): void {
   acc += Math.min(0.25, (now - last) / 1000) * TICKS_PER_SECOND * speed;
