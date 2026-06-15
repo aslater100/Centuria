@@ -20,10 +20,12 @@ import { AState } from './sim/agents';
 import { TERRAIN, ZONE } from './sim/build';
 import { ROOM_TYPE_ID, STATION_DEF_BY_NUM, TICKS_PER_SECOND } from './sim/defs';
 import { buildSprites } from './ui/sprites';
+import { applyOverrides } from './ui/spriteOverrides';
 
 // Real game art, generated procedurally (no asset files). [] skips building
 // sprites — TownCore renders from the BuildGrid (floor/wall/stations) + terrain.
 const sprites = buildSprites([]);
+void applyOverrides(sprites); // overlay any public/sprites/*.png; no-op by default
 
 const MAP = 64;
 // B-6 PART 3: boot WITH terrain so the play-test shows the Songs-of-Syx world

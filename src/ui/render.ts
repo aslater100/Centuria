@@ -8,6 +8,7 @@ import { MAP_W, MAP_H } from '../sim/world';
 import { buildingDef, BUILDING_DEFS, TUNING, STATION_DEF_BY_NUM, ROOM_TYPE_ID, BLUEPRINT_DEFS } from '../sim/defs';
 import { buildSprites, TILE } from './sprites';
 import type { SpriteSet } from './sprites';
+import { applyOverrides } from './spriteOverrides';
 import type { RegionMap } from '../sim/worldgen';
 import type { TownSite } from '../sim/worldgen';
 
@@ -120,6 +121,7 @@ export class Renderer {
     this.g = canvas.getContext('2d')!;
     this.g.imageSmoothingEnabled = false;
     this.sprites = buildSprites(BUILDING_DEFS);
+    void applyOverrides(this.sprites); // overlay any public/sprites/*.png; no-op by default
   }
 
   draw(): void {

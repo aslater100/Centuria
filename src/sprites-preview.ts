@@ -6,6 +6,7 @@
  * server. This is the only way to eyeball the art (the build can't self-verify).
  */
 import { buildSprites, type SpriteSet } from './ui/sprites';
+import { listSlots } from './ui/spriteOverrides';
 
 const SCALE = 6;
 const sprites: SpriteSet = buildSprites([]);
@@ -123,4 +124,20 @@ section('6 · Buildings / blueprints');
     note.textContent = 'buildings / blueprints: empty (buildSprites([]) passes no building defs)';
     root.appendChild(note);
   }
+}
+
+// --- 7. OVERRIDE MANIFEST --------------------------------------------------
+// Every overridable slot: drop public/sprites/<name>.png at the given size and
+// list <name> in public/sprites/index.json to replace the procedural sprite.
+section('7 · Override manifest — public/sprites/<name>.png');
+{
+  const list = document.createElement('div');
+  list.className = 'manifest';
+  list.style.cssText = 'font:12px monospace;columns:4;gap:1rem;padding:.5rem';
+  for (const s of listSlots(sprites)) {
+    const row = document.createElement('div');
+    row.textContent = `${s.name}.png — ${s.canvas.width}×${s.canvas.height}`;
+    list.appendChild(row);
+  }
+  root.appendChild(list);
 }
