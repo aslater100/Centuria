@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Simulation } from '../src/sim/sim';
-import { RegionSim, REGION_MINUTES_PER_TICK, REGION_LAWS, GOV_TYPES, POLICY_CARDS, POLICY_SWAP_COST, REGION_BUILDINGS, REGION_EVENT_DEFS } from '../src/sim/region';
+import { RegionSim, REGION_MINUTES_PER_TICK, REGION_LAWS, GOV_TYPES, POLICY_CARDS, POLICY_SWAP_COST, REGION_BUILDINGS, REGION_EVENT_DEFS, TECH_TREE } from '../src/sim/region';
 import { MINUTES_PER_DAY } from '../src/sim/defs';
 import { REGION_N } from '../src/sim/worldgen';
 
@@ -46,7 +46,7 @@ describe('The flip (GDD §2.4)', () => {
     const sim = new Simulation(42);
     grow(sim);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     expect(r.settlements).toHaveLength(2);
     expect(r.expeditions).toHaveLength(0);
     expect(r.log.some((l) => l.text.includes('is founded'))).toBe(true);
@@ -58,7 +58,7 @@ describe('RegionSim (aggregate model)', () => {
     const sim = new Simulation(seed);
     grow(sim);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     return r;
   }
 
@@ -215,7 +215,7 @@ describe('Region event variety', () => {
     const sim = new Simulation(seed);
     grow(sim);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     return r;
   }
 
@@ -372,7 +372,7 @@ describe('Elections & faction politics (v0.14.0)', () => {
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5); // town #2 arrives
+    runDays(r, 12); // town #2 arrives
     r.stateProclaimed = true;
     r.stateName = 'Testonia';
     r.govLean = 'council';
@@ -528,7 +528,7 @@ describe('Constitutional Convention & Nation Proclamation (v0.15.0)', () => {
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     r.stateProclaimed = true;
     r.proclamationReady = true; // Phase C: territory gate — set directly since we're not running the full sim
     r.stateName = 'Testonia';
@@ -603,7 +603,7 @@ describe('Constitutional Convention & Nation Proclamation (v0.15.0)', () => {
     const r = nationReady();
     r.proclaimNation('Test Nation', 'democracy', {});
     r.nextElectionDay = -1; // reset
-    runDays(r, 5);
+    runDays(r, 12);
     // election should be scheduled since universal_suffrage is researched
     expect(r.nextElectionDay).toBeGreaterThan(0);
   });
@@ -681,7 +681,7 @@ describe('Constitutional Convention & Nation Proclamation (v0.15.0)', () => {
     sim2.stock.wood = 200;
     sim2.stock.meal = 200;
     const r2 = RegionSim.fromTown(sim2, 8, 80, 80);
-    runDays(r2, 5);
+    runDays(r2, 12);
     r2.stateProclaimed = true;
     r2.stateName = 'Testonia';
     r2.govLean = 'council';
@@ -706,7 +706,7 @@ describe('Policy slots & expanded statute book (v0.16.0)', () => {
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     r.stateProclaimed = true;
     r.stateName = 'Testonia';
     r.govLean = 'council';
@@ -725,7 +725,7 @@ describe('Policy slots & expanded statute book (v0.16.0)', () => {
     const sim = new Simulation(42);
     while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     r.stateProclaimed = true;
     r.researched.push('statecraft', 'universal_suffrage', 'income_tax', 'free_press', 'labor_law', 'public_education');
     const laws = r.availableLaws();
@@ -752,7 +752,7 @@ describe('Policy slots & expanded statute book (v0.16.0)', () => {
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     r.stateProclaimed = true;
     r.researched.push('statecraft', 'universal_suffrage');
     for (const t of r.settlements) t.cohorts.bands[2] += 800;
@@ -883,7 +883,7 @@ describe('Sectoral economy (Phase 1)', () => {
     const sim = new Simulation(seed);
     grow(sim);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     return r;
   }
 
@@ -938,7 +938,7 @@ describe('Faction & fog-of-war persistence (Phase 0)', () => {
     const sim = new Simulation(seed);
     grow(sim);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     return { sim, r };
   }
 
@@ -966,7 +966,7 @@ describe('Faction & fog-of-war persistence (Phase 0)', () => {
 
   it('pre-faction saves are backfilled: every town flies the player flag', () => {
     const { sim, r } = flippedPair(42);
-    runDays(r, 5);
+    runDays(r, 12);
     const old = JSON.parse(r.serialize());
     delete old.regionalFactions;
     delete old.explorationMap;
@@ -993,7 +993,7 @@ describe('City works & zoning (Phase 2)', () => {
     const sim = new Simulation(seed);
     grow(sim);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     r.stateProclaimed = true;
     r.stateName = 'Test State';
     r.govLean = 'council';
@@ -1013,7 +1013,7 @@ describe('City works & zoning (Phase 2)', () => {
     const sim = new Simulation(42);
     grow(sim);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     r.treasury = 500;
     expect(r.canManageCity(r.settlements[0]).ok).toBe(false);
     expect(r.buildCity(r.settlements[0].id, 'grain_exchange')).toBe(false);
@@ -1074,7 +1074,7 @@ describe('City works & zoning (Phase 2)', () => {
     const sim = new Simulation(42);
     grow(sim);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     r.stateProclaimed = true;
     r.stateName = 'Test State';
     r.govLean = 'council';
@@ -1091,12 +1091,63 @@ describe('City works & zoning (Phase 2)', () => {
   });
 });
 
+describe('Cost scaling with development & size (Baumol / Wagner / ideas-harder-to-find)', () => {
+  function freshState(seed: number): RegionSim {
+    const sim = new Simulation(seed);
+    grow(sim);
+    const r = RegionSim.fromTown(sim, 8, 80, 80);
+    runDays(r, 12);
+    r.stateProclaimed = true;
+    r.treasury = 5000;
+    return r;
+  }
+
+  const factory = REGION_BUILDINGS.find((b) => b.id === 'factory')!;
+  const node = TECH_TREE.find((n) => n.cost > 0)!;
+
+  it('a fresh state pays the raw 1900 prices (factors floor at 1.0)', () => {
+    const r = freshState(42);
+    expect(r.devFactor()).toBe(1);
+    expect(r.researchScale()).toBe(1);
+    expect(r.cityBuildCost(factory)).toBe(factory.cost);
+    expect(r.techCost(node)).toBe(node.cost);
+  });
+
+  it('a large, wealthy nation pays strictly more for the same work and the same tech', () => {
+    const r = freshState(42);
+    // Inflate to a populous, value-chain-rich nation: ~10k people earning well
+    // above the £6/capita baseline.
+    for (const t of r.settlements) t.cohorts.bands = [2000, 3000, 3000, 1500, 500];
+    r.gdpLastMonth = r.totalPop() * 60; // 10× the Baumol baseline per capita
+
+    expect(r.devFactor()).toBeGreaterThan(1);
+    expect(r.researchScale()).toBeGreaterThan(1);
+    expect(r.cityBuildCost(factory)).toBeGreaterThan(factory.cost);
+    expect(r.techCost(node)).toBeGreaterThan(node.cost);
+    // Sub-linear: a 10× richer economy does not pay 10× for a building.
+    expect(r.cityBuildCost(factory)).toBeLessThan(factory.cost * 10);
+  });
+
+  it('actually charges the scaled price from the treasury', () => {
+    const r = freshState(42);
+    for (const t of r.settlements) t.cohorts.bands = [2000, 3000, 3000, 1500, 500];
+    r.gdpLastMonth = r.totalPop() * 60;
+    r.researched.push('steel_industry', 'mass_production'); // unlock the factory
+    const capital = r.settlements[0];
+    const cost = r.cityBuildCost(factory);
+    const before = r.treasury;
+    expect(r.buildCity(capital.id, 'factory')).toBe(true);
+    expect(r.treasury).toBeCloseTo(before - cost, 6);
+    expect(cost).toBeGreaterThan(factory.cost);
+  });
+});
+
 describe('Regional Events (Phase 4)', () => {
   function stateCity(seed: number): RegionSim {
     const sim = new Simulation(seed);
     grow(sim);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     r.stateProclaimed = true;
     r.stateName = 'Test State';
     r.govLean = 'council';
@@ -1166,7 +1217,7 @@ describe('Local Policies (Phase 5)', () => {
     const sim = new Simulation(seed);
     grow(sim);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     r.stateProclaimed = true;
     r.stateName = 'Test State';
     r.govLean = 'council';
@@ -1255,7 +1306,7 @@ describe('Phase 0: Territory & resource visualization', () => {
     sim.stock.wood = 200;
     sim.stock.meal = 200;
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5); // let the expedition found town #2
+    runDays(r, 12); // let the expedition found town #2
     return r;
   }
 

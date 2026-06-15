@@ -20,7 +20,7 @@ function flipped(seed: number): RegionSim {
   const sim = new Simulation(seed);
   grow(sim);
   const r = RegionSim.fromTown(sim, 8, 80, 80);
-  runDays(r, 5);
+  runDays(r, 12);
   return r;
 }
 

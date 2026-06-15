@@ -72,6 +72,15 @@ export class RegionView {
   private centuryModal: HTMLElement;
   private centuryDismissed = false;
   private frame = 0;
+  // ---- Static-map cache. Terrain + territory fills are O(N²) and barely change,
+  //      so render them once into an offscreen canvas (base coords) and blit it
+  //      under the camera each frame. Rebuilt only when the signature changes,
+  //      which keeps the per-frame cost independent of REGION_N. ----
+  private mapCache: HTMLCanvasElement | null = null;
+  private mapCacheCtx: CanvasRenderingContext2D | null = null;
+  private mapCacheSig = '';
+  /** Visible region in base (pre-camera) coords — culls off-screen sprites. */
+  private vb = { l: 0, t: 0, r: 0, b: 0 };
   private lastPanelBuildFrame = -999;
   private lastPanelBuildId: number | null = null;
   /** True while the inline town-rename field is open — pauses panel rebuilds so
@@ -234,9 +243,16 @@ export class RegionView {
     g.save();
     g.translate(this.camX, this.camY);
     g.scale(this.camScale, this.camScale);
-    this.drawTerrain(W, H);
-    // Phase 0: contested ground — territory fills and frontier lines under all.
-    this.drawTerritories(W, H);
+    // Visible base-coord rect, for culling off-screen sprites this frame.
+    this.vb = {
+      l: -this.camX / this.camScale,
+      t: -this.camY / this.camScale,
+      r: (W - this.camX) / this.camScale,
+      b: (H - this.camY) / this.camScale,
+    };
+    // Terrain + territory (the O(N²) layers) come from the static cache as one blit.
+    this.ensureMapCache(W, H);
+    g.drawImage(this.mapCache!, 0, 0);
 
     // Routes along their actual corridors (M6b/6c): dotted trails, solid
     // roads, cross-tied rail; line brightness is the route's condition.
@@ -324,12 +340,16 @@ export class RegionView {
     // Phase 0: trade-flow direction arrows along busy corridors.
     this.drawTradeFlows();
 
+    // Towns on the rail network get a depot by the tracks — precompute the set
+    // once (was an O(routes) scan per settlement → O(towns×routes)).
+    const railSet = new Set<number>();
+    for (const r of region.routes) if (r.kind === 'rail') { railSet.add(r.a); railSet.add(r.b); }
     // Settlements — tiered sprites: shack → cottage → house → town → manor → castle
     for (const t of ss) {
       const { px, py } = this.toPx(t.x, t.y);
+      if (!this.inView(px, py, 56)) continue; // off-screen: skip sprite + labels + icons
       const pop = Math.round(region.popOf(t));
-      // Station (M6c): towns on the rail network get a depot by the tracks
-      const onRail = region.routes.some((r) => r.kind === 'rail' && (r.a === t.id || r.b === t.id));
+      const onRail = railSet.has(t.id);
       if (onRail) {
         const sx = px + 22;
         g.fillStyle = '#7a3b2e';
@@ -367,6 +387,7 @@ export class RegionView {
         const s = region.settlement(settlementId);
         if (!s) continue;
         const { px, py } = this.toPx(s.x, s.y);
+        if (!this.inView(px, py, 24)) continue;
         const selected = this.selectedFactionId === faction.id;
         // Selection halo
         if (selected) {
@@ -406,6 +427,7 @@ export class RegionView {
       const faction = region.faction(scout.factionId);
       if (!faction || faction.id === region.playerFactionId) continue;
       const { px, py } = this.toPx(scout.x, scout.y);
+      if (!this.inView(px, py, 16)) continue;
       const bob = Math.floor(this.frame / 20) % 2;
       g.fillStyle = faction.color ?? '#aaa';
       g.globalAlpha = 0.75;
@@ -417,6 +439,7 @@ export class RegionView {
     for (const e of region.expeditions) {
       const { px, py } = this.toPx(e.x, e.y);
       const target = this.toPx(e.targetX, e.targetY);
+      if (!this.inView(px, py, 48) && !this.inView(target.px, target.py, 48)) continue;
       g.fillStyle = 'rgba(220,210,170,0.25)';
       g.fillRect(target.px - 4, target.py - 4, 8, 8);
       const bob = Math.floor(this.frame / 15) % 2;
@@ -507,11 +530,45 @@ export class RegionView {
     this.drawCenturyReport();
   }
 
+  /** Cheap fingerprint of everything the cached terrain+territory layer depends
+   *  on. Terrain is fixed after worldgen; territory shifts only when a settlement
+   *  is founded/taken/relocated — so hash size + each town's id/owner/position. */
+  private mapCacheSignature(): string {
+    const r = this.region;
+    let s = `${this.canvas.width}x${this.canvas.height}|${r.regionalFactions.length}`;
+    for (const t of r.settlements) s += `;${t.id},${t.factionId},${Math.round(t.x)},${Math.round(t.y)}`;
+    return s;
+  }
+
+  /** Rebuild the offscreen terrain+territory canvas only when its signature
+   *  changes; otherwise the per-frame map cost is a single drawImage. */
+  private ensureMapCache(W: number, H: number): void {
+    const sig = this.mapCacheSignature();
+    if (this.mapCache && this.mapCacheSig === sig && this.mapCache.width === W && this.mapCache.height === H) return;
+    if (!this.mapCache) this.mapCache = document.createElement('canvas');
+    if (this.mapCache.width !== W || this.mapCache.height !== H) {
+      this.mapCache.width = W;
+      this.mapCache.height = H;
+      this.mapCacheCtx = this.mapCache.getContext('2d');
+    }
+    const cg = this.mapCacheCtx!;
+    cg.clearRect(0, 0, W, H);
+    this.drawTerrain(cg, W, H);
+    this.drawTerritories(cg, W, H);
+    this.mapCacheSig = sig;
+  }
+
+  /** Is a base-coord point within the current viewport (plus margin)? */
+  private inView(px: number, py: number, margin: number): boolean {
+    const vb = this.vb;
+    return px >= vb.l - margin && px <= vb.r + margin && py >= vb.t - margin && py <= vb.b + margin;
+  }
+
   /** Phase 0: territory borders — translucent control zones plus thick frontier
    *  lines, so the map reads as contested ground at a glance. Drawn under routes
    *  and settlements; faction-coloured (player blue, rivals their own hues). */
-  private drawTerritories(W: number, H: number): void {
-    const { g, region } = this;
+  private drawTerritories(g: CanvasRenderingContext2D, W: number, H: number): void {
+    const { region } = this;
     const N = REGION_N;
     const { grid } = region.computeTerritoryGrid();
     const m = 60;
@@ -570,6 +627,7 @@ export class RegionView {
     };
     for (const t of region.settlements) {
       const { px, py } = this.toPx(t.x, t.y);
+      if (!this.inView(px, py, 56)) continue;
       const rs = region.getSettlementResourceStatus(t);
       const cells: [string, string][] = [['F', rs.food], ['W', rs.wood], ['G', rs.goods]];
       const bw = 7;
@@ -835,10 +893,10 @@ export class RegionView {
   private static readonly WATER_BIOMES = new Set(['sea', 'lake', 'river']);
 
   /** The generated land itself, in 8-bit blocks: this map IS the world. */
-  private drawTerrain(W: number, H: number): void {
-    const { g, region } = this;
+  private drawTerrain(g: CanvasRenderingContext2D, W: number, H: number): void {
+    const { region } = this;
     const map = region.map;
-    const N = 64; // REGION_N
+    const N = REGION_N;
     const m = 60;
     const cw = (W - 2 * m) / N;
     const ch = (H - 2 * m) / N;
@@ -2309,7 +2367,7 @@ export class RegionView {
       .map((def) => {
         const check = r.cityBuildCheck(t, def);
         return `<li>${def.name} <button class="mini city-build-btn" data-b="${def.id}" ${check.ok ? '' : 'disabled'} ` +
-          `title="${def.desc}${check.ok ? '' : ' — ' + check.reason}">` + formatCurrency(def.cost) + ` · ${def.days}d</button></li>`;
+          `title="${def.desc}${check.ok ? '' : ' — ' + check.reason}">` + formatCurrency(r.cityBuildCost(def)) + ` · ${def.days}d</button></li>`;
       })
       .join('');
     const focusBtns = (['balanced', ...SECTOR_IDS] as TownFocus[])
@@ -2715,7 +2773,7 @@ export class RegionView {
     const forceResearchRebuild = () => { this.lastResearchBuildFrame = -999; };
     const rate = r.researchRate().toFixed(1);
     const active = r.activeResearch ? TECH_TREE.find((n) => n.id === r.activeResearch) : null;
-    const progressPct = active ? Math.min(100, Math.round((r.researchProgress / active.cost) * 100)) : 0;
+    const progressPct = active ? Math.min(100, Math.round((r.researchProgress / r.techCost(active)) * 100)) : 0;
 
     const nodeRow = (id: string): string => {
       const node = TECH_TREE.find((n) => n.id === id)!;
@@ -2732,7 +2790,7 @@ export class RegionView {
         btn = `<button class="mini res-cancel-btn">cancel</button>`;
       }
       const pctStr = isActive ? ` ${progressPct}%` : '';
-      return `<div class="res-row ${cls}" title="${node.desc}">[${label}] ${node.name} (${node.cost || '✓'} RP)${pctStr}${btn}</div>`;
+      return `<div class="res-row ${cls}" title="${node.desc}">[${label}] ${node.name} (${r.techCost(node) || '✓'} RP)${pctStr}${btn}</div>`;
     };
 
     const techNodes = TECH_TREE.filter((n) => n.tree === 'tech').map((n) => nodeRow(n.id)).join('');

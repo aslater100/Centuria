@@ -24,7 +24,7 @@ describe('stockpile capacity is a hard ceiling for raw goods', () => {
 
     // Mark a generous stand of trees so haulers keep feeding the stores past cap.
     let marked = 0;
-    for (let r = 1; r < 20 && marked < 80; r++) {
+    for (let r = 1; r < 60 && marked < 80; r++) {
       for (let y = cy - r; y <= cy + r && marked < 80; y++) {
         for (let x = cx - r; x <= cx + r && marked < 80; x++) {
           if (sim.world.inBounds(x, y) && sim.world.at(x, y).kind === 'tree' && !sim.world.at(x, y).marked) {

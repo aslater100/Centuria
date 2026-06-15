@@ -58,7 +58,7 @@ describe('Tech tree: research state', () => {
   it('research rate scales with population', () => {
     const r = makeRegion();
     // add a second settlement with population
-    runDays(r, 5); // let expedition arrive and found town #2
+    runDays(r, 12); // let expedition arrive and found town #2
     const rate1 = r.researchRate();
     // add more population
     for (const t of r.settlements) t.cohorts.bands[1] += 100;
@@ -240,7 +240,7 @@ describe('Tech tree: gameplay effects', () => {
 
   it('labor_law reduces grievance build rate', () => {
     const r = makeRegion();
-    runDays(r, 5); // found town #2
+    runDays(r, 12); // found town #2
     r.stateProclaimed = true;
     r.stateName = 'Test State';
     r.govLean = 'council';
@@ -269,7 +269,7 @@ describe('Tech tree: gameplay effects', () => {
 
   it('income_tax adds 3% of GDP to treasury each month', () => {
     const r = makeRegion();
-    runDays(r, 5);
+    runDays(r, 12);
     r.stateProclaimed = true;
     r.stateName = 'Test State';
     r.govLean = 'council';

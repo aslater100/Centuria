@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Simulation } from '../src/sim/sim';
 import { RegionSim, REGION_MINUTES_PER_TICK, ROUTE_SPECS, RAIL_ERA_YEAR, HIGHWAY_ERA_YEAR, MAGLEV_ERA_YEAR } from '../src/sim/region';
-import { RegionMap } from '../src/sim/worldgen';
+import { RegionMap, CELL_SCALE } from '../src/sim/worldgen';
 import { MINUTES_PER_DAY, DAYS_PER_YEAR, START_YEAR } from '../src/sim/defs';
 
 const ticksPerDay = MINUTES_PER_DAY / REGION_MINUTES_PER_TICK;
@@ -21,7 +21,7 @@ function flipped(seed: number): RegionSim {
   const sim = new Simulation(seed);
   grow(sim);
   const r = RegionSim.fromTown(sim, 8, 80, 80);
-  runDays(r, 5);
+  runDays(r, 12);
   return r;
 }
 
@@ -350,7 +350,7 @@ describe('The maglev era (transportation.md §5)', () => {
     expect(r.buildRoad(a.id, b.id)).toBe(true);
     const route = r.routeBetween(a.id, b.id)!;
     const manned = r.maintBill(route);
-    expect(manned).toBeCloseTo(route.path.length * ROUTE_SPECS.road.maintPerCell, 5);
+    expect(manned).toBeCloseTo((route.path.length / CELL_SCALE) * ROUTE_SPECS.road.maintPerCell, 5);
     r.researched.push('automated_logistics');
     expect(r.maintBill(route)).toBeCloseTo(manned * 0.6, 5);
   });
@@ -436,7 +436,7 @@ describe('Route Network controls (Phase A)', () => {
     const sim = new Simulation(42);
     grow(sim);
     const r = RegionSim.fromTown(sim, 8, 80, 80);
-    runDays(r, 5);
+    runDays(r, 12);
     toStatehood(r);
     const [a, b] = r.settlements;
     r.treasury = 10000;
