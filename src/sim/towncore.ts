@@ -552,16 +552,20 @@ export class TownCore {
 
   // ── construction: painted blueprints → real build over time ──────────────────
 
-  /** Queue a wall blueprint (no-op if off-grid or already walled). */
+  private _pendingAt(x: number, y: number): boolean {
+    return this.builds.some((o) => o.x === x && o.y === y);
+  }
+
+  /** Queue a wall blueprint (no-op if off-grid, already walled, or already queued). */
   blueprintWall(x: number, y: number): boolean {
-    if (!this.grid.inBounds(x, y) || this.grid.wall[this.grid.index(x, y)]) return false;
+    if (!this.grid.inBounds(x, y) || this.grid.wall[this.grid.index(x, y)] || this._pendingAt(x, y)) return false;
     this.builds.push({ kind: 'wall', x, y, stationId: 0, roomType: 0, workLeft: WALL_WORK, cost: { ...WALL_COST } });
     return true;
   }
 
   /** Queue a floor blueprint, optionally designating it a room type once built. */
   blueprintFloor(x: number, y: number, roomType = 0): boolean {
-    if (!this.grid.inBounds(x, y) || this.grid.floor[this.grid.index(x, y)]) return false;
+    if (!this.grid.inBounds(x, y) || this.grid.floor[this.grid.index(x, y)] || this._pendingAt(x, y)) return false;
     this.builds.push({ kind: 'floor', x, y, stationId: 0, roomType, workLeft: FLOOR_WORK, cost: { ...FLOOR_COST } });
     return true;
   }
@@ -570,8 +574,16 @@ export class TownCore {
   blueprintStation(station: string | number, x: number, y: number): boolean {
     const typeId = typeof station === 'number' ? station : (STATION_TYPE_ID.get(station) ?? 0);
     const def = STATION_DEF_BY_NUM[typeId];
-    if (!def || !this.grid.inBounds(x, y)) return false;
+    if (!def || !this.grid.inBounds(x, y) || this._pendingAt(x, y)) return false;
     this.builds.push({ kind: 'station', x, y, stationId: typeId, roomType: 0, workLeft: def.buildWork, cost: { ...def.cost } });
+    return true;
+  }
+
+  /** Cancel any pending blueprint on a tile (player erase). Returns true if removed. */
+  cancelBlueprint(x: number, y: number): boolean {
+    const k = this.builds.findIndex((o) => o.x === x && o.y === y);
+    if (k < 0) return false;
+    this.builds.splice(k, 1);
     return true;
   }
 

@@ -58,6 +58,7 @@ const core = new TownCore({ width: MAP, height: MAP, seed: Date.now() % 100000, 
 
   g.rebuildRooms();
   core.stock.add('grain', 5000);
+  core.stock.add('wood', 200); // seed lumber so painted wall blueprints can be built
   core.seedColony(cx, cy, 8); // spawn on open ground at the centre — reachable via the doors
 
   // Auto-designate the nearest patches of each resource so the harvest loop runs
@@ -113,8 +114,8 @@ function paintAt(e: MouseEvent): void {
   const t = tileAt(e.clientX - r.left, e.clientY - r.top);
   const g = core.grid;
   if (!g.inBounds(t.x, t.y)) return;
-  if (painting === 2) { g.clearWall(t.x, t.y); g.clearZone(t.x, t.y); return; }
-  if (tool === 'wall') g.setWall(t.x, t.y);
+  if (painting === 2) { g.clearWall(t.x, t.y); g.clearZone(t.x, t.y); core.cancelBlueprint(t.x, t.y); return; }
+  if (tool === 'wall') core.blueprintWall(t.x, t.y); // Songs-of-Syx: a ghost the colony builds
   else g.setZone(t.x, t.y, ZONE[tool.toUpperCase() as keyof typeof ZONE]); // succeeds only on matching terrain
 }
 
@@ -155,6 +156,10 @@ function draw(): void {
     ctx.fillStyle = r.fleeing ? '#aa6600' : '#ff3030';
     ctx.fillRect(r.x * px + px / 2 - 3, r.y * px + px / 2 - 3, 6, 6);
   }
+  // Pending blueprints: dashed ghosts the colony hasn't built yet.
+  ctx.strokeStyle = '#88aaff'; ctx.setLineDash([2, 2]);
+  for (const o of core.builds) ctx.strokeRect(o.x * px + 1, o.y * px + 1, px - 2, px - 2);
+  ctx.setLineDash([]);
 
   ctx.fillStyle = '#000a'; ctx.fillRect(0, 0, 320, 168);
   ctx.fillStyle = '#fff'; ctx.font = '13px monospace';
