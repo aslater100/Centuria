@@ -212,7 +212,8 @@ if (detailZoom) {
 
 ## B-6 PART 3 — the swap, re-scoped (2026-06-15)
 
-**Verdict from this session's verification:** repo is green (tsc + build clean, now **663 tests**) and
+**Verdict from this session's verification:** repo is green (tsc + build clean, **685 tests** after
+this session's stages) and
 every PART 2 parity port is real. The raid GUI play-test is cleared. **But the swap is blocked
 *structurally*, not by tuning** — a direct `TownCore`-for-`Simulation` swap would delete the playable
 game because the live UI reads fat-sim shapes the SoA core lacks: a **World/terrain layer**, a
@@ -231,10 +232,23 @@ roadmap in `PLAN.md` § *B-6 PART 3*. Status:
   paint tools + auto-zone. Yields are GUI-tunable flat constants.
 - **Stage 3 — event log on `TownCore`** ✅ landed: `log: LogEntry[]` (`{ day, text, kind }`, the fat
   sim's shape) fed on founding/raids/wolves/deaths/births; save **v5** (old saves → empty log).
-- **Stage 2** (terrain-aware resources: chop/mine/fish + soil fertility) is additive + headlessly
-  testable — safe to land next.
-- **Stages 4–8** (view adapter, SoA renderer, flagged live wiring, blueprint build flow, the
-  destructive swap) touch the renderer/live loop and **need GUI verification** — don't land blind.
+- **Stage 3b — settler names** ✅ landed: `AgentStore.names[]` (deterministic from id), through
+  swap-remove, serialized; deaths/births named in the log.
+- **Stage 4 (partial) — settler view** ✅ landed: `TownCore.inspect(i) → SettlerView` for the HUD
+  inspector. The rest of the view adapter (tiles/stations/raiders/zones/builds iterables) is still
+  TODO and should be built **with** the renderer (Stage 5) so it isn't speculative.
+- **Stage 7 — blueprint construction** ✅ landed: `TownCore.builds[]` + `blueprintWall/Floor/Station`
+  + `tickConstruction()` (materials + labour → real build), `cancelBlueprint`; save **v6**.
+  `core.html`'s wall tool now paints blueprints the colony builds.
+- **Remaining: Stages 5, 6, 8 — renderer / live wiring / destructive swap.** These touch
+  `render.ts`/`main.ts` (no test catches a regression), so land them in a session where the result
+  can be watched. `core.html` + `src/coreview.ts` is the working SoA reference renderer to port from;
+  the model layer (`TownCore`) is feature-complete and deterministic.
+
+**Current SoA-core feature set (all on `TownCore`, deterministic + serialized):** terrain, harvest
+zones + primary production, blueprint construction, room/station crafting, needs/mood/thoughts,
+traits/skills, wounds/medical, relationships, weather, raids, wolves, town economy (loans/inflation),
+settler names, event log, `inspect()` view. Save format **v6**.
 
 ## Next Steps (B-6 PART 2 Swap + Beyond)
 
