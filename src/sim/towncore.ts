@@ -34,6 +34,7 @@ import { FlowField } from './flowfield';
 import { serveNeeds, serveMedical, aggregateCapacities, type RoomServices } from './needs';
 import { Relations, socialize } from './social';
 import { Weather } from './weather';
+import { RaidForce, raidSize, type RaidForceSave } from './raid';
 import { Rng } from './rng';
 import { BASE_PRICES } from './economy';
 import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, TUNING, type ResourceKind } from './defs';
@@ -46,8 +47,12 @@ const GRIEF_DELTA = -8, GRIEF_TICKS = 4 * TICKS_PER_DAY;
 const MENTAL_BREAK_THRESHOLD = TUNING.mentalBreakMoodThreshold;
 const MENTAL_BREAK_CHANCE = TUNING.mentalBreakChancePerPointPerDay;
 const BREAKDOWN_DELTA = -6, BREAKDOWN_TICKS = 2 * TICKS_PER_DAY;
+// Being attacked sours the mood for a while (mirrors the fat sim's raid dread).
+const RAID_FEAR_DELTA = -10, RAID_FEAR_TICKS = 2 * TICKS_PER_DAY;
+// Market price modifiers drift back toward 1.0 each day as supply/demand settles.
+const PRICE_RECOVERY = TUNING.marketRecoveryPerDay;
 
-const SAVE_VERSION = 1;
+const SAVE_VERSION = 2;
 
 // Behavior thresholds for the integration loop (modest, deterministic — full
 // mood/skills/trait fidelity is the remaining parity work, not this stage).
@@ -73,6 +78,9 @@ export interface TownCoreSave {
   stock: Partial<Record<string, number>>;
   relations: [number, number][];
   priceModifiers?: Record<string, number>;
+  /** v2+: raid schedule + any in-progress incursion. */
+  nextRaidDay?: number;
+  raids?: RaidForceSave;
 }
 
 export interface TownCoreOpts {
@@ -91,6 +99,10 @@ export class TownCore {
   readonly relations = new Relations();
   /** Daily weather: temperature drives warmth decay, freezing deals death. */
   readonly weather: Weather;
+  /** Hostile incursions: raiders converge on the colony; walls + settlers repel them. */
+  readonly raids = new RaidForce();
+  /** Game-day the next raid musters (rescheduled after each one). */
+  nextRaidDay: number;
   private readonly jobField: FlowField;
   private readonly rng: Rng;
   private readonly _rand: () => number;
@@ -124,6 +136,22 @@ export class TownCore {
     this._rand = () => this.rng.next();
     this.homeX = Math.floor(width / 2);
     this.homeY = Math.floor(height / 2);
+    this.nextRaidDay = TUNING.firstRaidDay + this.rng.int(5);
+  }
+
+  /**
+   * Colony wealth drives raid size: prosperity attracts trouble (mirrors the fat
+   * sim's `wealth()` — stocks + heads + built stations).
+   */
+  wealth(): number {
+    const stocks = this.stock.count('wood') * 0.2 + this.stock.count('grain') +
+      this.stock.count('meal') + this.stock.count('clothes') * 2;
+    return stocks + this.agents.count * 8 + this.grid.stations.length * 15;
+  }
+
+  /** True while raiders are on the map. */
+  get raidActive(): boolean {
+    return this.raids.active;
   }
 
   /**
@@ -211,6 +239,25 @@ export class TownCore {
       }
     }
 
+    // 5c. Raids: muster on schedule, then resolve combat. Raiders converge on the
+    //     settlers, walls slow them, and awake settlers fight back. Casualties fall
+    //     through the death pass below; the wounded carry a dread thought.
+    if (this.day >= this.nextRaidDay && !this.raids.active) {
+      const n = raidSize(this.wealth(), this.day, a.count);
+      this.raids.start(n, this.grid.width, this.grid.height, this.rng, t);
+      this.nextRaidDay = this.day + TUNING.raidIntervalDays + this.rng.int(5);
+    }
+    if (this.raids.active) {
+      // The horn rallies the colony: nobody sleeps through a raid.
+      for (let i = 0; i < a.count; i++) if (a.state[i] === AState.Sleeping) a.state[i] = AState.Idle;
+      this.raids.tick(this.grid, a, t);
+      for (let i = 0; i < a.count; i++) {
+        if (a.woundUntreated[i] === 1 && a.woundAt[i] === t) {
+          a.addThought(i, t, RAID_FEAR_DELTA, RAID_FEAR_TICKS);
+        }
+      }
+    }
+
     // 6. Deaths: swap-remove the starved (iterate backwards — splice-safe). Each
     //    death grieves the survivors — friends mourn harder — and forgets the bond.
     for (let i = a.count - 1; i >= 0; i--) {
@@ -246,6 +293,14 @@ export class TownCore {
 
   private dailyUpdate(): void {
     const a = this.agents;
+
+    // Market: price modifiers heal a fraction of the way back to 1.0 each day, so
+    // a single panic buy/sell doesn't dislocate prices forever (mirrors the fat sim).
+    for (const [kind, mod] of this.priceModifiers) {
+      const healed = mod + (1.0 - mod) * PRICE_RECOVERY;
+      if (Math.abs(healed - 1.0) < 1e-3) this.priceModifiers.delete(kind);
+      else this.priceModifiers.set(kind, healed);
+    }
 
     // Feed: each hungry agent eats one produced meal (restores food fully). Meals
     // are consumed in agent order until the larder runs dry — the rest stay hungry
@@ -358,6 +413,8 @@ export class TownCore {
       stock: this.stock.serialize(),
       relations: this.relations.serialize(),
       priceModifiers: this.priceModifiers.size > 0 ? Object.fromEntries(this.priceModifiers) : undefined,
+      nextRaidDay: this.nextRaidDay,
+      raids: this.raids.serialize(),
     };
   }
 
@@ -382,6 +439,10 @@ export class TownCore {
     if (data.priceModifiers) {
       core.priceModifiers = new Map(Object.entries(data.priceModifiers));
     }
+    // v2+: restore the raid schedule + any in-progress incursion (old saves keep
+    // the freshly-rolled schedule and an empty force).
+    if (data.nextRaidDay !== undefined) core.nextRaidDay = data.nextRaidDay;
+    if (data.raids) (core as { raids: RaidForce }).raids = RaidForce.deserialize(data.raids);
     return core;
   }
 }

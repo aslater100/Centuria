@@ -1,7 +1,7 @@
 # Handoff — Centuria Development Guide
 
 **Last updated:** 2026-06-15  
-**Current test count:** 599 passing  
+**Current test count:** 616 passing  
 **Branch pattern:** feature branches off `main` via `claude/...` naming; merge via draft PR  
 **Model guidance:** See PLAN.md § Model Assignment for context ceilings per task
 
@@ -212,10 +212,22 @@ if (detailZoom) {
 
 ## Next Steps (B-6 PART 2 Swap + Beyond)
 
-**Immediate (blocked by nothing):**
-- B-6 PART 2: wire `TownCore` into `main.ts`/`render.ts`, retire `buildings.json`, v-bump save format
-  - Gating conditions: (1) Stage 4 behavior port complete (✅ done: traits/skills/medical/social landed, parity tests passing), (2) GUI play-test the new core (user has not yet confirmed)
-  - Once play-tested, this is a straightforward mechanical swap: replace `simulation` with `townCore`, point all renders at SoA columns instead of `settlers[]` objects
+**B-6 PART 2 — the live swap (still gated, NOT a "mechanical swap").**
+Reality check: `TownCore` (~430 lines) is *not* a drop-in for `Simulation` (~3,860 lines) +
+`region.ts` (~7,245 lines). The live `main.ts`/`render.ts`/`hud.ts`/`regionview.ts` are coupled to
+`sim.settlers`/`sim.world`/`buildings.json`/the region flip — none of which the SoA core has. A
+blind swap would *delete the playable game*. Do it incrementally, behind a flag, with a play-test.
+
+- **Behavior parity port — mostly done.** On the SoA columns now: traits/skills, wounds/medical,
+  relationships/thoughts, weather, market (buy/sell + daily price recovery), and **raids/combat**
+  (`src/sim/raid.ts` — `RaidForce`/`raidSize()`; raiders converge, walls slow them, settlers rally
+  as a militia, attackers flee on timeout; wired into `TownCore.tick` before the death pass).
+  Tests: `tests/raid.test.ts` (10) + raid cases in `tests/parity.test.ts`.
+- **Still missing before a swap is safe:** spike traps, forged-weapon/spear bonuses, wolf packs,
+  the `region.ts` flip, and **raid balance tuning** (headless numbers are conservative — tune in the GUI).
+- **Gate that remains: GUI play-test.** Recommended first move is a *non-destructive parallel mode*
+  (opt-in flag) that renders the SoA core in the real GUI without removing `Simulation`, so the new
+  core can be play-verified before anything is ripped out. Only then do the destructive swap.
 
 **Future (after B-6 PART 2):**
 - Phase 3 (Parcel purchase UI) — right-click fog cell, cost panel, purchase button (low friction; no new architecture)

@@ -189,10 +189,22 @@ Stages (extend Track C; the live game is untouched until B-6):
   `tests/towncore.test.ts` (12 cases). **Still additive — the live game is untouched.**
   **PART 2 (the actual swap) is deliberately deferred and gated:** wiring `TownCore` into `main.ts`/
   `render.ts` in place of `Simulation`, the save-format v-bump on the live save, and retiring
-  `buildings.json` must wait on (a) **behavior parity** with the fat-object sim's 526-test surface
-  (combat/raids/weather/trading/economy/traits/skills are not yet ported onto the SoA columns) and
-  (b) a **GUI play-test** — neither is safe to do blind from headless CI. Land PART 2 once the
-  parity port (the rest of Stage 4) is done and the user has play-verified the new core.
+  `buildings.json` must wait on (a) **behavior parity** with the fat-object sim and (b) a **GUI
+  play-test** — neither is safe to do blind from headless CI.
+  **Parity port status (2026-06-15):** traits+skills, wounds/medical, relationships/thoughts,
+  weather, and the market (buy/sell + daily price recovery) are on the SoA columns.
+  **Raids/combat are now ported** — `src/sim/raid.ts` (`RaidForce` + `raidSize()`) is the
+  SoA-altitude analogue of the fat sim's tile-pathing raiders: a band converges on the agents,
+  painted `BuildGrid` walls slow them by forcing them to bash through, awake settlers rally as a
+  militia and fight back, and attackers flee on a timeout. `TownCore` owns the schedule
+  (`firstRaidDay`+interval, mirroring the fat sim) and resolves combat each tick before its death
+  pass, so casualties flow through the existing grief/death loop. Pure/DOM-free with a
+  `npx tsx src/sim/raid.ts` self-check, `tests/raid.test.ts` (10 cases), and raid-focused parity
+  cases in `tests/parity.test.ts`. **Remaining before the swap is safe:** the still-tile-coupled
+  bits the SoA core has no analogue for — spike traps, forged-weapon/spear bonuses, wolf packs,
+  and the `region.ts` flip — plus **raid balance tuning during the GUI play-test** (the headless
+  numbers are deliberately conservative). Land PART 2 once those are squared away and the user has
+  play-verified the new core.
 
 ---
 
@@ -206,7 +218,7 @@ Stages (extend Track C; the live game is untouched until B-6):
 
 ### Current state (updated 2026-06-15)
 
-**Test baseline: 599 passing** (570 prior + UI/zoom-LOD fixes). `tsc` + `vite build` clean. PR #121 merged. **Stage 4 behavior port: traits+skills (v0.33.0), wounds/medical (v0.34.0), relationships/thoughts (v0.35.0) landed. UI performance and window management: zoom-LOD rendering + WindowManager + tabbed panels (Stage 4 behavior port complete; awaiting live swap gating conditions).**
+**Test baseline: 616 passing** (599 prior + raids/combat parity port). `tsc` + `vite build` clean. PR #121 merged. **Stage 4 behavior port: traits+skills (v0.33.0), wounds/medical (v0.34.0), relationships/thoughts (v0.35.0), and raids/combat (`src/sim/raid.ts`) landed. UI performance and window management: zoom-LOD rendering + WindowManager + tabbed panels.** All additive — the live game is still untouched; the swap (B-6 PART 2) remains gated on a GUI play-test.
 
 **Scale engine (Track C):**
 - **Stage 1 ✅** — `src/sim/agents.ts` (`AgentStore`, SoA agent core).
@@ -218,15 +230,22 @@ Stages (extend Track C; the live game is untouched until B-6):
 
 **▶ Pick up next: Build-system B-6 PART 2 — the live swap (gated).** B-1→B-5 and **B-6 PART 1**
 (the integrated `TownCore` swap candidate) have landed. `TownCore` already composes all the
-scale-engine modules into one deterministic, serializable town sim with tests. Before PART 2
-(wire `TownCore` into `main.ts`/`render.ts`, retire `buildings.json`, v-bump the live save) is
-safe, two things must happen first: **(1) finish the Stage-4 behavior port** — combat, raids,
-weather, trading, economy, traits and skills still live only on the fat-object `Simulation`,
-not on the SoA columns, so a swap today would lose them; add headless parity tests asserting the
-new core matches the old sim's behavior. **(2) GUI play-test** the new core (paint a town, watch
-it run) — the destructive swap can't be validated from headless CI alone. PART 2 touches
-`render.ts`/the live sim and is destructive, so it needs design review + the user's play-verify
-before starting. Full breakdown in the **Build-system rewrite** subsection under Track C above.
+scale-engine modules into one deterministic, serializable town sim with tests. The behavior
+parity port is now largely complete — traits/skills, wounds/medical, relationships/thoughts,
+weather, market, **and raids/combat (`src/sim/raid.ts`)** all run on the SoA columns, with
+headless parity tests (`tests/parity.test.ts`) asserting the new core matches the old sim's
+high-level dynamics. What still blocks a *safe* swap:
+- **GUI play-test** the new core (paint a town, watch it run, fight a raid) — the destructive
+  swap can't be validated from headless CI alone, and **raid balance needs tuning there** (the
+  headless numbers are deliberately conservative).
+- A handful of tile-coupled niceties the SoA core has no analogue for yet: **spike traps,
+  forged-weapon/spear damage bonuses, wolf packs**, and the **`region.ts` flip** (the region tier
+  is still built `RegionSim.fromTown(sim)` against the fat sim).
+PART 2 then wires `TownCore` into `main.ts`/`render.ts`, retires `buildings.json`, and v-bumps the
+live save. It touches `render.ts`/the live sim and is destructive, so it needs design review + the
+user's play-verify before starting. **Recommended first step: a non-destructive parallel mode**
+(opt-in flag) that draws the SoA core in the real GUI without removing `Simulation`, which is what
+satisfies the play-test gate. Full breakdown in the **Build-system rewrite** subsection above.
 
 **Key data-flow once B-5/B-6 wire it together:** `JobBoard.rebuild` → `assignIdle`
 (idle agents claim nearest unmanned craft station) → `BuildGrid.tickProduction`
