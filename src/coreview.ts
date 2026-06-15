@@ -41,7 +41,7 @@ const sprites = buildSprites([]);
 void applyOverrides(sprites);
 
 const MAP = 64;
-const core = new TownCore({ width: MAP, height: MAP, seed: Date.now() % 100000, terrain: true });
+let core = new TownCore({ width: MAP, height: MAP, seed: Date.now() % 100000, terrain: true });
 (window as unknown as { core: TownCore }).core = core;
 
 // ── Room type colors (semi-transparent tint over floor tiles) ──────────────
@@ -122,6 +122,8 @@ const tileAt = (mx: number, my: number) => ({ x: Math.floor(mx / tilePx()), y: M
 let paused = false;
 let speed = 3;
 let painting: 0 | 1 | 2 = 0; // 0=none, 1=apply, 2=erase
+let flashMsg = ''; // brief feedback message (e.g. "Saved", "Loaded")
+let flashUntil = 0; // timestamp when flash expires
 
 type Tool = 'wall' | 'erase' | 'gate' | 'floor' | 'room' | 'station'
            | 'field' | 'woodcutter' | 'quarry' | 'fishery' | 'flax' | 'trap';
@@ -174,6 +176,20 @@ addEventListener('keydown', (e) => {
   if (k === 'b') { tool = 'fishery'; return; }
   if (k === 'l') { tool = 'flax'; return; }
   if (k === 't') { tool = 'trap'; return; }
+  // Save / Load via localStorage (Ctrl+S / Ctrl+L)
+  if (e.ctrlKey && k === 's') {
+    localStorage.setItem('centuria_save', JSON.stringify(core.serialize()));
+    flashMsg = 'Saved'; flashUntil = Date.now() + 1500;
+    e.preventDefault(); return;
+  }
+  if (e.ctrlKey && k === 'l') {
+    const raw = localStorage.getItem('centuria_save');
+    if (raw) {
+      try { core = TownCore.deserialize(JSON.parse(raw)); (window as unknown as { core: TownCore }).core = core; flashMsg = 'Loaded'; flashUntil = Date.now() + 1500; }
+      catch { flashMsg = 'Load failed'; flashUntil = Date.now() + 2000; }
+    } else { flashMsg = 'No save found'; flashUntil = Date.now() + 1500; }
+    e.preventDefault(); return;
+  }
   // Cycle room type
   if (e.key === '[') { roomTypeIdx = (roomTypeIdx - 1 + ROOM_TYPE_NAMES.length) % ROOM_TYPE_NAMES.length; return; }
   if (e.key === ']') { roomTypeIdx = (roomTypeIdx + 1) % ROOM_TYPE_NAMES.length; return; }
@@ -454,6 +470,15 @@ function draw(): void {
     ctx.fillStyle = '#888'; ctx.font = '11px monospace';
     ctx.fillText(`Unlocked: ${done.slice(0, 3).join(', ')}${done.length > 3 ? '…' : ''}`, rpx + 6, rpy + 14 + row++ * RPH);
   }
+
+  // ── Flash message (center-top) ───────────────────────────────────────
+  if (flashMsg && Date.now() < flashUntil) {
+    ctx.font = 'bold 18px monospace';
+    const fw = ctx.measureText(flashMsg).width;
+    const fx = (canvas.width - fw) / 2, fy = 40;
+    ctx.fillStyle = '#000b'; ctx.fillRect(fx - 8, fy - 18, fw + 16, 28);
+    ctx.fillStyle = '#7fe07f'; ctx.fillText(flashMsg, fx, fy);
+  } else { flashMsg = ''; }
 
   // ── Event log (bottom-left) ───────────────────────────────────────────
   const logColors = { good: '#7fe07f', bad: '#ff6b6b', info: '#d8d8d8' };

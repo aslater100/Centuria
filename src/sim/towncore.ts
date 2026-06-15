@@ -878,7 +878,7 @@ export class TownCore {
     this._hasWell = services.well > 0; // cache for per-tick infection calc
     const avgMood = this.averageMood();
     const fed = this.stock.count('meal') >= a.count;
-    if (a.count < housing && a.count < a.capacity && avgMood >= BIRTH_MOOD_MIN && fed) {
+    if (this.day >= TUNING.firstImmigrantDay && a.count < housing && a.count < TUNING.immigrantStopPop && a.count < a.capacity && avgMood >= BIRTH_MOOD_MIN && fed) {
       const newcomer = this.spawnPerson(this.homeX, this.homeY);
       if (newcomer >= 0) {
         this.births++;
@@ -1185,7 +1185,8 @@ export class TownCore {
    * materials charged on completion — fine until the GUI says otherwise.
    */
   private tickConstruction(): void {
-    let budget = Math.floor(this.agents.count * BUILD_WORK_PER_WORKER);
+    const toolBonus = this.stock.count('tools') > 0 ? TUNING.toolsBuildSpeedBonus : 0;
+    let budget = Math.floor(this.agents.count * BUILD_WORK_PER_WORKER * (1 + toolBonus));
     if (budget <= 0 || this.builds.length === 0) return;
     let built = false;
     for (let k = 0; k < this.builds.length && budget > 0;) {

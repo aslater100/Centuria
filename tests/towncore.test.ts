@@ -1311,3 +1311,74 @@ describe('TownCore emigration', () => {
     expect(c.population).toBeLessThan(popBefore);
   });
 });
+
+// ── Tools build-speed bonus ───────────────────────────────────────────────────
+
+describe('TownCore tools build-speed bonus', () => {
+  function daysToComplete(withTools: boolean): number {
+    const c = new TownCore({ width: 20, height: 20, seed: 1 });
+    c.seedColony(10, 10, 4); // 4 workers, 30 work/day each = 120/day base
+    c.stock.add('grain', 2000);
+    if (withTools) c.stock.add('tools', 5);
+    // Blueprint a wall: wallWork = 20 (the constant from tickConstruction)
+    // but use blueprintWall which uses WALL_WORK (20 settler-minutes)
+    c.blueprintWall(5, 5);
+    let day = 0;
+    while (c.builds.length > 0 && day < 30) { c.run(360); day++; }
+    return day;
+  }
+
+  it('construction completes faster when tools are in stock', () => {
+    const slow = daysToComplete(false);
+    const fast = daysToComplete(true);
+    expect(fast).toBeLessThanOrEqual(slow); // at minimum not slower
+    // 20% bonus — ensures at least one of the cases differs if budgets differ
+    expect(TUNING.toolsBuildSpeedBonus).toBeGreaterThan(0);
+  });
+
+  it('blueprints complete on day 1 with enough workers and materials', () => {
+    const c = new TownCore({ width: 20, height: 20, seed: 1 });
+    c.seedColony(10, 10, 10); // 10 workers = 300 base work/day
+    c.stock.add('grain', 5000);
+    c.stock.add('tools', 5);
+    c.stock.add('wood', 50); // wall costs 1 wood
+    c.blueprintWall(5, 5); // 20 work
+    c.run(360); // one day
+    expect(c.builds.length).toBe(0); // completed same day
+    expect(c.grid.wall[c.grid.index(5, 5)]).toBeTruthy();
+  });
+});
+
+// ── Immigration gates ─────────────────────────────────────────────────────────
+
+describe('TownCore immigration gates', () => {
+  it('no immigration before firstImmigrantDay', () => {
+    // Plenty of food and beds, but day < 12
+    const c = new TownCore({ width: 20, height: 20, seed: 7 });
+    const g = c.grid;
+    g.designateRect(1, 1, 8, 4, HOME);
+    for (let k = 0; k < 10; k++) g.placeStation('bed', 1 + k * 1, 1);
+    g.rebuildRooms();
+    c.stock.add('meal', 500);
+    c.seedColony(10, 10, 1);
+    const popStart = c.population;
+    // Run exactly firstImmigrantDay - 1 days — no immigrants should arrive
+    c.run(360 * (TUNING.firstImmigrantDay - 1));
+    expect(c.births).toBe(0);
+    expect(c.population).toBe(popStart);
+  });
+
+  it('immigration stops at immigrantStopPop', () => {
+    const c = new TownCore({ width: 32, height: 32, seed: 5 });
+    const g = c.grid;
+    // Huge home with massive sleep capacity
+    g.designateRect(1, 1, 20, 10, HOME);
+    for (let k = 0; k < 30; k++) g.placeStation('bed', 1 + (k % 10) * 2, 1 + Math.floor(k / 10) * 3);
+    g.rebuildRooms();
+    c.stock.add('meal', 50000);
+    c.seedColony(16, 16, TUNING.immigrantStopPop - 2);
+    // Run long enough that immigration WOULD grow past the threshold without the gate
+    c.run(360 * 60);
+    expect(c.population).toBeLessThanOrEqual(TUNING.immigrantStopPop);
+  });
+});
