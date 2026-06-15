@@ -91,9 +91,16 @@ const ROOM_COLORS: Record<string, string> = {
   room(cx + 8, cy - 2, cx + 14, cy + 2, 'tavern');
   fill('table', cx + 8, cy - 2, cx + 13, cy + 2, 3, 2);
 
+  room(cx - 14, cy - 4, cx - 10, cy - 1, 'library');
+  fill('desk', cx - 13, cy - 3, cx - 11, cy - 2, 2, 1);
+
+  room(cx - 14, cy + 2, cx - 10, cy + 6, 'infirmary');
+  fill('sickbed', cx - 13, cy + 3, cx - 11, cy + 5, 2, 2);
+
   g.rebuildRooms();
   core.stock.add('grain', 5000);
   core.stock.add('wood', 200);
+  core.stock.add('herbs', 4); // starter herbs for apothecary craft
   core.seedColony(cx, cy, 8);
 
   const autoZone = (type: number, cap: number): void => {
