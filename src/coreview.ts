@@ -847,13 +847,22 @@ function draw(): void {
   // Deer — 1.25× tile, centered horizontally, slightly taller
   const deerFrame = (performance.now() / 400 | 0) % sprites.deer.length;
   { const dW = Math.round(px * 1.25), dH = Math.round(px * 1.15);
-    for (const d of core.deerViews()) ctx.drawImage(sprites.deer[deerFrame], (d.x | 0) * px - (dW - px) / 2, (d.y | 0) * px - (dH - px), dW, dH); }
+    for (const d of core.deerViews()) {
+      const dx = (d.x | 0) * px - (dW - px) / 2, dy = (d.y | 0) * px - (dH - px);
+      ctx.fillStyle = 'rgba(28,20,12,0.18)';
+      ctx.beginPath(); ctx.ellipse((d.x | 0) * px + px * 0.5, (d.y | 0 + 1) * px - 1, px * 0.44, px * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.drawImage(sprites.deer[deerFrame], dx, dy, dW, dH);
+    }
+  }
 
-  // Raiders — same oversized rendering as settlers
-  for (const r of core.raids.raiders) {
+  // Raiders — same oversized rendering as settlers, y-sorted
+  const sortedRaiders = [...core.raids.raiders].sort((a2, b2) => a2.y - b2.y);
+  for (const r of sortedRaiders) {
     const rSpr = sprites.raider[r.fleeing ? 0 : (performance.now() / 200 | 0) % sprites.raider.length];
     const rH = Math.round(px * 1.35);
     const rax = r.x * px, ray = r.y * px - (rH - px);
+    ctx.fillStyle = 'rgba(28,20,12,0.22)';
+    ctx.beginPath(); ctx.ellipse(rax + px * 0.5, r.y * px + px - 1, px * 0.38, px * 0.12, 0, 0, Math.PI * 2); ctx.fill();
     // Flip when raider is to the right of center (approaching from east, moving west)
     const facingLeft = r.fleeing ? r.x < MAP / 2 : r.x > MAP / 2;
     if (facingLeft) {
@@ -869,7 +878,10 @@ function draw(): void {
     const wolfFrame = (performance.now() / 250 | 0) % sprites.wolf.length;
     const wW = Math.round(px * 1.2), wH = Math.round(px * 1.2);
     for (const w of core.wolves.wolves) {
-      ctx.drawImage(sprites.wolf[w.leaving ? 0 : wolfFrame], (w.x | 0) * px - (wW - px) / 2, (w.y | 0) * px - (wH - px), wW, wH);
+      const wwx = (w.x | 0) * px - (wW - px) / 2, wwy = (w.y | 0) * px - (wH - px);
+      ctx.fillStyle = 'rgba(28,20,12,0.20)';
+      ctx.beginPath(); ctx.ellipse((w.x | 0) * px + px * 0.5, (w.y | 0 + 1) * px - 1, px * 0.40, px * 0.11, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.drawImage(sprites.wolf[w.leaving ? 0 : wolfFrame], wwx, wwy, wW, wH);
     }
   }
 
@@ -921,6 +933,23 @@ function draw(): void {
         const roomDef = ROOM_DEF_BY_NUM[g.roomId[i]];
         if (roomDef?.enclosedRequired) ctx.fillRect(tx * px, ty * px, px, px);
       }
+    }
+  }
+
+  // Fish jumps — brief silvery arcs above non-winter water tiles
+  if (seasonIdx !== 3) {
+    const tick3 = core.tickNo;
+    const g3 = core.grid;
+    ctx.fillStyle = 'rgba(180,210,235,0.85)';
+    for (let n = 0; n < 12; n++) {
+      const cycle = 60 + (n % 4) * 20; // stagger jump cycles
+      const phase = (tick3 + n * 31) % cycle;
+      if (phase > 8) continue; // only 8 ticks of the cycle are "jump"
+      const fx = ((n * 1664525 + 33333) >>> 0) % MAP;
+      const fy = ((n * 1013904223 + 55555) >>> 0) % MAP;
+      if (g3.terrain[fy * MAP + fx] !== TERRAIN.WATER) continue;
+      const h = Math.sin(phase / 8 * Math.PI) * px * 0.45;
+      ctx.fillRect(fx * px + px * 0.45, fy * px + px * 0.5 - h, 2, 3);
     }
   }
 
