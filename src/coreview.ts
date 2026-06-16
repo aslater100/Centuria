@@ -483,6 +483,14 @@ function draw(): void {
   ctx.translate(-view.x, -view.y);
   ctx.scale(view.scale, view.scale);
 
+  // Collect active fire station positions for night glow
+  const fireGlowPositions: { cx: number; cy: number }[] = [];
+  for (const sv of core.stationViews()) {
+    const def = STATION_DEF_BY_NUM[sv.typeId];
+    if (def && sv.progress > 0 && SMOKE_STATIONS.has(def.id))
+      fireGlowPositions.push({ cx: (sv.x + def.w / 2) * px, cy: (sv.y + def.h / 2) * px });
+  }
+
   // drought/flood zone tint: +1 = flood (blue), -1 = drought (brown), 0 = normal
   const droughtOrFlood = core.weather.isFloodRisk(core.day) ? 1 : core.weather.isDrought(core.day) ? -1 : 0;
   // Season index: 0=spring, 1=summer, 2=autumn, 3=winter — drives crop stage sprites.
@@ -906,6 +914,22 @@ function draw(): void {
         ctx.fillStyle = `rgba(240,255,180,${(fa * 0.6).toFixed(3)})`;
         ctx.fillRect(fx, fy, 1, 1);
       }
+    }
+    // Fire station glow at night — warm orange halo drawn after the dark overlay
+    if (nightAlpha > 0.04 && fireGlowPositions.length > 0) {
+      const glowStrength = Math.min(1, nightAlpha * 3);
+      ctx.globalCompositeOperation = 'screen';
+      for (const { cx, cy } of fireGlowPositions) {
+        const r = px * 3.5;
+        for (let d = 0; d < 5; d++) {
+          const frac = d / 5;
+          const a = glowStrength * (0.12 - frac * 0.09);
+          ctx.fillStyle = `rgba(255,${140 - d * 15},20,${a.toFixed(3)})`;
+          const rr = r * (0.2 + frac * 0.8);
+          ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.globalCompositeOperation = 'source-over';
     }
   }
 
