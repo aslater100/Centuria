@@ -111,6 +111,8 @@ export interface BuildGridSave {
   forage?: string;
   /** base64 of the forage regrow countdown layer (optional: absent in pre-regrow saves). */
   forageRegrow?: string;
+  /** base64 of the road layer (optional: absent in pre-road saves). 0=none, 1=dirt, 2=plank, 3=gravel, 4=bridge. */
+  road?: string;
   /** base64 of the sapling-age layer (optional: absent in pre-forester saves). Days growing; 0 = no sapling. */
   saplingAge?: string;
   floor: string;
@@ -237,6 +239,8 @@ export class BuildGrid {
   readonly forage: Uint8Array;
   /** Forage regrow countdown (days until the deposit returns). 0 = no countdown. */
   readonly forageRegrow: Uint8Array;
+  /** Road surface on this tile. 0=none, 1=dirt, 2=plank, 3=gravel, 4=bridge (allows crossing water). */
+  readonly road: Uint8Array;
   /** Days since the tile's tree was felled; 0 = no sapling. Advances in TownCore dailyUpdate. */
   readonly saplingAge: Uint8Array;
 
@@ -266,6 +270,7 @@ export class BuildGrid {
     this.zone = new Uint8Array(this.size);
     this.forage = new Uint8Array(this.size);
     this.forageRegrow = new Uint8Array(this.size);
+    this.road = new Uint8Array(this.size);
     this.saplingAge = new Uint8Array(this.size);
     this._visited = new Uint8Array(this.size);
   }
@@ -279,16 +284,29 @@ export class BuildGrid {
   }
 
   /** Movement blocked by a wall OR by impassable terrain (forest/water/rock).
-   *  Feeds FlowField/world passability. An all-grass grid (the default, and every
-   *  pre-terrain save) blocks on walls alone, exactly as before. */
+   *  A bridge road (road=4) opens water tiles for crossing. */
   passable(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false;
     const i = this.index(x, y);
-    return this.wall[i] === 0 && !this._terrainBlocks(this.terrain[i]);
+    if (this.wall[i] !== 0) return false;
+    const t = this.terrain[i];
+    if (t === TERRAIN.WATER) return this.road[i] === 4; // bridge only
+    return t !== TERRAIN.TREE && t !== TERRAIN.ROCK;
   }
 
-  private _terrainBlocks(code: number): boolean {
-    return code === TERRAIN.TREE || code === TERRAIN.WATER || code === TERRAIN.ROCK;
+  /** Place a road surface (0=clear, 1=dirt, 2=plank, 3=gravel, 4=bridge).
+   *  Bridge is only valid on WATER; other roads only on passable non-water terrain. */
+  setRoad(x: number, y: number, kind: number): boolean {
+    if (!this.inBounds(x, y)) return false;
+    const i = this.index(x, y);
+    if (kind === 4 && this.terrain[i] !== TERRAIN.WATER) return false; // bridge → water only
+    if (kind !== 4 && kind !== 0 && this.terrain[i] === TERRAIN.WATER) return false; // non-bridge roads not on water
+    this.road[i] = kind;
+    return true;
+  }
+
+  clearRoad(x: number, y: number): void {
+    if (this.inBounds(x, y)) this.road[this.index(x, y)] = 0;
   }
 
   // --- terrain layer (B-6 PART 3) ---
@@ -307,7 +325,9 @@ export class BuildGrid {
 
   /** True where terrain (not a wall) stops movement: forest, water, or rock. */
   terrainBlocks(x: number, y: number): boolean {
-    return this.inBounds(x, y) && this._terrainBlocks(this.terrain[this.index(x, y)]);
+    if (!this.inBounds(x, y)) return false;
+    const t = this.terrain[this.index(x, y)];
+    return t === TERRAIN.TREE || t === TERRAIN.WATER || t === TERRAIN.ROCK;
   }
 
   hasOre(x: number, y: number): boolean {
@@ -834,6 +854,7 @@ export class BuildGrid {
       zone: bytesToB64(this.zone),
       forage: bytesToB64(this.forage),
       forageRegrow: bytesToB64(this.forageRegrow),
+      road: bytesToB64(this.road),
       saplingAge: bytesToB64(this.saplingAge),
       floor: bytesToB64(this.floor),
       roomType: bytesToB64(this.roomType),
@@ -853,6 +874,7 @@ export class BuildGrid {
     if (data.zone) g.zone.set(b64ToBytes(data.zone, g.size)); // backfill: old saves have no zones
     if (data.forage) g.forage.set(b64ToBytes(data.forage, g.size)); // backfill: old saves have no deposits
     if (data.forageRegrow) g.forageRegrow.set(b64ToBytes(data.forageRegrow, g.size));
+    if (data.road) g.road.set(b64ToBytes(data.road, g.size));
     if (data.saplingAge) g.saplingAge.set(b64ToBytes(data.saplingAge, g.size));
     g.floor.set(b64ToBytes(data.floor, g.size));
     g.roomType.set(b64ToBytes(data.roomType, g.size));

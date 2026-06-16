@@ -215,7 +215,7 @@ let flashUntil = 0; // timestamp when flash expires
 
 type Tool = 'wall' | 'erase' | 'gate' | 'floor' | 'room' | 'station'
            | 'field' | 'woodcutter' | 'quarry' | 'fishery' | 'flax' | 'forage'
-           | 'orchard' | 'veggarden' | 'trap';
+           | 'orchard' | 'veggarden' | 'trap' | 'bridge';
 let tool: Tool = 'wall';
 
 // Room designation sub-tool: cycle through room type names.
@@ -255,6 +255,7 @@ addEventListener('keydown', (e) => {
   if (e.key === '3') { speed = 8; return; }
   if (e.key === '4') { speed = 16; return; }
   if (k === 'r') { core.musterRaid(); return; }
+  if (k === 'm') { core.summonWolves(); return; }
   if (k === 'n') { core.seedColony(core.homeX, core.homeY, 1); return; }
   if (k === 'y') {
     const FOCUSES: import('./sim/defs').TownFocus[] = ['balanced', 'agricultural', 'military', 'trade', 'industrial', 'cultural'];
@@ -290,6 +291,7 @@ addEventListener('keydown', (e) => {
   if (k === 'v') { tool = 'veggarden'; return; } // vegetable garden (soil)
   if (k === 'i') { showEconomy = !showEconomy; return; } // inventory / economy panel
   if (k === 't' && !e.ctrlKey) { tool = 'trap'; return; }
+  if (k === 'b' && e.shiftKey) { tool = 'bridge'; e.preventDefault(); return; }
   // Save / Load via localStorage (Ctrl+S / Ctrl+L)
   if (e.ctrlKey && k === 's') {
     localStorage.setItem('centuria_save', JSON.stringify(core.serialize()));
@@ -387,7 +389,10 @@ function paintAt(e: MouseEvent): void {
       g.clearWall(t.x, t.y); g.clearGate(t.x, t.y);
       g.clearFloor(t.x, t.y); g.clearZone(t.x, t.y);
       g.clearDesignation(t.x, t.y); core.cancelBlueprint(t.x, t.y);
-      core.clearTrap(t.x, t.y);
+      core.clearTrap(t.x, t.y); g.clearRoad(t.x, t.y);
+      // Remove any station whose footprint covers this tile.
+      { const stn = g.stations.find(s => t.x >= s.x && t.x < s.x + s.w && t.y >= s.y && t.y < s.y + s.h);
+        if (stn) { g.removeStation(stn.id); g.rebuildRooms(); } }
       break;
     case 'gate':    g.setGate(t.x, t.y);  break;
     case 'floor':   g.setFloor(t.x, t.y); break;
@@ -411,6 +416,7 @@ function paintAt(e: MouseEvent): void {
     case 'orchard':    g.setZone(t.x, t.y, ZONE.ORCHARD);     break;
     case 'veggarden':  g.setZone(t.x, t.y, ZONE.VEGGARDEN);   break;
     case 'trap':       core.paintTrap(t.x, t.y);               break;
+    case 'bridge':     g.setRoad(t.x, t.y, 4);                break;
   }
 }
 
@@ -482,6 +488,13 @@ function draw(): void {
           ctx.fillRect(x * px, y * px, px, px);
         }
       }
+    }
+
+    // Road / bridge overlay
+    if (g.road[i]) {
+      const roadNames = ['', 'dirt', 'plank', 'gravel', 'bridge'];
+      const rImg = sprites.roads[roadNames[g.road[i]]];
+      if (rImg) blit(rImg, x, y);
     }
 
     if (g.gate[i]) blit(sprites.gate, x, y);
@@ -850,11 +863,17 @@ function draw(): void {
 
 // ── Loop ──────────────────────────────────────────────────────────────────
 let acc = 0, last = performance.now();
+let _autoSaveDay = -1;
 function loop(now: number): void {
   acc += Math.min(0.25, (now - last) / 1000) * TICKS_PER_SECOND * speed;
   last = now;
   if (!paused && !core.pendingChoice) { let guard = 0; while (acc >= 1 && guard++ < 64) { core.tick(); acc -= 1; } }
   else acc = 0;
+  // Auto-save once per game day so progress is never lost.
+  if (core.day !== _autoSaveDay) {
+    _autoSaveDay = core.day;
+    try { localStorage.setItem(SOA_SAVE_KEY, JSON.stringify(core.serialize())); } catch { /* storage full */ }
+  }
   draw();
   requestAnimationFrame(loop);
 }
