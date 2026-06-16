@@ -232,6 +232,20 @@ describe('terrain layer', () => {
     expect(Array.from(a.terrain)).not.toEqual(Array.from(c.terrain));
   });
 
+  it('generateTerrainHeightmap: deterministic, SoS-style bands, buildable heart', () => {
+    const a = new BuildGrid(96, 96); a.generateTerrainHeightmap(new Rng(42));
+    const b = new BuildGrid(96, 96); b.generateTerrainHeightmap(new Rng(42));
+    const c = new BuildGrid(96, 96); c.generateTerrainHeightmap(new Rng(7));
+    expect(Array.from(a.terrain)).toEqual(Array.from(b.terrain)); // deterministic
+    expect(Array.from(a.terrain)).not.toEqual(Array.from(c.terrain)); // seed varies
+    const kinds = new Set(a.terrain);
+    expect(kinds.has(TERRAIN.WATER)).toBe(true);  // seas
+    expect(kinds.has(TERRAIN.GRASS)).toBe(true);  // land
+    expect(kinds.has(TERRAIN.ROCK)).toBe(true);   // mountains
+    expect(a.terrainAt(48, 48)).toBe(TERRAIN.GRASS); // buildable heart for the colony
+    for (let i = 0; i < a.size; i++) if (a.ore[i]) expect(a.terrain[i]).toBe(TERRAIN.ROCK);
+  });
+
   it('generates a mixed landscape with a buildable grass heart and ore only on rock', () => {
     const g = new BuildGrid(96, 96); g.generateTerrain(new Rng(123));
     const counts = [0, 0, 0, 0, 0];

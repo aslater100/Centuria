@@ -384,6 +384,56 @@ export class BuildGrid {
     }
   }
 
+  /**
+   * Songs-of-Syx-style terrain from a procedural heightmap: low = sea,
+   * mid = land (with forests), high = mountains (with ore). A smooth
+   * value-noise field gives coherent continents/seas/ranges instead of the
+   * scattered blobs of generateTerrain(). Opt-in (TownCore `terrain:'heightmap'`).
+   */
+  generateTerrainHeightmap(rng: Rng): void {
+    const W = this.width, H = this.height;
+    // One value-noise octave: a coarse random lattice, smoothstep-interpolated.
+    const octave = (cellSize: number): Float32Array => {
+      const gw = Math.ceil(W / cellSize) + 2;
+      const lat = new Float32Array(gw * (Math.ceil(H / cellSize) + 2));
+      for (let i = 0; i < lat.length; i++) lat[i] = rng.next();
+      const field = new Float32Array(W * H);
+      const s = (t: number) => t * t * (3 - 2 * t);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const fx = x / cellSize, fy = y / cellSize;
+        const ix = Math.floor(fx), iy = Math.floor(fy);
+        const tx = s(fx - ix), ty = s(fy - iy);
+        const a = lat[iy * gw + ix], b = lat[iy * gw + ix + 1];
+        const c = lat[(iy + 1) * gw + ix], d = lat[(iy + 1) * gw + ix + 1];
+        field[y * W + x] = (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
+      }
+      return field;
+    };
+    const big = octave(Math.max(8, Math.round(W / 4)));
+    const mid = octave(Math.max(4, Math.round(W / 10)));
+    const fine = octave(Math.max(3, Math.round(W / 22)));
+    const forest = octave(Math.max(3, Math.round(W / 14)));
+
+    for (let i = 0; i < W * H; i++) {
+      const h = 0.55 * big[i] + 0.3 * mid[i] + 0.15 * fine[i]; // 0..1 elevation
+      this.terrain[i] =
+        h < 0.32 ? TERRAIN.WATER :
+        h < 0.37 ? TERRAIN.SOIL :                         // fertile shoreline flats
+        h > 0.72 ? TERRAIN.ROCK :                         // mountains
+        (forest[i] > 0.62 && h < 0.66) ? TERRAIN.TREE :   // lowland forests
+        TERRAIN.GRASS;
+    }
+    // Ore seams in the high rock (deterministic, capped).
+    for (let i = 0, deposits = 0; i < W * H && deposits < 6; i++) {
+      if (this.terrain[i] === TERRAIN.ROCK && fine[i] > 0.8) { this.ore[i] = 1; deposits++; }
+    }
+    // Heart clearing: a guaranteed buildable, walkable grass patch for the colony.
+    const cx0 = Math.floor(W / 2), cy0 = Math.floor(H / 2);
+    for (let y = cy0 - 10; y <= cy0 + 10; y++) for (let x = cx0 - 14; x <= cx0 + 14; x++) {
+      if (this.inBounds(x, y) && this.terrain[this.index(x, y)] !== TERRAIN.GRASS) this.setTerrain(x, y, TERRAIN.GRASS);
+    }
+  }
+
   /** Stamp a rough disc of `code`, only overwriting tiles currently `over`. */
   private _terrainBlob(cx: number, cy: number, r: number, code: number, rng: Rng, over: number): void {
     for (let y = cy - r; y <= cy + r; y++) {
