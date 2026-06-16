@@ -2105,14 +2105,13 @@ export class RegionSim {
       };
 
       faction.treasury = 120 + this.aiRng.int(60); // enough to found immediately
+      // ponytail: mark as immediately due so the first monthly tick (day 30) bootstraps their settlement
+      faction.lastUpdateDay = this.day - faction.updateFrequency;
       this.regionalFactions.push(faction);
 
       // Initialize exchange rates for this rival
       this.exchangeRates[`0:${rivalId}`] = 1.0; // start at parity
       this.exchangeRates[`${rivalId}:0`] = 1.0;
-
-      // Bootstrap first settlement immediately (behind fog) so rivals exist from day 1
-      this.updateFactionAI(faction);
     }
   }
 
@@ -6330,6 +6329,8 @@ export class RegionSim {
         // Older saves predate vassalage — backfill as independent.
         f.vassals = (f as unknown as { vassals?: number[] }).vassals ?? [];
         f.overlordId = (f as unknown as { overlordId?: number | null }).overlordId ?? null;
+        // Functions don't survive JSON round-trips; null out the goal so it regenerates.
+        if (f.currentGoal && typeof f.currentGoal.successCondition !== 'function') f.currentGoal = null;
       }
       r.playerFactionId = d.playerFactionId ?? 0;
       r.aiDifficulty = d.aiDifficulty ?? 'normal';
