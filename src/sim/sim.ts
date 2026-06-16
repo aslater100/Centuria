@@ -1103,25 +1103,26 @@ export class Simulation {
       farmReadyTiles: [], farmSowTiles: [], flaxReadyTiles: [], mineReadyTiles: [],
     };
     const inSeason = this.growingSeason;
-    for (let y = 0; y < MAP_H; y++) {
-      for (let x = 0; x < MAP_W; x++) {
-        const tile = this.world.at(x, y);
-        if (tile.wallPlan && !tile.wall) scan.wallPlanTiles.push({ x, y });
-        if (tile.gatePlan && !tile.gate) scan.gatePlanTiles.push({ x, y });
-        if ((tile.wall || tile.gate) && tile.wallHp > 0) {
-          const maxHp = tile.gate ? TUNING.gateMaxHp : TUNING.wallMaxHp;
-          if (tile.wallHp < maxHp) scan.damagedWallTiles.push({ x, y, isGate: tile.gate });
-        }
-        if (tile.kind === 'tree' && tile.marked) scan.markedTrees.push({ x, y });
-        else if (tile.kind === 'rock' && tile.marked) scan.markedRocks.push({ x, y });
-        if (tile.roadPlan) scan.roadPlanTiles.push({ x, y, road: tile.roadPlan });
-        if (tile.farmZone) {
-          if (tile.growth >= 100) scan.farmReadyTiles.push({ x, y });
-          else if (!tile.sown && inSeason) scan.farmSowTiles.push({ x, y });
-        }
-        if (tile.flaxZone && tile.growth >= 100) scan.flaxReadyTiles.push({ x, y });
-        if (tile.mineZone && tile.mineCharges > 0) scan.mineReadyTiles.push({ x, y });
+    // Iterate the flat tile array (idx = y*MAP_W + x, same x-fastest order as the
+    // nested loop) and derive x/y only on a match — skips a world.at() call per tile.
+    const tiles = this.world.tiles;
+    for (let idx = 0; idx < tiles.length; idx++) {
+      const tile = tiles[idx];
+      if (tile.wallPlan && !tile.wall) scan.wallPlanTiles.push({ x: idx % MAP_W, y: (idx / MAP_W) | 0 });
+      if (tile.gatePlan && !tile.gate) scan.gatePlanTiles.push({ x: idx % MAP_W, y: (idx / MAP_W) | 0 });
+      if ((tile.wall || tile.gate) && tile.wallHp > 0) {
+        const maxHp = tile.gate ? TUNING.gateMaxHp : TUNING.wallMaxHp;
+        if (tile.wallHp < maxHp) scan.damagedWallTiles.push({ x: idx % MAP_W, y: (idx / MAP_W) | 0, isGate: tile.gate });
       }
+      if (tile.kind === 'tree' && tile.marked) scan.markedTrees.push({ x: idx % MAP_W, y: (idx / MAP_W) | 0 });
+      else if (tile.kind === 'rock' && tile.marked) scan.markedRocks.push({ x: idx % MAP_W, y: (idx / MAP_W) | 0 });
+      if (tile.roadPlan) scan.roadPlanTiles.push({ x: idx % MAP_W, y: (idx / MAP_W) | 0, road: tile.roadPlan });
+      if (tile.farmZone) {
+        if (tile.growth >= 100) scan.farmReadyTiles.push({ x: idx % MAP_W, y: (idx / MAP_W) | 0 });
+        else if (!tile.sown && inSeason) scan.farmSowTiles.push({ x: idx % MAP_W, y: (idx / MAP_W) | 0 });
+      }
+      if (tile.flaxZone && tile.growth >= 100) scan.flaxReadyTiles.push({ x: idx % MAP_W, y: (idx / MAP_W) | 0 });
+      if (tile.mineZone && tile.mineCharges > 0) scan.mineReadyTiles.push({ x: idx % MAP_W, y: (idx / MAP_W) | 0 });
     }
     return scan;
   }
