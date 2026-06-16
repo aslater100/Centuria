@@ -267,6 +267,52 @@ describe('TownCore production tech effects', () => {
     expect(boostedFlour).toBeGreaterThan(baseFlour);
   });
 
+  /** Build a minimal enclosed kitchen with one oven and two workers. */
+  function ovenColony(): TownCore {
+    const core = new TownCore({ width: 20, height: 20, seed: 55 });
+    const KIT = ROOM_TYPE_ID.get('kitchen')!;
+    const g = core.grid;
+    g.designateRect(2, 2, 7, 5, KIT);
+    for (let x = 1; x <= 8; x++) { g.setWall(x, 1); g.setWall(x, 6); }
+    for (let y = 1; y <= 6; y++) { g.setWall(1, y); g.setWall(8, y); }
+    g.placeStation('oven', 2, 2);
+    g.setGate(4, 6);
+    g.rebuildRooms();
+    core.stock.add('grain', 100000);
+    core.seedColony(10, 10, 2);
+    return core;
+  }
+
+  it('baking tech makes ovens produce more meals', () => {
+    const base = ovenColony();
+    base.run(2000);
+    const baseMeal = base.stock.count('meal');
+
+    const boosted = ovenColony();
+    boosted.researchBook.points = 9999;
+    boosted.research('milling');  // prereq for baking
+    boosted.research('baking');
+    boosted.run(2000);
+
+    expect(boosted.stock.count('meal')).toBeGreaterThan(baseMeal);
+  });
+
+  it('mechanization speeds every workstation (millstone throughput rises)', () => {
+    const base = millColony();
+    base.run(2000);
+    const baseFlour = base.stock.count('flour');
+
+    const boosted = millColony();
+    boosted.researchBook.points = 99999;
+    boosted.research('blacksmithing'); // mechanization prereqs
+    boosted.research('carpentry');
+    boosted.research('mechanization');
+    expect(boosted.researchBook.hasTech('mechanization')).toBe(true);
+    boosted.run(2000);
+
+    expect(boosted.stock.count('flour')).toBeGreaterThan(baseFlour);
+  });
+
   it('textile_farming tech makes looms produce more clothes', () => {
     const base = loomColony();
     base.run(2000);

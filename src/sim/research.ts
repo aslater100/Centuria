@@ -51,7 +51,15 @@ export const CORE_TECHS: CoreTechDef[] = [
   },
   {
     id: 'carpentry', name: 'Carpentry', cost: 80, prereqs: [],
-    desc: 'Saw benches output 25% more timber',
+    desc: 'Saw benches and carpentry benches run 25% faster',
+  },
+  {
+    id: 'animal_husbandry', name: 'Animal Husbandry', cost: 80, prereqs: [],
+    desc: 'Animal pens produce 30% more dairy',
+  },
+  {
+    id: 'ceramics', name: 'Ceramics', cost: 90, prereqs: [],
+    desc: 'Kilns and coke ovens run 25% faster',
   },
   {
     id: 'blacksmithing', name: 'Blacksmithing', cost: 100, prereqs: [],
@@ -65,6 +73,14 @@ export const CORE_TECHS: CoreTechDef[] = [
   {
     id: 'fermentation', name: 'Fermentation', cost: 100, prereqs: ['crop_rotation'],
     desc: 'Brew vats produce 30% more ale',
+  },
+  {
+    id: 'baking', name: 'Baking', cost: 100, prereqs: ['milling'],
+    desc: 'Ovens and baking ovens run 25% faster',
+  },
+  {
+    id: 'food_preservation', name: 'Food Preservation', cost: 110, prereqs: ['crop_rotation'],
+    desc: 'Smoke racks preserve 40% more food',
   },
   {
     id: 'first_aid', name: 'First Aid', cost: 80, prereqs: ['herbalism'],
@@ -86,6 +102,10 @@ export const CORE_TECHS: CoreTechDef[] = [
   {
     id: 'crop_science', name: 'Crop Science', cost: 200, prereqs: ['milling', 'crop_rotation'],
     desc: 'Field zones yield an additional 20% grain (stacks with Crop Rotation)',
+  },
+  {
+    id: 'mechanization', name: 'Mechanization', cost: 240, prereqs: ['blacksmithing', 'carpentry'],
+    desc: 'Every workstation runs an additional 15% faster',
   },
 ];
 

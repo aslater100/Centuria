@@ -11,7 +11,32 @@
 
 ---
 
-## Session Snapshot — Content: late-century tech tree (2050–2100) (2026-06-16, latest)
+## Session Snapshot — Content: TownCore production tech tree (2026-06-16, latest)
+
+**What landed (branch `claude/game-build-iteration-assets-2kd2z0`):** Content track,
+**primary engine** this time — the SoA TownCore research tree (`src/sim/research.ts`)
+had only 12 techs and several stations had no tech bonus at all. Added **5 techs**
+(12→17) wired into `TownCore._stationSpeedMult`:
+
+- **Food Preservation** — *activates a previously dead effect*: `towncore.ts` already
+  checked `hasTech('food_preservation')` for the smoke_rack ×1.40 bonus, but no such
+  tech existed, so it could never fire. Now it does.
+- **Baking** (oven / baking_oven ×1.25), **Ceramics** (kiln / coke_oven ×1.25),
+  **Animal Husbandry** (animal_pen dairy ×1.30), and **Mechanization** capstone
+  (prereqs blacksmithing + carpentry) — **every** workstation runs +15% faster.
+- Also folded `carpentry_bench` into the existing Carpentry bonus (it had none).
+
+Tests 879→**881** (added Baking + Mechanization throughput tests; the existing
+prereq-validation test covers the new nodes). `npm run sim:town` survival 10/10, avg
+mood 35 (baseline unchanged — techs aren't auto-researched by the unmanaged harness).
+
+**Note:** the town tier's player-facing tree is `research.ts` (`CoreTechDef`), consumed
+by `towncore.ts`. `town_techs.json` feeds the *classic* sim via `defs.ts` — a separate,
+demoted path; future town content should target `research.ts`.
+
+---
+
+## Session Snapshot — Content: late-century tech tree (2050–2100) (2026-06-16)
 
 **What landed (branch `claude/game-build-iteration-assets-2kd2z0`):** First content drop
 from the cross-facet roadmap (Content track). The region tech tree (`techtree.json`) had
