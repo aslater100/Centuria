@@ -1106,6 +1106,24 @@ function draw(): void {
     ctx.fillStyle = '#666'; ctx.font = '11px monospace';
     ctx.fillText('Press 1 or 2 to choose', mx + 8, my + MH - 4);
   }
+
+  // ── Colony perished overlay ───────────────────────────────────────────
+  if (core.population === 0 && core.day > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const GW = 420, GH = 160;
+    const gx = (canvas.width - GW) / 2, gy = (canvas.height - GH) / 2;
+    ctx.fillStyle = '#1a0808'; ctx.fillRect(gx, gy, GW, GH);
+    ctx.strokeStyle = '#882222'; ctx.lineWidth = 2; ctx.strokeRect(gx, gy, GW, GH); ctx.lineWidth = 1;
+    ctx.fillStyle = '#ff4444'; ctx.font = 'bold 22px monospace';
+    ctx.fillText('Colony Perished', gx + 20, gy + 38);
+    ctx.fillStyle = '#ccc'; ctx.font = '13px monospace';
+    ctx.fillText(`${core.townName} fell on Day ${core.day}.`, gx + 20, gy + 64);
+    ctx.fillText(`${core.deaths} souls lost. ${core.births} born.  Prestige: ${core.prestige}`, gx + 20, gy + 82);
+    ctx.fillStyle = '#888'; ctx.font = '11px monospace';
+    ctx.fillText('Press Ctrl+L to load a save, or Esc to return to menu.', gx + 20, gy + 120);
+    ctx.fillText('N adds a new settler if you want to continue.', gx + 20, gy + 138);
+  }
 }
 
 // ── Loop ──────────────────────────────────────────────────────────────────
