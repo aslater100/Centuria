@@ -141,6 +141,7 @@ export interface SpriteSet {
   dirtPatch: HTMLCanvasElement;
   tree: HTMLCanvasElement;
   treeMarked: HTMLCanvasElement;
+  treeSpring: HTMLCanvasElement;
   treeAutumn: HTMLCanvasElement;
   treeWinter: HTMLCanvasElement;
   water: HTMLCanvasElement[];
@@ -342,6 +343,39 @@ function grassWinterTile(variant: number): HTMLCanvasElement {
     g.fillRect(bx, by, 1, 2 + Math.floor(rnd() * 2));
     g.fillStyle = '#d0e0ec'; g.fillRect(bx, by, 1, 1); // frost tip
   }
+  return c;
+}
+
+/** Spring blossom tree — pink/white cherry-blossom canopy with the same silhouette. */
+function treeSpringSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = 40; c.height = 44;
+  const g = c.getContext('2d')!;
+  fillDisc(g, 22, 38, 13, 5, P.shadow);
+  g.fillStyle = P.trunkDark; g.fillRect(17, 28, 6, 14);
+  g.fillStyle = P.trunk;     g.fillRect(18, 28, 4, 13);
+  g.fillStyle = P.trunkLight; g.fillRect(18, 28, 2, 11);
+  const cx = 19, cy = 16;
+  // deep blossom shadow (cool pink-grey)
+  fillDisc(g, cx + 1, cy + 3, 17, 14, '#7a4058');
+  fillDisc(g, cx + 2, cy + 4, 14, 11, '#9a5a70');
+  // main blossom body (soft pink)
+  fillDisc(g, cx, cy + 1, 16, 13, '#d880a0');
+  fillDisc(g, cx - 6, cy - 2, 8, 7, '#cc7898');
+  fillDisc(g, cx + 7, cy + 1, 8, 7, '#b06880');
+  fillDisc(g, cx - 1, cy - 6, 9, 7, '#d880a0');
+  // lit upper-left — bright pink and white
+  fillDisc(g, cx - 5, cy - 4, 7, 6, '#f0a0c0');
+  fillDisc(g, cx - 3, cy - 5, 5, 4, '#fce0ec');
+  // white blossom cluster specks
+  g.fillStyle = '#fce8f0'; g.fillRect(cx - 8, cy + 2, 2, 2); g.fillRect(cx + 2, cy - 7, 2, 2);
+  g.fillStyle = '#ffffff';  g.fillRect(cx - 7, cy + 2, 1, 1); g.fillRect(cx + 2, cy - 7, 1, 1);
+  g.fillStyle = '#e87090'; g.fillRect(cx - 1, cy + 1, 2, 2); g.fillRect(cx + 4, cy + 9, 2, 2);
+  g.fillStyle = '#fce8f0'; g.fillRect(cx + 9, cy + 5, 2, 2);
+  // fallen petal drifts — tiny pink dots near bottom of canopy
+  g.fillStyle = '#f4b8cc';
+  g.fillRect(cx - 9, cy + 10, 1, 1); g.fillRect(cx + 11, cy + 8, 1, 1);
+  g.fillRect(cx + 3, cy + 11, 2, 1); g.fillRect(cx - 4, cy + 9, 1, 1);
   return c;
 }
 
@@ -2961,6 +2995,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     dirtPatch: dirtPatchTile(),
     tree: treeSprite(false),
     treeMarked: treeSprite(true),
+    treeSpring: treeSpringSprite(),
     treeAutumn: treeAutumnSprite(),
     treeWinter: treeWinterSprite(),
     water: [waterTile(0), waterTile(1), waterTile(2), waterTile(3)],

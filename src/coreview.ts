@@ -510,7 +510,7 @@ function draw(): void {
       blit(grassSet[(x * 3 + y) % 4], x, y);
     }
     if (t === TERRAIN.TREE) {
-      const treeSpr = seasonIdx === 3 ? sprites.treeWinter : seasonIdx === 2 ? sprites.treeAutumn : sprites.tree;
+      const treeSpr = seasonIdx === 3 ? sprites.treeWinter : seasonIdx === 2 ? sprites.treeAutumn : seasonIdx === 0 ? sprites.treeSpring : sprites.tree;
       // Render at native sprite scale (40×44 drawn at sprite-TILE=32) so the canopy
       // overhangs the tile boundary — trunk base stays anchored to the tile bottom.
       const tW = Math.round(treeSpr.width * px / 32);
