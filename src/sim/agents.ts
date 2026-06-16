@@ -112,7 +112,13 @@ const FREEZE_BLEED = 1.0;                                 // health/hr at warmth
 // always takes a fresh slot (e.g. grief for a specific death).
 export const THOUGHT_SLOTS = 6;
 /** Stable keys for refreshable thoughts (0 = anonymous one-off). */
-export const enum ThoughtKey { Anon = 0, Breakdown = 1, FoodVariety = 2, Faith = 3 }
+export const enum ThoughtKey {
+  Anon = 0, Breakdown = 1, FoodVariety = 2, Faith = 3,
+  RaidFear = 4, Grief = 5, GriefFriend = 6,
+  FreshGame = 7, FreshFish = 8, FreshProduce = 9, Dairy = 10, Bread = 11, Ale = 12,
+  RawGrain = 13, Harvest = 14, Recreation = 15, Tired = 16,
+  NewArrival = 17, Friendship = 18, Isolation = 19,
+}
 
 export class AgentStore {
   readonly capacity: number;

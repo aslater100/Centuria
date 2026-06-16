@@ -27,7 +27,7 @@
 import './style.css';
 import { TownCore } from './sim/towncore';
 import type { SettlerView, PendingEventChoice, YearReport } from './sim/towncore';
-import { AState, THOUGHT_SLOTS } from './sim/agents';
+import { AState, THOUGHT_SLOTS, ThoughtKey } from './sim/agents';
 import { TERRAIN, ZONE, ZONE_DEFS } from './sim/build';
 import {
   ROOM_TYPE_ID, ROOM_DEF_BY_NUM, ROOM_DEFS,
@@ -41,6 +41,13 @@ import { applyOverrides } from './ui/spriteOverrides';
 
 const sprites = buildSprites([]);
 void applyOverrides(sprites);
+
+const THOUGHT_LABELS: Partial<Record<ThoughtKey, string>> = {
+  [ThoughtKey.Breakdown]: 'Mental breakdown',
+  [ThoughtKey.FoodVariety]: 'Food variety',
+  [ThoughtKey.Faith]: 'Attended services',
+  // Reserved for future keyed thoughts (see ThoughtKey enum in agents.ts)
+};
 
 const SOA_SAVE_KEY = 'centuria_save';
 const MAP = 96; // room to grow — the colony starts as a cluster in a wider world
@@ -923,17 +930,19 @@ function draw(): void {
         const sdef = STATION_DEF_BY_NUM[sid];
         if (sdef) jobLabel = `${live.state} @ ${sdef.name}`;
       }
-      // Collect active thoughts (non-expired).
+      // Collect active thoughts (non-expired) with human-readable labels.
       const SLOTS = THOUGHT_SLOTS;
       const thoughts: string[] = [];
       for (let s = 0; s < SLOTS; s++) {
         const base = inspectedIdx * SLOTS + s;
-        const delta = a.thoughtDelta[base], expiry = a.thoughtExpiry[base];
+        const delta = a.thoughtDelta[base], expiry = a.thoughtExpiry[base], key = a.thoughtKey[base] as ThoughtKey;
         if (expiry > core.tickNo && delta !== 0) {
-          thoughts.push(`${delta > 0 ? '+' : ''}${delta}`);
+          const label = THOUGHT_LABELS[key] ?? (delta > 0 ? 'mood boost' : 'mood penalty');
+          thoughts.push(`${label} (${delta > 0 ? '+' : ''}${delta})`);
         }
       }
-      const PW = 260, PH = thoughts.length > 0 ? 210 : 188;
+      const flagLines = [live.wounded && 'wounded', live.infected && 'infected', live.sick && 'sick'].filter(Boolean);
+      const PW = 300, PH = 188 + flagLines.length * 16 + thoughts.length * 16;
       const px2 = canvas.width - PW - 8;
       ctx.fillStyle = '#000c'; ctx.fillRect(px2, 8, PW, PH);
       ctx.fillStyle = '#ffd700'; ctx.font = 'bold 13px monospace';
@@ -945,10 +954,12 @@ function draw(): void {
       iline(2, `rec ${live.recreation.toFixed(0)}  social ${live.social.toFixed(0)}  hp ${live.health.toFixed(0)}`);
       iline(3, jobLabel, '#aaddff');
       iline(4, `traits: ${live.traits.join(', ') || 'none'}  armed: ${live.armed}`, '#aaa');
-      const flags = [live.wounded && 'wounded', live.infected && 'infected', live.sick && 'sick'].filter(Boolean);
       let row = 5;
-      if (flags.length) iline(row++, flags.join(' · '), '#ff6b6b');
-      if (thoughts.length > 0) iline(row++, `thoughts: ${thoughts.join('  ')}`, '#ddddaa');
+      if (flagLines.length) iline(row++, flagLines.join(' · '), '#ff6b6b');
+      for (const th of thoughts) {
+        const color = th.startsWith('+') || th.includes('(+') ? '#88dd88' : '#dd8888';
+        iline(row++, th, color);
+      }
       ctx.fillStyle = '#888'; ctx.font = '11px monospace';
       ctx.fillText('click agent to inspect', px2 + 8, 8 + PH - 10);
     }
