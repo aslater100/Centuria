@@ -155,9 +155,13 @@ const P = {
 
 export interface SpriteSet {
   grass: HTMLCanvasElement[];
+  grassAutumn: HTMLCanvasElement[];
+  grassWinter: HTMLCanvasElement[];
   dirtPatch: HTMLCanvasElement;
   tree: HTMLCanvasElement;
   treeMarked: HTMLCanvasElement;
+  treeAutumn: HTMLCanvasElement;
+  treeWinter: HTMLCanvasElement;
   water: HTMLCanvasElement[];
   rock: HTMLCanvasElement;
   rockMarked: HTMLCanvasElement;
@@ -236,6 +240,140 @@ function grassTile(variant: number): HTMLCanvasElement {
     g.fillRect(bx, by, 1, h);
     if (rnd() < 0.5) { g.fillStyle = P.bladeLight; g.fillRect(bx, by, 1, 1); }
   }
+  return c;
+}
+
+/** Autumn grass — warm amber/brown with scattered orange and red leaf flecks. */
+function grassAutumnTile(variant: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const rnd = mulberry(2000 + variant * 113);
+  const base = ['#6e5c30', '#7a6438', '#625430', '#685e38'][variant % 4];
+  g.fillStyle = base;
+  g.fillRect(0, 0, TILE, TILE);
+  // mottling — ochre light patches and dark-brown shadow clumps
+  for (let i = 0; i < 26; i++) {
+    const x = Math.floor(rnd() * TILE);
+    const y = Math.floor(rnd() * TILE);
+    const s = 1 + Math.floor(rnd() * 2);
+    const roll = rnd();
+    g.fillStyle = roll < 0.45 ? '#4e3c20' : roll < 0.8 ? '#8a7040' : '#7a6030';
+    g.fillRect(x, y, s + 1, s);
+  }
+  // dried blades — ochre with warm-gold tips
+  for (let i = 0; i < 10; i++) {
+    const bx = Math.floor(rnd() * (TILE - 1));
+    const by = Math.floor(rnd() * (TILE - 4));
+    g.fillStyle = '#8a6c38';
+    g.fillRect(bx, by, 1, 2 + Math.floor(rnd() * 2));
+    if (rnd() < 0.6) { g.fillStyle = '#b89050'; g.fillRect(bx, by, 1, 1); }
+  }
+  // fallen leaf flecks — orange, red, yellow
+  const leafColors = ['#c84820', '#d86020', '#d4a030', '#c83c18', '#e09020'];
+  for (let i = 0; i < 7; i++) {
+    const lx = Math.floor(rnd() * (TILE - 2));
+    const ly = Math.floor(rnd() * (TILE - 2));
+    g.fillStyle = leafColors[Math.floor(rnd() * leafColors.length)];
+    g.fillRect(lx, ly, 2, 1);
+    if (rnd() < 0.5) g.fillRect(lx + 1, ly + 1, 1, 1);
+  }
+  return c;
+}
+
+/** Winter grass — frost-muted, desaturated, with snow patches and white-tipped blades. */
+function grassWinterTile(variant: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const rnd = mulberry(3000 + variant * 131);
+  const base = ['#4e5850', '#505c52', '#4a5450', '#485052'][variant % 4];
+  g.fillStyle = base;
+  g.fillRect(0, 0, TILE, TILE);
+  // frost mottling — cool blue-white patches
+  for (let i = 0; i < 18; i++) {
+    const x = Math.floor(rnd() * TILE);
+    const y = Math.floor(rnd() * TILE);
+    const s = 1 + Math.floor(rnd() * 3);
+    g.fillStyle = rnd() < 0.5 ? '#c8d8e4' : '#3c4a40';
+    g.fillRect(x, y, s + 1, s);
+  }
+  // snow patches (larger blobs)
+  for (let i = 0; i < 4; i++) {
+    const sx = Math.floor(rnd() * (TILE - 5));
+    const sy = Math.floor(rnd() * (TILE - 5));
+    g.fillStyle = '#dce8f4';
+    g.fillRect(sx, sy, 3 + Math.floor(rnd() * 3), 2);
+    g.fillStyle = '#eef4fc';
+    g.fillRect(sx + 1, sy, 1 + Math.floor(rnd() * 2), 1);
+  }
+  // frost-tipped blades
+  for (let i = 0; i < 8; i++) {
+    const bx = Math.floor(rnd() * (TILE - 1));
+    const by = Math.floor(rnd() * (TILE - 4));
+    g.fillStyle = '#5e6e60';
+    g.fillRect(bx, by, 1, 2 + Math.floor(rnd() * 2));
+    g.fillStyle = '#d0e0ec'; g.fillRect(bx, by, 1, 1); // frost tip
+  }
+  return c;
+}
+
+/** Autumn tree — orange/red canopy instead of green. */
+function treeAutumnSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = 40; c.height = 44;
+  const g = c.getContext('2d')!;
+  // shadow
+  fillDisc(g, 22, 38, 13, 5, P.shadow);
+  // trunk — same warm brown as normal
+  g.fillStyle = P.trunkDark; g.fillRect(17, 28, 6, 14);
+  g.fillStyle = P.trunk;     g.fillRect(18, 28, 4, 13);
+  g.fillStyle = P.trunkLight; g.fillRect(18, 28, 2, 11);
+  const cx = 19, cy = 16;
+  // deep canopy shadow (maroon)
+  fillDisc(g, cx + 1, cy + 3, 17, 14, '#5a2a10');
+  fillDisc(g, cx + 2, cy + 4, 14, 11, '#8a3820');
+  // main body (burnt orange)
+  fillDisc(g, cx, cy + 1, 16, 13, '#c05830');
+  fillDisc(g, cx - 6, cy - 2, 8, 7, '#b04c28');
+  fillDisc(g, cx + 7, cy + 1, 8, 7, '#8a3820');
+  fillDisc(g, cx - 1, cy - 6, 9, 7, '#c05830');
+  // warm lit highlights (golden/orange)
+  fillDisc(g, cx - 5, cy - 4, 7, 6, '#e07030');
+  fillDisc(g, cx - 3, cy - 5, 5, 4, '#f0a830');
+  // leaf flecks — yellow and red
+  g.fillStyle = '#e8c828'; g.fillRect(cx - 8, cy + 2, 2, 2); g.fillRect(cx + 2, cy - 7, 2, 2);
+  g.fillStyle = '#c83820'; g.fillRect(cx - 1, cy + 1, 2, 2); g.fillRect(cx + 4, cy + 9, 2, 2);
+  g.fillStyle = '#f0b830'; g.fillRect(cx + 9, cy + 6, 2, 2);
+  return c;
+}
+
+/** Winter tree — bare trunk with thin branches and snow clumps. */
+function treeWinterSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = 40; c.height = 44;
+  const g = c.getContext('2d')!;
+  // shadow (smaller than leafy tree)
+  fillDisc(g, 22, 38, 9, 4, P.shadow);
+  // trunk
+  g.fillStyle = P.trunkDark; g.fillRect(17, 18, 6, 24);
+  g.fillStyle = P.trunk;     g.fillRect(18, 18, 4, 23);
+  g.fillStyle = P.trunkLight; g.fillRect(18, 18, 2, 20);
+  // bare branches (thin lines radiating from top of trunk)
+  g.fillStyle = P.trunkDark;
+  // left branch
+  g.fillRect(11, 14, 7, 2); g.fillRect(9, 11, 4, 3); g.fillRect(8, 10, 2, 2);
+  // right branch
+  g.fillRect(22, 16, 7, 2); g.fillRect(27, 13, 4, 3); g.fillRect(30, 12, 2, 2);
+  // upper branch
+  g.fillRect(18, 10, 4, 8);
+  // small twigs
+  g.fillRect(13, 9, 2, 3); g.fillRect(26, 11, 2, 3);
+  // snow clumps on branch tips
+  g.fillStyle = '#dce8f4';
+  g.fillRect(7, 8, 4, 2); g.fillRect(29, 10, 4, 2); g.fillRect(17, 6, 5, 3);
+  g.fillStyle = '#eef4fc';
+  g.fillRect(8, 8, 2, 1); g.fillRect(30, 10, 2, 1); g.fillRect(18, 6, 3, 1);
   return c;
 }
 
@@ -2464,9 +2602,13 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
   };
   return {
     grass: [0, 1, 2, 3].map(grassTile),
+    grassAutumn: [0, 1, 2, 3].map(grassAutumnTile),
+    grassWinter: [0, 1, 2, 3].map(grassWinterTile),
     dirtPatch: dirtPatchTile(),
     tree: treeSprite(false),
     treeMarked: treeSprite(true),
+    treeAutumn: treeAutumnSprite(),
+    treeWinter: treeWinterSprite(),
     water: [waterTile(0), waterTile(1), waterTile(2), waterTile(3)],
     rock: rockSprite(false),
     rockMarked: rockSprite(true),

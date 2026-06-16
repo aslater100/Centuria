@@ -183,7 +183,7 @@ function fitView(): void {
 }
 /** Center on the colony at a comfortable zoom — the initial view, so the player
  *  starts looking at their town rather than a tiny dot in a wide map. */
-function focusTown(span = 46): void {
+function focusTown(span = 36): void {
   view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(canvas.width, canvas.height) / (span * TILE)));
   view.x = core.homeX * TILE * view.scale - canvas.width / 2;
   view.y = core.homeY * TILE * view.scale - canvas.height / 2;
@@ -460,6 +460,8 @@ function paintAt(e: MouseEvent): void {
 const ZONE_OUTLINE = ['', '#d4d46a', '#6ad48a', '#c8c8d8', '#6ad4d4', '#d4a06a', '#c060d0', '#e07090', '#90c050']; // forage=violet, orchard=pink, veg=green
 // Wild forage deposit marker colours by FORAGE type (berries/mushrooms/herbs).
 const FORAGE_COLOR = ['', '#e0405a', '#c8a060', '#50c060'];
+// Station ids that produce heat/smoke — rendered with rising smoke puffs while active.
+const SMOKE_STATIONS = new Set(['oven', 'baking_oven', 'smelter', 'kiln', 'coke_oven', 'brew_vat']);
 
 function draw(): void {
   const px = TILE; // world is drawn in base px under the camera transform below
@@ -495,8 +497,14 @@ function draw(): void {
     }
     else if (t === TERRAIN.ROCK) blit(g.ore[i] ? sprites.rockMarked : sprites.rock, x, y);
     else if (t === TERRAIN.SAND) blit(sprites.sand, x, y);
-    else blit(sprites.grass[(x * 3 + y) % 4], x, y);
-    if (t === TERRAIN.TREE) blit(sprites.tree, x, y);
+    else {
+      const grassSet = seasonIdx === 3 ? sprites.grassWinter : seasonIdx === 2 ? sprites.grassAutumn : sprites.grass;
+      blit(grassSet[(x * 3 + y) % 4], x, y);
+    }
+    if (t === TERRAIN.TREE) {
+      const treeSpr = seasonIdx === 3 ? sprites.treeWinter : seasonIdx === 2 ? sprites.treeAutumn : sprites.tree;
+      blit(treeSpr, x, y);
+    }
 
     // Sapling: scale by age so young trees are tiny and nearly mature ones are full-size.
     if (g.saplingAge[i] > 0) {
@@ -598,6 +606,21 @@ function draw(): void {
       ctx.fillRect(sv.x * px + 2, (sv.y + (def?.h ?? 1)) * px - 4, bw, 3);
       ctx.fillStyle = frac > 0.8 ? '#ffcc00' : '#44cc44';
       ctx.fillRect(sv.x * px + 2, (sv.y + (def?.h ?? 1)) * px - 4, Math.round(bw * frac), 3);
+    }
+    // Smoke / steam above fire stations that are actively producing
+    if (sv.progress > 0 && def && SMOKE_STATIONS.has(def.id)) {
+      const tick = core.tickNo;
+      const cx = (sv.x + def.w / 2) * px;
+      const top = sv.y * px;
+      for (let p = 0; p < 3; p++) {
+        const phase = ((tick + p * 7) % 18) / 18;
+        const py = top - phase * px * 1.2;
+        const ox = Math.sin((tick * 0.18 + p * 2.1)) * px * 0.22;
+        const alpha = 0.45 * (1 - phase);
+        ctx.fillStyle = `rgba(200,200,200,${alpha.toFixed(2)})`;
+        const r = Math.max(1, px * (0.1 + phase * 0.12));
+        ctx.beginPath(); ctx.arc(cx + ox, py, r, 0, Math.PI * 2); ctx.fill();
+      }
     }
   }
 
