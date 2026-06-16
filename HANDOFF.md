@@ -1,6 +1,7 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-16  
+**Last updated:** 2026-06-16
+**Branch**: `claude/game-dev-continue-nfudlp` (ahead of main — PR #161 merged)
 **Current test count:** 852 passing  
 **Current version:** v0.41.1  
 **Default engine:** **SoA `TownCore`** — "New Colony" boots it; the fat `Simulation` is now "Classic Colony"  
@@ -57,6 +58,44 @@ tier (`RegionSim`) already matches Victoria 3 and needs none.
   deficit had no lever. Now the economy runs pre-statehood (tax/services work), and the routes /
   economy / settlement panels + a trimmed Treasury panel are unlocked early (Politics/Diplomacy/
   central-bank stay nation-tier). Also a **zoom-drift fix**: `canvasXY` now maps CSS→canvas-buffer px.
+
+---
+
+## Next Priority (from 2026-06-16 session)
+
+**Town→Region→Nation transitions** — structural + visual. All three phases should mesh with gated progress. AI competitors run from region-phase start, hidden in fog until discovered, with relations initiated on contact. **Multi-path win conditions.**
+
+### Audit findings
+
+| System | State |
+|--------|-------|
+| Town sim | ✅ Complete |
+| Town→region flip (`canFoundSecondTown()`) | ✅ Complete |
+| Regional economy (settlements, routes, trade) | ✅ Complete |
+| Fog of war (`src/sim/fogmap.ts`, 100×100 grid) | ✅ Complete |
+| Elections / laws / government | ✅ Complete |
+| AI rivals: activation | ❌ Only activate after "State Proclaimed" (~yr 1930) |
+| AI rivals: behavior | ❌ Only earn gold — never expand, raid, or research |
+| Nation phase: rival nations | ❌ Never instantiated; no inter-nation war |
+| Era 3/4 transitions | ❌ Stubbed, never trigger |
+| Win condition | ❌ None — only a graded 2100 century report |
+
+**Key files**: `src/sim/sim.ts` (town), `src/sim/region.ts` (region/nation, ~6000 lines), `src/sim/fogmap.ts`, `src/sim/defs.ts`
+
+**Critical line**: `region.ts` — `if (this.stateProclaimed) this.updateFactions();` — rivals are gated behind proclamation. Move this to run from region-phase tick 1.
+
+### Recommended work order
+
+1. **AI from region start** — at `RegionSim.fromTown()`, spawn rival factions at hidden map positions with a difficulty-scaled head start. Run `updateFactions()` from tick 1. Fire a "first contact" event when player fog lifts near a rival settlement and initiate relations.
+2. **AI actually does things** — wire settlement expansion, raiding, and tech progress into the existing framework stubs in `region.ts` (currently only `updateRegionalTrade()` runs).
+3. **Phase gate UI** — milestone checklist UI for town→region and region→nation transitions; nation proclamation as a proper modal ceremony with meaningful choices.
+4. **Multi-path win conditions** — implement all four paths; player wins when any one is achieved:
+   - **Unification** — control X% of the map by a target era
+   - **Legacy** — A grade in 3 of 4 century categories (prosperity / liberty / stewardship / standing)
+   - **Domination** — last nation with sovereignty at 2100
+   - **Solarpunk** — green branch achieved (warming < 2.3°C + democracy + satisfaction ≥ 42% + legitimacy ≥ 35%)
+
+---
 
 ### Ways ahead (identified, not yet started)
 1. **Close the SoA game loop** — the default still opens a *separate page* (`core.html`): add an
