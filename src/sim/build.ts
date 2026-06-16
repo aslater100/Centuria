@@ -680,6 +680,9 @@ export class BuildGrid {
     return this.stations.find((s) => s.id === id);
   }
 
+  /** Craft progress [0..recipe.work) for the given station id. 0 if not a craft station. */
+  progressFor(id: number): number { return this._progress.get(id) ?? 0; }
+
   // --- room derivation ---
 
   /**

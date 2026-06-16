@@ -563,13 +563,22 @@ function draw(): void {
   }
 
   // Stations — blit at the full tile footprint (multi-tile stations span def.w × def.h tiles).
-  for (const s of g.stations) {
-    const def = STATION_DEF_BY_NUM[s.typeId];
+  for (const sv of core.stationViews()) {
+    const def = STATION_DEF_BY_NUM[sv.typeId];
     const img = def && sprites.stations[def.id];
-    if (img) ctx.drawImage(img, s.x * px, s.y * px, def!.w * px, def!.h * px);
+    if (img) ctx.drawImage(img, sv.x * px, sv.y * px, def!.w * px, def!.h * px);
     else if (def) { // generic marker fallback
-      ctx.fillStyle = '#6a5030'; ctx.fillRect(s.x * px + 1, s.y * px + 1, def.w * px - 2, def.h * px - 2);
-      ctx.fillStyle = '#e8d8b0'; ctx.fillText(def.name[0], s.x * px + px * 0.35, s.y * px + px * 0.7);
+      ctx.fillStyle = '#6a5030'; ctx.fillRect(sv.x * px + 1, sv.y * px + 1, def.w * px - 2, def.h * px - 2);
+      ctx.fillStyle = '#e8d8b0'; ctx.fillText(def.name[0], sv.x * px + px * 0.35, sv.y * px + px * 0.7);
+    }
+    // Production progress bar: tiny green strip at the bottom of the station
+    if (sv.workMax > 0 && sv.progress > 0) {
+      const frac = Math.min(1, sv.progress / sv.workMax);
+      const bw = def ? def.w * px - 4 : px - 4;
+      ctx.fillStyle = '#1a1a1a88';
+      ctx.fillRect(sv.x * px + 2, (sv.y + (def?.h ?? 1)) * px - 4, bw, 3);
+      ctx.fillStyle = frac > 0.8 ? '#ffcc00' : '#44cc44';
+      ctx.fillRect(sv.x * px + 2, (sv.y + (def?.h ?? 1)) * px - 4, Math.round(bw * frac), 3);
     }
   }
 

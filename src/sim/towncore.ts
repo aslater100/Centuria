@@ -146,6 +146,10 @@ export interface StationView {
   typeId: number;
   /** String id from stations.json (e.g. 'oven', 'bed'). */
   stationId: string;
+  /** Craft progress [0..recipe.work). 0 for non-craft stations. */
+  progress: number;
+  /** Max work for one craft cycle (recipe.work). 0 for non-craft stations. */
+  workMax: number;
 }
 
 /** A displayable snapshot of one active raider — position, health, and flee state. */
@@ -491,7 +495,9 @@ export class TownCore {
     for (const s of this.grid.stations) {
       const def = STATION_DEF_BY_NUM[s.typeId];
       if (!def) continue;
-      yield { x: s.x, y: s.y, typeId: s.typeId, stationId: def.id };
+      const progress = this.grid.progressFor(s.id);
+      const workMax = def.recipe?.work ?? 0;
+      yield { x: s.x, y: s.y, typeId: s.typeId, stationId: def.id, progress, workMax };
     }
   }
 
