@@ -849,6 +849,19 @@ function draw(): void {
     if (nightAlpha > 0.02) {
       ctx.fillStyle = `rgba(8,12,40,${(nightAlpha * 0.7).toFixed(3)})`;
       ctx.fillRect(0, 0, MAP * px, MAP * px);
+      // Stars — fixed positions, visible when night is dark enough
+      if (nightAlpha > 0.25) {
+        const starA = Math.min(1, (nightAlpha - 0.25) * 4);
+        const worldW = MAP * px, worldH = MAP * px;
+        for (let n = 0; n < 60; n++) {
+          const sx = ((n * 1013904223) >>> 0) % worldW;
+          const sy = ((n * 1664525 + 77777) >>> 0) % worldH;
+          const twinkle = ((core.tickNo + n * 17) % 14) < 2 ? 0.4 : 1;
+          ctx.fillStyle = `rgba(220,230,255,${(starA * twinkle * 0.6).toFixed(3)})`;
+          ctx.fillRect(sx, sy, 1, 1);
+          if (n % 8 === 0) { ctx.fillStyle = `rgba(255,245,220,${(starA * 0.7).toFixed(3)})`; ctx.fillRect(sx - 1, sy, 1, 1); ctx.fillRect(sx, sy - 1, 1, 1); }
+        }
+      }
     }
     // Golden dusk/dawn tint when transitioning
     const dawnDusk = tod < 0.25 ? Math.max(0, 0.22 - Math.abs(tod - 0.125) * 3.5)
@@ -856,6 +869,26 @@ function draw(): void {
     if (dawnDusk > 0.01) {
       ctx.fillStyle = `rgba(255,160,40,${(dawnDusk * 0.35).toFixed(3)})`;
       ctx.fillRect(0, 0, MAP * px, MAP * px);
+    }
+    // Summer fireflies at dusk and early night
+    if (seasonIdx === 1 && (tod > 0.78 || tod < 0.14)) {
+      const ffAlpha = Math.min(0.9, Math.min(
+        tod > 0.78 ? (tod - 0.78) * 9 : 1,
+        tod < 0.10 ? 1 : (0.14 - tod) * 20
+      ));
+      const tick = core.tickNo;
+      const worldW = MAP * px, worldH = MAP * px;
+      for (let n = 0; n < 18; n++) {
+        const phase = ((tick * 3 + n * 47) % 28);
+        if (phase > 10) continue; // off most of the time
+        const fx = ((n * 1013904223 + tick % 7 * n) >>> 0) % worldW;
+        const fy = ((n * 1664525 + tick % 5 * n * 3) >>> 0) % worldH;
+        const fa = ffAlpha * (1 - phase / 10) * 0.85;
+        ctx.fillStyle = `rgba(200,255,100,${fa.toFixed(3)})`;
+        ctx.fillRect(fx, fy, 2, 2);
+        ctx.fillStyle = `rgba(240,255,180,${(fa * 0.6).toFixed(3)})`;
+        ctx.fillRect(fx, fy, 1, 1);
+      }
     }
   }
 
