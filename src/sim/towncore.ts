@@ -247,8 +247,9 @@ export interface TownCoreOpts {
   seed?: number;
   /** Generate natural terrain (forests/water/rock/ore) into the grid at construction.
    *  Off by default so the all-grass core stays byte-identical for existing tests;
-   *  the live swap (B-6 PART 3) turns this on. */
-  terrain?: boolean;
+   *  the live swap (B-6 PART 3) turns this on. `'heightmap'` uses the
+   *  Songs-of-Syx-style heightmap generator (coherent seas/continents/ranges). */
+  terrain?: boolean | 'heightmap';
 }
 
 export class TownCore {
@@ -390,7 +391,8 @@ export class TownCore {
     this.nextRaidDay = TUNING.firstRaidDay + this.rng.int(5);
     // Terrain is painted from a dedicated stream so the main rng (weather, raids,
     // births) is byte-for-byte identical whether or not terrain is generated.
-    if (opts.terrain) this.grid.generateTerrain(new Rng((seed ^ 0x9e3779b1) >>> 0));
+    if (opts.terrain === 'heightmap') this.grid.generateTerrainHeightmap(new Rng((seed ^ 0x9e3779b1) >>> 0));
+    else if (opts.terrain) this.grid.generateTerrain(new Rng((seed ^ 0x9e3779b1) >>> 0));
   }
 
   /**

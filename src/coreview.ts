@@ -42,7 +42,7 @@ const sprites = buildSprites([]);
 void applyOverrides(sprites);
 
 const MAP = 96; // room to grow — the colony starts as a cluster in a wider world
-let core = new TownCore({ width: MAP, height: MAP, seed: Date.now() % 100000, terrain: true });
+let core = new TownCore({ width: MAP, height: MAP, seed: Date.now() % 100000, terrain: 'heightmap' });
 (window as unknown as { core: TownCore }).core = core;
 
 // ── Room type colors (semi-transparent tint over floor tiles) ──────────────
