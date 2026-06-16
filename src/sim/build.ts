@@ -109,6 +109,10 @@ export interface BuildGridSave {
   zone?: string;
   /** base64 of the wild-forage-deposit layer (optional: absent in pre-forage saves). */
   forage?: string;
+  /** base64 of the forage regrow countdown layer (optional: absent in pre-regrow saves). */
+  forageRegrow?: string;
+  /** base64 of the road layer (optional: absent in pre-road saves). 0=none, 1=dirt, 2=plank, 3=gravel, 4=bridge. */
+  road?: string;
   /** base64 of the sapling-age layer (optional: absent in pre-forester saves). Days growing; 0 = no sapling. */
   saplingAge?: string;
   floor: string;
@@ -129,10 +133,10 @@ const NY4 = [0, 0, 1, -1];
  * irrigates. Order mirrors `world.ts`'s `TileKind` so a renderer can share a
  * colour table. GRASS (0) is the default — an all-grass grid behaves exactly as
  * a terrain-free one did, which keeps every pre-terrain test and save valid. */
-export const TERRAIN = { GRASS: 0, TREE: 1, WATER: 2, SOIL: 3, ROCK: 4 } as const;
+export const TERRAIN = { GRASS: 0, TREE: 1, WATER: 2, SOIL: 3, ROCK: 4, SAND: 5 } as const;
 export type TerrainCode = (typeof TERRAIN)[keyof typeof TERRAIN];
 /** Index-aligned with TERRAIN values — for renderers/inspectors. */
-export const TERRAIN_NAMES = ['grass', 'tree', 'water', 'soil', 'rock'] as const;
+export const TERRAIN_NAMES = ['grass', 'tree', 'water', 'soil', 'rock', 'sand'] as const;
 
 /**
  * Harvest zones (B-6 PART 3, Songs-of-Syx primary production). The player paints a
@@ -233,6 +237,10 @@ export class BuildGrid {
   readonly zone: Uint8Array;
   /** Wild forage deposit on this tile (see FORAGE). 0 = none. Only on GRASS. */
   readonly forage: Uint8Array;
+  /** Forage regrow countdown (days until the deposit returns). 0 = no countdown. */
+  readonly forageRegrow: Uint8Array;
+  /** Road surface on this tile. 0=none, 1=dirt, 2=plank, 3=gravel, 4=bridge (allows crossing water). */
+  readonly road: Uint8Array;
   /** Days since the tile's tree was felled; 0 = no sapling. Advances in TownCore dailyUpdate. */
   readonly saplingAge: Uint8Array;
 
@@ -261,6 +269,8 @@ export class BuildGrid {
     this.ore = new Uint8Array(this.size);
     this.zone = new Uint8Array(this.size);
     this.forage = new Uint8Array(this.size);
+    this.forageRegrow = new Uint8Array(this.size);
+    this.road = new Uint8Array(this.size);
     this.saplingAge = new Uint8Array(this.size);
     this._visited = new Uint8Array(this.size);
   }
@@ -274,16 +284,29 @@ export class BuildGrid {
   }
 
   /** Movement blocked by a wall OR by impassable terrain (forest/water/rock).
-   *  Feeds FlowField/world passability. An all-grass grid (the default, and every
-   *  pre-terrain save) blocks on walls alone, exactly as before. */
+   *  A bridge road (road=4) opens water tiles for crossing. */
   passable(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false;
     const i = this.index(x, y);
-    return this.wall[i] === 0 && !this._terrainBlocks(this.terrain[i]);
+    if (this.wall[i] !== 0) return false;
+    const t = this.terrain[i];
+    if (t === TERRAIN.WATER) return this.road[i] === 4; // bridge only
+    return t !== TERRAIN.TREE && t !== TERRAIN.ROCK;
   }
 
-  private _terrainBlocks(code: number): boolean {
-    return code === TERRAIN.TREE || code === TERRAIN.WATER || code === TERRAIN.ROCK;
+  /** Place a road surface (0=clear, 1=dirt, 2=plank, 3=gravel, 4=bridge).
+   *  Bridge is only valid on WATER; other roads only on passable non-water terrain. */
+  setRoad(x: number, y: number, kind: number): boolean {
+    if (!this.inBounds(x, y)) return false;
+    const i = this.index(x, y);
+    if (kind === 4 && this.terrain[i] !== TERRAIN.WATER) return false; // bridge → water only
+    if (kind !== 4 && kind !== 0 && this.terrain[i] === TERRAIN.WATER) return false; // non-bridge roads not on water
+    this.road[i] = kind;
+    return true;
+  }
+
+  clearRoad(x: number, y: number): void {
+    if (this.inBounds(x, y)) this.road[this.index(x, y)] = 0;
   }
 
   // --- terrain layer (B-6 PART 3) ---
@@ -302,7 +325,9 @@ export class BuildGrid {
 
   /** True where terrain (not a wall) stops movement: forest, water, or rock. */
   terrainBlocks(x: number, y: number): boolean {
-    return this.inBounds(x, y) && this._terrainBlocks(this.terrain[this.index(x, y)]);
+    if (!this.inBounds(x, y)) return false;
+    const t = this.terrain[this.index(x, y)];
+    return t === TERRAIN.TREE || t === TERRAIN.WATER || t === TERRAIN.ROCK;
   }
 
   hasOre(x: number, y: number): boolean {
@@ -471,15 +496,16 @@ export class BuildGrid {
         x = nx; y = ny;
       }
     }
-    // Beaches: a sandy (soil) shore wherever grass/forest meets water. One pass
-    // over a snapshot so the ring doesn't grow into itself.
+    // Beaches: sandy shore wherever grass/forest meets water (dedicated SAND
+    // terrain so it's visually distinct from farmable soil). One pass over a
+    // snapshot so the ring doesn't grow into itself.
     const land = this.terrain.slice();
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const i = y * W + x;
       if (land[i] !== TERRAIN.GRASS && land[i] !== TERRAIN.TREE) continue;
       for (let d = 0; d < 4; d++) {
         const ax = x + NX4[d], ay = y + NY4[d];
-        if (ax >= 0 && ay >= 0 && ax < W && ay < H && land[ay * W + ax] === TERRAIN.WATER) { this.terrain[i] = TERRAIN.SOIL; break; }
+        if (ax >= 0 && ay >= 0 && ax < W && ay < H && land[ay * W + ax] === TERRAIN.WATER) { this.terrain[i] = TERRAIN.SAND; break; }
       }
     }
     // Wild forage deposits scattered on grassland — berries/mushrooms/herbs you
@@ -654,6 +680,9 @@ export class BuildGrid {
     return this.stations.find((s) => s.id === id);
   }
 
+  /** Craft progress [0..recipe.work) for the given station id. 0 if not a craft station. */
+  progressFor(id: number): number { return this._progress.get(id) ?? 0; }
+
   // --- room derivation ---
 
   /**
@@ -827,6 +856,8 @@ export class BuildGrid {
       ore: bytesToB64(this.ore),
       zone: bytesToB64(this.zone),
       forage: bytesToB64(this.forage),
+      forageRegrow: bytesToB64(this.forageRegrow),
+      road: bytesToB64(this.road),
       saplingAge: bytesToB64(this.saplingAge),
       floor: bytesToB64(this.floor),
       roomType: bytesToB64(this.roomType),
@@ -845,6 +876,8 @@ export class BuildGrid {
     if (data.ore) g.ore.set(b64ToBytes(data.ore, g.size));
     if (data.zone) g.zone.set(b64ToBytes(data.zone, g.size)); // backfill: old saves have no zones
     if (data.forage) g.forage.set(b64ToBytes(data.forage, g.size)); // backfill: old saves have no deposits
+    if (data.forageRegrow) g.forageRegrow.set(b64ToBytes(data.forageRegrow, g.size));
+    if (data.road) g.road.set(b64ToBytes(data.road, g.size));
     if (data.saplingAge) g.saplingAge.set(b64ToBytes(data.saplingAge, g.size));
     g.floor.set(b64ToBytes(data.floor, g.size));
     g.roomType.set(b64ToBytes(data.roomType, g.size));

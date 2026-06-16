@@ -3,7 +3,7 @@ import { TownCore } from '../src/sim/towncore';
 import { BuildGrid, TERRAIN, ZONE, FORAGE } from '../src/sim/build';
 import { AgentStore, AState } from '../src/sim/agents';
 import { Stockpile } from '../src/sim/stockpile';
-import { ROOM_TYPE_ID, STATION_TYPE_ID, TUNING, type TownFocus } from '../src/sim/defs';
+import { ROOM_TYPE_ID, STATION_TYPE_ID, TUNING, BLUEPRINT_DEFS, type TownFocus } from '../src/sim/defs';
 
 // Build-system B-6: the integrated room-based town core that composes every
 // scale-engine module (BuildGrid + AgentStore + Stockpile + JobBoard + needs +
@@ -921,6 +921,39 @@ describe('TownCore blueprint construction', () => {
     const r = TownCore.deserialize(c.serialize());
     expect(r.builds).toEqual(c.builds);
   });
+
+  it('stampBlueprint queues walls + floors + station for a hut template', () => {
+    const c = new TownCore({ width: 24, height: 24, seed: 7 });
+    c.seedColony(12, 12, 6);
+    c.stock.add('wood', 200); c.stock.add('stone', 200);
+    const hut = BLUEPRINT_DEFS.find(b => b.id === 'hut')!;
+    expect(hut).toBeDefined();
+    const ok = c.stampBlueprint('hut', 2, 2);
+    expect(ok).toBe(true);
+    // Should have queued wall + floor orders covering the blueprint footprint.
+    const hasWall = c.builds.some(o => o.kind === 'wall');
+    const hasFloor = c.builds.some(o => o.kind === 'floor');
+    expect(hasWall).toBe(true);
+    expect(hasFloor).toBe(true);
+    // Out-of-bounds stamp should fail.
+    expect(c.stampBlueprint('hut', 23, 23)).toBe(false);
+    // Unknown id should fail.
+    expect(c.stampBlueprint('no_such_blueprint', 2, 2)).toBe(false);
+  });
+
+  it('stampBlueprint builds the hut to completion with enough labour', () => {
+    const c = new TownCore({ width: 24, height: 24, seed: 7 });
+    c.seedColony(12, 12, 10);
+    c.stock.add('wood', 500); c.stock.add('stone', 500);
+    c.stampBlueprint('hut', 2, 2);
+    const queuedCount = c.builds.length;
+    expect(queuedCount).toBeGreaterThan(0);
+    c.run(360 * 20); // 20 days of labour
+    // All build orders should be completed.
+    expect(c.builds.length).toBe(0);
+    // At least one wall tile should exist in the hut footprint.
+    expect(c.grid.wall[c.grid.index(2, 2)]).toBe(1);
+  });
 });
 
 // --- net flow tracking ---
@@ -1177,6 +1210,42 @@ describe('TownCore deer and hunting', () => {
   it('deer hunting_lodge station is registered in STATION_TYPE_ID', () => {
     expect(STATION_TYPE_ID.has('hunting_lodge')).toBe(true);
     expect(OUTPOST).toBeGreaterThan(0); // outpost room type is registered
+  });
+});
+
+describe('TownCore wolf packs', () => {
+  const TPDAY = 360;
+
+  it('spawnWolfPack activates a wolf pack and logs the attack', () => {
+    const core = new TownCore({ width: 20, height: 20, seed: 77 });
+    core.seedColony(10, 10, 3);
+    expect(core.wolves.active).toBe(false);
+    core.summonWolves(2);
+    expect(core.wolves.active).toBe(true);
+    expect(core.log.some((l) => /wolf/i.test(l.text))).toBe(true);
+  });
+
+  it('wolf pack becomes inactive after wolfStayDays', () => {
+    const core = new TownCore({ width: 20, height: 20, seed: 78 });
+    core.seedColony(10, 10, 4);
+    core.summonWolves(2);
+    expect(core.wolves.active).toBe(true);
+    // Run well past wolfStayDays — wolves should leave even without being killed.
+    core.run((TUNING.wolfStayDays + 5) * TPDAY);
+    expect(core.wolves.active).toBe(false);
+  });
+
+  it('wolf pack state survives a save/load round-trip', () => {
+    const core = new TownCore({ width: 20, height: 20, seed: 79 });
+    core.seedColony(10, 10, 3);
+    core.summonWolves(3);
+    const snap = core.serialize();
+    const twin = TownCore.deserialize(snap);
+    expect(twin.wolves.active).toBe(core.wolves.active);
+    // Both should run forward identically.
+    core.run(10);
+    twin.run(10);
+    expect(twin.wolves.active).toBe(core.wolves.active);
   });
 });
 
@@ -1572,14 +1641,14 @@ describe('TownCore event variety', () => {
 
 // ── Save v10: serialization of clothing/festival/milestone/prestige state ─────
 
-describe('TownCore save v10 serialization', () => {
+describe('TownCore save v11 serialization', () => {
   it('clothingDay survives round-trip', () => {
     const c = new TownCore({ width: 20, height: 20, seed: 1 });
     c.seedColony(10, 10, 2);
     c.stock.add('grain', 2000);
     c.run(360 * 5); // accumulate some state
     const saved = c.serialize();
-    expect(saved.v).toBe(10);
+    expect(saved.v).toBe(11);
     const twin = TownCore.deserialize(saved);
     // Serialized state exists; twin won't re-fire clothing event on next tick
     expect(twin.serialize().clothingDay).toBe(saved.clothingDay);

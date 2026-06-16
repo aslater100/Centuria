@@ -10,29 +10,6 @@ import { STATION_DEFS } from '../sim/defs';
 
 export const TILE = 32;
 
-type Px = string | null;
-
-function sheet(pixels: Px[][]): HTMLCanvasElement {
-  const h = pixels.length;
-  const w = pixels[0].length;
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  const g = c.getContext('2d')!;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const col = pixels[y][x];
-      if (!col) continue;
-      g.fillStyle = col;
-      g.fillRect(x, y, 1, 1);
-    }
-  }
-  return c;
-}
-
-function grid(rows: string[], pal: Record<string, string>): Px[][] {
-  return rows.map((r) => [...r].map((ch) => (ch === '.' ? null : pal[ch] ?? null)));
-}
 
 // ---------------------------------------------------------------------------
 // COHESIVE, HUE-SHIFTED PALETTE
@@ -103,6 +80,9 @@ const P = {
   cloth3: '#7a5868',           // mauve tunic
   clothDark3: '#56384a',
   clothLight3: '#9a7488',
+  cloth4: '#3c6a3a',           // forest-green tunic (4th settler variant)
+  clothDark4: '#2a4c2a',
+  clothLight4: '#568a52',
   clothRaider: '#9a3a2a',      // blood-red raider
   clothRaiderDk: '#6a2018',
   clothRaiderLt: '#c25240',
@@ -155,16 +135,28 @@ const P = {
 
 export interface SpriteSet {
   grass: HTMLCanvasElement[];
+  grassSpring: HTMLCanvasElement[];
+  grassAutumn: HTMLCanvasElement[];
+  grassWinter: HTMLCanvasElement[];
   dirtPatch: HTMLCanvasElement;
   tree: HTMLCanvasElement;
   treeMarked: HTMLCanvasElement;
+  treeSpring: HTMLCanvasElement;
+  treeAutumn: HTMLCanvasElement;
+  treeWinter: HTMLCanvasElement;
   water: HTMLCanvasElement[];
-  rock: HTMLCanvasElement;
-  rockMarked: HTMLCanvasElement;
+  waterWinter: HTMLCanvasElement[];
+  rock: HTMLCanvasElement[];
+  rockMarked: HTMLCanvasElement[];
+  sand: HTMLCanvasElement[];
   soil: HTMLCanvasElement;
   soilSown: HTMLCanvasElement;
   soilGrown: HTMLCanvasElement;
   soilRipe: HTMLCanvasElement;
+  soilWinter: HTMLCanvasElement;
+  flaxSown: HTMLCanvasElement;
+  flaxGrown: HTMLCanvasElement;
+  flaxRipe: HTMLCanvasElement;
   roads: Record<string, HTMLCanvasElement>;
   roadPlans: Record<string, HTMLCanvasElement>;
   stockpileZone: HTMLCanvasElement;
@@ -176,6 +168,8 @@ export interface SpriteSet {
   gateVariants: HTMLCanvasElement[];
   gatePlan: HTMLCanvasElement;
   sapling: HTMLCanvasElement;
+  /** Index matches FORAGE type: 0=none(unused), 1=berries, 2=mushrooms, 3=herbs */
+  forage: HTMLCanvasElement[];
   settler: HTMLCanvasElement[][];
   settlerArmed: HTMLCanvasElement[][];
   raider: HTMLCanvasElement[];
@@ -189,6 +183,8 @@ export interface SpriteSet {
   /** Room build-system art: plank floor, stone wall, and per-station furniture. */
   interiorFloor: HTMLCanvasElement;
   interiorWall: HTMLCanvasElement;
+  /** Per-room-type floor sprites. Keys match room ids; falls back to interiorFloor if absent. */
+  roomFloors: Record<string, HTMLCanvasElement>;
   stations: Record<string, HTMLCanvasElement>;
 }
 
@@ -235,6 +231,214 @@ function grassTile(variant: number): HTMLCanvasElement {
     g.fillRect(bx, by, 1, h);
     if (rnd() < 0.5) { g.fillStyle = P.bladeLight; g.fillRect(bx, by, 1, 1); }
   }
+  return c;
+}
+
+/** Spring grass — bright fresh green with occasional tiny wildflower specks. */
+function grassSpringTile(variant: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const rnd = mulberry(4000 + variant * 89);
+  const base = ['#4ea040', '#56ac48', '#48983c', '#4ea844'][variant % 4];
+  g.fillStyle = base;
+  g.fillRect(0, 0, TILE, TILE);
+  // vivid mottling — lighter bright patches + deeper shadow pockets
+  for (let i = 0; i < 28; i++) {
+    const x = Math.floor(rnd() * TILE);
+    const y = Math.floor(rnd() * TILE);
+    const s = 1 + Math.floor(rnd() * 2);
+    const roll = rnd();
+    g.fillStyle = roll < 0.40 ? '#38742e' : roll < 0.75 ? '#68c05a' : '#50b044';
+    g.fillRect(x, y, s + 1, s);
+  }
+  // fresh blades — brighter green, taller than summer
+  for (let i = 0; i < 12; i++) {
+    const bx = Math.floor(rnd() * (TILE - 1));
+    const by = Math.floor(rnd() * (TILE - 5));
+    g.fillStyle = '#5cc450';
+    g.fillRect(bx, by, 1, 2 + Math.floor(rnd() * 3));
+    if (rnd() < 0.6) { g.fillStyle = '#84e870'; g.fillRect(bx, by, 1, 1); }
+  }
+  // wildflower specks — tiny white, yellow, violet dots
+  const flowerColors = ['#f4f0e0', '#f0e040', '#d080e0', '#f08060', '#60c8f0'];
+  for (let i = 0; i < 4; i++) {
+    if (rnd() < 0.5) {
+      const fx = 2 + Math.floor(rnd() * (TILE - 4));
+      const fy = 2 + Math.floor(rnd() * (TILE - 4));
+      g.fillStyle = flowerColors[Math.floor(rnd() * flowerColors.length)];
+      g.fillRect(fx, fy, 2, 2);
+      g.fillStyle = '#f0f8e0';
+      g.fillRect(fx, fy, 1, 1);
+    }
+  }
+  return c;
+}
+
+/** Autumn grass — warm amber/brown with scattered orange and red leaf flecks. */
+function grassAutumnTile(variant: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const rnd = mulberry(2000 + variant * 113);
+  const base = ['#6e5c30', '#7a6438', '#625430', '#685e38'][variant % 4];
+  g.fillStyle = base;
+  g.fillRect(0, 0, TILE, TILE);
+  // mottling — ochre light patches and dark-brown shadow clumps
+  for (let i = 0; i < 26; i++) {
+    const x = Math.floor(rnd() * TILE);
+    const y = Math.floor(rnd() * TILE);
+    const s = 1 + Math.floor(rnd() * 2);
+    const roll = rnd();
+    g.fillStyle = roll < 0.45 ? '#4e3c20' : roll < 0.8 ? '#8a7040' : '#7a6030';
+    g.fillRect(x, y, s + 1, s);
+  }
+  // dried blades — ochre with warm-gold tips
+  for (let i = 0; i < 10; i++) {
+    const bx = Math.floor(rnd() * (TILE - 1));
+    const by = Math.floor(rnd() * (TILE - 4));
+    g.fillStyle = '#8a6c38';
+    g.fillRect(bx, by, 1, 2 + Math.floor(rnd() * 2));
+    if (rnd() < 0.6) { g.fillStyle = '#b89050'; g.fillRect(bx, by, 1, 1); }
+  }
+  // fallen leaf flecks — orange, red, yellow
+  const leafColors = ['#c84820', '#d86020', '#d4a030', '#c83c18', '#e09020'];
+  for (let i = 0; i < 7; i++) {
+    const lx = Math.floor(rnd() * (TILE - 2));
+    const ly = Math.floor(rnd() * (TILE - 2));
+    g.fillStyle = leafColors[Math.floor(rnd() * leafColors.length)];
+    g.fillRect(lx, ly, 2, 1);
+    if (rnd() < 0.5) g.fillRect(lx + 1, ly + 1, 1, 1);
+  }
+  return c;
+}
+
+/** Winter grass — frost-muted, desaturated, with snow patches and white-tipped blades. */
+function grassWinterTile(variant: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const rnd = mulberry(3000 + variant * 131);
+  const base = ['#4e5850', '#505c52', '#4a5450', '#485052'][variant % 4];
+  g.fillStyle = base;
+  g.fillRect(0, 0, TILE, TILE);
+  // frost mottling — cool blue-white patches
+  for (let i = 0; i < 18; i++) {
+    const x = Math.floor(rnd() * TILE);
+    const y = Math.floor(rnd() * TILE);
+    const s = 1 + Math.floor(rnd() * 3);
+    g.fillStyle = rnd() < 0.5 ? '#c8d8e4' : '#3c4a40';
+    g.fillRect(x, y, s + 1, s);
+  }
+  // snow patches (larger blobs)
+  for (let i = 0; i < 4; i++) {
+    const sx = Math.floor(rnd() * (TILE - 5));
+    const sy = Math.floor(rnd() * (TILE - 5));
+    g.fillStyle = '#dce8f4';
+    g.fillRect(sx, sy, 3 + Math.floor(rnd() * 3), 2);
+    g.fillStyle = '#eef4fc';
+    g.fillRect(sx + 1, sy, 1 + Math.floor(rnd() * 2), 1);
+  }
+  // frost-tipped blades
+  for (let i = 0; i < 8; i++) {
+    const bx = Math.floor(rnd() * (TILE - 1));
+    const by = Math.floor(rnd() * (TILE - 4));
+    g.fillStyle = '#5e6e60';
+    g.fillRect(bx, by, 1, 2 + Math.floor(rnd() * 2));
+    g.fillStyle = '#d0e0ec'; g.fillRect(bx, by, 1, 1); // frost tip
+  }
+  return c;
+}
+
+/** Spring blossom tree — pink/white cherry-blossom canopy with the same silhouette. */
+function treeSpringSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = 40; c.height = 44;
+  const g = c.getContext('2d')!;
+  fillDisc(g, 22, 38, 13, 5, P.shadow);
+  g.fillStyle = P.trunkDark; g.fillRect(17, 28, 6, 14);
+  g.fillStyle = P.trunk;     g.fillRect(18, 28, 4, 13);
+  g.fillStyle = P.trunkLight; g.fillRect(18, 28, 2, 11);
+  const cx = 19, cy = 16;
+  // deep blossom shadow (cool pink-grey)
+  fillDisc(g, cx + 1, cy + 3, 17, 14, '#7a4058');
+  fillDisc(g, cx + 2, cy + 4, 14, 11, '#9a5a70');
+  // main blossom body (soft pink)
+  fillDisc(g, cx, cy + 1, 16, 13, '#d880a0');
+  fillDisc(g, cx - 6, cy - 2, 8, 7, '#cc7898');
+  fillDisc(g, cx + 7, cy + 1, 8, 7, '#b06880');
+  fillDisc(g, cx - 1, cy - 6, 9, 7, '#d880a0');
+  // lit upper-left — bright pink and white
+  fillDisc(g, cx - 5, cy - 4, 7, 6, '#f0a0c0');
+  fillDisc(g, cx - 3, cy - 5, 5, 4, '#fce0ec');
+  // white blossom cluster specks
+  g.fillStyle = '#fce8f0'; g.fillRect(cx - 8, cy + 2, 2, 2); g.fillRect(cx + 2, cy - 7, 2, 2);
+  g.fillStyle = '#ffffff';  g.fillRect(cx - 7, cy + 2, 1, 1); g.fillRect(cx + 2, cy - 7, 1, 1);
+  g.fillStyle = '#e87090'; g.fillRect(cx - 1, cy + 1, 2, 2); g.fillRect(cx + 4, cy + 9, 2, 2);
+  g.fillStyle = '#fce8f0'; g.fillRect(cx + 9, cy + 5, 2, 2);
+  // fallen petal drifts — tiny pink dots near bottom of canopy
+  g.fillStyle = '#f4b8cc';
+  g.fillRect(cx - 9, cy + 10, 1, 1); g.fillRect(cx + 11, cy + 8, 1, 1);
+  g.fillRect(cx + 3, cy + 11, 2, 1); g.fillRect(cx - 4, cy + 9, 1, 1);
+  return c;
+}
+
+/** Autumn tree — orange/red canopy instead of green. */
+function treeAutumnSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = 40; c.height = 44;
+  const g = c.getContext('2d')!;
+  // shadow
+  fillDisc(g, 22, 38, 13, 5, P.shadow);
+  // trunk — same warm brown as normal
+  g.fillStyle = P.trunkDark; g.fillRect(17, 28, 6, 14);
+  g.fillStyle = P.trunk;     g.fillRect(18, 28, 4, 13);
+  g.fillStyle = P.trunkLight; g.fillRect(18, 28, 2, 11);
+  const cx = 19, cy = 16;
+  // deep canopy shadow (maroon)
+  fillDisc(g, cx + 1, cy + 3, 17, 14, '#5a2a10');
+  fillDisc(g, cx + 2, cy + 4, 14, 11, '#8a3820');
+  // main body (burnt orange)
+  fillDisc(g, cx, cy + 1, 16, 13, '#c05830');
+  fillDisc(g, cx - 6, cy - 2, 8, 7, '#b04c28');
+  fillDisc(g, cx + 7, cy + 1, 8, 7, '#8a3820');
+  fillDisc(g, cx - 1, cy - 6, 9, 7, '#c05830');
+  // warm lit highlights (golden/orange)
+  fillDisc(g, cx - 5, cy - 4, 7, 6, '#e07030');
+  fillDisc(g, cx - 3, cy - 5, 5, 4, '#f0a830');
+  // leaf flecks — yellow and red
+  g.fillStyle = '#e8c828'; g.fillRect(cx - 8, cy + 2, 2, 2); g.fillRect(cx + 2, cy - 7, 2, 2);
+  g.fillStyle = '#c83820'; g.fillRect(cx - 1, cy + 1, 2, 2); g.fillRect(cx + 4, cy + 9, 2, 2);
+  g.fillStyle = '#f0b830'; g.fillRect(cx + 9, cy + 6, 2, 2);
+  return c;
+}
+
+/** Winter tree — bare trunk with thin branches and snow clumps. */
+function treeWinterSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = 40; c.height = 44;
+  const g = c.getContext('2d')!;
+  // shadow (smaller than leafy tree)
+  fillDisc(g, 22, 38, 9, 4, P.shadow);
+  // trunk
+  g.fillStyle = P.trunkDark; g.fillRect(17, 18, 6, 24);
+  g.fillStyle = P.trunk;     g.fillRect(18, 18, 4, 23);
+  g.fillStyle = P.trunkLight; g.fillRect(18, 18, 2, 20);
+  // bare branches (thin lines radiating from top of trunk)
+  g.fillStyle = P.trunkDark;
+  // left branch
+  g.fillRect(11, 14, 7, 2); g.fillRect(9, 11, 4, 3); g.fillRect(8, 10, 2, 2);
+  // right branch
+  g.fillRect(22, 16, 7, 2); g.fillRect(27, 13, 4, 3); g.fillRect(30, 12, 2, 2);
+  // upper branch
+  g.fillRect(18, 10, 4, 8);
+  // small twigs
+  g.fillRect(13, 9, 2, 3); g.fillRect(26, 11, 2, 3);
+  // snow clumps on branch tips
+  g.fillStyle = '#dce8f4';
+  g.fillRect(7, 8, 4, 2); g.fillRect(29, 10, 4, 2); g.fillRect(17, 6, 5, 3);
+  g.fillStyle = '#eef4fc';
+  g.fillRect(8, 8, 2, 1); g.fillRect(30, 10, 2, 1); g.fillRect(18, 6, 3, 1);
   return c;
 }
 
@@ -297,6 +501,50 @@ function waterTile(frame: number): HTMLCanvasElement {
   g.fillStyle = P.waterGlint2;
   g.fillRect((10 + off * 2) % TILE, 6, 2, 1);
   g.fillRect((22 + off) % TILE, 18, 2, 1);
+  return c;
+}
+
+/** Winter frozen water — pale blue-white ice with crack lines and snow patches. */
+function waterWinterTile(variant: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const rnd = mulberry(8800 + variant * 61);
+  // ice base — pale desaturated blue
+  g.fillStyle = '#b8d4e8';
+  g.fillRect(0, 0, TILE, TILE);
+  // subtle surface variation (lighter patches = compressed ice, darker = deep)
+  for (let i = 0; i < 12; i++) {
+    const x = Math.floor(rnd() * TILE);
+    const y = Math.floor(rnd() * TILE);
+    const s = 2 + Math.floor(rnd() * 3);
+    g.fillStyle = rnd() < 0.5 ? '#cce0f0' : '#a0c0d8';
+    g.fillRect(x, y, s, s);
+  }
+  // crack lines (thin dark blue-grey)
+  g.fillStyle = '#708898';
+  const crackX = 4 + Math.floor(rnd() * (TILE - 8));
+  const crackY = 4 + Math.floor(rnd() * (TILE - 8));
+  g.fillRect(crackX, crackY, 1, 6 + Math.floor(rnd() * 6));
+  g.fillRect(crackX, crackY, 8 + Math.floor(rnd() * 6), 1);
+  if (rnd() < 0.5) {
+    g.fillRect(crackX + 5, crackY + 3, 1, 5);
+    g.fillRect(crackX + 5, crackY + 3, 5, 1);
+  }
+  // snow patches on ice
+  g.fillStyle = '#e8f0f8';
+  for (let i = 0; i < 3; i++) {
+    if (rnd() < 0.6) {
+      const sx = Math.floor(rnd() * (TILE - 5));
+      const sy = Math.floor(rnd() * (TILE - 5));
+      g.fillRect(sx, sy, 3 + Math.floor(rnd() * 3), 2);
+      g.fillStyle = '#f4f8fc'; g.fillRect(sx + 1, sy, 1 + Math.floor(rnd() * 2), 1);
+      g.fillStyle = '#e8f0f8';
+    }
+  }
+  // sky glint on flat ice
+  g.fillStyle = '#eef8ff';
+  g.fillRect(Math.floor(rnd() * (TILE - 4)), Math.floor(rnd() * (TILE - 2)), 4, 1);
   return c;
 }
 
@@ -364,40 +612,125 @@ function treeSprite(marked: boolean): HTMLCanvasElement {
 }
 
 /**
- * A clustered boulder on grass. Faceted, not a smooth blob: a big lit slab on
- * the upper-left, cooler faces dropping to the lower-right, with a cast shadow.
+ * A clustered boulder on grass. Three visual variants for field variety.
  */
-function rockSprite(marked: boolean): HTMLCanvasElement {
-  const c = grassTile(2);
+function rockSprite(marked: boolean, variant = 0): HTMLCanvasElement {
+  const c = grassTile(variant % 4);
   const g = c.getContext('2d')!;
-  // cool cast shadow, lower-right
-  fillDisc(g, 17, 25, 13, 4, P.shadow);
-  // base boulder body (cool dark)
-  fillDisc(g, 16, 17, 13, 11, P.rockDarker);
-  fillDisc(g, 15, 16, 12, 10, P.rockDark);
-  // main facet (midtone)
-  fillDisc(g, 14, 15, 10, 8, P.rock);
-  // upper-left lit facet — angular slab
-  g.fillStyle = P.rockLight;
-  g.fillRect(8, 9, 11, 7);
-  g.fillRect(7, 12, 8, 5);
-  g.fillStyle = P.rockHighlight;
-  g.fillRect(9, 9, 7, 3);
-  g.fillRect(8, 11, 4, 2);
-  // small companion rock, front-right
-  fillDisc(g, 23, 22, 6, 4, P.rockDark);
-  fillDisc(g, 22, 21, 5, 3, P.rock);
-  g.fillStyle = P.rockLight; g.fillRect(20, 19, 4, 2);
-  // facet break lines (cool)
-  g.fillStyle = P.rockDarker;
-  g.fillRect(15, 12, 1, 9);
-  g.fillRect(15, 18, 6, 1);
-  g.fillRect(11, 16, 4, 1);
+
+  if (variant === 1) {
+    // Two medium boulders side-by-side, centre-left bias
+    fillDisc(g, 14, 23, 10, 4, P.shadow);
+    fillDisc(g, 13, 16, 10, 9, P.rockDarker);
+    fillDisc(g, 12, 15, 9, 8, P.rockDark);
+    fillDisc(g, 11, 14, 7, 6, P.rock);
+    g.fillStyle = P.rockLight; g.fillRect(7, 8, 9, 6); g.fillRect(6, 11, 6, 4);
+    g.fillStyle = P.rockHighlight; g.fillRect(8, 8, 5, 3);
+    fillDisc(g, 22, 18, 7, 6, P.rockDarker);
+    fillDisc(g, 21, 17, 6, 5, P.rockDark);
+    fillDisc(g, 20, 16, 5, 4, P.rock);
+    g.fillStyle = P.rockLight; g.fillRect(17, 12, 7, 4);
+    g.fillStyle = P.rockDarker; g.fillRect(13, 13, 1, 6); g.fillRect(13, 18, 5, 1);
+  } else if (variant === 2) {
+    // Single large flat-topped slab, tilted — more angular look
+    fillDisc(g, 18, 26, 12, 4, P.shadow);
+    g.fillStyle = P.rockDarker; g.fillRect(7, 14, 20, 12); // flat base
+    g.fillStyle = P.rockDark;   g.fillRect(8, 12, 18, 12);
+    g.fillStyle = P.rock;       g.fillRect(9, 11, 16, 11);
+    g.fillStyle = P.rockLight;  g.fillRect(9, 11, 16, 4);  // top face
+    g.fillStyle = P.rockHighlight; g.fillRect(9, 11, 8, 2);
+    // left angled face
+    g.fillStyle = P.rockDark;
+    for (let i = 0; i < 5; i++) g.fillRect(7 + i, 14 + i, 1, 9 - i);
+    // crack
+    g.fillStyle = P.rockDarker;
+    g.fillRect(18, 11, 1, 7); g.fillRect(18, 17, 5, 1);
+  } else {
+    // Original variant 0: classic one large + one small boulder
+    fillDisc(g, 17, 25, 13, 4, P.shadow);
+    fillDisc(g, 16, 17, 13, 11, P.rockDarker);
+    fillDisc(g, 15, 16, 12, 10, P.rockDark);
+    fillDisc(g, 14, 15, 10, 8, P.rock);
+    g.fillStyle = P.rockLight; g.fillRect(8, 9, 11, 7); g.fillRect(7, 12, 8, 5);
+    g.fillStyle = P.rockHighlight; g.fillRect(9, 9, 7, 3); g.fillRect(8, 11, 4, 2);
+    fillDisc(g, 23, 22, 6, 4, P.rockDark);
+    fillDisc(g, 22, 21, 5, 3, P.rock);
+    g.fillStyle = P.rockLight; g.fillRect(20, 19, 4, 2);
+    g.fillStyle = P.rockDarker; g.fillRect(15, 12, 1, 9); g.fillRect(15, 18, 6, 1); g.fillRect(11, 16, 4, 1);
+  }
+
   if (marked) {
-    g.fillStyle = '#c25b2e';
-    g.fillRect(24, 2, 6, 6);
-    g.fillStyle = '#f08040';
-    g.fillRect(25, 3, 4, 4);
+    g.fillStyle = '#7a3018';
+    g.fillRect(8, 13, 7, 2); g.fillRect(10, 15, 5, 1);
+    g.fillRect(17, 9, 2, 5); g.fillRect(19, 11, 3, 2);
+    g.fillStyle = '#b84828';
+    g.fillRect(9, 13, 5, 1); g.fillRect(10, 14, 4, 1); g.fillRect(17, 9, 1, 4);
+    g.fillStyle = '#e06030';
+    g.fillRect(12, 13, 2, 1); g.fillRect(18, 10, 1, 1);
+    g.fillStyle = '#e86028'; g.fillRect(26, 3, 4, 4);
+    g.fillStyle = '#f09050'; g.fillRect(27, 4, 2, 2);
+  }
+  return c;
+}
+
+/**
+ * Sandy beach tile — warm gold with subtle ripple texture and the occasional
+ * pebble, distinct from dark-brown soil (farmable earth).
+ */
+function sandTile(variant = 0): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const rnd = mulberry(99 + variant * 173);
+  // Base sandy gold — slight hue shift per variant
+  const bases = ['#c8a84c', '#caa84e', '#c4a448', '#ccb050'];
+  g.fillStyle = bases[variant % 4];
+  g.fillRect(0, 0, TILE, TILE);
+  if (variant === 2) {
+    // Coarser ripple — more compressed waves, rougher beach
+    g.fillStyle = '#b89640';
+    for (let y = 2; y < TILE; y += 5) g.fillRect(0, y, TILE, 1);
+    g.fillStyle = '#d4b048';
+    for (let y = 0; y < TILE; y += 5) g.fillRect(0, y, TILE, 1);
+    // More pebbles
+    g.fillStyle = '#9a7828';
+    for (let i = 0; i < 8; i++) {
+      const px2 = Math.floor(rnd() * (TILE - 3)) + 1;
+      const py2 = Math.floor(rnd() * (TILE - 3)) + 1;
+      g.fillRect(px2, py2, 2 + (rnd() < 0.3 ? 1 : 0), 1);
+      g.fillRect(px2, py2 + 1, 1, 1);
+    }
+  } else if (variant === 3) {
+    // Dry fine sand — less visible ripple, more uniform shimmer
+    g.fillStyle = '#d8bc5c';
+    for (let i = 0; i < 16; i++) {
+      const fx = Math.floor(rnd() * (TILE - 2));
+      const fy = Math.floor(rnd() * (TILE - 2));
+      g.fillRect(fx, fy, 1 + (rnd() < 0.3 ? 1 : 0), 1);
+    }
+    g.fillStyle = '#a89038';
+    for (let i = 0; i < 5; i++) {
+      g.fillRect(Math.floor(rnd() * (TILE - 3)), Math.floor(rnd() * (TILE - 3)), 2, 1);
+    }
+  } else {
+    // Original pattern (variants 0 and 1 with slight variation)
+    g.fillStyle = variant === 1 ? '#d0b452' : '#d4b45a';
+    for (let y = 3; y < TILE; y += 7) g.fillRect(0, y, TILE, 2);
+    g.fillStyle = '#b89640';
+    for (let y = 5; y < TILE; y += 7) g.fillRect(0, y, TILE, 1);
+    g.fillStyle = '#dfc070';
+    for (let i = 0; i < 8; i++) {
+      const fx = Math.floor(rnd() * (TILE - 2));
+      const fy = Math.floor(rnd() * (TILE - 2));
+      g.fillRect(fx, fy, 2, 1);
+    }
+    g.fillStyle = '#a08030';
+    for (let i = 0; i < 3 + variant; i++) {
+      const px2 = Math.floor(rnd() * (TILE - 3)) + 1;
+      const py2 = Math.floor(rnd() * (TILE - 3)) + 1;
+      g.fillRect(px2, py2, 2, 1);
+      g.fillRect(px2 + 1, py2 + 1, 1, 1);
+    }
   }
   return c;
 }
@@ -446,6 +779,63 @@ function soilTile(stage: 'bare' | 'sown' | 'grown' | 'ripe'): HTMLCanvasElement 
     }
   }
   return c;
+}
+
+/** Frozen winter farmland — frost-grey furrows with ice-blue sheen and snow streaks. */
+function soilWinterTile(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  // desaturated grey-brown base
+  g.fillStyle = '#5a5450'; g.fillRect(0, 0, TILE, TILE);
+  for (let y = 0; y < TILE; y += 6) {
+    g.fillStyle = '#484440'; g.fillRect(0, y + 4, TILE, 2); // frozen trough
+    g.fillStyle = '#6e6a64'; g.fillRect(0, y, TILE, 2);     // ridge
+    g.fillStyle = '#c8d0d8'; // ice sheen on crest
+    for (let x = 2; x < TILE; x += 9) g.fillRect(x, y, 2, 1);
+  }
+  // snow streaks across the top of ridges
+  g.fillStyle = '#d8e0e8';
+  for (let y = 0; y < TILE; y += 6) g.fillRect(0, y, TILE, 1);
+  g.fillStyle = '#eef2f8';
+  for (let x = 1; x < TILE; x += 14) g.fillRect(x, 0, 4, TILE);
+  return c;
+}
+
+/** Flax field — thin stalks with blue-violet flowers; golden seedpods when ripe. */
+function flaxSoilTile(stage: 'sown' | 'grown' | 'ripe'): HTMLCanvasElement {
+  const base = document.createElement('canvas');
+  base.width = TILE; base.height = TILE;
+  const g = base.getContext('2d')!;
+  g.fillStyle = P.soil; g.fillRect(0, 0, TILE, TILE);
+  for (let y = 0; y < TILE; y += 6) {
+    g.fillStyle = P.soilDark; g.fillRect(0, y + 4, TILE, 2);
+    g.fillStyle = P.soilMid;  g.fillRect(0, y, TILE, 2);
+  }
+  const rnd = mulberry(stage === 'sown' ? 501 : stage === 'grown' ? 502 : 503);
+  for (let y = 3; y < TILE; y += 6) {
+    for (let x = 2; x < TILE - 2; x += 5) {
+      const jx = x + (rnd() < 0.4 ? 0 : 1);
+      if (stage === 'sown') {
+        // tiny seedlings — pale green spikes
+        g.fillStyle = '#6aaa50'; g.fillRect(jx, y, 1, 2);
+        g.fillStyle = '#8acc70'; g.fillRect(jx, y, 1, 1);
+      } else if (stage === 'grown') {
+        // tall thin stalks with blue flowers on top
+        g.fillStyle = '#509050'; g.fillRect(jx, y - 4, 1, 6);
+        g.fillStyle = '#7098c0'; // blue flower
+        g.fillRect(jx - 1, y - 5, 3, 2);
+        g.fillStyle = '#a0c8f0'; g.fillRect(jx, y - 5, 1, 1);
+      } else {
+        // ripe: golden-brown seedpods, pale stalks
+        g.fillStyle = '#8a7840'; g.fillRect(jx, y - 2, 1, 5);
+        g.fillStyle = '#c0a050'; // pod
+        g.fillRect(jx - 1, y - 4, 3, 3);
+        g.fillStyle = '#d8b860'; g.fillRect(jx, y - 4, 1, 2);
+      }
+    }
+  }
+  return base;
 }
 
 function roadTile(kind: string, plan: boolean): HTMLCanvasElement {
@@ -1823,90 +2213,208 @@ function gatePlanTile(): HTMLCanvasElement {
   return c;
 }
 
+/**
+ * Deer: top-down perspective, warm tan body, antlers rising from head.
+ * Fills most of the 32×32 tile so it reads clearly when blitted at 20px.
+ */
 function deerSprite(frame: number): HTMLCanvasElement {
-  const legA = frame === 0 ? 'LL..' : '..LL';
-  const legB = frame === 0 ? '..LL' : 'LL..';
-  const rows = [
-    '................................',
-    '................................',
-    '............e...................',
-    '...........hh...................',
-    '...........hhn..................',
-    '.......bbbbbh...................',
-    '......bbbbbbb...................',
-    '......tbbbbbbb..................',
-    `........${legA}${legB}..................`,
-    `........${legA}${legB}..................`,
-    `........${legA}${legB}..................`,
-    '.......SSSSSSSSSS...............',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-  ];
-  return sheet(grid(rows, {
-    b: '#b48a58', h: '#9c7448', n: '#231c16', e: '#6b4a2a',
-    t: '#efe7d6', L: '#7a5a36', S: 'rgba(28,22,40,0.30)',
-  }));
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const f0 = frame === 0;
+
+  const bod = '#b87848', bodDk = '#8a5a2c', bodLt = '#d09c60';
+  const legC = '#7a5028', ant = '#9c7238';
+
+  // Shadow
+  g.fillStyle = P.shadow; g.fillRect(6, 27, 20, 4);
+
+  // Legs — 2px wide stubs, front pair and back pair swap forward each frame
+  g.fillStyle = legC;
+  if (f0) {
+    g.fillRect(10, 22, 2, 6); g.fillRect(15, 21, 2, 5); // front: left fwd, right back
+    g.fillRect(20, 21, 2, 5); g.fillRect(25, 22, 2, 6); // rear: left back, right fwd
+  } else {
+    g.fillRect(10, 21, 2, 5); g.fillRect(15, 22, 2, 6); // alternate
+    g.fillRect(20, 22, 2, 6); g.fillRect(25, 21, 2, 5);
+  }
+
+  // Body — tapered oval, shadow right/lower, lit upper-left
+  fillDisc(g, 18, 17, 12, 7, bodDk);
+  fillDisc(g, 17, 16, 12, 7, bod);
+  fillDisc(g, 12, 13, 8,  5, bodLt);
+
+  // White rump patch
+  g.fillStyle = '#ece4cc'; g.fillRect(26, 12, 4, 6);
+  g.fillStyle = '#f4ede0'; g.fillRect(27, 12, 3, 5);
+
+  // Neck (connects body to head)
+  g.fillStyle = bod;    g.fillRect(7, 10, 8, 8);
+  g.fillStyle = bodLt;  g.fillRect(7, 10, 4, 6);  // lit side
+  g.fillStyle = bodDk;  g.fillRect(13, 10, 2, 8); // shadow side
+
+  // Head
+  fillDisc(g, 7, 7, 6, 5, bodDk);
+  fillDisc(g, 6, 6, 6, 5, bod);
+  fillDisc(g, 3, 4, 4, 3, bodLt);
+
+  // Snout / nose
+  g.fillStyle = '#5a2e10'; g.fillRect(1, 8, 5, 3);
+  g.fillStyle = '#3a1a08'; g.fillRect(1, 9, 2, 1); // nostril
+
+  // Eye
+  g.fillStyle = P.outline; g.fillRect(8, 5, 2, 1);
+  g.fillStyle = '#e0c890'; g.fillRect(8, 5, 1, 1); // glint
+
+  // Ear (visible from above)
+  g.fillStyle = bodDk; g.fillRect(9, 2, 4, 4);
+  g.fillStyle = '#c07050'; g.fillRect(10, 3, 2, 2); // inner pink
+
+  // Antlers
+  g.fillStyle = ant;
+  g.fillRect(5, 0, 2, 5); g.fillRect(3, 0, 3, 1); g.fillRect(4, 1, 1, 1); // left + tine
+  g.fillRect(9, 0, 2, 4); g.fillRect(9, 0, 5, 1); g.fillRect(11, 1, 1, 1); // right + tine
+
+  return c;
 }
 
+/**
+ * Wolf: stockier dark-grey body, prominent fanged snout, pointed ears, bushy tail.
+ * Differentiated from deer by color and silhouette at small display sizes.
+ */
 function wolfSprite(frame: number): HTMLCanvasElement {
-  const legA = frame === 0 ? 'LL..' : '..LL';
-  const legB = frame === 0 ? '..LL' : 'LL..';
-  const rows = [
-    '................................',
-    '................................',
-    '.........e.e....................',
-    '.........hhh....................',
-    '.........hhhn...................',
-    '......bbbbbh....................',
-    '.....tbbbbbb....................',
-    '......bbbbbb....................',
-    `......${legA}${legB}..................`,
-    `......${legA}${legB}..................`,
-    `......${legA}${legB}..................`,
-    '......SSSSSSSSSS................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const f0 = frame === 0;
+
+  const bod = '#727280', bodDk = '#4a4a58', bodLt = '#9090a0';
+  const legC = '#38384a';
+
+  // Shadow
+  g.fillStyle = P.shadow; g.fillRect(5, 27, 22, 4);
+
+  // Bushy tail (curls up on the right side)
+  g.fillStyle = bodDk;  g.fillRect(26,  8, 4, 10);
+  g.fillStyle = bod;    g.fillRect(27,  8, 2,  9);
+  g.fillStyle = '#ccccd8'; g.fillRect(26, 7, 4, 3); // white tip
+
+  // Legs — slightly heavier than deer
+  g.fillStyle = legC;
+  if (f0) {
+    g.fillRect(9,  23, 2, 5); g.fillRect(14, 22, 2, 4);
+    g.fillRect(20, 22, 2, 4); g.fillRect(25, 23, 2, 5);
+  } else {
+    g.fillRect(9,  22, 2, 4); g.fillRect(14, 23, 2, 5);
+    g.fillRect(20, 23, 2, 5); g.fillRect(25, 22, 2, 4);
+  }
+
+  // Body — heavier/broader than deer
+  fillDisc(g, 18, 18, 12, 8, bodDk);
+  fillDisc(g, 17, 17, 12, 8, bod);
+  fillDisc(g, 11, 13,  8, 6, bodLt);
+
+  // Neck
+  g.fillStyle = bod;   g.fillRect(6, 11, 9, 8);
+  g.fillStyle = bodLt; g.fillRect(6, 11, 5, 6);
+  g.fillStyle = bodDk; g.fillRect(13, 11, 2, 8);
+
+  // Head (broader, lower-set)
+  fillDisc(g, 7, 8, 7, 5, bodDk);
+  fillDisc(g, 6, 7, 7, 5, bod);
+  fillDisc(g, 2, 5, 4, 3, bodLt);
+
+  // Pointed ears
+  g.fillStyle = bodDk;
+  g.fillRect(5, 2, 3, 5);  // left ear
+  g.fillRect(11, 3, 3, 4); // right ear (partially hidden)
+  g.fillStyle = '#c05858'; g.fillRect(6, 3, 1, 3); // inner ear flush
+  g.fillStyle = '#c05858'; g.fillRect(12, 4, 1, 2);
+
+  // Snout (longer and broader than deer)
+  g.fillStyle = bodDk; g.fillRect(0, 10, 6, 4);
+  g.fillStyle = bod;   g.fillRect(0, 10, 4, 3);
+  g.fillStyle = '#141010'; g.fillRect(0, 11, 2, 1); // nostril
+  // Teeth hint
+  g.fillStyle = '#e0dcd0'; g.fillRect(1, 13, 4, 1);
+
+  // Eye — intense yellow glint
+  g.fillStyle = '#141010'; g.fillRect(7, 6, 2, 2);
+  g.fillStyle = '#c8c040'; g.fillRect(8, 6, 1, 1);
+
+  return c;
+}
+
+/** Berry bush — dark green leaves, red/purple berry clusters. */
+function berryBushSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  // shadow
+  fillDisc(g, 16, 27, 8, 3, P.shadow);
+  // bush body (two overlapping leaf clumps)
+  fillDisc(g, 13, 19, 9, 8, P.treeLeafDark);
+  fillDisc(g, 20, 20, 8, 7, P.treeLeafDark);
+  fillDisc(g, 13, 18, 8, 7, P.treeLeaf);
+  fillDisc(g, 19, 19, 7, 6, P.treeLeaf);
+  // warm lit highlight
+  fillDisc(g, 11, 16, 5, 4, P.treeLeafLight);
+  g.fillStyle = P.treeLeafTop; g.fillRect(10, 14, 3, 2);
+  // berry clusters — red+dark red
+  const berries: [number, number][] = [[12,20],[15,22],[18,19],[21,21],[14,18],[20,23]];
+  for (const [bx, by] of berries) {
+    g.fillStyle = '#8a2838'; g.fillRect(bx, by, 3, 2);
+    g.fillStyle = '#c03848'; g.fillRect(bx, by, 2, 1);
+    g.fillStyle = '#e05060'; g.fillRect(bx, by, 1, 1);
+  }
+  return c;
+}
+
+/** Mushroom cluster — pale tan caps with buff stems. */
+function mushroomClusterSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  fillDisc(g, 16, 28, 8, 2, P.shadow);
+  // stems
+  g.fillStyle = '#c8b890'; g.fillRect(10, 22, 3, 5); g.fillRect(17, 23, 3, 4); g.fillRect(22, 21, 3, 6);
+  g.fillStyle = '#a89870'; g.fillRect(11, 23, 1, 4); g.fillRect(18, 24, 1, 3); g.fillRect(23, 22, 1, 5);
+  // caps (rounded top, darker underside)
+  const drawCap = (cx: number, cy: number, rw: number, rh: number) => {
+    fillDisc(g, cx, cy, rw, rh, '#7a5030');        // shadow underside
+    fillDisc(g, cx, cy - 1, rw - 1, rh - 1, '#b88060'); // mid cap
+    g.fillStyle = '#c89870'; g.fillRect(cx - rw + 3, cy - rh + 1, rw * 2 - 5, 2); // warm lit top
+    g.fillStyle = '#d8a880'; g.fillRect(cx - rw + 4, cy - rh + 1, 3, 1);
+  };
+  drawCap(11, 21, 6, 4);
+  drawCap(18, 22, 5, 3);
+  drawCap(23, 20, 5, 4);
+  return c;
+}
+
+/** Herb patch — soft leafy clumps in sage and muted green. */
+function herbPatchSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  fillDisc(g, 16, 27, 9, 3, P.shadow);
+  // several leaf rosettes at different heights
+  const clumps: [number, number, string, string][] = [
+    [10, 22, '#7a9040', '#a0b858'],
+    [17, 20, '#5e7830', '#849848'],
+    [22, 23, '#7a9040', '#98b050'],
+    [14, 18, '#5e7830', '#7a9040'],
+    [20, 17, '#6a8838', '#90aa50'],
   ];
-  return sheet(grid(rows, {
-    b: '#72717a', h: '#5e5d66', n: '#231c16', e: '#5e5d66',
-    t: '#92929c', L: '#4a4a52', S: 'rgba(28,22,40,0.30)',
-  }));
+  for (const [cx, cy, dark, light] of clumps) {
+    // small leaf splays (3-4 pixel leaf shapes)
+    g.fillStyle = dark;
+    g.fillRect(cx - 2, cy, 5, 2); g.fillRect(cx, cy - 2, 2, 5);
+    g.fillStyle = light;
+    g.fillRect(cx - 1, cy, 3, 1); g.fillRect(cx, cy - 1, 1, 3);
+    g.fillStyle = '#b8cc68'; g.fillRect(cx, cy - 2, 1, 1); // bright tip
+  }
+  return c;
 }
 
 function saplingSprite(): HTMLCanvasElement {
@@ -1971,6 +2479,83 @@ function interiorFloorTile(): HTMLCanvasElement {
     g.fillStyle = P.plankDark;
     g.fillRect((off) % TILE, row + 1, 1, 6);
     g.fillRect((off + 16) % TILE, row + 1, 1, 6);
+  }
+  return c;
+}
+
+/** Stone tile floor — grey flagstone with mortar seams. Used in kitchens, smithies, temples, etc. */
+function floorStoneTile(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  g.fillStyle = P.rockDark; g.fillRect(0, 0, TILE, TILE); // mortar
+  const stones: [number, number, number, number][] = [
+    [1, 1, 14, 7], [16, 1, 14, 7],
+    [1, 9, 8, 7],  [10, 9, 20, 7],
+    [1, 17, 20, 7],[22, 17, 8, 7],
+    [1, 25, 14, 6],[16, 25, 14, 6],
+  ];
+  for (const [x, y, w, h] of stones) {
+    g.fillStyle = P.rock; g.fillRect(x, y, w, h);
+    g.fillStyle = P.rockLight; g.fillRect(x, y, w, 1); // top bevel
+    g.fillStyle = P.rockDarker; g.fillRect(x, y + h - 1, w, 1); // bottom shadow
+  }
+  return c;
+}
+
+/** Packed earth / dirt floor — for pastures, outposts, burial grounds. */
+function floorDirtTile(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const rnd = mulberry(9991);
+  g.fillStyle = P.dirtMid; g.fillRect(0, 0, TILE, TILE);
+  for (let i = 0; i < 22; i++) {
+    const x = Math.floor(rnd() * TILE), y = Math.floor(rnd() * TILE);
+    g.fillStyle = rnd() < 0.5 ? P.dirtPatch : P.soilDark;
+    g.fillRect(x, y, 1 + Math.floor(rnd() * 2), 1);
+  }
+  return c;
+}
+
+/** Fine herringbone plank floor — for libraries, taverns, temples. */
+function floorFineTile(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  g.fillStyle = P.plankDark; g.fillRect(0, 0, TILE, TILE);
+  // Herringbone: alternating horizontal and vertical plank pairs
+  const planks: [number, number, number, number][] = [];
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      const x = i * 8, y = j * 8;
+      if ((i + j) % 2 === 0) planks.push([x, y, 8, 3], [x, y + 4, 8, 3]); // horizontal
+      else                   planks.push([x, y, 3, 8], [x + 4, y, 3, 8]);  // vertical
+    }
+  }
+  for (const [x, y, w, h] of planks) {
+    g.fillStyle = P.plank; g.fillRect(x + 1, y + 1, w - 1, h - 1);
+    g.fillStyle = P.plankLight; g.fillRect(x + 1, y + 1, w - 1, 1);
+  }
+  return c;
+}
+
+/** Irregular flagstone — for storehourses, markets, apothecaries. */
+function floorFlagTile(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  g.fillStyle = P.rockDarker; g.fillRect(0, 0, TILE, TILE);
+  const flags: [number, number, number, number][] = [
+    [1, 1, 9, 6], [11, 1, 5, 6], [17, 1, 13, 6],
+    [1, 8, 7, 7],  [9, 8, 12, 7], [22, 8, 8, 7],
+    [1, 16, 14, 7],[16, 16, 9, 7], [26, 16, 4, 7],
+    [1, 24, 5, 7],  [7, 24, 14, 7],[22, 24, 8, 7],
+  ];
+  for (const [x, y, w, h] of flags) {
+    g.fillStyle = P.gravelA; g.fillRect(x, y, w, h);
+    g.fillStyle = P.gravelC; g.fillRect(x, y + h - 1, w, 1);
+    g.fillStyle = '#b0aba0'; g.fillRect(x, y, w, 1); // lit top
   }
   return c;
 }
@@ -2164,6 +2749,317 @@ function stationSprite(id: string, w: number, h: number): HTMLCanvasElement {
       }
       break;
     }
+    case 'crate': {
+      shadow();
+      // Outer box
+      g.fillStyle = P.trunkDark; g.fillRect(m, m, W - 2 * m, H - 2 * m);
+      g.fillStyle = P.trunk; g.fillRect(m + 1, m + 1, W - 2 * m - 2, H - 2 * m - 2);
+      g.fillStyle = P.wood; g.fillRect(m + 2, m + 2, W - 2 * m - 4, H - 2 * m - 4);
+      // Cross braces
+      g.fillStyle = P.woodDark;
+      g.fillRect(m, Math.floor(H / 2) - 1, W - 2 * m, 2); // horizontal band
+      g.fillRect(Math.floor(W / 2) - 1, m, 2, H - 2 * m); // vertical band
+      // Top highlight
+      g.fillStyle = P.woodLight; g.fillRect(m + 2, m + 2, W - 2 * m - 4, 2);
+      break;
+    }
+    case 'shrine': {
+      // Plinth base
+      g.fillStyle = P.rock; g.fillRect(m + 2, H - 10, W - 2 * m - 4, 8);
+      g.fillStyle = P.rockDark; g.fillRect(m + 2, H - 11, W - 2 * m - 4, 2); // top edge
+      g.fillStyle = P.rockLight; g.fillRect(m + 3, H - 9, 4, 2); // light catch
+      // Column
+      g.fillStyle = P.wallCream; g.fillRect(W / 2 - 3, 14, 6, H - 24);
+      g.fillStyle = P.wallCreamDk; g.fillRect(W / 2 - 3, 14, 1, H - 24); // shadow side
+      // Capital (top of column)
+      g.fillStyle = P.wallCreamDk; g.fillRect(W / 2 - 6, 10, 12, 5);
+      g.fillStyle = P.wallCream; g.fillRect(W / 2 - 5, 11, 10, 3);
+      // Flame / holy symbol
+      g.fillStyle = '#f0b030'; g.fillRect(W / 2 - 2, 3, 4, 6);
+      g.fillStyle = '#f8d860'; g.fillRect(W / 2 - 1, 2, 2, 4);
+      g.fillStyle = '#ffffff'; g.fillRect(W / 2, 1, 1, 2);
+      break;
+    }
+    case 'well': {
+      shadow();
+      // Stone surround
+      g.fillStyle = P.rockDark; g.fillRect(m + 2, m + 2, W - 2 * m - 4, H - 2 * m - 4);
+      g.fillStyle = P.rock; g.fillRect(m + 4, m + 4, W - 2 * m - 8, H - 2 * m - 8);
+      // Dark interior shaft
+      g.fillStyle = '#0e1820'; g.fillRect(W / 2 - 5, m + 5, 10, H / 2 - 4);
+      g.fillStyle = P.water2; g.fillRect(W / 2 - 4, H / 2 - 2, 8, 4); // water glint
+      g.fillStyle = P.waterGlint; g.fillRect(W / 2 - 2, H / 2 - 1, 3, 1);
+      // Crossbeam
+      g.fillStyle = P.woodDark; g.fillRect(m, m + 2, W - 2 * m, 3);
+      g.fillStyle = P.wood; g.fillRect(m + 1, m + 3, W - 2 * m - 2, 1);
+      // Rope/bucket
+      g.fillStyle = '#8a7050'; g.fillRect(W / 2 - 1, m + 5, 2, H / 2 - 8); // rope
+      g.fillStyle = P.woodDark; g.fillRect(W / 2 - 3, H / 2 - 7, 6, 4); // bucket top
+      g.fillStyle = P.wood; g.fillRect(W / 2 - 2, H / 2 - 6, 4, 3);
+      break;
+    }
+    case 'watch_post': {
+      shadow();
+      // Platform floor
+      g.fillStyle = P.woodDark; g.fillRect(m, H - 10, W - 2 * m, 3);
+      g.fillStyle = P.wood; g.fillRect(m + 1, H - 9, W - 2 * m - 2, 2);
+      // Support legs
+      g.fillStyle = P.trunkDark;
+      g.fillRect(m + 2, H - 7, 3, 6); g.fillRect(W - m - 5, H - 7, 3, 6);
+      // Ladder rungs
+      g.fillStyle = P.trunk;
+      g.fillRect(W / 2 - 3, m + 4, 2, H - 14); g.fillRect(W / 2 + 1, m + 4, 2, H - 14);
+      for (let ry = m + 8; ry < H - 11; ry += 5) g.fillRect(W / 2 - 3, ry, 6, 1);
+      // Watchtower roof
+      g.fillStyle = P.roofWood; g.fillRect(m, m, W - 2 * m, 5);
+      g.fillStyle = P.roofLight; g.fillRect(m, m + 1, W - 2 * m, 2);
+      // Arrow slit
+      g.fillStyle = '#0e0c08'; g.fillRect(W / 2 - 1, m + 5, 2, 4);
+      break;
+    }
+    case 'grave_marker': {
+      // Dirt mound
+      g.fillStyle = P.soilDark; g.fillRect(m + 2, H - 9, W - 2 * m - 4, 7);
+      g.fillStyle = P.soil; g.fillRect(m + 3, H - 9, W - 2 * m - 6, 5);
+      // Stone marker
+      g.fillStyle = P.rockDark; g.fillRect(W / 2 - 4, m + 2, 8, H - 14);
+      g.fillStyle = P.rock; g.fillRect(W / 2 - 3, m + 3, 6, H - 16);
+      g.fillStyle = P.rockLight; g.fillRect(W / 2 - 2, m + 3, 2, 3);
+      // Cross notch
+      g.fillStyle = P.rockDark; g.fillRect(W / 2 - 3, m + 6, 6, 1); // crossbar
+      break;
+    }
+    case 'training_post': {
+      shadow();
+      // Central post
+      g.fillStyle = P.trunkDark; g.fillRect(W / 2 - 3, m + 2, 6, H - 2 * m - 4);
+      g.fillStyle = P.trunk; g.fillRect(W / 2 - 2, m + 3, 4, H - 2 * m - 6);
+      // Cross arm
+      g.fillStyle = P.trunkDark; g.fillRect(m + 2, H / 2 - 2, W - 2 * m - 4, 4);
+      g.fillStyle = P.trunk; g.fillRect(m + 3, H / 2 - 1, W - 2 * m - 6, 2);
+      // Rope circles
+      g.fillStyle = '#8a7050';
+      disc(m + 6, H / 2, 4, '#8a7050'); g.fillStyle = '#b89a6a'; disc(m + 6, H / 2, 2, '#b89a6a');
+      disc(W - m - 6, H / 2, 4, '#8a7050'); g.fillStyle = '#b89a6a'; disc(W - m - 6, H / 2, 2, '#b89a6a');
+      break;
+    }
+    case 'hunting_lodge': {
+      // Floor/ground
+      g.fillStyle = P.grassB; g.fillRect(1, 1, W - 2, H - 2);
+      g.fillStyle = P.dirtPatch; g.fillRect(m + 2, H - 14, W - 2 * m - 4, 12);
+      // Small log cabin
+      const lx = Math.floor(W / 2) - 10, lw = 20;
+      g.fillStyle = P.trunkDark; g.fillRect(lx, 12, lw, H - 26);
+      g.fillStyle = P.trunk; g.fillRect(lx + 1, 13, lw - 2, H - 28);
+      // Log lines
+      g.fillStyle = P.trunkDark;
+      for (let ly = 18; ly < H - 16; ly += 5) g.fillRect(lx + 1, ly, lw - 2, 1);
+      // Roof
+      g.fillStyle = P.roofWood; g.fillRect(lx - 3, 6, lw + 6, 8);
+      g.fillStyle = P.roofLight; g.fillRect(lx - 2, 7, lw + 4, 3);
+      // Door
+      g.fillStyle = '#1e1408'; g.fillRect(Math.floor(W / 2) - 3, H - 24, 6, 10);
+      // Antlers
+      g.fillStyle = '#c0a86a';
+      g.fillRect(lx - 4, 8, 2, 8); g.fillRect(lx - 6, 6, 2, 4); g.fillRect(lx - 2, 6, 2, 3);
+      g.fillRect(lx + lw + 2, 8, 2, 8); g.fillRect(lx + lw, 6, 2, 4); g.fillRect(lx + lw + 4, 6, 2, 3);
+      break;
+    }
+    case 'market_stall': {
+      // Ground
+      g.fillStyle = P.gravelB; g.fillRect(1, H - 10, W - 2, 9);
+      // Awning posts
+      g.fillStyle = P.woodDark;
+      g.fillRect(m + 2, 16, 3, H - 26); g.fillRect(W - m - 5, 16, 3, H - 26);
+      g.fillStyle = P.wood;
+      g.fillRect(m + 3, 17, 2, H - 28); g.fillRect(W - m - 4, 17, 2, H - 28);
+      // Awning
+      g.fillStyle = '#b83828'; // red cloth
+      g.fillRect(m, 8, W - 2 * m, 10);
+      g.fillStyle = '#cc5040';
+      g.fillRect(m, 8, W - 2 * m, 3); // lighter top stripe
+      // Scalloped edge
+      for (let ex = m; ex < W - m - 6; ex += 6) {
+        g.fillStyle = '#b83828';
+        g.fillRect(ex + 1, 18, 4, 4);
+        g.fillStyle = P.shadow;
+        g.fillRect(ex, 18, 1, 3); g.fillRect(ex + 5, 18, 1, 3);
+      }
+      // Counter table
+      g.fillStyle = P.woodDark; g.fillRect(m + 4, H - 17, W - 2 * m - 8, 6);
+      g.fillStyle = P.wood; g.fillRect(m + 5, H - 16, W - 2 * m - 10, 4);
+      // Goods
+      g.fillStyle = '#b84020'; g.fillRect(m + 6, H - 22, 6, 5); // pottery
+      g.fillStyle = '#a8b040'; g.fillRect(m + 14, H - 21, 5, 4); // greens
+      g.fillStyle = P.grain; g.fillRect(W - m - 14, H - 20, 6, 3); // grain sack
+      break;
+    }
+    case 'carpentry_bench': {
+      shadow(); woodTop(m, 11, W - 2 * m, H - 13);
+      // Wood shavings
+      g.fillStyle = P.woodLight;
+      g.fillRect(m + 4, 14, 6, 2); g.fillRect(m + 12, 16, 5, 1); g.fillRect(W - m - 10, 13, 7, 2);
+      // Chisel and mallet
+      g.fillStyle = P.rockLight; // chisel blade
+      g.fillRect(W / 2 + 2, 12, 2, 6);
+      g.fillStyle = P.woodDark; // mallet handle
+      g.fillRect(W / 2 + 2, 18, 2, 8);
+      g.fillStyle = P.trunk; // mallet head
+      g.fillRect(W / 2 - 1, 14, 8, 5);
+      // Wood block being worked
+      g.fillStyle = P.trunkDark;
+      g.fillRect(m + 3, 14, 10, 12);
+      g.fillStyle = P.trunk;
+      g.fillRect(m + 4, 15, 8, 10);
+      break;
+    }
+    case 'smoke_rack': {
+      // Smokehouse rack: heavy horizontal beams with hanging smoked cuts.
+      shadow();
+      // Frame posts
+      g.fillStyle = P.trunkDark;
+      g.fillRect(m, m + 6, 3, H - m - 8);
+      g.fillRect(W - m - 3, m + 6, 3, H - m - 8);
+      // Horizontal beam
+      g.fillStyle = P.trunk;
+      g.fillRect(m, m + 6, W - 2 * m, 4);
+      g.fillStyle = P.woodLight;
+      g.fillRect(m, m + 6, W - 2 * m, 1);
+      // Smoke + ash floor
+      g.fillStyle = P.soilDark; g.fillRect(m + 3, H - m - 5, W - 2 * m - 6, 4);
+      g.fillStyle = '#5a4a3a';  g.fillRect(m + 4, H - m - 4, W - 2 * m - 8, 2);
+      // Hanging smoked cuts (dark red strips on string)
+      for (let hx = m + 4; hx < W - m - 4; hx += 6) {
+        g.fillStyle = '#44261a'; g.fillRect(hx, m + 10, 1, 8 + (hx % 3));
+        g.fillStyle = '#6a3820'; g.fillRect(hx, m + 10, 1, 2);
+      }
+      break;
+    }
+    case 'animal_pen': {
+      // Pen: fenced enclosure with dirt floor and a couple of cows.
+      shadow();
+      // Dirt floor
+      g.fillStyle = P.soilDark; g.fillRect(m, m + 4, W - 2 * m, H - m - 6);
+      g.fillStyle = P.soil; g.fillRect(m + 1, m + 5, W - 2 * m - 2, H - m - 8);
+      // Fence rails (top, bottom, left, right)
+      g.fillStyle = P.woodDark;
+      g.fillRect(m, m + 4, W - 2 * m, 2);
+      g.fillRect(m, H - m - 4, W - 2 * m, 2);
+      g.fillRect(m, m + 4, 2, H - 2 * m - 4);
+      g.fillRect(W - m - 2, m + 4, 2, H - 2 * m - 4);
+      // Mid-rail
+      g.fillStyle = P.wood;
+      g.fillRect(m, m + 8, W - 2 * m, 1);
+      // Two simple cows (blobs)
+      g.fillStyle = P.trunk; // brown
+      g.fillRect(m + 4, m + 10, 5, 4); // cow 1
+      g.fillRect(m + 3, m + 10, 1, 3); g.fillRect(m + 8, m + 10, 1, 3); // legs 1
+      g.fillRect(m + 12, m + 11, 5, 4); // cow 2
+      g.fillRect(m + 11, m + 11, 1, 3); g.fillRect(m + 16, m + 11, 1, 3); // legs 2
+      g.fillStyle = P.woodLight; // highlight
+      g.fillRect(m + 4, m + 10, 5, 1);
+      g.fillRect(m + 12, m + 11, 5, 1);
+      break;
+    }
+    case 'game_meal': {
+      // Cooked game meat — bone-in leg piece.
+      // (default shadow at y=21 acts as underlay)
+      // Bone handle
+      g.fillStyle = '#c0b890'; g.fillRect(21, 17, 4, 12);
+      g.fillStyle = '#d8d0a8'; g.fillRect(22, 17, 2, 11);
+      fillDisc(g, 23, 29, 4, 2, '#c0b890'); // knob end
+      g.fillStyle = '#d8d0a8'; g.fillRect(21, 28, 3, 1);
+      // Meat mass — charred outside, warmer inside
+      fillDisc(g, 13, 14, 10, 8, '#4e2010'); // dark char rim
+      fillDisc(g, 12, 13, 10, 8, '#8a3c22'); // charred surface
+      fillDisc(g, 10, 11,  8, 6, '#ae5830'); // main meat
+      fillDisc(g,  7,  9,  5, 4, '#c87040'); // warm lit highlight
+      g.fillStyle = '#d8904c'; g.fillRect(6, 8, 4, 2); // bright spot
+      break;
+    }
+    case 'preserved': {
+      // Preserved / smoked meat — dark tied bundle.
+      g.fillStyle = P.shadow; g.fillRect(4, 23, 24, 6);
+      // Main bundle
+      g.fillStyle = '#4a2418'; g.fillRect(5, 11, 22, 13);
+      g.fillStyle = '#6a3828'; g.fillRect(5, 11, 22, 4); // slightly lighter top
+      g.fillStyle = '#3a1c10'; g.fillRect(5, 22, 22, 2); // dark bottom
+      // Smoke grain lines
+      g.fillStyle = '#38200e';
+      for (let lx = 6; lx < 26; lx += 5) g.fillRect(lx, 12, 1, 11);
+      // Binding twine
+      g.fillStyle = '#c8a858'; g.fillRect(4, 14, 24, 2); g.fillRect(4, 20, 24, 2);
+      // Vertical cord + knot
+      g.fillStyle = '#b09040'; g.fillRect(14, 10, 4, 13);
+      g.fillStyle = '#d4b860'; g.fillRect(15, 10, 2, 12);
+      // Lit surface hint
+      g.fillStyle = '#7a4434'; g.fillRect(6, 12, 8, 2);
+      break;
+    }
+    case 'clay': {
+      // Clay — smooth wet lump, grey-tan
+      g.fillStyle = P.shadow; g.fillRect(4, 23, 22, 6);
+      fillDisc(g, 15, 15, 11, 8, '#706050'); // dark rim
+      fillDisc(g, 14, 14, 11, 8, '#9a7858'); // mid clay
+      fillDisc(g, 10, 11,  7, 5, '#b89070'); // lit surface
+      g.fillStyle = '#c8a888'; g.fillRect(8, 10, 5, 2); // wet sheen
+      break;
+    }
+    case 'coal': {
+      // Coal — rough black chunks with subtle sheen
+      g.fillStyle = P.shadow; g.fillRect(4, 22, 24, 7);
+      g.fillStyle = '#2a2820'; g.fillRect(5, 12, 12, 10); g.fillRect(15, 14, 12, 10);
+      g.fillStyle = '#3c3a30'; g.fillRect(5, 12, 10, 8); g.fillRect(15, 14, 10, 8);
+      g.fillStyle = '#545248'; g.fillRect(5, 12, 10, 1); g.fillRect(15, 14, 10, 1); // edge sheen
+      g.fillStyle = '#403e36'; g.fillRect(5, 12, 1, 9); g.fillRect(15, 14, 1, 9);
+      break;
+    }
+    case 'iron_ore': {
+      // Iron ore — reddish-brown heavy chunk with metallic gleam
+      g.fillStyle = P.shadow; g.fillRect(4, 22, 24, 7);
+      fillDisc(g, 16, 15, 12, 8, '#543828'); // dark rim
+      fillDisc(g, 15, 14, 12, 8, '#7a5040'); // main ore (reddish-brown)
+      fillDisc(g, 11, 11,  7, 5, '#966454'); // lit surface
+      g.fillStyle = '#b08070'; g.fillRect(9, 10, 5, 2); // metallic highlight
+      // Companion chunk (lower right)
+      g.fillStyle = '#6a4030'; g.fillRect(21, 17, 7, 5);
+      g.fillStyle = '#9a6050'; g.fillRect(22, 17, 5, 4);
+      g.fillStyle = '#b08070'; g.fillRect(22, 17, 3, 1);
+      break;
+    }
+    case 'coke': {
+      // Processed coke — grey-black angular chunks with a slight metallic sheen
+      g.fillStyle = P.shadow; g.fillRect(4, 22, 24, 7);
+      // Two main chunks, irregular shapes
+      g.fillStyle = '#1e1c18'; g.fillRect(5, 11, 14, 11); g.fillRect(18, 14, 11, 9);
+      g.fillStyle = '#2c2820'; g.fillRect(5, 11, 12, 9); g.fillRect(18, 14, 9, 7);
+      // Grey metallic surface highlights (coke is partially graphitised)
+      g.fillStyle = '#504c44'; g.fillRect(5, 11, 12, 1); g.fillRect(18, 14, 9, 1);
+      g.fillStyle = '#3c3830'; g.fillRect(5, 11, 1, 10); g.fillRect(18, 14, 1, 8);
+      g.fillStyle = '#686460'; g.fillRect(6, 12, 4, 1); g.fillRect(19, 15, 3, 1); // sheen
+      break;
+    }
+    case 'flax': {
+      // Flax — tied bundle of pale yellow-green fibers with blue flowers
+      g.fillStyle = P.shadow; g.fillRect(5, 23, 20, 5);
+      const fc = '#9cb860', fd = '#7a9040';
+      // Fiber stalks
+      for (let i = 0; i < 5; i++) {
+        const fx = 8 + i * 4;
+        g.fillStyle = (i % 2 === 0) ? fc : fd;
+        g.fillRect(fx, 6, 2, 16);
+      }
+      // Binding twine at center
+      g.fillStyle = '#c8a840'; g.fillRect(5, 12, 20, 3);
+      g.fillStyle = '#e0c050'; g.fillRect(5, 12, 20, 1);
+      // Tufted fiber tips (top)
+      g.fillStyle = '#c0d880';
+      for (let i = 0; i < 5; i++) { g.fillRect(8 + i * 4, 5, 2, 2); }
+      // Blue flower buds on some stalks
+      g.fillStyle = '#7878d0'; g.fillRect(10, 4, 2, 2); g.fillRect(18, 3, 2, 2);
+      g.fillStyle = '#a0a0f0'; g.fillRect(10, 4, 1, 1); g.fillRect(18, 3, 1, 1);
+      break;
+    }
     default: { // generic crate
       shadow();
       woodTop(m + 2, m + 3, W - 2 * m - 4, H - 2 * m - 5);
@@ -2197,7 +3093,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     roads[k]     = roadTile(k, false);
     roadPlans[k] = roadTile(k, true);
   }
-  // Three distinct settler looks: ochre/dark-hair, teal/auburn, mauve/grey.
+  // Four distinct settler looks: ochre/dark-hair, teal/auburn, mauve/grey, forest-green/dark.
   const pawnLooks: PawnLook[] = [
     { cloth: P.cloth1, clothDk: P.clothDark1, clothLt: P.clothLight1,
       skin: P.skin,  skinShad: P.skinShad,  skinLight: P.skinLight,
@@ -2208,6 +3104,9 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     { cloth: P.cloth3, clothDk: P.clothDark3, clothLt: P.clothLight3,
       skin: P.skin,  skinShad: P.skinShad,  skinLight: P.skinLight,
       hair: P.hairC, hairDk: '#6e665a' },
+    { cloth: P.cloth4, clothDk: P.clothDark4, clothLt: P.clothLight4,
+      skin: P.skinB, skinShad: P.skinBShad, skinLight: P.skinBLight,
+      hair: '#1c1a18', hairDk: '#0e0c0a' },
   ];
   const raiderLook: PawnLook = {
     cloth: P.clothRaider, clothDk: P.clothRaiderDk, clothLt: P.clothRaiderLt,
@@ -2216,16 +3115,28 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
   };
   return {
     grass: [0, 1, 2, 3].map(grassTile),
+    grassSpring: [0, 1, 2, 3].map(grassSpringTile),
+    grassAutumn: [0, 1, 2, 3].map(grassAutumnTile),
+    grassWinter: [0, 1, 2, 3].map(grassWinterTile),
     dirtPatch: dirtPatchTile(),
     tree: treeSprite(false),
     treeMarked: treeSprite(true),
-    water: [waterTile(0), waterTile(1)],
-    rock: rockSprite(false),
-    rockMarked: rockSprite(true),
+    treeSpring: treeSpringSprite(),
+    treeAutumn: treeAutumnSprite(),
+    treeWinter: treeWinterSprite(),
+    water: [waterTile(0), waterTile(1), waterTile(2), waterTile(3)],
+    waterWinter: [0, 1, 2, 3].map(waterWinterTile),
+    rock: [0, 1, 2].map(v => rockSprite(false, v)),
+    rockMarked: [0, 1, 2].map(v => rockSprite(true, v)),
+    sand: [0, 1, 2, 3].map(sandTile),
     soil: soilTile('bare'),
     soilSown: soilTile('sown'),
     soilGrown: soilTile('grown'),
     soilRipe: soilTile('ripe'),
+    soilWinter: soilWinterTile(),
+    flaxSown: flaxSoilTile('sown'),
+    flaxGrown: flaxSoilTile('grown'),
+    flaxRipe: flaxSoilTile('ripe'),
     roads,
     roadPlans,
     stockpileZone: stockpileZoneTile(),
@@ -2237,6 +3148,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     gateVariants: Array.from({ length: 16 }, (_, i) => gateVariantTile(i)),
     gatePlan: gatePlanTile(),
     sapling: saplingSprite(),
+    forage: [saplingSprite() /* unused slot 0 */, berryBushSprite(), mushroomClusterSprite(), herbPatchSprite()],
     settler: pawnLooks.map((lk) => [pawnSprite(lk, 0), pawnSprite(lk, 1)]),
     settlerArmed: pawnLooks.map((lk) => [pawnSprite(lk, 0, true), pawnSprite(lk, 1, true)]),
     raider: [pawnSprite(raiderLook, 0, true), pawnSprite(raiderLook, 1, true)],
@@ -2249,10 +3161,10 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
       stone:      itemSprite('stone'),
       clothes:    itemSprite('clothes'),
       weapons:    weaponSprite(),
-      clay:       genericItemSprite('#9c6b40', '#7a5030'),
-      coal:       genericItemSprite('#3c3830', '#2a2820'),
-      iron_ore:   genericItemSprite('#786050', '#5e4840'),
-      flax:       genericItemSprite('#9cb060', '#7a9040'),
+      clay:       craftedItemSprite('clay'),
+      coal:       craftedItemSprite('coal'),
+      iron_ore:   craftedItemSprite('iron_ore'),
+      flax:       craftedItemSprite('flax'),
       herbs:      craftedItemSprite('herbs'),
       timber:     craftedItemSprite('timber'),
       brick:      craftedItemSprite('brick'),
@@ -2265,10 +3177,10 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
       bread:      craftedItemSprite('bread'),
       dairy:      craftedItemSprite('dairy'),
       produce:    craftedItemSprite('produce'),
-      game_meal:  genericItemSprite('#8c5c3c', '#6a4028'),
+      game_meal:  craftedItemSprite('game_meal'),
       fish_meal:  craftedItemSprite('fish_meal'),
-      preserved:  genericItemSprite('#6a4030', '#502820'),
-      coke:       genericItemSprite('#2a2010', '#1a1408'),
+      preserved:  craftedItemSprite('preserved'),
+      coke:       craftedItemSprite('coke'),
       petroleum:  genericItemSprite('#1c1e28', '#14161e'),
     },
     grave:  graveSprite(),
@@ -2277,6 +3189,17 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     blueprints,
     interiorFloor: interiorFloorTile(),
     interiorWall: interiorWallTile(),
+    roomFloors: (() => {
+      const stone = floorStoneTile(), dirt = floorDirtTile(), fine = floorFineTile(), flag = floorFlagTile();
+      return {
+        kitchen: stone, bakery: stone, smithy: stone, foundry: stone, kilnhouse: stone,
+        mill: stone, sawmill: dirt, workshop: flag, smokehouse: dirt,
+        yard: stone, watchtower: stone, infirmary: stone,
+        home: fine, library: fine, tavern: fine, barracks: fine, temple: fine,
+        pasture: dirt, burial_ground: dirt, outpost: dirt,
+        storehouse: flag, market: flag, apothecary: flag,
+      };
+    })(),
     stations,
   };
 }

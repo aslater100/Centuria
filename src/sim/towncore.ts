@@ -40,7 +40,7 @@ import { Ledger, type LedgerSave, type BorrowResult, type RepayResult } from './
 import { ResearchBook, type ResearchBookSave } from './research';
 import { Rng } from './rng';
 import { BASE_PRICES } from './economy';
-import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, ROOM_DEF_BY_NUM, STATION_DEF_BY_NUM, STATION_TYPE_ID, TRAIT_DEFS, TUNING, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, DIFFICULTY_PRESETS, RESOURCE_KINDS, type ResourceKind, type TradeOrder, type TradeRecord, type TownFocus } from './defs';
+import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, ROOM_DEF_BY_NUM, STATION_DEF_BY_NUM, STATION_TYPE_ID, TRAIT_DEFS, TUNING, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, DIFFICULTY_PRESETS, RESOURCE_KINDS, BLUEPRINT_DEFS, type BlueprintDef, type ResourceKind, type TradeOrder, type TradeRecord, type TownFocus } from './defs';
 
 const TICKS_PER_DAY = MINUTES_PER_DAY / MINUTES_PER_TICK;
 // Colony storage cap (SoS model): non-food goods the colony can warehouse before
@@ -80,7 +80,7 @@ const ECONOMY_MONTH_DAYS = 30;
 const FIRST_EVENT_DAY = 7;
 const EVENT_INTERVAL = [3, 7] as const;
 
-const SAVE_VERSION = 10;
+const SAVE_VERSION = 11;
 
 // Behavior thresholds for the integration loop (modest, deterministic — full
 // mood/skills/trait fidelity is the remaining parity work, not this stage).
@@ -90,6 +90,7 @@ const BIRTH_MOOD_MIN = 50;     // colony must be reasonably content to grow
 const STARVED_HEALTH = 0;      // health at/under this → death (swap-removed)
 const HARVEST_TILES_PER_WORKER = 4; // zone tiles one settler can work per day (labour cap)
 const HARVEST_YIELD = 1;            // raw goods a worked zone tile yields per day
+const FORAGE_REGROW_DAYS = 30;      // days before a harvested forage deposit regenerates
 const BUILD_WORK_PER_WORKER = 30;   // construction work one settler delivers per day
 const WALL_WORK = 20, FLOOR_WORK = 10;
 const WALL_COST: Partial<Record<ResourceKind, number>> = { wood: 1 };
@@ -145,6 +146,10 @@ export interface StationView {
   typeId: number;
   /** String id from stations.json (e.g. 'oven', 'bed'). */
   stationId: string;
+  /** Craft progress [0..recipe.work). 0 for non-craft stations. */
+  progress: number;
+  /** Max work for one craft cycle (recipe.work). 0 for non-craft stations. */
+  workMax: number;
 }
 
 /** A displayable snapshot of one active raider — position, health, and flee state. */
@@ -173,6 +178,14 @@ export interface BuildOrder {
   roomType: number;  // designation applied with a 'floor'; 0 otherwise
   workLeft: number;
   cost: Partial<Record<ResourceKind, number>>;
+}
+
+export interface YearReport {
+  year: number;
+  popStart: number;
+  popEnd: number;
+  inflow: Partial<Record<ResourceKind, number>>;
+  outflow: Partial<Record<ResourceKind, number>>;
 }
 
 export interface TownCoreSave {
@@ -249,6 +262,8 @@ export interface TownCoreSave {
   floodActive?: boolean;
   /** v10+: last prestige tier already logged (prevents duplicate tier logs on load). */
   lastPrestigeMilestone?: number;
+  /** v11+: last completed year's resource ledger (null on old saves). */
+  lastYearReport?: YearReport | null;
 }
 
 export interface TownCoreOpts {
@@ -310,6 +325,7 @@ export class TownCore {
       case 'millstone': return (rb.hasTech('milling') ? 1.30 : 1) * focusMult;
       case 'brew_vat': return (rb.hasTech('fermentation') ? 1.30 : 1) * focusMult;
       case 'smelter': return (rb.hasTech('iron_smelting') ? 1.30 : 1) * focusMult;
+      case 'smoke_rack': return (rb.hasTech('food_preservation') ? 1.40 : 1) * focusMult;
       default: return focusMult;
     }
   };
@@ -378,6 +394,15 @@ export class TownCore {
   private _clothingDay = 0;
   /** True when at least one well station is operational — cached daily to avoid per-tick room scan. */
   private _hasWell = false;
+
+  // Yearly resource ledger: accumulate gross inflow / outflow since year start.
+  private _yearIn = new Float32Array(RESOURCE_KINDS.length);
+  private _yearOut = new Float32Array(RESOURCE_KINDS.length);
+  private _yearStartPop = 0;
+  /** End-of-previous-day stock snapshot, for computing daily deltas. */
+  private _prevDayStock = new Float32Array(RESOURCE_KINDS.length);
+  /** Last completed year's resource + population summary. Shown in the economy panel. */
+  lastYearReport: YearReport | null = null;
 
   private readonly weatherSeed: number;
 
@@ -471,7 +496,9 @@ export class TownCore {
     for (const s of this.grid.stations) {
       const def = STATION_DEF_BY_NUM[s.typeId];
       if (!def) continue;
-      yield { x: s.x, y: s.y, typeId: s.typeId, stationId: def.id };
+      const progress = this.grid.progressFor(s.id);
+      const workMax = def.recipe?.work ?? 0;
+      yield { x: s.x, y: s.y, typeId: s.typeId, stationId: def.id, progress, workMax };
     }
   }
 
@@ -512,6 +539,7 @@ export class TownCore {
       if (this.spawnPerson(cx + dx, cy + dy) >= 0) placed++;
     }
     if (placed > 0) this.addLog(`${placed} settlers step off the wagon and make camp.`, 'good');
+    this._yearStartPop = this.population;
     // Spawn the starting deer herd via the dedicated deer rng stream so the main
     // rng (raids, births, weather) stays byte-for-byte identical regardless of deer count.
     const W = this.grid.width, H = this.grid.height;
@@ -600,7 +628,8 @@ export class TownCore {
       * (this._hasWell ? (1 - TUNING.wellInfectionReduction) : 1.0);
     a.tick(t, this._rand,
       infectionChanceMult,
-      this.researchBook.hasTech('germ_theory') ? 0.5 : 1.0);
+      this.researchBook.hasTech('germ_theory') ? 0.5 : 1.0,
+      this.grid.road, this.grid.width);
 
     // 5b. Mental break: a miserable settler may crack, leaving a sour thought.
     for (let i = 0; i < a.count; i++) {
@@ -809,6 +838,14 @@ export class TownCore {
   private dailyUpdate(): void {
     const a = this.agents;
 
+    // Yearly ledger: compare today's opening stock to yesterday's closing snapshot.
+    // (On day 1 _prevDayStock is all-zero; starting goods count as inflow — acceptable.)
+    for (let ri = 0; ri < RESOURCE_KINDS.length; ri++) {
+      const delta = this.stock.buf[ri] - this._prevDayStock[ri];
+      if (delta > 0.05) this._yearIn[ri] += delta;
+      else if (delta < -0.05) this._yearOut[ri] -= delta;
+    }
+
     // Snapshot stock levels for 7-day rolling net-flow display (same pattern as fat sim).
     for (const [key, qty] of Object.entries(this.stock.snapshot())) {
       let hist = this._stockHistory.get(key);
@@ -822,6 +859,8 @@ export class TownCore {
     this.harvestZones();
     // Sapling regrowth: woodcutter-felled tiles grow back into forest over days.
     this._tickSaplings();
+    // Forage regrowth: harvested deposits regenerate after FORAGE_REGROW_DAYS.
+    this._tickForageRegrow();
     // Construction: spend the day's labour on the blueprint queue.
     this.tickConstruction();
 
@@ -870,6 +909,10 @@ export class TownCore {
         a.recreation[i] = Math.min(100, a.recreation[i] + 20); // drinking lifts spirits
         a.addThought(i, this.tickNo, 5, TICKS_PER_DAY); // "Had a drink"
         eatAle++;
+      } else if (this.stock.remove('preserved', 1)) {
+        a.food[i] = Math.min(100, a.food[i] + MEAL_VAL); // preserved rations are as filling as a meal
+        // Neutral taste: no thought bonus/penalty — better than grain, not as good as fresh
+        eatGrain++; // reuse eatGrain counter for preserved (counted as staple variety)
       } else if (this.stock.remove('grain', 1)) {
         a.food[i] = Math.min(100, a.food[i] + GRAIN_VAL);
         a.addThought(i, this.tickNo, -4, TICKS_PER_DAY, ThoughtKey.Anon); // "ate raw grain"
@@ -1110,6 +1153,20 @@ export class TownCore {
       const year = START_YEAR + Math.floor(this.day / DAYS_PER_YEAR);
       this.addLog(`${SEASONS[seasonIdx]} ${year} begins.`, 'info');
       this._lastSeasonIdx = seasonIdx;
+      // Year rollover: Spring of a new year → finalize the prior year's ledger.
+      if (seasonIdx === 0 && this.day >= DAYS_PER_YEAR) {
+        const inflow: Partial<Record<ResourceKind, number>> = {};
+        const outflow: Partial<Record<ResourceKind, number>> = {};
+        for (let ri = 0; ri < RESOURCE_KINDS.length; ri++) {
+          if (this._yearIn[ri] > 0.5) inflow[RESOURCE_KINDS[ri]] = Math.round(this._yearIn[ri]);
+          if (this._yearOut[ri] > 0.5) outflow[RESOURCE_KINDS[ri]] = Math.round(this._yearOut[ri]);
+        }
+        const prevPop = this._yearStartPop;
+        this.lastYearReport = { year: year - 1, popStart: prevPop, popEnd: this.population, inflow, outflow };
+        this._yearIn.fill(0);
+        this._yearOut.fill(0);
+        this._yearStartPop = this.population;
+      }
     }
     // Drought/flood transitions: log once when conditions change.
     const nowDrought = growingSeason && this.weather.isDrought(this.day);
@@ -1144,6 +1201,9 @@ export class TownCore {
         this.addLog(`Colony reaches ${m} settlers — a growing community. (+${pts} prestige)`, 'good');
       }
     }
+
+    // Yearly ledger: snapshot stock at end of day so tomorrow's delta is accurate.
+    this._prevDayStock.set(this.stock.buf);
   }
 
   /**
@@ -1181,6 +1241,8 @@ export class TownCore {
       if (def.seasonal && !growingSeason) { budget--; continue; }
       const x = i % grid.width, y = (i / grid.width) | 0;
       if (!grid.canZone(x, y, z)) { grid.zone[i] = ZONE.NONE; continue; } // terrain changed under it
+      // Forage: skip depleted tiles (deposit cleared, regrow timer running).
+      if (z === ZONE.FORAGE && grid.forage[i] === FORAGE.NONE) { budget--; continue; }
       const res = z === ZONE.QUARRY && grid.ore[i] ? 'iron_ore'
         : z === ZONE.FORAGE ? (grid.forage[i] === FORAGE.HERBS ? 'herbs' : 'meal')
         : def.resource;
@@ -1192,6 +1254,12 @@ export class TownCore {
         grid.zone[i] = ZONE.NONE;
         // Woodcutter-cleared tiles start regrowing (sapling age 1 = day 1 of growth).
         if (z === ZONE.WOODCUTTER) grid.saplingAge[i] = 1;
+      } else if (z === ZONE.FORAGE) {
+        // Deplete the deposit; start countdown — zone stays painted so it auto-resumes.
+        const kind = grid.forage[i];
+        grid.forage[i] = FORAGE.NONE;
+        grid.forageRegrow[i] = FORAGE_REGROW_DAYS;
+        this.addLog(`Forage deposit (${kind === FORAGE.HERBS ? 'herbs' : kind === FORAGE.MUSHROOMS ? 'mushrooms' : 'berries'}) exhausted — regrowing in ${FORAGE_REGROW_DAYS} days.`, 'info');
       }
     }
   }
@@ -1206,6 +1274,22 @@ export class TownCore {
       if (grid.saplingAge[i] > TUNING.saplingGrowDays) {
         grid.setTerrain(i % grid.width, (i / grid.width) | 0, TERRAIN.TREE);
         grid.saplingAge[i] = 0;
+      }
+    }
+  }
+
+  /** Count down forage regrow timers; restore deposits when they expire. */
+  private _tickForageRegrow(): void {
+    const grid = this.grid;
+    for (let i = 0; i < grid.size; i++) {
+      if (grid.forageRegrow[i] === 0) continue;
+      grid.forageRegrow[i]--;
+      if (grid.forageRegrow[i] === 0 && grid.forage[i] === FORAGE.NONE) {
+        // Restore a random deposit type on the tile (only if still grass, no other deposit).
+        if (grid.terrain[i] === TERRAIN.GRASS) {
+          const roll = Math.random();
+          grid.forage[i] = roll < 0.5 ? FORAGE.BERRIES : roll < 0.8 ? FORAGE.MUSHROOMS : FORAGE.HERBS;
+        }
       }
     }
   }
@@ -1260,6 +1344,33 @@ export class TownCore {
     const k = this.builds.findIndex((o) => o.x === x && o.y === y);
     if (k < 0) return false;
     this.builds.splice(k, 1);
+    return true;
+  }
+
+  /**
+   * Queue all walls, floors, and stations for a pre-defined building template.
+   * Accepts a BlueprintDef object or a blueprint id string. Returns false if the
+   * footprint is out of bounds. Individual tiles already built/queued are silently
+   * skipped so overlapping stamps don't hard-fail.
+   */
+  stampBlueprint(bp: BlueprintDef | string, ox: number, oy: number): boolean {
+    if (typeof bp === 'string') {
+      const found = BLUEPRINT_DEFS.find((b) => b.id === bp);
+      if (!found) return false;
+      bp = found;
+    }
+    if (!this.grid.inBounds(ox, oy) || !this.grid.inBounds(ox + bp.w - 1, oy + bp.h - 1)) return false;
+    const [fx0, fy0, fx1, fy1] = bp.floorRect;
+    const typeId = ROOM_TYPE_ID.get(bp.roomType) ?? 0;
+    for (let y = fy0; y <= fy1; y++)
+      for (let x = fx0; x <= fx1; x++)
+        this.blueprintFloor(ox + x, oy + y, typeId);
+    for (const [wx0, wy0, wx1, wy1] of bp.wallRects)
+      for (let y = wy0; y <= wy1; y++)
+        for (let x = wx0; x <= wx1; x++)
+          this.blueprintWall(ox + x, oy + y);
+    for (const st of bp.stations)
+      this.blueprintStation(st.type, ox + st.x, oy + st.y);
     return true;
   }
 
@@ -2002,6 +2113,7 @@ export class TownCore {
       droughtActive: this._droughtActive || undefined,
       floodActive: this._floodActive || undefined,
       lastPrestigeMilestone: this._lastPrestigeMilestone > 0 ? this._lastPrestigeMilestone : undefined,
+      lastYearReport: this.lastYearReport ?? undefined,
     };
   }
 
@@ -2073,6 +2185,10 @@ export class TownCore {
     if (data.droughtActive) (core as unknown as { _droughtActive: boolean })._droughtActive = true;
     if (data.floodActive) (core as unknown as { _floodActive: boolean })._floodActive = true;
     if (data.lastPrestigeMilestone != null) (core as unknown as { _lastPrestigeMilestone: number })._lastPrestigeMilestone = data.lastPrestigeMilestone;
+    // v11+: restore the last year's ledger summary so the economy panel shows it immediately.
+    if (data.lastYearReport != null) core.lastYearReport = data.lastYearReport;
+    // Seed the stock snapshot so the first day's delta is relative to the loaded state.
+    (core as unknown as { _prevDayStock: Float32Array })._prevDayStock.set(core.stock.buf);
     return core;
   }
 }
