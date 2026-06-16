@@ -494,7 +494,7 @@ function draw(): void {
     const t = g.terrain[i];
 
     // Ground layer — field zones use a crop-stage soil sprite based on current season.
-    if (t === TERRAIN.WATER) blit(sprites.water[anim], x, y);
+    if (t === TERRAIN.WATER) blit(seasonIdx === 3 ? sprites.waterWinter[(x ^ y * 3) % 4] : sprites.water[anim], x, y);
     else if (t === TERRAIN.SOIL) {
       const fz = g.zone[i] === ZONE.FIELD || g.zone[i] === ZONE.VEGGARDEN;
       if (fz && seasonIdx === 0) blit(sprites.soilSown, x, y);        // spring: sown
@@ -507,7 +507,7 @@ function draw(): void {
     else if (t === TERRAIN.SAND) blit(sprites.sand, x, y);
     else {
       const grassSet = seasonIdx === 3 ? sprites.grassWinter : seasonIdx === 2 ? sprites.grassAutumn : seasonIdx === 0 ? sprites.grassSpring : sprites.grass;
-      blit(grassSet[(x * 3 + y) % 4], x, y);
+      blit(grassSet[((x * 1664525 ^ y * 22695477) >>> 30) % 4], x, y);
     }
     if (t === TERRAIN.TREE) {
       const treeSpr = seasonIdx === 3 ? sprites.treeWinter : seasonIdx === 2 ? sprites.treeAutumn : seasonIdx === 0 ? sprites.treeSpring : sprites.tree;

@@ -145,6 +145,7 @@ export interface SpriteSet {
   treeAutumn: HTMLCanvasElement;
   treeWinter: HTMLCanvasElement;
   water: HTMLCanvasElement[];
+  waterWinter: HTMLCanvasElement[];
   rock: HTMLCanvasElement;
   rockMarked: HTMLCanvasElement;
   sand: HTMLCanvasElement;
@@ -497,6 +498,50 @@ function waterTile(frame: number): HTMLCanvasElement {
   g.fillStyle = P.waterGlint2;
   g.fillRect((10 + off * 2) % TILE, 6, 2, 1);
   g.fillRect((22 + off) % TILE, 18, 2, 1);
+  return c;
+}
+
+/** Winter frozen water — pale blue-white ice with crack lines and snow patches. */
+function waterWinterTile(variant: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const rnd = mulberry(8800 + variant * 61);
+  // ice base — pale desaturated blue
+  g.fillStyle = '#b8d4e8';
+  g.fillRect(0, 0, TILE, TILE);
+  // subtle surface variation (lighter patches = compressed ice, darker = deep)
+  for (let i = 0; i < 12; i++) {
+    const x = Math.floor(rnd() * TILE);
+    const y = Math.floor(rnd() * TILE);
+    const s = 2 + Math.floor(rnd() * 3);
+    g.fillStyle = rnd() < 0.5 ? '#cce0f0' : '#a0c0d8';
+    g.fillRect(x, y, s, s);
+  }
+  // crack lines (thin dark blue-grey)
+  g.fillStyle = '#708898';
+  const crackX = 4 + Math.floor(rnd() * (TILE - 8));
+  const crackY = 4 + Math.floor(rnd() * (TILE - 8));
+  g.fillRect(crackX, crackY, 1, 6 + Math.floor(rnd() * 6));
+  g.fillRect(crackX, crackY, 8 + Math.floor(rnd() * 6), 1);
+  if (rnd() < 0.5) {
+    g.fillRect(crackX + 5, crackY + 3, 1, 5);
+    g.fillRect(crackX + 5, crackY + 3, 5, 1);
+  }
+  // snow patches on ice
+  g.fillStyle = '#e8f0f8';
+  for (let i = 0; i < 3; i++) {
+    if (rnd() < 0.6) {
+      const sx = Math.floor(rnd() * (TILE - 5));
+      const sy = Math.floor(rnd() * (TILE - 5));
+      g.fillRect(sx, sy, 3 + Math.floor(rnd() * 3), 2);
+      g.fillStyle = '#f4f8fc'; g.fillRect(sx + 1, sy, 1 + Math.floor(rnd() * 2), 1);
+      g.fillStyle = '#e8f0f8';
+    }
+  }
+  // sky glint on flat ice
+  g.fillStyle = '#eef8ff';
+  g.fillRect(Math.floor(rnd() * (TILE - 4)), Math.floor(rnd() * (TILE - 2)), 4, 1);
   return c;
 }
 
@@ -2999,6 +3044,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     treeAutumn: treeAutumnSprite(),
     treeWinter: treeWinterSprite(),
     water: [waterTile(0), waterTile(1), waterTile(2), waterTile(3)],
+    waterWinter: [0, 1, 2, 3].map(waterWinterTile),
     rock: rockSprite(false),
     rockMarked: rockSprite(true),
     sand: sandTile(),
