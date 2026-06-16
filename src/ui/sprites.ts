@@ -135,6 +135,7 @@ const P = {
 
 export interface SpriteSet {
   grass: HTMLCanvasElement[];
+  grassSpring: HTMLCanvasElement[];
   grassAutumn: HTMLCanvasElement[];
   grassWinter: HTMLCanvasElement[];
   dirtPatch: HTMLCanvasElement;
@@ -224,6 +225,47 @@ function grassTile(variant: number): HTMLCanvasElement {
     g.fillStyle = P.blade;
     g.fillRect(bx, by, 1, h);
     if (rnd() < 0.5) { g.fillStyle = P.bladeLight; g.fillRect(bx, by, 1, 1); }
+  }
+  return c;
+}
+
+/** Spring grass — bright fresh green with occasional tiny wildflower specks. */
+function grassSpringTile(variant: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const rnd = mulberry(4000 + variant * 89);
+  const base = ['#4ea040', '#56ac48', '#48983c', '#4ea844'][variant % 4];
+  g.fillStyle = base;
+  g.fillRect(0, 0, TILE, TILE);
+  // vivid mottling — lighter bright patches + deeper shadow pockets
+  for (let i = 0; i < 28; i++) {
+    const x = Math.floor(rnd() * TILE);
+    const y = Math.floor(rnd() * TILE);
+    const s = 1 + Math.floor(rnd() * 2);
+    const roll = rnd();
+    g.fillStyle = roll < 0.40 ? '#38742e' : roll < 0.75 ? '#68c05a' : '#50b044';
+    g.fillRect(x, y, s + 1, s);
+  }
+  // fresh blades — brighter green, taller than summer
+  for (let i = 0; i < 12; i++) {
+    const bx = Math.floor(rnd() * (TILE - 1));
+    const by = Math.floor(rnd() * (TILE - 5));
+    g.fillStyle = '#5cc450';
+    g.fillRect(bx, by, 1, 2 + Math.floor(rnd() * 3));
+    if (rnd() < 0.6) { g.fillStyle = '#84e870'; g.fillRect(bx, by, 1, 1); }
+  }
+  // wildflower specks — tiny white, yellow, violet dots
+  const flowerColors = ['#f4f0e0', '#f0e040', '#d080e0', '#f08060', '#60c8f0'];
+  for (let i = 0; i < 4; i++) {
+    if (rnd() < 0.5) {
+      const fx = 2 + Math.floor(rnd() * (TILE - 4));
+      const fy = 2 + Math.floor(rnd() * (TILE - 4));
+      g.fillStyle = flowerColors[Math.floor(rnd() * flowerColors.length)];
+      g.fillRect(fx, fy, 2, 2);
+      g.fillStyle = '#f0f8e0';
+      g.fillRect(fx, fy, 1, 1);
+    }
   }
   return c;
 }
@@ -2913,6 +2955,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
   };
   return {
     grass: [0, 1, 2, 3].map(grassTile),
+    grassSpring: [0, 1, 2, 3].map(grassSpringTile),
     grassAutumn: [0, 1, 2, 3].map(grassAutumnTile),
     grassWinter: [0, 1, 2, 3].map(grassWinterTile),
     dirtPatch: dirtPatchTile(),
@@ -2985,6 +3028,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
       const stone = floorStoneTile(), dirt = floorDirtTile(), fine = floorFineTile(), flag = floorFlagTile();
       return {
         kitchen: stone, bakery: stone, smithy: stone, foundry: stone, kilnhouse: stone,
+        mill: stone, sawmill: dirt, workshop: flag, smokehouse: dirt,
         yard: stone, watchtower: stone, infirmary: stone,
         home: fine, library: fine, tavern: fine, barracks: fine, temple: fine,
         pasture: dirt, burial_ground: dirt, outpost: dirt,
