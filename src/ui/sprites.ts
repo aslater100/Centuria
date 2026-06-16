@@ -518,10 +518,18 @@ function rockSprite(marked: boolean): HTMLCanvasElement {
   g.fillRect(15, 18, 6, 1);
   g.fillRect(11, 16, 4, 1);
   if (marked) {
-    g.fillStyle = '#c25b2e';
-    g.fillRect(24, 2, 6, 6);
-    g.fillStyle = '#f08040';
-    g.fillRect(25, 3, 4, 4);
+    // Iron ore veins running through the rock face — diagonal rust-coloured streaks
+    g.fillStyle = '#7a3018'; // dark vein shadow
+    g.fillRect(8, 13, 7, 2); g.fillRect(10, 15, 5, 1); // vein cluster 1
+    g.fillRect(17, 9, 2, 5); g.fillRect(19, 11, 3, 2);  // vein cluster 2
+    g.fillStyle = '#b84828'; // mid vein
+    g.fillRect(9, 13, 5, 1); g.fillRect(10, 14, 4, 1);
+    g.fillRect(17, 9, 1, 4);
+    g.fillStyle = '#e06030'; // bright glimmer pixel
+    g.fillRect(12, 13, 2, 1); g.fillRect(18, 10, 1, 1);
+    // Small corner indicator (retained but muted — orange dot)
+    g.fillStyle = '#e86028'; g.fillRect(26, 3, 4, 4);
+    g.fillStyle = '#f09050'; g.fillRect(27, 4, 2, 2);
   }
   return c;
 }
@@ -2817,6 +2825,18 @@ function stationSprite(id: string, w: number, h: number): HTMLCanvasElement {
       g.fillStyle = '#b08070'; g.fillRect(22, 17, 3, 1);
       break;
     }
+    case 'coke': {
+      // Processed coke — grey-black angular chunks with a slight metallic sheen
+      g.fillStyle = P.shadow; g.fillRect(4, 22, 24, 7);
+      // Two main chunks, irregular shapes
+      g.fillStyle = '#1e1c18'; g.fillRect(5, 11, 14, 11); g.fillRect(18, 14, 11, 9);
+      g.fillStyle = '#2c2820'; g.fillRect(5, 11, 12, 9); g.fillRect(18, 14, 9, 7);
+      // Grey metallic surface highlights (coke is partially graphitised)
+      g.fillStyle = '#504c44'; g.fillRect(5, 11, 12, 1); g.fillRect(18, 14, 9, 1);
+      g.fillStyle = '#3c3830'; g.fillRect(5, 11, 1, 10); g.fillRect(18, 14, 1, 8);
+      g.fillStyle = '#686460'; g.fillRect(6, 12, 4, 1); g.fillRect(19, 15, 3, 1); // sheen
+      break;
+    }
     case 'flax': {
       // Flax — tied bundle of pale yellow-green fibers with blue flowers
       g.fillStyle = P.shadow; g.fillRect(5, 23, 20, 5);
@@ -2952,7 +2972,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
       game_meal:  craftedItemSprite('game_meal'),
       fish_meal:  craftedItemSprite('fish_meal'),
       preserved:  craftedItemSprite('preserved'),
-      coke:       genericItemSprite('#2a2010', '#1a1408'),
+      coke:       craftedItemSprite('coke'),
       petroleum:  genericItemSprite('#1c1e28', '#14161e'),
     },
     grave:  graveSprite(),

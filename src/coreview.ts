@@ -514,6 +514,27 @@ function draw(): void {
       blit(treeSpr, x, y);
     }
 
+    // Shore transitions: foam strip on water tiles touching land; wet-sand darkening on land tiles touching water.
+    if (t === TERRAIN.WATER) {
+      ctx.fillStyle = 'rgba(200,225,245,0.40)'; // surf foam
+      if (y > 0     && g.terrain[(y-1)*MAP+x] !== TERRAIN.WATER) ctx.fillRect(x*px, y*px, px, 2);
+      if (y < MAP-1 && g.terrain[(y+1)*MAP+x] !== TERRAIN.WATER) ctx.fillRect(x*px, (y+1)*px-2, px, 2);
+      if (x < MAP-1 && g.terrain[y*MAP+(x+1)] !== TERRAIN.WATER) ctx.fillRect((x+1)*px-2, y*px, 2, px);
+      if (x > 0     && g.terrain[y*MAP+(x-1)] !== TERRAIN.WATER) ctx.fillRect(x*px, y*px, 2, px);
+    } else {
+      const wN = y > 0     && g.terrain[(y-1)*MAP+x] === TERRAIN.WATER;
+      const wS = y < MAP-1 && g.terrain[(y+1)*MAP+x] === TERRAIN.WATER;
+      const wE = x < MAP-1 && g.terrain[y*MAP+(x+1)] === TERRAIN.WATER;
+      const wW = x > 0     && g.terrain[y*MAP+(x-1)] === TERRAIN.WATER;
+      if (wN || wS || wE || wW) {
+        ctx.fillStyle = 'rgba(40,90,150,0.20)'; // wet-shore darkening
+        if (wN) ctx.fillRect(x*px, y*px, px, 3);
+        if (wS) ctx.fillRect(x*px, (y+1)*px-3, px, 3);
+        if (wE) ctx.fillRect((x+1)*px-3, y*px, 3, px);
+        if (wW) ctx.fillRect(x*px, y*px, 3, px);
+      }
+    }
+
     // Sapling: scale by age so young trees are tiny and nearly mature ones are full-size.
     if (g.saplingAge[i] > 0) {
       const frac = Math.min(1, g.saplingAge[i] / TUNING.saplingGrowDays);
