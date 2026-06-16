@@ -559,6 +559,16 @@ function draw(): void {
         if (wE) ctx.fillRect((x+1)*px-3, y*px, 3, px);
         if (wW) ctx.fillRect(x*px, y*px, 3, px);
       }
+      // Grass↔sand edge blend: warm sandy transition strip
+      if (t === TERRAIN.GRASS || t === TERRAIN.SAND) {
+        const other = t === TERRAIN.GRASS ? TERRAIN.SAND : TERRAIN.GRASS;
+        const col = t === TERRAIN.GRASS ? 'rgba(195,165,60,0.35)' : 'rgba(80,140,50,0.30)';
+        ctx.fillStyle = col;
+        if (y > 0     && g.terrain[(y-1)*MAP+x] === other) ctx.fillRect(x*px, y*px, px, 3);
+        if (y < MAP-1 && g.terrain[(y+1)*MAP+x] === other) ctx.fillRect(x*px, (y+1)*px-3, px, 3);
+        if (x < MAP-1 && g.terrain[y*MAP+(x+1)] === other) ctx.fillRect((x+1)*px-3, y*px, 3, px);
+        if (x > 0     && g.terrain[y*MAP+(x-1)] === other) ctx.fillRect(x*px, y*px, 3, px);
+      }
     }
 
     // Sapling: scale by age so young trees are tiny and nearly mature ones are full-size.
