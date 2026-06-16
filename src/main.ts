@@ -1,6 +1,7 @@
 import './style.css';
 import { Simulation } from './sim/sim';
 import { RegionSim } from './sim/region';
+import { ParcelManager } from './sim/parcel';
 import { TICKS_PER_SECOND, TUNING, BLUEPRINT_DEFS } from './sim/defs';
 import { MAP_W, MAP_H } from './sim/world';
 import { BuildGrid } from './sim/build';
@@ -42,10 +43,10 @@ const DESIGN_KEY = 'centuria-town-design';
 
 // Booting after "Load Game": the menu sets a one-shot flag and reloads, and
 // we resume from the snapshot instead of seeding a fresh colony. Saves are
-// either a bare town snapshot (v1) or a combined town+region one (v2).
+// either a bare town snapshot (v1), combined town+region (v2), or parcel system (v3).
 // A fresh game first shows the town design screen; the choice is stashed in
 // sessionStorage and the page reloads to build the world from it.
-function bootSim(): { sim: Simulation; region: RegionSim | null; needsDesign: boolean } {
+function bootSim(): { parcelManager: ParcelManager; region: RegionSim | null; needsDesign: boolean } {
   try {
     const pending = sessionStorage.getItem('centuria-load-on-boot');
     if (pending) {
@@ -53,32 +54,51 @@ function bootSim(): { sim: Simulation; region: RegionSim | null; needsDesign: bo
       const data = localStorage.getItem(SAVE_KEY);
       if (data) {
         const d = JSON.parse(data);
+        if (d.v === 3 && d.parcels) {
+          // v3: parcel system save with ParcelManager + optional region
+          const town = Simulation.deserialize(d.town);
+          const parcelMgr = ParcelManager.deserialize(d.parcels, town);
+          if (d.region) {
+            const reg = RegionSim.deserialize(d.region, town);
+            town.economy.cash = reg.treasury;
+            return { parcelManager: parcelMgr, region: reg, needsDesign: false };
+          }
+          return { parcelManager: parcelMgr, region: null, needsDesign: false };
+        }
         if (d.v === 2 && d.mode === 'region') {
+          // v2 → v3 migration: wrap the town in ParcelManager
           const town = Simulation.deserialize(d.town);
           const reg = RegionSim.deserialize(d.region, town);
-          // Keep town economy cash consistent with region treasury (Fix 7).
           town.economy.cash = reg.treasury;
-          return { sim: town, region: reg, needsDesign: false };
+          const parcelMgr = new ParcelManager(town);
+          return { parcelManager: parcelMgr, region: reg, needsDesign: false };
         }
-        return { sim: Simulation.deserialize(data), region: null, needsDesign: false };
+        // v1: bare town save → wrap in ParcelManager
+        const town = Simulation.deserialize(d);
+        const parcelMgr = new ParcelManager(town);
+        return { parcelManager: parcelMgr, region: null, needsDesign: false };
       }
     }
     const designJson = sessionStorage.getItem(DESIGN_KEY);
     if (designJson) {
       sessionStorage.removeItem(DESIGN_KEY);
       const design = JSON.parse(designJson) as TownDesign;
-      return { sim: new Simulation(Date.now() % 100000, design), region: null, needsDesign: false };
+      const sim = new Simulation(Date.now() % 100000, design);
+      return { parcelManager: new ParcelManager(sim), region: null, needsDesign: false };
     }
   } catch (err) {
     console.error('load failed, starting fresh:', err);
   }
-  return { sim: new Simulation(Date.now() % 100000), region: null, needsDesign: true };
+  const sim = new Simulation(Date.now() % 100000);
+  return { parcelManager: new ParcelManager(sim), region: null, needsDesign: true };
 }
 
 const boot = bootSim();
-const sim = boot.sim;
+const parcelManager = boot.parcelManager;
+const sim = parcelManager.home;
 // Debug/automation hook (used by headless smoke tests; harmless in play)
-(window as unknown as { sim: Simulation }).sim = sim;
+(window as unknown as { sim: Simulation; parcelManager: ParcelManager }).sim = sim;
+(window as unknown as { parcelManager: ParcelManager }).parcelManager = parcelManager;
 const buildGrid = new BuildGrid();
 const cam: Camera = {
   x: (MAP_W * TILE) / 2 - window.innerWidth / 2,
@@ -124,7 +144,11 @@ const windows = new WindowManager(hud.draggablePanels);
 
 hud.onSave = () => {
   try {
-    localStorage.setItem(SAVE_KEY, sim.serialize());
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      v: 3,
+      town: sim.serialize(),
+      parcels: parcelManager.serialize(),
+    }));
     return true;
   } catch (err) {
     console.error('save failed:', err);
@@ -215,11 +239,11 @@ function enterRegionMode(r: RegionSim): void {
   dioramaOpen = false;
   hud.resetLogLen(); // region log starts independently from town log
   hud.closeMenu();
-  // Region saves bundle the town snapshot too — the diorama keeps it alive.
+  // Region saves bundle the town and parcel state too — the diorama keeps them alive.
   hud.onSave = () => {
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify({
-        v: 2, mode: 'region', town: sim.serialize(), region: r.serialize(),
+        v: 3, town: sim.serialize(), parcels: parcelManager.serialize(), region: r.serialize(),
       }));
       return true;
     } catch (err) {
