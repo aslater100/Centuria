@@ -154,6 +154,9 @@ export interface SpriteSet {
   soilGrown: HTMLCanvasElement;
   soilRipe: HTMLCanvasElement;
   soilWinter: HTMLCanvasElement;
+  flaxSown: HTMLCanvasElement;
+  flaxGrown: HTMLCanvasElement;
+  flaxRipe: HTMLCanvasElement;
   roads: Record<string, HTMLCanvasElement>;
   roadPlans: Record<string, HTMLCanvasElement>;
   stockpileZone: HTMLCanvasElement;
@@ -770,6 +773,42 @@ function soilWinterTile(): HTMLCanvasElement {
   g.fillStyle = '#eef2f8';
   for (let x = 1; x < TILE; x += 14) g.fillRect(x, 0, 4, TILE);
   return c;
+}
+
+/** Flax field — thin stalks with blue-violet flowers; golden seedpods when ripe. */
+function flaxSoilTile(stage: 'sown' | 'grown' | 'ripe'): HTMLCanvasElement {
+  const base = document.createElement('canvas');
+  base.width = TILE; base.height = TILE;
+  const g = base.getContext('2d')!;
+  g.fillStyle = P.soil; g.fillRect(0, 0, TILE, TILE);
+  for (let y = 0; y < TILE; y += 6) {
+    g.fillStyle = P.soilDark; g.fillRect(0, y + 4, TILE, 2);
+    g.fillStyle = P.soilMid;  g.fillRect(0, y, TILE, 2);
+  }
+  const rnd = mulberry(stage === 'sown' ? 501 : stage === 'grown' ? 502 : 503);
+  for (let y = 3; y < TILE; y += 6) {
+    for (let x = 2; x < TILE - 2; x += 5) {
+      const jx = x + (rnd() < 0.4 ? 0 : 1);
+      if (stage === 'sown') {
+        // tiny seedlings — pale green spikes
+        g.fillStyle = '#6aaa50'; g.fillRect(jx, y, 1, 2);
+        g.fillStyle = '#8acc70'; g.fillRect(jx, y, 1, 1);
+      } else if (stage === 'grown') {
+        // tall thin stalks with blue flowers on top
+        g.fillStyle = '#509050'; g.fillRect(jx, y - 4, 1, 6);
+        g.fillStyle = '#7098c0'; // blue flower
+        g.fillRect(jx - 1, y - 5, 3, 2);
+        g.fillStyle = '#a0c8f0'; g.fillRect(jx, y - 5, 1, 1);
+      } else {
+        // ripe: golden-brown seedpods, pale stalks
+        g.fillStyle = '#8a7840'; g.fillRect(jx, y - 2, 1, 5);
+        g.fillStyle = '#c0a050'; // pod
+        g.fillRect(jx - 1, y - 4, 3, 3);
+        g.fillStyle = '#d8b860'; g.fillRect(jx, y - 4, 1, 2);
+      }
+    }
+  }
+  return base;
 }
 
 function roadTile(kind: string, plan: boolean): HTMLCanvasElement {
@@ -3068,6 +3107,9 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     soilGrown: soilTile('grown'),
     soilRipe: soilTile('ripe'),
     soilWinter: soilWinterTile(),
+    flaxSown: flaxSoilTile('sown'),
+    flaxGrown: flaxSoilTile('grown'),
+    flaxRipe: flaxSoilTile('ripe'),
     roads,
     roadPlans,
     stockpileZone: stockpileZoneTile(),

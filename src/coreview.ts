@@ -506,7 +506,11 @@ function draw(): void {
     if (t === TERRAIN.WATER) blit(seasonIdx === 3 ? sprites.waterWinter[(x ^ y * 3) % 4] : sprites.water[anim], x, y);
     else if (t === TERRAIN.SOIL) {
       const fz = g.zone[i] === ZONE.FIELD || g.zone[i] === ZONE.VEGGARDEN;
-      if (fz && seasonIdx === 0) blit(sprites.soilSown, x, y);        // spring: sown
+      const fx = g.zone[i] === ZONE.FLAX;
+      if (fx && seasonIdx === 0) blit(sprites.flaxSown, x, y);
+      else if (fx && seasonIdx === 1) blit(sprites.flaxGrown, x, y);
+      else if (fx && seasonIdx === 2) blit(sprites.flaxRipe, x, y);
+      else if (fz && seasonIdx === 0) blit(sprites.soilSown, x, y);        // spring: sown
       else if (fz && seasonIdx === 1) blit(sprites.soilGrown, x, y); // summer: green
       else if (fz && seasonIdx === 2) blit(sprites.soilRipe, x, y);  // autumn: ripe
       else if (seasonIdx === 3) blit(sprites.soilWinter, x, y);      // winter: frozen
