@@ -309,7 +309,7 @@ export class Renderer {
         const px = ox + x * TILE;
         const py = oy + y * TILE;
         if (t.kind === 'rock') {
-          g.drawImage(t.marked ? sprites.rockMarked : sprites.rock, px, py);
+          g.drawImage((t.marked ? sprites.rockMarked : sprites.rock)[(x * 3 ^ y * 7) % 3], px, py);
           if (t.oreDeposit) {
             // Ore vein flecks: small amber/orange dots scattered across the rock face.
             g.fillStyle = 'rgba(210,140,40,0.72)';

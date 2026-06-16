@@ -71,7 +71,7 @@ section('2 · Terrain');
 group('grass[variant]', sprites.grass, sprites.grass.map((_, i) => `v${i}`));
 group('tree / treeMarked', [sprites.tree, sprites.treeMarked], ['tree', 'marked']);
 group('water[frame]', sprites.water, sprites.water.map((_, i) => `f${i}`));
-group('rock / rockMarked', [sprites.rock, sprites.rockMarked], ['rock', 'marked']);
+group('rock / rockMarked', [...sprites.rock, ...sprites.rockMarked], ['v0','v1','v2','marked-v0','marked-v1','marked-v2']);
 group('soil stages', [sprites.soil, sprites.soilSown, sprites.soilGrown, sprites.soilRipe],
   ['bare', 'sown', 'grown', 'ripe']);
 group('dirtPatch / sapling', [sprites.dirtPatch, sprites.sapling], ['dirtPatch', 'sapling']);

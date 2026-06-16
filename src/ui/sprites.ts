@@ -146,8 +146,8 @@ export interface SpriteSet {
   treeWinter: HTMLCanvasElement;
   water: HTMLCanvasElement[];
   waterWinter: HTMLCanvasElement[];
-  rock: HTMLCanvasElement;
-  rockMarked: HTMLCanvasElement;
+  rock: HTMLCanvasElement[];
+  rockMarked: HTMLCanvasElement[];
   sand: HTMLCanvasElement;
   soil: HTMLCanvasElement;
   soilSown: HTMLCanvasElement;
@@ -609,46 +609,61 @@ function treeSprite(marked: boolean): HTMLCanvasElement {
 }
 
 /**
- * A clustered boulder on grass. Faceted, not a smooth blob: a big lit slab on
- * the upper-left, cooler faces dropping to the lower-right, with a cast shadow.
+ * A clustered boulder on grass. Three visual variants for field variety.
  */
-function rockSprite(marked: boolean): HTMLCanvasElement {
-  const c = grassTile(2);
+function rockSprite(marked: boolean, variant = 0): HTMLCanvasElement {
+  const c = grassTile(variant % 4);
   const g = c.getContext('2d')!;
-  // cool cast shadow, lower-right
-  fillDisc(g, 17, 25, 13, 4, P.shadow);
-  // base boulder body (cool dark)
-  fillDisc(g, 16, 17, 13, 11, P.rockDarker);
-  fillDisc(g, 15, 16, 12, 10, P.rockDark);
-  // main facet (midtone)
-  fillDisc(g, 14, 15, 10, 8, P.rock);
-  // upper-left lit facet — angular slab
-  g.fillStyle = P.rockLight;
-  g.fillRect(8, 9, 11, 7);
-  g.fillRect(7, 12, 8, 5);
-  g.fillStyle = P.rockHighlight;
-  g.fillRect(9, 9, 7, 3);
-  g.fillRect(8, 11, 4, 2);
-  // small companion rock, front-right
-  fillDisc(g, 23, 22, 6, 4, P.rockDark);
-  fillDisc(g, 22, 21, 5, 3, P.rock);
-  g.fillStyle = P.rockLight; g.fillRect(20, 19, 4, 2);
-  // facet break lines (cool)
-  g.fillStyle = P.rockDarker;
-  g.fillRect(15, 12, 1, 9);
-  g.fillRect(15, 18, 6, 1);
-  g.fillRect(11, 16, 4, 1);
+
+  if (variant === 1) {
+    // Two medium boulders side-by-side, centre-left bias
+    fillDisc(g, 14, 23, 10, 4, P.shadow);
+    fillDisc(g, 13, 16, 10, 9, P.rockDarker);
+    fillDisc(g, 12, 15, 9, 8, P.rockDark);
+    fillDisc(g, 11, 14, 7, 6, P.rock);
+    g.fillStyle = P.rockLight; g.fillRect(7, 8, 9, 6); g.fillRect(6, 11, 6, 4);
+    g.fillStyle = P.rockHighlight; g.fillRect(8, 8, 5, 3);
+    fillDisc(g, 22, 18, 7, 6, P.rockDarker);
+    fillDisc(g, 21, 17, 6, 5, P.rockDark);
+    fillDisc(g, 20, 16, 5, 4, P.rock);
+    g.fillStyle = P.rockLight; g.fillRect(17, 12, 7, 4);
+    g.fillStyle = P.rockDarker; g.fillRect(13, 13, 1, 6); g.fillRect(13, 18, 5, 1);
+  } else if (variant === 2) {
+    // Single large flat-topped slab, tilted — more angular look
+    fillDisc(g, 18, 26, 12, 4, P.shadow);
+    g.fillStyle = P.rockDarker; g.fillRect(7, 14, 20, 12); // flat base
+    g.fillStyle = P.rockDark;   g.fillRect(8, 12, 18, 12);
+    g.fillStyle = P.rock;       g.fillRect(9, 11, 16, 11);
+    g.fillStyle = P.rockLight;  g.fillRect(9, 11, 16, 4);  // top face
+    g.fillStyle = P.rockHighlight; g.fillRect(9, 11, 8, 2);
+    // left angled face
+    g.fillStyle = P.rockDark;
+    for (let i = 0; i < 5; i++) g.fillRect(7 + i, 14 + i, 1, 9 - i);
+    // crack
+    g.fillStyle = P.rockDarker;
+    g.fillRect(18, 11, 1, 7); g.fillRect(18, 17, 5, 1);
+  } else {
+    // Original variant 0: classic one large + one small boulder
+    fillDisc(g, 17, 25, 13, 4, P.shadow);
+    fillDisc(g, 16, 17, 13, 11, P.rockDarker);
+    fillDisc(g, 15, 16, 12, 10, P.rockDark);
+    fillDisc(g, 14, 15, 10, 8, P.rock);
+    g.fillStyle = P.rockLight; g.fillRect(8, 9, 11, 7); g.fillRect(7, 12, 8, 5);
+    g.fillStyle = P.rockHighlight; g.fillRect(9, 9, 7, 3); g.fillRect(8, 11, 4, 2);
+    fillDisc(g, 23, 22, 6, 4, P.rockDark);
+    fillDisc(g, 22, 21, 5, 3, P.rock);
+    g.fillStyle = P.rockLight; g.fillRect(20, 19, 4, 2);
+    g.fillStyle = P.rockDarker; g.fillRect(15, 12, 1, 9); g.fillRect(15, 18, 6, 1); g.fillRect(11, 16, 4, 1);
+  }
+
   if (marked) {
-    // Iron ore veins running through the rock face — diagonal rust-coloured streaks
-    g.fillStyle = '#7a3018'; // dark vein shadow
-    g.fillRect(8, 13, 7, 2); g.fillRect(10, 15, 5, 1); // vein cluster 1
-    g.fillRect(17, 9, 2, 5); g.fillRect(19, 11, 3, 2);  // vein cluster 2
-    g.fillStyle = '#b84828'; // mid vein
-    g.fillRect(9, 13, 5, 1); g.fillRect(10, 14, 4, 1);
-    g.fillRect(17, 9, 1, 4);
-    g.fillStyle = '#e06030'; // bright glimmer pixel
+    g.fillStyle = '#7a3018';
+    g.fillRect(8, 13, 7, 2); g.fillRect(10, 15, 5, 1);
+    g.fillRect(17, 9, 2, 5); g.fillRect(19, 11, 3, 2);
+    g.fillStyle = '#b84828';
+    g.fillRect(9, 13, 5, 1); g.fillRect(10, 14, 4, 1); g.fillRect(17, 9, 1, 4);
+    g.fillStyle = '#e06030';
     g.fillRect(12, 13, 2, 1); g.fillRect(18, 10, 1, 1);
-    // Small corner indicator (retained but muted — orange dot)
     g.fillStyle = '#e86028'; g.fillRect(26, 3, 4, 4);
     g.fillStyle = '#f09050'; g.fillRect(27, 4, 2, 2);
   }
@@ -3045,8 +3060,8 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     treeWinter: treeWinterSprite(),
     water: [waterTile(0), waterTile(1), waterTile(2), waterTile(3)],
     waterWinter: [0, 1, 2, 3].map(waterWinterTile),
-    rock: rockSprite(false),
-    rockMarked: rockSprite(true),
+    rock: [0, 1, 2].map(v => rockSprite(false, v)),
+    rockMarked: [0, 1, 2].map(v => rockSprite(true, v)),
     sand: sandTile(),
     soil: soilTile('bare'),
     soilSown: soilTile('sown'),
