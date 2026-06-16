@@ -150,6 +150,13 @@ const canvas = document.createElement('canvas');
 app.appendChild(canvas);
 const ctx = canvas.getContext('2d')!;
 
+// Minimap: off-screen canvas rendered at 2px/tile, overlaid in bottom-right corner.
+const MINI_PX = 2; // px per tile in the minimap
+const minimapCanvas = document.createElement('canvas');
+minimapCanvas.width = minimapCanvas.height = 96 * MINI_PX; // updated if MAP changes
+const minimapCtx = minimapCanvas.getContext('2d')!;
+const minimapData = minimapCtx.createImageData(96 * MINI_PX, 96 * MINI_PX);
+
 // "← Menu" DOM button — always-visible escape hatch back to the title screen.
 const menuBtn = document.createElement('button');
 menuBtn.textContent = '← Menu';
@@ -359,6 +366,19 @@ canvas.addEventListener('wheel', (e) => {
   const r = canvas.getBoundingClientRect();
   zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1 : -1);
 }, { passive: false });
+
+// Minimap click → pan main view to that tile.
+canvas.addEventListener('click', (e) => {
+  const r = canvas.getBoundingClientRect();
+  const cx = e.clientX - r.left, cy = e.clientY - r.top;
+  const mmSize = MAP * MINI_PX, mmX = canvas.width - mmSize - 4, mmY = canvas.height - mmSize - 4;
+  if (cx >= mmX && cx < mmX + mmSize && cy >= mmY && cy < mmY + mmSize) {
+    const tx = Math.floor((cx - mmX) / MINI_PX);
+    const ty = Math.floor((cy - mmY) / MINI_PX);
+    view.x = tx * TILE * view.scale - canvas.width / 2;
+    view.y = ty * TILE * view.scale - canvas.height / 2;
+  }
+});
 
 /** Click on/near a settler to open the inspector. Returns true if one was hit
  *  (so the caller can skip painting). */
@@ -939,6 +959,64 @@ function draw(): void {
     ctx.fillStyle = '#000b'; ctx.fillRect(fx - 8, fy - 18, fw + 16, 28);
     ctx.fillStyle = '#7fe07f'; ctx.fillText(flashMsg, fx, fy);
   } else { flashMsg = ''; }
+
+  // ── Minimap (bottom-right) ───────────────────────────────────────────
+  { const g2 = core.grid;
+    const md = minimapData.data;
+    for (let my = 0; my < MAP; my++) for (let mx = 0; mx < MAP; mx++) {
+      const i = my * MAP + mx;
+      // Pick a colour for this tile: zones first, then terrain.
+      let r = 0, gr = 0, b = 0;
+      const t2 = g2.terrain[i];
+      if (t2 === TERRAIN.WATER) { r = 30; gr = 100; b = 180; }
+      else if (t2 === TERRAIN.TREE) { r = 30; gr = 100; b = 40; }
+      else if (t2 === TERRAIN.ROCK) { r = 110; gr = 100; b = 90; }
+      else if (t2 === TERRAIN.SOIL) { r = 140; gr = 100; b = 60; }
+      else if (t2 === TERRAIN.SAND) { r = 200; gr = 190; b = 140; }
+      else { r = 60; gr = 140; b = 50; } // grass
+      // Zone tint brightens the tile
+      if (g2.zone[i]) { r = Math.min(255, r + 60); gr = Math.min(255, gr + 60); b = Math.min(255, b + 20); }
+      // Floor = warm cream
+      if (g2.floor[i]) { r = 210; gr = 190; b = 150; }
+      // Wall = dark brown
+      if (g2.wall[i]) { r = 70; gr = 50; b = 40; }
+      // Write into the 2px-per-tile image data
+      for (let py = 0; py < MINI_PX; py++) for (let px2 = 0; px2 < MINI_PX; px2++) {
+        const di = ((my * MINI_PX + py) * MAP * MINI_PX + (mx * MINI_PX + px2)) * 4;
+        md[di] = r; md[di+1] = gr; md[di+2] = b; md[di+3] = 255;
+      }
+    }
+    // Settlers: white dots; raiders: red; wolves: yellow
+    for (let si = 0; si < core.agents.count; si++) {
+      const sx = (core.agents.posX[si] | 0) * MINI_PX, sy = (core.agents.posY[si] | 0) * MINI_PX;
+      const di = (sy * MAP * MINI_PX + sx) * 4;
+      md[di] = 255; md[di+1] = 255; md[di+2] = 255; md[di+3] = 255;
+    }
+    for (const rd of core.raids.raiders) {
+      const sx = (rd.x | 0) * MINI_PX, sy = (rd.y | 0) * MINI_PX;
+      const di = (sy * MAP * MINI_PX + sx) * 4;
+      md[di] = 255; md[di+1] = 60; md[di+2] = 60; md[di+3] = 255;
+    }
+    if (core.wolves.active) for (const w of core.wolves.wolves) {
+      const sx = (w.x | 0) * MINI_PX, sy = (w.y | 0) * MINI_PX;
+      const di = (sy * MAP * MINI_PX + sx) * 4;
+      md[di] = 255; md[di+1] = 230; md[di+2] = 0; md[di+3] = 255;
+    }
+    minimapCtx.putImageData(minimapData, 0, 0);
+    const mmSize = MAP * MINI_PX;
+    const mmX = canvas.width - mmSize - 4, mmY = canvas.height - mmSize - 4;
+    // Border + background
+    ctx.fillStyle = '#000a'; ctx.fillRect(mmX - 1, mmY - 1, mmSize + 2, mmSize + 2);
+    ctx.drawImage(minimapCanvas, mmX, mmY);
+    // Viewport rect overlay
+    const vLeft = view.x / view.scale / TILE * MINI_PX;
+    const vTop  = view.y / view.scale / TILE * MINI_PX;
+    const vW = canvas.width  / view.scale / TILE * MINI_PX;
+    const vH = canvas.height / view.scale / TILE * MINI_PX;
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1;
+    ctx.strokeRect(mmX + vLeft, mmY + vTop, vW, vH);
+    ctx.lineWidth = 1;
+  }
 
   // ── Event log (bottom-left) ───────────────────────────────────────────
   const logColors = { good: '#7fe07f', bad: '#ff6b6b', info: '#d8d8d8' };
