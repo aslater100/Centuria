@@ -1,12 +1,12 @@
-# Session Handoff — 2026-06-15 (v0.40.0)
+# Session Handoff — 2026-06-16 (v0.41.1)
 
 > **Note:** this file is the chronological *shipped-features ledger*. The living architecture +
 > session guide is the top-level **[`HANDOFF.md`](../HANDOFF.md)** (read that first for current
-> patterns, the B-6 swap status, and the most recent session snapshot). Test suite: **825 passing**.
+> patterns, the B-6 swap status, and the most recent session snapshot). Test suite: **839 passing**.
 
 ## Current state
 
-Version **v0.40.0**. Transportation arc, governance stack, audio, diplomacy, war, climate, central bank + credit cycle + FX (GDD §5.1) are complete; the game runs its full 1900–2100 arc with emergent business cycles. **Region mode is mid-expansion into a fully-playable governor tier** — Phase 0 (territory/borders/resource visualization) landed (#71), Phase A (Route Network UI) in 0.28, regional AI competitors in 0.29, and **governor crisis tools + bottom action bar + settlement/economy panels** in 0.30; the remaining governor phases (C–D below) are open.
+Version **v0.41.1**. Transportation arc, governance stack, audio, diplomacy, war, climate, central bank + credit cycle + FX (GDD §5.1) are complete; the game runs its full 1900–2100 arc with emergent business cycles. **Region mode is mid-expansion into a fully-playable governor tier** — Phase 0 (territory/borders/resource visualization) landed (#71), Phase A (Route Network UI) in 0.28, regional AI competitors in 0.29, and **governor crisis tools + bottom action bar + settlement/economy panels** in 0.30; the remaining governor phases (C–D below) are open.
 
 Since then the active thrust has been **Track C / B-6 — the SoA scale engine**: `src/sim/towncore.ts` is now a deterministic, serializable, **feature-complete town sim at fat-sim parity** (terrain, harvest zones, blueprint construction, room/station crafting, needs/mood/traits/skills, wounds/medical, relationships, weather, raids, wolves, town economy, full event deck, seasonal farming, research tech tree). The live `Simulation` is untouched; the destructive swap (`render.ts`/`main.ts`) remains gated on a GUI play-test. See the top-level **[`HANDOFF.md`](../HANDOFF.md)** for the swap roadmap and per-stage status. Also shipped: the UI zoom-LOD + draggable-window system (#121), the AI sprite pipeline (#131–133), and the big TownCore parity + research + live-UX bundle (#134).
 
@@ -58,6 +58,9 @@ Since then the active thrust has been **Track C / B-6 — the SoA scale engine**
 | #130 | **B-6 PART 3: Songs-of-Syx `TownCore` foundation.** Terrain + ore Uint8 layers on `BuildGrid`, terrain-aware `passable()`, harvest zones (field/woodcutter/quarry/fishery) → primary production, blueprint construction (`tickConstruction`), event log, settler names, real-sprite renderer + PNG override pipeline (`public/sprites/`). |
 | #131–#133 | **AI sprite generation pipeline.** `scripts/hf-sprites.ts` (`npm run hf-sprites`) calls the Hugging Face Inference API (`nerijs/pixel-art-xl`) to generate pixel-art sprites into `public/sprites/` + `index.json`; loaded automatically by `applyOverrides()`. 61 catalogued slots with tuned prompts. |
 | #134 | **TownCore parity completion + research + live-game UX** (52 commits, 709→**825** tests). Closes the B-6 behavior-parity gap on `TownCore`: full random-event deck + choice events (trader/bandit/refugees/feud/scholar, plague/found-gold/heatwave/healer/mineral-strike), seasonal farming + drought, colony-wide food-variety/clothing/burial mood systems, prestige + era progression, difficulty + `startColony()`, deer/hunting, flax→loom chain, watchtower, market room, carpentry, barracks+drill, forester regrowth. New **`src/sim/research.ts`** (`ResearchBook`, 12 techs, library-desk points, real raid/yield effects; TownCore save **v10**). Stage 4 view-adapter done (`settlers()`/`stationViews()`/`raiders()` iterators). `core.html` upgraded to a playable colony sim (room/station/gate/floor/erase tools, settler inspector, `?core` routing). Live game: research queue UI + ETA, weather/temperature HUD, drought/flood overlays, day/night cycle, prestige milestones, food-projection HUD, scholar event, tile hover tooltip. |
+| #136–#137 | **Macro credit-cycle harness + region long-run regression** (825→**839** tests). `src/sim/macro-headless.ts` + `npm run sim:macro` runs `RegionSim.tickMonetary` across 110 game-years/multiple seeds under `passive`/`taylor` policy; `tests/macro.test.ts` (11) pins `analyzeCycles`/`policyRateFor`; `tests/region-longrun.test.ts` (3) guards finite/in-clamp + determinism + seed-sensitivity over 1900–2010. **Finding (open):** credit busts = 0/century — the cycle under-emerges (GDD §13.3 risk #3). *(Originally merged into a sub-branch only; re-landed on main 2026-06-16.)* |
+| 0.41.0 | Version bump covering #134–138 (market/barracks rooms, healer/mineral events, carpentry, rope bonus, day/night, food projection, starter-town improvements, macro harness, region longrun). |
+| 0.41.1 | **Title-screen z-index fix** — in-game HUD no longer bleeds through the title screen. |
 
 ## Ship loop
 

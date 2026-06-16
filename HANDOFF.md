@@ -1,13 +1,42 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-15  
-**Current test count:** 825 passing  
+**Last updated:** 2026-06-16  
+**Current test count:** 839 passing  
+**Current version:** v0.41.1  
 **Branch pattern:** feature branches off `main` via `claude/...` naming; merge via draft PR  
 **Model guidance:** See PLAN.md § Model Assignment for context ceilings per task
 
 ---
 
-## Session Snapshot — What Just Landed (2026-06-15)
+## Session Snapshot — What Just Landed (2026-06-16)
+
+### Reconciliation + recovered macro work
+
+**PRs #135–141 (now reflected here):** #135/#138 docs reconciliation, #136/#137 macro credit-cycle
+harness + region long-run test (see below), #139 version bump to **v0.41.0**, #140/#141 title-screen
+z-index fix (in-game HUD no longer bleeds through the title screen) → **v0.41.1**.
+
+**Recovered the stranded macro harness.** PRs #136 and #137 had been merged into the
+`claude/loving-gates-3luzuc` *sub-branch* but never PR'd to `main`, so their ~14 tests + the
+`sim:macro` harness were missing from trunk while PLAN.md already claimed them. This session
+cherry-picks the two feature commits back onto main (pure additive, no conflicts):
+
+- **`src/sim/macro-headless.ts`** + **`npm run sim:macro -- [years] [runs] [policy]`** — runs the
+  nation-tier monetary engine (`RegionSim.tickMonetary`) across 110 game-years and multiple seeds,
+  with `passive` (pinned rate) and `taylor` (dovish growth mandate) reaction functions.
+- **`tests/macro.test.ts`** (11 cases) CI-pins `analyzeCycles` + `policyRateFor`.
+- **`tests/region-longrun.test.ts`** (3 cases): 1900–2010 stays finite/in-clamp; 50-year run is
+  byte-identical for a fixed seed; distinct seeds diverge.
+- **Key finding (open):** credit busts = **0/century** under current params — confidence never
+  moves off 70, the 1929-crash guard (conf < 55) never fires, leverage tops out ~2.0. The cycle
+  **under-emerges** (GDD §13.3 risk #3). The harness is the tuning instrument; fix levers are
+  stronger leverage→inflation pass-through or a leverage term in the confidence equation.
+
+Test baseline restored to **839** (825 on main + 14 recovered).
+
+---
+
+## Session Snapshot — What Landed (2026-06-15)
 
 ### PR #134 — TownCore parity completion + research + live-game UX (52 commits, +4,004/−146; suite 709 → **825** tests)
 
