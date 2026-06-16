@@ -71,6 +71,7 @@ const ROOM_COLORS: Record<string, string> = {
   barracks: '#c05050',
   pasture: '#7ba050',
   temple: '#c8a8e0',
+  smokehouse: '#7a4828',
 };
 
 // ── Starter town ──────────────────────────────────────────────────────────
@@ -477,7 +478,7 @@ function draw(): void {
   // Season index: 0=spring, 1=summer, 2=autumn, 3=winter — drives crop stage sprites.
   const seasonIdx = Math.floor((core.day % DAYS_PER_YEAR) / DAYS_PER_SEASON);
 
-  const anim = (performance.now() / 350 | 0) % sprites.water.length;
+  const anim = (performance.now() / 500 | 0) % sprites.water.length;
 
   for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
     const i = y * MAP + x;
@@ -969,7 +970,14 @@ function draw(): void {
     const t = g.terrain[i];
     if (t) parts.push(terrainNames[t] ?? `terrain:${t}`);
     if (g.ore[i]) parts.push('ore');
-    if (g.zone[i]) parts.push(zoneNames[g.zone[i]] ?? `zone:${g.zone[i]}`);
+    if (g.zone[i]) {
+      let zl = zoneNames[g.zone[i]] ?? `zone:${g.zone[i]}`;
+      if (g.zone[i] === ZONE.FORAGE) {
+        if (g.forage[i] === 0 && g.forageRegrow[i] > 0) zl += ` (depleted, regrows in ${g.forageRegrow[i]}d)`;
+        else if (g.forage[i] === 0) zl += ' (depleted)';
+      }
+      parts.push(zl);
+    }
     if (g.floor[i]) {
       const rd = ROOM_DEF_BY_NUM[g.roomId[i]];
       parts.push(rd ? rd.id : 'floor');

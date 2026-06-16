@@ -2467,7 +2467,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     dirtPatch: dirtPatchTile(),
     tree: treeSprite(false),
     treeMarked: treeSprite(true),
-    water: [waterTile(0), waterTile(1)],
+    water: [waterTile(0), waterTile(1), waterTile(2), waterTile(3)],
     rock: rockSprite(false),
     rockMarked: rockSprite(true),
     sand: sandTile(),
