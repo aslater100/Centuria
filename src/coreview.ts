@@ -707,14 +707,26 @@ function draw(): void {
 
   // Day/night cycle: tickNo within the day drives a night darkness overlay.
   // Night = roughly 10pm–5am (day fraction 0.77–1.0 + 0.0–0.21).
+  let nightAlpha = 0;
   { const TICKS_PER_DAY = MINUTES_PER_DAY / MINUTES_PER_TICK;
     const frac = (core.tickNo % TICKS_PER_DAY) / TICKS_PER_DAY;
     // Ramp: 0 at 6am (0.25), peak at midnight (0.0/1.0), 0 at 6pm (0.75).
     // Use a cosine to get a smooth bell (peak=1 at frac=0/1, zero at frac=0.5).
-    const nightAlpha = Math.max(0, Math.cos(frac * 2 * Math.PI)) * 0.35;
+    nightAlpha = Math.max(0, Math.cos(frac * 2 * Math.PI)) * 0.35;
     if (nightAlpha > 0.01) {
       ctx.fillStyle = `rgba(10,15,40,${nightAlpha.toFixed(2)})`;
       ctx.fillRect(0, 0, MAP * px, MAP * px);
+    }
+    // Warm candlelight wash from inhabited enclosed rooms when dark.
+    // ponytail: flat rect per tile, no gradient. Good enough at this scale.
+    if (nightAlpha > 0.08) {
+      ctx.fillStyle = `rgba(255,190,60,${(nightAlpha * 0.28).toFixed(2)})`;
+      for (let ty = 0; ty < MAP; ty++) for (let tx = 0; tx < MAP; tx++) {
+        const i = ty * MAP + tx;
+        if (!g.floor[i]) continue;
+        const roomDef = ROOM_DEF_BY_NUM[g.roomId[i]];
+        if (roomDef?.enclosedRequired) ctx.fillRect(tx * px, ty * px, px, px);
+      }
     }
   }
 
