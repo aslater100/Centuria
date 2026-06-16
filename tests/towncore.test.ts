@@ -73,6 +73,27 @@ describe('TownCore production loop', () => {
     for (let t = 0; t < 1100; t++) c.tick(); // ~3 days (360 ticks/day)
     expect(c.stock.count('herbs')).toBeGreaterThan(herbs0); // herbs aren't eaten → clean signal
   });
+
+  it('a vegetable garden yields produce (kept fed on meal so it accumulates)', () => {
+    const c = new TownCore({ width: 24, height: 24, seed: 4 });
+    const g = c.grid;
+    g.setTerrain(6, 5, TERRAIN.SOIL);
+    expect(g.setZone(6, 5, ZONE.VEGGARDEN)).toBe(true);
+    c.seedColony(12, 12, 4);
+    c.stock.add('meal', 2000); // eat meal first, so harvested produce piles up
+    const produce0 = c.stock.count('produce');
+    for (let t = 0; t < 1100; t++) c.tick();
+    expect(c.stock.count('produce')).toBeGreaterThan(produce0);
+  });
+
+  it('the colony can live on produce alone (it counts as food)', () => {
+    const c = new TownCore({ width: 16, height: 16, seed: 4 });
+    c.seedColony(8, 8, 3);
+    c.stock.add('produce', 600); // no meal/grain — only produce to eat
+    for (let t = 0; t < 1100; t++) c.tick();
+    expect(c.population).toBeGreaterThanOrEqual(2);          // didn't starve
+    expect(c.stock.count('produce')).toBeLessThan(600);     // ate some
+  });
 });
 
 describe('TownCore room services', () => {
