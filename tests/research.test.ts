@@ -244,8 +244,11 @@ describe('TownCore production tech effects', () => {
     for (let y = 1; y <= 6; y++) { g.setWall(1, y); g.setWall(9, y); }
     g.placeStation('loom', 2, 2);
     g.setGate(4, 6);
+    // Warehousing so the storage cap doesn't spoil the clothes we're measuring.
+    g.designateRect(11, 2, 16, 6, ROOM_TYPE_ID.get('storehouse')!);
+    for (let x = 11; x <= 16; x++) for (let y = 2; y <= 6; y++) g.placeStation('crate', x, y);
     g.rebuildRooms();
-    core.stock.add('flax', 100000);
+    core.stock.add('flax', 5000); // enough loom input for the run, but leaves cap room for clothes
     core.seedColony(10, 10, 2);
     return core;
   }

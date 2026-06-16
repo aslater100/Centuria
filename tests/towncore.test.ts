@@ -117,6 +117,24 @@ describe('TownCore production loop', () => {
     expect(c.population).toBeGreaterThanOrEqual(2);
     expect(c.stock.count('dairy')).toBeLessThan(600);
   });
+
+  it('non-food goods spoil when stores overflow; food is exempt', () => {
+    const c = new TownCore({ width: 16, height: 16, seed: 4 });
+    c.seedColony(8, 8, 2);
+    const cap = c.storageCap();
+    c.stock.add('wood', cap + 5000); // far over the non-food cap
+    c.stock.add('grain', 9999);      // food → must not be spoiled by the storage cap
+    for (let t = 0; t < 400; t++) c.tick(); // cross a day → overflow spoils
+    expect(c.stock.count('wood')).toBeLessThanOrEqual(cap + 1);     // trimmed to cap
+    expect(c.stock.count('grain')).toBeGreaterThanOrEqual(9999 - 60); // food spared (minus a little eating)
+  });
+
+  it('storage cap scales with population', () => {
+    const c = new TownCore({ width: 16, height: 16, seed: 4 });
+    const empty = c.storageCap();
+    c.seedColony(8, 8, 6);
+    expect(c.storageCap()).toBeGreaterThan(empty); // bigger colony stores more
+  });
 });
 
 describe('TownCore room services', () => {
