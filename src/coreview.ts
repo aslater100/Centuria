@@ -23,7 +23,7 @@
  */
 import './style.css';
 import { TownCore } from './sim/towncore';
-import type { SettlerView, PendingEventChoice, YearReport } from './sim/towncore';
+import type { SettlerView, PendingEventChoice, YearReport, LogEntry } from './sim/towncore';
 import { buildStarterTown } from './sim/startertown';
 import { AState, THOUGHT_SLOTS, ThoughtKey } from './sim/agents';
 import { TERRAIN, ZONE, ZONE_DEFS } from './sim/build';
@@ -207,6 +207,35 @@ const FOOD_KINDS_VIEW = new Set(['meal', 'grain', 'bread', 'ale', 'dairy', 'prod
 let painting: 0 | 1 | 2 = 0; // 0=none, 1=apply, 2=erase
 let flashMsg = ''; // brief feedback message (e.g. "Saved", "Loaded")
 let flashUntil = 0; // timestamp when flash expires
+// Event toasts: notable (good/bad) log entries pop up top-centre so they're not
+// missed in the bottom-left log. Primed on first poll so boot history is silent.
+let lastLogLen = -1;
+const toasts: { text: string; kind: LogEntry['kind']; until: number }[] = [];
+function pollEvents(): void {
+  if (lastLogLen < 0 || core.log.length < lastLogLen) { lastLogLen = core.log.length; return; }
+  for (let i = lastLogLen; i < core.log.length; i++) {
+    const e = core.log[i];
+    if (e.kind === 'good' || e.kind === 'bad') {
+      toasts.push({ text: e.text, kind: e.kind, until: Date.now() + 3500 });
+      if (toasts.length > 4) toasts.shift();
+    }
+  }
+  lastLogLen = core.log.length;
+}
+function drawToasts(): void {
+  const now = Date.now();
+  while (toasts.length && toasts[0].until < now) toasts.shift();
+  ctx.font = 'bold 13px monospace';
+  let y = 74;
+  for (const t of toasts) {
+    const w = ctx.measureText(t.text).width;
+    const x = (cw - w) / 2;
+    ctx.fillStyle = '#000a'; ctx.fillRect(x - 8, y - 14, w + 16, 22);
+    ctx.fillStyle = t.kind === 'bad' ? '#ff8080' : '#9ff09f';
+    ctx.fillText(t.text, x, y);
+    y += 26;
+  }
+}
 
 type Tool = 'wall' | 'erase' | 'gate' | 'floor' | 'room' | 'station'
            | 'field' | 'woodcutter' | 'quarry' | 'fishery' | 'flax' | 'forage'
@@ -1778,6 +1807,9 @@ function draw(): void {
     ctx.fillStyle = '#7fe07f'; ctx.fillText(flashMsg, fx, fy);
   } else { flashMsg = ''; }
 
+  // ── Event toasts (center-top, under the flash) ───────────────────────
+  drawToasts();
+
   // ── Minimap (bottom-right) ───────────────────────────────────────────
   { const g2 = core.grid;
     const md = minimapData.data;
@@ -1915,6 +1947,7 @@ function loop(now: number): void {
   last = now;
   if (!paused && !core.pendingChoice) { let guard = 0; while (acc >= 1 && guard++ < 64) { core.tick(); acc -= 1; } }
   else acc = 0;
+  pollEvents(); // surface new notable log entries as toasts
   // Auto-save once per game day so progress is never lost.
   if (core.day !== _autoSaveDay) {
     _autoSaveDay = core.day;

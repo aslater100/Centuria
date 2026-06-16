@@ -11,7 +11,18 @@
 
 ---
 
-## Session Snapshot — Backbone M3 (lazy): holdings income (2026-06-16, latest)
+## Session Snapshot — UX: event toasts (2026-06-16, latest)
+
+**What landed (branch `claude/game-build-iteration-assets-2kd2z0`):** Notable events
+(`good`/`bad` log entries — raids, deaths, milestones, breakthroughs) now pop as
+top-centre **toasts** for ~3.5s so they aren't missed in the bottom-left log. `pollEvents()`
+(in the loop) diffs `core.log` and queues new good/bad entries (capped at 4); `drawToasts()`
+renders them under the flash line, colour-coded. Primed on first poll so boot history is
+silent; resets after load. UI-only — 893 tests still green; browser-verifiable.
+
+---
+
+## Session Snapshot — Backbone M3 (lazy): holdings income (2026-06-16)
 
 **What landed (branch `claude/game-build-iteration-assets-2kd2z0`):** Claiming land now
 **pays off**. Instead of a full dormant per-parcel sim (deferred — needs per-parcel
