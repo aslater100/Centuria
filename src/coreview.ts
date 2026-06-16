@@ -511,7 +511,11 @@ function draw(): void {
     }
     if (t === TERRAIN.TREE) {
       const treeSpr = seasonIdx === 3 ? sprites.treeWinter : seasonIdx === 2 ? sprites.treeAutumn : sprites.tree;
-      blit(treeSpr, x, y);
+      // Render at native sprite scale (40×44 drawn at sprite-TILE=32) so the canopy
+      // overhangs the tile boundary — trunk base stays anchored to the tile bottom.
+      const tW = Math.round(treeSpr.width * px / 32);
+      const tH = Math.round(treeSpr.height * px / 32);
+      ctx.drawImage(treeSpr, x * px - (tW - px) / 2, y * px - (tH - px), tW, tH);
     }
 
     // Shore transitions: foam strip on water tiles touching land; wet-sand darkening on land tiles touching water.
