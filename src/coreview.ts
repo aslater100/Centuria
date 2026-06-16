@@ -27,7 +27,7 @@
 import './style.css';
 import { TownCore } from './sim/towncore';
 import type { SettlerView, PendingEventChoice, YearReport } from './sim/towncore';
-import { AState } from './sim/agents';
+import { AState, THOUGHT_SLOTS } from './sim/agents';
 import { TERRAIN, ZONE } from './sim/build';
 import {
   ROOM_TYPE_ID, ROOM_DEF_BY_NUM, ROOM_DEFS,
@@ -228,6 +228,7 @@ let stationTypeIdx = 0; // index into STATION_TYPE_NAMES
 
 // Settler inspector state.
 let inspected: SettlerView | null = null;
+let inspectedIdx = -1;
 
 // ── Input ─────────────────────────────────────────────────────────────────
 addEventListener('keydown', (e) => {
@@ -361,6 +362,7 @@ function maybeInspect(e: MouseEvent): boolean {
   }
   if (bestIdx < 0) return false;
   inspected = core.inspect(bestIdx);
+  inspectedIdx = bestIdx;
   return true;
 }
 
@@ -700,9 +702,9 @@ function draw(): void {
 
   // Key hints
   ctx.fillStyle = '#888'; ctx.font = '11px monospace';
-  ctx.fillText('H wall  E erase  G gate  J floor  T trap  Z room([ ])  K station(, .)', 8, 20 + 10 * 17);
-  ctx.fillText('F field  C chop  Q quarry  B fishery  L flax  P forage  U orchard  V veg  R raid  N settler  X queue  Y focus  1-4 speed  space pause', 8, 20 + 11 * 17);
-  ctx.fillText('camera: WASD / arrows pan · scroll zoom · middle-drag · O overview   ·   click settler to inspect · I economy', 8, 20 + 12 * 17);
+  ctx.fillText('H wall  E erase  G gate  J floor  T trap  Z room([ ])  K station(, .)  Shift+B bridge', 8, 20 + 10 * 17);
+  ctx.fillText('F field  C chop  Q quarry  B fishery  L flax  P forage  U orchard  V veg  R raid  M wolves  N settler  X tech  Y focus  1-4 speed  space pause', 8, 20 + 11 * 17);
+  ctx.fillText('camera: WASD / arrows pan · scroll zoom · middle-drag · O overview  ·  click settler to inspect · I economy · Ctrl+S save', 8, 20 + 12 * 17);
 
   // ── Economy / storage panel (toggle I): every stored resource with its
   //    net flow and market price — the SoS per-resource economy readout. ──
@@ -752,22 +754,47 @@ function draw(): void {
   }
 
   // ── Settler inspector panel (top-right) ──────────────────────────────────
-  if (inspected) {
-    const PW = 240, PH = 180;
-    const px2 = canvas.width - PW - 8;
-    ctx.fillStyle = '#000c'; ctx.fillRect(px2, 8, PW, PH);
-    ctx.fillStyle = '#ffd700'; ctx.font = 'bold 13px monospace';
-    ctx.fillText(inspected.name, px2 + 8, 28);
-    ctx.fillStyle = '#ddd'; ctx.font = '12px monospace';
-    const iline = (n: number, s: string) => ctx.fillText(s, px2 + 8, 46 + n * 16);
-    iline(0, `mood ${inspected.mood.toFixed(0)}  skill ${inspected.skill.toFixed(1)}  ${inspected.state}`);
-    iline(1, `food ${inspected.food.toFixed(0)}  rest ${inspected.rest.toFixed(0)}  warmth ${inspected.warmth.toFixed(0)}`);
-    iline(2, `rec ${inspected.recreation.toFixed(0)}  social ${inspected.social.toFixed(0)}  hp ${inspected.health.toFixed(0)}`);
-    iline(3, `armed: ${inspected.armed}  traits: ${inspected.traits.join(', ') || 'none'}`);
-    const flags = [inspected.wounded && 'wounded', inspected.infected && 'infected', inspected.sick && 'sick'].filter(Boolean);
-    if (flags.length) { ctx.fillStyle = '#ff6b6b'; iline(4, flags.join(' · ')); ctx.fillStyle = '#ddd'; }
-    ctx.fillStyle = '#888'; ctx.font = '11px monospace';
-    ctx.fillText('click agent to inspect', px2 + 8, 8 + PH - 10);
+  if (inspected && inspectedIdx >= 0) {
+    const a = core.agents;
+    // Refresh the view each frame so it stays live.
+    const live = core.inspect(inspectedIdx);
+    if (live) {
+      // Find current job station name.
+      const sid = a.stationId[inspectedIdx];
+      let jobLabel: string = live.state;
+      if (sid > 0) {
+        const sdef = STATION_DEF_BY_NUM[sid];
+        if (sdef) jobLabel = `${live.state} @ ${sdef.name}`;
+      }
+      // Collect active thoughts (non-expired).
+      const SLOTS = THOUGHT_SLOTS;
+      const thoughts: string[] = [];
+      for (let s = 0; s < SLOTS; s++) {
+        const base = inspectedIdx * SLOTS + s;
+        const delta = a.thoughtDelta[base], expiry = a.thoughtExpiry[base];
+        if (expiry > core.tickNo && delta !== 0) {
+          thoughts.push(`${delta > 0 ? '+' : ''}${delta}`);
+        }
+      }
+      const PW = 260, PH = thoughts.length > 0 ? 210 : 188;
+      const px2 = canvas.width - PW - 8;
+      ctx.fillStyle = '#000c'; ctx.fillRect(px2, 8, PW, PH);
+      ctx.fillStyle = '#ffd700'; ctx.font = 'bold 13px monospace';
+      ctx.fillText(live.name, px2 + 8, 28);
+      ctx.fillStyle = '#ddd'; ctx.font = '12px monospace';
+      const iline = (n: number, s: string, col = '#ddd') => { ctx.fillStyle = col; ctx.fillText(s, px2 + 8, 46 + n * 16); ctx.fillStyle = '#ddd'; };
+      iline(0, `mood ${live.mood.toFixed(0)}  skill ${live.skill.toFixed(1)}`);
+      iline(1, `food ${live.food.toFixed(0)}  rest ${live.rest.toFixed(0)}  warmth ${live.warmth.toFixed(0)}`);
+      iline(2, `rec ${live.recreation.toFixed(0)}  social ${live.social.toFixed(0)}  hp ${live.health.toFixed(0)}`);
+      iline(3, jobLabel, '#aaddff');
+      iline(4, `traits: ${live.traits.join(', ') || 'none'}  armed: ${live.armed}`, '#aaa');
+      const flags = [live.wounded && 'wounded', live.infected && 'infected', live.sick && 'sick'].filter(Boolean);
+      let row = 5;
+      if (flags.length) iline(row++, flags.join(' · '), '#ff6b6b');
+      if (thoughts.length > 0) iline(row++, `thoughts: ${thoughts.join('  ')}`, '#ddddaa');
+      ctx.fillStyle = '#888'; ctx.font = '11px monospace';
+      ctx.fillText('click agent to inspect', px2 + 8, 8 + PH - 10);
+    }
   }
 
   // ── Research panel (bottom-right) ────────────────────────────────────
