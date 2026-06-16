@@ -524,6 +524,39 @@ function draw(): void {
     else {
       const grassSet = seasonIdx === 3 ? sprites.grassWinter : seasonIdx === 2 ? sprites.grassAutumn : seasonIdx === 0 ? sprites.grassSpring : sprites.grass;
       blit(grassSet[((x * 1664525 ^ y * 22695477) >>> 30) % 4], x, y);
+      // Orchard tile: small fruit-tree overlay that changes by season
+      if (g.zone[i] === ZONE.ORCHARD) {
+        const ocx = (x + 0.5) * px, ocy = (y + 0.42) * px;
+        const or2 = px * 0.32;
+        if (seasonIdx === 0) { // spring: pink blossom canopy
+          ctx.fillStyle = 'rgba(220,120,160,0.75)';
+          ctx.beginPath(); ctx.arc(ocx, ocy, or2, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(255,210,230,0.55)';
+          ctx.beginPath(); ctx.arc(ocx - or2*0.3, ocy - or2*0.3, or2*0.55, 0, Math.PI * 2); ctx.fill();
+        } else if (seasonIdx === 1) { // summer: dense green canopy + fruit dots
+          ctx.fillStyle = 'rgba(40,120,30,0.80)';
+          ctx.beginPath(); ctx.arc(ocx, ocy, or2, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(70,160,50,0.60)';
+          ctx.beginPath(); ctx.arc(ocx - or2*0.3, ocy - or2*0.3, or2*0.55, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(210,50,30,0.90)'; // small fruit dots
+          ctx.fillRect(ocx - 2, ocy + 1, 2, 2); ctx.fillRect(ocx + 2, ocy - 1, 2, 2);
+        } else if (seasonIdx === 2) { // autumn: orange-amber, heavy with fruit
+          ctx.fillStyle = 'rgba(160,80,20,0.75)';
+          ctx.beginPath(); ctx.arc(ocx, ocy, or2, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(210,120,30,0.60)';
+          ctx.beginPath(); ctx.arc(ocx - or2*0.3, ocy - or2*0.3, or2*0.55, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = 'rgba(220,60,30,0.95)'; // ripe fruit
+          ctx.fillRect(ocx - 3, ocy, 2, 2); ctx.fillRect(ocx + 1, ocy - 2, 2, 2); ctx.fillRect(ocx, ocy + 2, 2, 2);
+        } else { // winter: bare mini-trunk + twig lines
+          ctx.fillStyle = 'rgba(90,60,30,0.80)';
+          ctx.fillRect(Math.round(ocx - 1), Math.round(ocy - or2 * 0.5), 2, Math.round(or2 * 1.5));
+          ctx.fillRect(Math.round(ocx - or2), Math.round(ocy - or2 * 0.1), Math.round(or2 * 2), 1);
+          ctx.fillRect(Math.round(ocx - or2 * 0.6), Math.round(ocy - or2 * 0.5), Math.round(or2 * 1.2), 1);
+        }
+        // Trunk stub (all seasons)
+        ctx.fillStyle = 'rgba(80,50,20,0.80)';
+        ctx.fillRect(Math.round(ocx - 1), Math.round(ocy + or2 * 0.6), 2, Math.round(px * 0.18));
+      }
     }
     if (t === TERRAIN.TREE) {
       const treeSpr = seasonIdx === 3 ? sprites.treeWinter : seasonIdx === 2 ? sprites.treeAutumn : seasonIdx === 0 ? sprites.treeSpring : sprites.tree;
@@ -571,6 +604,39 @@ function draw(): void {
         if (y < MAP-1 && g.terrain[(y+1)*MAP+x] === other) ctx.fillRect(x*px, (y+1)*px-3, px, 3);
         if (x < MAP-1 && g.terrain[y*MAP+(x+1)] === other) ctx.fillRect((x+1)*px-3, y*px, 3, px);
         if (x > 0     && g.terrain[y*MAP+(x-1)] === other) ctx.fillRect(x*px, y*px, 3, px);
+      }
+      // Grass↔soil edge blend: dark earth peek at ploughed field edges
+      if (t === TERRAIN.GRASS || t === TERRAIN.SOIL) {
+        const other2 = t === TERRAIN.GRASS ? TERRAIN.SOIL : TERRAIN.GRASS;
+        const col2 = t === TERRAIN.GRASS ? 'rgba(120,75,30,0.28)' : 'rgba(60,120,40,0.22)';
+        ctx.fillStyle = col2;
+        if (y > 0     && g.terrain[(y-1)*MAP+x] === other2) ctx.fillRect(x*px, y*px, px, 2);
+        if (y < MAP-1 && g.terrain[(y+1)*MAP+x] === other2) ctx.fillRect(x*px, (y+1)*px-2, px, 2);
+        if (x < MAP-1 && g.terrain[y*MAP+(x+1)] === other2) ctx.fillRect((x+1)*px-2, y*px, 2, px);
+        if (x > 0     && g.terrain[y*MAP+(x-1)] === other2) ctx.fillRect(x*px, y*px, 2, px);
+      }
+      // Rock↔grass edge: shadow fringe on grass side where rock looms
+      if (t === TERRAIN.GRASS && (
+        (y > 0     && g.terrain[(y-1)*MAP+x] === TERRAIN.ROCK) ||
+        (y < MAP-1 && g.terrain[(y+1)*MAP+x] === TERRAIN.ROCK) ||
+        (x > 0     && g.terrain[y*MAP+(x-1)] === TERRAIN.ROCK) ||
+        (x < MAP-1 && g.terrain[y*MAP+(x+1)] === TERRAIN.ROCK)
+      )) {
+        ctx.fillStyle = 'rgba(50,45,40,0.20)';
+        if (y > 0     && g.terrain[(y-1)*MAP+x] === TERRAIN.ROCK) ctx.fillRect(x*px, y*px, px, 3);
+        if (y < MAP-1 && g.terrain[(y+1)*MAP+x] === TERRAIN.ROCK) ctx.fillRect(x*px, (y+1)*px-3, px, 3);
+        if (x > 0     && g.terrain[y*MAP+(x-1)] === TERRAIN.ROCK) ctx.fillRect(x*px, y*px, 3, px);
+        if (x < MAP-1 && g.terrain[y*MAP+(x+1)] === TERRAIN.ROCK) ctx.fillRect((x+1)*px-3, y*px, 3, px);
+      }
+      // Palisade wall shadow on ground tiles to the south/east of a wall
+      if (!g.wall[i] && !g.gate[i]) {
+        const wallN = y > 0     && (g.wall[(y-1)*MAP+x] || g.gate[(y-1)*MAP+x]);
+        const wallW = x > 0     && (g.wall[y*MAP+(x-1)] || g.gate[y*MAP+(x-1)]);
+        if (wallN || wallW) {
+          ctx.fillStyle = 'rgba(30,25,15,0.22)';
+          if (wallN) ctx.fillRect(x*px, y*px, px, 4);
+          if (wallW) ctx.fillRect(x*px, y*px, 4, px);
+        }
       }
     }
 
@@ -657,6 +723,16 @@ function draw(): void {
     }
   }
 
+  // Station cast shadows — ground shadow ellipses pass (drawn before sprites)
+  ctx.fillStyle = 'rgba(28,22,15,0.18)';
+  for (const sv of core.stationViews()) {
+    const def = STATION_DEF_BY_NUM[sv.typeId];
+    if (!def) continue;
+    const scx = (sv.x + def.w / 2 + 0.25) * px;
+    const scy = (sv.y + def.h + 0.12) * px;
+    ctx.beginPath(); ctx.ellipse(scx, scy, def.w * px * 0.52, def.h * px * 0.16, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
   // Stations — blit at the full tile footprint (multi-tile stations span def.w × def.h tiles).
   for (const sv of core.stationViews()) {
     const def = STATION_DEF_BY_NUM[sv.typeId];
@@ -711,13 +787,18 @@ function draw(): void {
   // Agents (animate: alternate walk frames every 6 ticks)
   const settlerFrame = (core.tickNo / 6 | 0) % 2;
   const a = core.agents;
-  for (let i = 0; i < a.count; i++) {
+  // Y-sort so units lower on screen draw over those above (painter's algorithm)
+  const sortedAgents = Array.from({length: a.count}, (_, i) => i).sort((ia, ib) => a.posY[ia] - a.posY[ib]);
+  for (const i of sortedAgents) {
     const variant = i % sprites.settler.length;
     const frame = a.state[i] === AState.Sleeping ? 0 : settlerFrame;
     // Draw settlers 35% taller than a tile, anchored to the tile bottom (head pokes up).
     const spr = (a.armed[i] ? sprites.settlerArmed : sprites.settler)[variant][frame];
     const sH = Math.round(px * 1.35);
     const sax = a.posX[i] * px, say = a.posY[i] * px - (sH - px);
+    // Ground shadow ellipse
+    ctx.fillStyle = 'rgba(28,20,12,0.22)';
+    ctx.beginPath(); ctx.ellipse(sax + px * 0.5, (a.posY[i] + 1) * px - 1, px * 0.38, px * 0.12, 0, 0, Math.PI * 2); ctx.fill();
     // Flip sprite horizontally when moving left
     if (!isNaN(a.destX[i]) && a.destX[i] < a.posX[i] - 0.1) {
       ctx.save(); ctx.translate(sax + px, say); ctx.scale(-1, 1);

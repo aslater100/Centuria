@@ -383,37 +383,42 @@ function treeSpringSprite(): HTMLCanvasElement {
   return c;
 }
 
-/** Autumn tree — orange/red canopy instead of green. */
+/** Autumn tree — orange/red/gold canopy, more clump variety than summer. */
 function treeAutumnSprite(): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = 40; c.height = 44;
   const g = c.getContext('2d')!;
   // shadow
   fillDisc(g, 22, 38, 13, 5, P.shadow);
-  // trunk — same warm brown as normal
+  // trunk
   g.fillStyle = P.trunkDark; g.fillRect(17, 28, 6, 14);
   g.fillStyle = P.trunk;     g.fillRect(18, 28, 4, 13);
   g.fillStyle = P.trunkLight; g.fillRect(18, 28, 2, 11);
   const cx = 19, cy = 16;
-  // deep canopy shadow (maroon)
-  fillDisc(g, cx + 1, cy + 3, 17, 14, '#5a2a10');
-  fillDisc(g, cx + 2, cy + 4, 14, 11, '#8a3820');
-  // main body (burnt orange)
-  fillDisc(g, cx, cy + 1, 16, 13, '#c05830');
-  fillDisc(g, cx - 6, cy - 2, 8, 7, '#b04c28');
-  fillDisc(g, cx + 7, cy + 1, 8, 7, '#8a3820');
-  fillDisc(g, cx - 1, cy - 6, 9, 7, '#c05830');
-  // warm lit highlights (golden/orange)
-  fillDisc(g, cx - 5, cy - 4, 7, 6, '#e07030');
-  fillDisc(g, cx - 3, cy - 5, 5, 4, '#f0a830');
-  // leaf flecks — yellow and red
-  g.fillStyle = '#e8c828'; g.fillRect(cx - 8, cy + 2, 2, 2); g.fillRect(cx + 2, cy - 7, 2, 2);
-  g.fillStyle = '#c83820'; g.fillRect(cx - 1, cy + 1, 2, 2); g.fillRect(cx + 4, cy + 9, 2, 2);
-  g.fillStyle = '#f0b830'; g.fillRect(cx + 9, cy + 6, 2, 2);
+  // deep shadow base (dark maroon)
+  fillDisc(g, cx + 1, cy + 3, 17, 14, '#4a200c');
+  fillDisc(g, cx + 2, cy + 4, 14, 11, '#7a2e18');
+  // main canopy (mixed orange/crimson clumps — more fragmented than summer)
+  fillDisc(g, cx, cy + 1,    15, 12, '#b84c28');
+  fillDisc(g, cx - 7, cy,     9,  7, '#c85c1c');
+  fillDisc(g, cx + 8, cy + 2, 8,  7, '#9c3818');
+  fillDisc(g, cx - 2, cy - 7, 9,  7, '#c04c20');
+  fillDisc(g, cx + 4, cy - 4, 7,  6, '#b83c10');
+  // gold/yellow clumps (patches of still-holding leaves)
+  fillDisc(g, cx - 5, cy - 3, 7, 6, '#d47818');
+  fillDisc(g, cx + 6, cy - 5, 5, 4, '#d89020');
+  // sun-lit highlights
+  fillDisc(g, cx - 4, cy - 5, 5, 4, '#f0a028');
+  fillDisc(g, cx - 2, cy - 7, 3, 3, '#f8c830');
+  // scattered leaf flecks — scarlet, crimson, gold
+  g.fillStyle = '#f0c820'; g.fillRect(cx - 9, cy + 1, 2, 2); g.fillRect(cx + 3, cy - 8, 2, 2);
+  g.fillStyle = '#d02818'; g.fillRect(cx - 1, cy + 2, 2, 2); g.fillRect(cx + 5, cy + 8, 2, 2);
+  g.fillStyle = '#e87020'; g.fillRect(cx + 10, cy + 5, 2, 2); g.fillRect(cx - 8, cy + 6, 2, 2);
+  g.fillStyle = '#a81808'; g.fillRect(cx + 2, cy + 10, 2, 2);
   return c;
 }
 
-/** Winter tree — bare trunk with thin branches and snow clumps. */
+/** Winter tree — bare trunk with detailed branching and snow clumps. */
 function treeWinterSprite(): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = 40; c.height = 44;
@@ -421,24 +426,41 @@ function treeWinterSprite(): HTMLCanvasElement {
   // shadow (smaller than leafy tree)
   fillDisc(g, 22, 38, 9, 4, P.shadow);
   // trunk
-  g.fillStyle = P.trunkDark; g.fillRect(17, 18, 6, 24);
-  g.fillStyle = P.trunk;     g.fillRect(18, 18, 4, 23);
-  g.fillStyle = P.trunkLight; g.fillRect(18, 18, 2, 20);
-  // bare branches (thin lines radiating from top of trunk)
+  g.fillStyle = P.trunkDark; g.fillRect(17, 20, 6, 22);
+  g.fillStyle = P.trunk;     g.fillRect(18, 20, 4, 21);
+  g.fillStyle = P.trunkLight; g.fillRect(18, 20, 2, 18);
+  // bark texture lines
   g.fillStyle = P.trunkDark;
-  // left branch
-  g.fillRect(11, 14, 7, 2); g.fillRect(9, 11, 4, 3); g.fillRect(8, 10, 2, 2);
-  // right branch
-  g.fillRect(22, 16, 7, 2); g.fillRect(27, 13, 4, 3); g.fillRect(30, 12, 2, 2);
-  // upper branch
-  g.fillRect(18, 10, 4, 8);
-  // small twigs
-  g.fillRect(13, 9, 2, 3); g.fillRect(26, 11, 2, 3);
-  // snow clumps on branch tips
-  g.fillStyle = '#dce8f4';
-  g.fillRect(7, 8, 4, 2); g.fillRect(29, 10, 4, 2); g.fillRect(17, 6, 5, 3);
-  g.fillStyle = '#eef4fc';
-  g.fillRect(8, 8, 2, 1); g.fillRect(30, 10, 2, 1); g.fillRect(18, 6, 3, 1);
+  g.fillRect(19, 26, 1, 4); g.fillRect(20, 32, 1, 5);
+  // main branches (radiating from trunk top)
+  g.fillStyle = P.trunkDark;
+  // left main branch
+  g.fillRect(9, 17, 9, 2); g.fillRect(6, 13, 5, 2);
+  // left sub-branches
+  g.fillRect(8, 11, 2, 3); g.fillRect(10, 12, 2, 1);
+  // right main branch
+  g.fillRect(22, 16, 10, 2); g.fillRect(30, 13, 5, 2);
+  // right sub-branches
+  g.fillRect(32, 11, 2, 3); g.fillRect(28, 12, 2, 1);
+  // upper central branches
+  g.fillRect(18, 8, 4, 12);
+  g.fillRect(14, 8, 4, 2); g.fillRect(12, 5, 3, 3);
+  g.fillRect(23, 10, 4, 2); g.fillRect(25, 7, 3, 3);
+  // fine twigs (1px)
+  g.fillStyle = '#6a5a48';
+  g.fillRect(5, 12, 2, 1); g.fillRect(33, 12, 2, 1);
+  g.fillRect(11, 4, 2, 2); g.fillRect(26, 6, 2, 2);
+  g.fillRect(18, 5, 1, 3); g.fillRect(21, 5, 1, 3);
+  // snow accumulation on branches (thick where branch is wide)
+  g.fillStyle = '#d0e4f2';
+  g.fillRect(5, 11, 6, 2); g.fillRect(29, 11, 6, 2);
+  g.fillRect(13, 7, 4, 2); g.fillRect(22, 7, 4, 2);
+  g.fillRect(17, 4, 5, 2);
+  // snow highlight
+  g.fillStyle = '#eaf4fc';
+  g.fillRect(6, 11, 4, 1); g.fillRect(30, 11, 4, 1);
+  g.fillRect(14, 7, 2, 1); g.fillRect(23, 7, 2, 1);
+  g.fillRect(18, 4, 3, 1);
   return c;
 }
 
@@ -3093,7 +3115,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     roads[k]     = roadTile(k, false);
     roadPlans[k] = roadTile(k, true);
   }
-  // Four distinct settler looks: ochre/dark-hair, teal/auburn, mauve/grey, forest-green/dark.
+  // Six distinct settler looks for population variety.
   const pawnLooks: PawnLook[] = [
     { cloth: P.cloth1, clothDk: P.clothDark1, clothLt: P.clothLight1,
       skin: P.skin,  skinShad: P.skinShad,  skinLight: P.skinLight,
@@ -3107,6 +3129,14 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     { cloth: P.cloth4, clothDk: P.clothDark4, clothLt: P.clothLight4,
       skin: P.skinB, skinShad: P.skinBShad, skinLight: P.skinBLight,
       hair: '#1c1a18', hairDk: '#0e0c0a' },
+    // Russet-red tunic, silver-grey hair — elder look
+    { cloth: '#7a3c2c', clothDk: '#522818', clothLt: '#9a5040',
+      skin: P.skin,  skinShad: P.skinShad,  skinLight: P.skinLight,
+      hair: '#b0aca0', hairDk: P.hairC },
+    // Deep slate-blue tunic, warm sandy hair, dark skin
+    { cloth: '#405068', clothDk: '#2c3848', clothLt: '#5a6e88',
+      skin: P.skinB, skinShad: P.skinBShad, skinLight: P.skinBLight,
+      hair: '#c8a860', hairDk: '#9a7840' },
   ];
   const raiderLook: PawnLook = {
     cloth: P.clothRaider, clothDk: P.clothRaiderDk, clothLt: P.clothRaiderLt,
