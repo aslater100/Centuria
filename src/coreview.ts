@@ -756,13 +756,14 @@ function draw(): void {
   };
   const meal = core.stock.count('meal'), grain = core.stock.count('grain');
   const mealFlow = core.netFlow('meal');
-  const mealTotal = meal + core.stock.count('game_meal') + core.stock.count('fish_meal') + core.stock.count('bread') + core.stock.count('ale');
+  const mealTotal = meal + core.stock.count('game_meal') + core.stock.count('fish_meal') + core.stock.count('preserved') + core.stock.count('bread') + core.stock.count('ale');
   const foodDaysStr = mealFlow < -0.5 && mealTotal > 0 ? `  [${Math.floor(mealTotal / -mealFlow)}d left]` : '';
   const foodColor = foodDaysStr && Math.floor(mealTotal / -mealFlow) < 7 ? '#ff6b6b' : '#ddd';
   line(1, `meal ${meal.toFixed(0)}/${core.mealCap()}${flowStr('meal') ? `(${flowStr('meal')})` : ''}  grain ${grain.toFixed(0)}${flowStr('grain') ? `(${flowStr('grain')})` : ''}  bread ${core.stock.count('bread').toFixed(0)}  ale ${core.stock.count('ale').toFixed(0)}${foodDaysStr}`, foodColor);
   const gameMeal = core.stock.count('game_meal'), fishMeal = core.stock.count('fish_meal');
+  const preserved = core.stock.count('preserved');
   const deerCount = [...core.deerViews()].length;
-  line(2, `game_meal ${gameMeal.toFixed(0)}  fish_meal ${fishMeal.toFixed(0)}  deer ${deerCount}`, gameMeal > 0 || fishMeal > 0 ? '#aed6a0' : '#888');
+  line(2, `game_meal ${gameMeal.toFixed(0)}  fish_meal ${fishMeal.toFixed(0)}  preserved ${preserved.toFixed(0)}  deer ${deerCount}`, gameMeal > 0 || fishMeal > 0 || preserved > 0 ? '#aed6a0' : '#888');
   line(3, `wood ${core.stock.count('wood').toFixed(0)}${flowStr('wood') ? `(${flowStr('wood')})` : ''}  stone ${core.stock.count('stone').toFixed(0)}  iron ${core.stock.count('iron').toFixed(0)}  ore ${core.stock.count('iron_ore').toFixed(0)}  tools ${core.stock.count('tools').toFixed(0)}`);
   line(4, `clothes ${core.stock.count('clothes').toFixed(0)}  weapons ${core.stock.count('weapons').toFixed(0)}  medicine ${core.stock.count('medicine').toFixed(0)}  flax ${core.stock.count('flax').toFixed(0)}  rope ${core.stock.count('rope').toFixed(0)}`);
   { const a = core.agents;

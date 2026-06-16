@@ -325,6 +325,7 @@ export class TownCore {
       case 'millstone': return (rb.hasTech('milling') ? 1.30 : 1) * focusMult;
       case 'brew_vat': return (rb.hasTech('fermentation') ? 1.30 : 1) * focusMult;
       case 'smelter': return (rb.hasTech('iron_smelting') ? 1.30 : 1) * focusMult;
+      case 'smoke_rack': return (rb.hasTech('food_preservation') ? 1.40 : 1) * focusMult;
       default: return focusMult;
     }
   };
@@ -908,6 +909,10 @@ export class TownCore {
         a.recreation[i] = Math.min(100, a.recreation[i] + 20); // drinking lifts spirits
         a.addThought(i, this.tickNo, 5, TICKS_PER_DAY); // "Had a drink"
         eatAle++;
+      } else if (this.stock.remove('preserved', 1)) {
+        a.food[i] = Math.min(100, a.food[i] + MEAL_VAL); // preserved rations are as filling as a meal
+        // Neutral taste: no thought bonus/penalty — better than grain, not as good as fresh
+        eatGrain++; // reuse eatGrain counter for preserved (counted as staple variety)
       } else if (this.stock.remove('grain', 1)) {
         a.food[i] = Math.min(100, a.food[i] + GRAIN_VAL);
         a.addThought(i, this.tickNo, -4, TICKS_PER_DAY, ThoughtKey.Anon); // "ate raw grain"

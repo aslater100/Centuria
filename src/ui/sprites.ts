@@ -2364,6 +2364,28 @@ function stationSprite(id: string, w: number, h: number): HTMLCanvasElement {
       g.fillRect(m + 4, 15, 8, 10);
       break;
     }
+    case 'smoke_rack': {
+      // Smokehouse rack: heavy horizontal beams with hanging smoked cuts.
+      shadow();
+      // Frame posts
+      g.fillStyle = P.trunkDark;
+      g.fillRect(m, m + 6, 3, H - m - 8);
+      g.fillRect(W - m - 3, m + 6, 3, H - m - 8);
+      // Horizontal beam
+      g.fillStyle = P.trunk;
+      g.fillRect(m, m + 6, W - 2 * m, 4);
+      g.fillStyle = P.woodLight;
+      g.fillRect(m, m + 6, W - 2 * m, 1);
+      // Smoke + ash floor
+      g.fillStyle = P.soilDark; g.fillRect(m + 3, H - m - 5, W - 2 * m - 6, 4);
+      g.fillStyle = '#5a4a3a';  g.fillRect(m + 4, H - m - 4, W - 2 * m - 8, 2);
+      // Hanging smoked cuts (dark red strips on string)
+      for (let hx = m + 4; hx < W - m - 4; hx += 6) {
+        g.fillStyle = '#44261a'; g.fillRect(hx, m + 10, 1, 8 + (hx % 3));
+        g.fillStyle = '#6a3820'; g.fillRect(hx, m + 10, 1, 2);
+      }
+      break;
+    }
     case 'animal_pen': {
       // Pen: fenced enclosure with dirt floor and a couple of cows.
       shadow();
