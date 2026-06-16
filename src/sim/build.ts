@@ -143,7 +143,7 @@ export const TERRAIN_NAMES = ['grass', 'tree', 'water', 'soil', 'rock'] as const
  * while FIELD/FISHERY/FLAX renew. Each id's `terrain` is the tile it may sit on
  * (FISHERY is special-cased: any passable tile next to water).
  */
-export const ZONE = { NONE: 0, FIELD: 1, WOODCUTTER: 2, QUARRY: 3, FISHERY: 4, FLAX: 5, FORAGE: 6 } as const;
+export const ZONE = { NONE: 0, FIELD: 1, WOODCUTTER: 2, QUARRY: 3, FISHERY: 4, FLAX: 5, FORAGE: 6, ORCHARD: 7, VEGGARDEN: 8 } as const;
 /** Wild forage deposits scattered on grass (the `forage` layer). */
 export const FORAGE = { NONE: 0, BERRIES: 1, MUSHROOMS: 2, HERBS: 3 } as const;
 export type ZoneCode = (typeof ZONE)[keyof typeof ZONE];
@@ -165,6 +165,10 @@ export const ZONE_DEFS: (ZoneDef | null)[] = [
   // Forage: gathered from wild deposits on grass. `resource` is overridden per
   // deposit in harvestZones (berries/mushrooms → meal, herbs → herbs).
   { id: 'forage', terrain: TERRAIN.GRASS, resource: 'meal', renewable: true },
+  // Farms: fruit orchards (grass) and vegetable gardens (soil) → produce, a fresh
+  // food that lifts diet variety. Seasonal like fields.
+  { id: 'orchard', terrain: TERRAIN.GRASS, resource: 'produce', renewable: true, seasonal: true },
+  { id: 'veggarden', terrain: TERRAIN.SOIL, resource: 'produce', renewable: true, seasonal: true },
 ];
 
 // Portable base64 for the byte layers (no Buffer/btoa — runs in Node, browser, worker).

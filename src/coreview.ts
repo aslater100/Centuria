@@ -116,6 +116,8 @@ const ROOM_COLORS: Record<string, string> = {
   autoZone(ZONE.QUARRY, 8);
   autoZone(ZONE.FISHERY, 6);
   autoZone(ZONE.FORAGE, 8);
+  autoZone(ZONE.ORCHARD, 10);
+  autoZone(ZONE.VEGGARDEN, 8);
 }
 
 // ── Canvas ────────────────────────────────────────────────────────────────
@@ -176,7 +178,8 @@ let flashMsg = ''; // brief feedback message (e.g. "Saved", "Loaded")
 let flashUntil = 0; // timestamp when flash expires
 
 type Tool = 'wall' | 'erase' | 'gate' | 'floor' | 'room' | 'station'
-           | 'field' | 'woodcutter' | 'quarry' | 'fishery' | 'flax' | 'forage' | 'trap';
+           | 'field' | 'woodcutter' | 'quarry' | 'fishery' | 'flax' | 'forage'
+           | 'orchard' | 'veggarden' | 'trap';
 let tool: Tool = 'wall';
 
 // Room designation sub-tool: cycle through room type names.
@@ -246,6 +249,8 @@ addEventListener('keydown', (e) => {
   if (k === 'b') { tool = 'fishery'; return; }
   if (k === 'l' && !e.ctrlKey) { tool = 'flax'; return; }
   if (k === 'p') { tool = 'forage'; return; } // pick wild forage deposits
+  if (k === 'u') { tool = 'orchard'; return; }   // fruit orchard (grass)
+  if (k === 'v') { tool = 'veggarden'; return; } // vegetable garden (soil)
   if (k === 'i') { showEconomy = !showEconomy; return; } // inventory / economy panel
   if (k === 't' && !e.ctrlKey) { tool = 'trap'; return; }
   // Save / Load via localStorage (Ctrl+S / Ctrl+L)
@@ -366,12 +371,14 @@ function paintAt(e: MouseEvent): void {
     case 'fishery':    g.setZone(t.x, t.y, ZONE.FISHERY);     break;
     case 'flax':       g.setZone(t.x, t.y, ZONE.FLAX);        break;
     case 'forage':     g.setZone(t.x, t.y, ZONE.FORAGE);      break;
+    case 'orchard':    g.setZone(t.x, t.y, ZONE.ORCHARD);     break;
+    case 'veggarden':  g.setZone(t.x, t.y, ZONE.VEGGARDEN);   break;
     case 'trap':       core.paintTrap(t.x, t.y);               break;
   }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────
-const ZONE_OUTLINE = ['', '#d4d46a', '#6ad48a', '#c8c8d8', '#6ad4d4', '#d4a06a', '#c060d0']; // flax = amber, forage = violet
+const ZONE_OUTLINE = ['', '#d4d46a', '#6ad48a', '#c8c8d8', '#6ad4d4', '#d4a06a', '#c060d0', '#e07090', '#90c050']; // forage=violet, orchard=pink, veg=green
 // Wild forage deposit marker colours by FORAGE type (berries/mushrooms/herbs).
 const FORAGE_COLOR = ['', '#e0405a', '#c8a060', '#50c060'];
 
@@ -598,7 +605,7 @@ function draw(): void {
   // Key hints
   ctx.fillStyle = '#888'; ctx.font = '11px monospace';
   ctx.fillText('H wall  E erase  G gate  J floor  T trap  Z room([ ])  K station(, .)', 8, 20 + 10 * 17);
-  ctx.fillText('F field  C chop  Q quarry  B fishery  L flax  P forage  R raid  N settler  X queue  Y focus  1-4 speed  space pause', 8, 20 + 11 * 17);
+  ctx.fillText('F field  C chop  Q quarry  B fishery  L flax  P forage  U orchard  V veg  R raid  N settler  X queue  Y focus  1-4 speed  space pause', 8, 20 + 11 * 17);
   ctx.fillText('camera: WASD / arrows pan · scroll zoom · middle-drag · O overview   ·   click settler to inspect · I economy', 8, 20 + 12 * 17);
 
   // ── Economy / storage panel (toggle I): every stored resource with its
@@ -686,7 +693,7 @@ function draw(): void {
     const i = hoverY * MAP + hoverX;
     const parts: string[] = [];
     const terrainNames = ['', 'grass', 'tree', 'water', 'rock', 'soil'];
-    const zoneNames = ['', 'field', 'woodcutter', 'quarry', 'fishery', 'flax', 'forage'];
+    const zoneNames = ['', 'field', 'woodcutter', 'quarry', 'fishery', 'flax', 'forage', 'orchard', 'veg garden'];
     const forageNames = ['', 'berries', 'mushrooms', 'herbs'];
     if (g.forage[i]) parts.push(forageNames[g.forage[i]] ?? 'forage');
     const t = g.terrain[i];
