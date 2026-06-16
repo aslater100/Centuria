@@ -40,9 +40,17 @@ import { Ledger, type LedgerSave, type BorrowResult, type RepayResult } from './
 import { ResearchBook, type ResearchBookSave } from './research';
 import { Rng } from './rng';
 import { BASE_PRICES } from './economy';
-import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, ROOM_DEF_BY_NUM, STATION_DEF_BY_NUM, STATION_TYPE_ID, TRAIT_DEFS, TUNING, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, DIFFICULTY_PRESETS, type ResourceKind, type TradeOrder, type TradeRecord, type TownFocus } from './defs';
+import { MINUTES_PER_TICK, MINUTES_PER_DAY, NEED_INTERRUPT_THRESHOLD, ROOM_TYPE_ID, ROOM_DEF_BY_NUM, STATION_DEF_BY_NUM, STATION_TYPE_ID, TRAIT_DEFS, TUNING, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, DIFFICULTY_PRESETS, RESOURCE_KINDS, type ResourceKind, type TradeOrder, type TradeRecord, type TownFocus } from './defs';
 
 const TICKS_PER_DAY = MINUTES_PER_DAY / MINUTES_PER_TICK;
+// Colony storage cap (SoS model): non-food goods the colony can warehouse before
+// overflow spoils. Base + per-head scaling + built shelves/crates (storageCap()).
+const STORAGE_BASE = 1200, STORAGE_PER_POP = 150;
+// Foods are exempt — they ride their own freshness/larder cap, so the storage
+// limit can never starve the colony.
+const FOOD_KINDS: ReadonlySet<ResourceKind> = new Set<ResourceKind>([
+  'meal', 'grain', 'bread', 'ale', 'dairy', 'produce', 'game_meal', 'fish_meal', 'preserved', 'flour',
+]);
 // Grief on a death (mirrors the fat sim): friends mourn harder and longer.
 const GRIEF_FRIEND_DELTA = -18, GRIEF_FRIEND_TICKS = 6 * TICKS_PER_DAY;
 const GRIEF_DELTA = -8, GRIEF_TICKS = 4 * TICKS_PER_DAY;
@@ -931,6 +939,25 @@ export class TownCore {
       }
     }
 
+    // Storage overflow (SoS colony model): non-food goods beyond the warehouse
+    // capacity spoil/are lost. Food is exempt (own freshness cap above), so this
+    // never starves the colony — it just punishes hoarding raw materials.
+    {
+      const cap = this.storageCap();
+      let total = 0;
+      for (const k of RESOURCE_KINDS) if (!FOOD_KINDS.has(k)) total += this.stock.count(k);
+      if (total > cap) {
+        const factor = cap / total;
+        let spoiled = 0;
+        for (const k of RESOURCE_KINDS) {
+          if (FOOD_KINDS.has(k)) continue;
+          const lose = Math.round(this.stock.count(k) * (1 - factor));
+          if (lose > 0) { this.stock.remove(k, lose); spoiled += lose; }
+        }
+        if (spoiled > 0) this.addLog(`Storehouses overflow — ${spoiled} goods spoil for want of space. Build more storage.`, 'bad');
+      }
+    }
+
     // Emigration: an overcrowded colony loses families until the hard cap is broken.
     if (a.count >= TUNING.hardCapPop && this.rng.chance(0.1)) {
       const idx = this.rng.int(a.count);
@@ -1695,6 +1722,17 @@ export class TownCore {
   }
 
   // ── read-only views ──────────────────────────────────────────────────────────
+
+  /**
+   * Total non-food goods the colony can warehouse before overflow spoils
+   * (Songs-of-Syx colony model). Scales with population (a bigger settlement
+   * keeps more under roof) + built storage capacity (shelves/crates). Food has
+   * its own freshness cap (mealCap) so the storage limit never starves anyone.
+   * (Region/nation tier uses a Victoria-3 flow model — no stockpile caps.)
+   */
+  storageCap(): number {
+    return STORAGE_BASE + this.population * STORAGE_PER_POP + this.services().storage;
+  }
 
   /** Max meals the larder holds before spoilage (base + storehouse rooms). */
   mealCap(): number {

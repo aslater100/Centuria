@@ -174,6 +174,8 @@ function zoomAt(mx: number, my: number, dir: number): void {
 let paused = false;
 let speed = 3;
 let showEconomy = false; // toggle the full inventory/economy panel (I)
+// Foods are exempt from the storage cap (they ride their own freshness limit).
+const FOOD_KINDS_VIEW = new Set(['meal', 'grain', 'bread', 'ale', 'dairy', 'produce', 'game_meal', 'fish_meal', 'preserved', 'flour']);
 let painting: 0 | 1 | 2 = 0; // 0=none, 1=apply, 2=erase
 let flashMsg = ''; // brief feedback message (e.g. "Saved", "Loaded")
 let flashUntil = 0; // timestamp when flash expires
@@ -619,8 +621,11 @@ function draw(): void {
     const items = RESOURCE_KINDS.filter((kRes) => core.stock.count(kRes) > 0.05);
     const rowH = 15, ox = 352, oy = 8, PW = 250, PH = 30 + Math.max(1, items.length) * rowH;
     ctx.fillStyle = '#000c'; ctx.fillRect(ox, oy, PW, PH);
+    let stored = 0;
+    for (const kRes of RESOURCE_KINDS) if (!FOOD_KINDS_VIEW.has(kRes)) stored += core.stock.count(kRes);
+    const cap = core.storageCap();
     ctx.fillStyle = '#ffd700'; ctx.font = 'bold 12px monospace';
-    ctx.fillText(`Economy · gold ${core.gold.toFixed(0)} · infl ${(core.inflation * 100).toFixed(1)}%`, ox + 8, oy + 16);
+    ctx.fillText(`Economy · gold ${core.gold.toFixed(0)} · infl ${(core.inflation * 100).toFixed(1)}% · storage ${stored.toFixed(0)}/${cap}`, ox + 8, oy + 16);
     ctx.font = '11px monospace';
     items.forEach((kRes, n) => {
       const cnt = core.stock.count(kRes), flow = core.netFlow(kRes), price = core.marketPrice(kRes);
