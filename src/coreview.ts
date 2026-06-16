@@ -766,6 +766,29 @@ function draw(): void {
     }
     // Summer: warm golden tint
     else if (si === 1) { ctx.fillStyle = '#ffdd0010'; ctx.fillRect(0, 0, worldW, worldH); }
+    // Spring: fresh green-cool tint + occasional flower specks
+    else if (si === 0) {
+      ctx.fillStyle = '#40c04010'; ctx.fillRect(0, 0, worldW, worldH);
+      const tick = core.tickNo;
+      ctx.fillStyle = '#e8e0f8'; // pale blossom
+      for (let n = 0; n < 30; n++) {
+        const fx = (((n * 1013904223 + tick) ^ (n * 22695477)) >>> 0) % worldW;
+        const fy = (((n * 1664525 + tick * 2) ^ (n * 1013904223)) >>> 0) % worldH;
+        ctx.fillRect(fx, fy, 2, 2);
+      }
+    }
+    // Autumn: warm amber haze + falling leaf flecks
+    else if (si === 2) {
+      ctx.fillStyle = '#c8740010'; ctx.fillRect(0, 0, worldW, worldH);
+      const tick = core.tickNo;
+      const leafCols = ['#c84820', '#d86020', '#d4a030', '#e09020', '#c83820'];
+      for (let n = 0; n < 90; n++) {
+        const lx = (((n * 1664525 + tick * 3) ^ (n * 22695477)) >>> 0) % worldW;
+        const ly = (((n * 1013904223 + tick * 9) ^ (n * 1664525)) >>> 0) % worldH;
+        ctx.fillStyle = leafCols[n % 5];
+        ctx.fillRect(lx, ly, 2, 2);
+      }
+    }
 
     // Rain or storm: diagonal rain streaks
     if (sky === 'rain' || sky === 'storm') {

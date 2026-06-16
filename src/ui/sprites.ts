@@ -80,6 +80,9 @@ const P = {
   cloth3: '#7a5868',           // mauve tunic
   clothDark3: '#56384a',
   clothLight3: '#9a7488',
+  cloth4: '#3c6a3a',           // forest-green tunic (4th settler variant)
+  clothDark4: '#2a4c2a',
+  clothLight4: '#568a52',
   clothRaider: '#9a3a2a',      // blood-red raider
   clothRaiderDk: '#6a2018',
   clothRaiderLt: '#c25240',
@@ -2868,7 +2871,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     roads[k]     = roadTile(k, false);
     roadPlans[k] = roadTile(k, true);
   }
-  // Three distinct settler looks: ochre/dark-hair, teal/auburn, mauve/grey.
+  // Four distinct settler looks: ochre/dark-hair, teal/auburn, mauve/grey, forest-green/dark.
   const pawnLooks: PawnLook[] = [
     { cloth: P.cloth1, clothDk: P.clothDark1, clothLt: P.clothLight1,
       skin: P.skin,  skinShad: P.skinShad,  skinLight: P.skinLight,
@@ -2879,6 +2882,9 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     { cloth: P.cloth3, clothDk: P.clothDark3, clothLt: P.clothLight3,
       skin: P.skin,  skinShad: P.skinShad,  skinLight: P.skinLight,
       hair: P.hairC, hairDk: '#6e665a' },
+    { cloth: P.cloth4, clothDk: P.clothDark4, clothLt: P.clothLight4,
+      skin: P.skinB, skinShad: P.skinBShad, skinLight: P.skinBLight,
+      hair: '#1c1a18', hairDk: '#0e0c0a' },
   ];
   const raiderLook: PawnLook = {
     cloth: P.clothRaider, clothDk: P.clothRaiderDk, clothLt: P.clothRaiderLt,
