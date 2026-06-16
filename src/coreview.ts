@@ -163,7 +163,7 @@ app.appendChild(menuBtn);
 // World is drawn at `TILE` base px/tile under a translate+scale transform, so
 // the SoA play-test pans and zooms like the real game. `view.x/y` are the
 // screen-space offset (px); `view.scale` is the zoom.
-const TILE = 14; // base px per tile at zoom 1
+const TILE = 20; // base px per tile at zoom 1 (sprites render at 32; ~62% scale gives crisp detail)
 const view = { x: 0, y: 0, scale: 1 };
 const MIN_SCALE = 0.4, MAX_SCALE = 4;
 
@@ -444,6 +444,7 @@ function draw(): void {
     if (t === TERRAIN.WATER) blit(sprites.water[anim], x, y);
     else if (t === TERRAIN.SOIL) blit(sprites.soil, x, y);
     else if (t === TERRAIN.ROCK) blit(g.ore[i] ? sprites.rockMarked : sprites.rock, x, y);
+    else if (t === TERRAIN.SAND) blit(sprites.sand, x, y);
     else blit(sprites.grass[(x * 3 + y) % 4], x, y);
     if (t === TERRAIN.TREE) blit(sprites.tree, x, y);
 
@@ -499,12 +500,12 @@ function draw(): void {
     }
   }
 
-  // Stations
+  // Stations — blit at the full tile footprint (multi-tile stations span def.w × def.h tiles).
   for (const s of g.stations) {
     const def = STATION_DEF_BY_NUM[s.typeId];
     const img = def && sprites.stations[def.id];
-    if (img) blit(img, s.x, s.y);
-    else if (def) { // no bespoke sprite yet (e.g. animal pen) — draw a labelled marker
+    if (img) ctx.drawImage(img, s.x * px, s.y * px, def!.w * px, def!.h * px);
+    else if (def) { // generic marker fallback
       ctx.fillStyle = '#6a5030'; ctx.fillRect(s.x * px + 1, s.y * px + 1, def.w * px - 2, def.h * px - 2);
       ctx.fillStyle = '#e8d8b0'; ctx.fillText(def.name[0], s.x * px + px * 0.35, s.y * px + px * 0.7);
     }
@@ -765,7 +766,7 @@ function draw(): void {
     const g = core.grid;
     const i = hoverY * MAP + hoverX;
     const parts: string[] = [];
-    const terrainNames = ['', 'grass', 'tree', 'water', 'rock', 'soil'];
+    const terrainNames = ['', 'grass', 'tree', 'water', 'rock', 'soil', 'sand'];
     const zoneNames = ['', 'field', 'woodcutter', 'quarry', 'fishery', 'flax', 'forage', 'orchard', 'veg garden'];
     const forageNames = ['', 'berries', 'mushrooms', 'herbs'];
     if (g.forage[i]) parts.push(forageNames[g.forage[i]] ?? 'forage');

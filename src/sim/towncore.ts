@@ -80,7 +80,7 @@ const ECONOMY_MONTH_DAYS = 30;
 const FIRST_EVENT_DAY = 7;
 const EVENT_INTERVAL = [3, 7] as const;
 
-const SAVE_VERSION = 10;
+const SAVE_VERSION = 11;
 
 // Behavior thresholds for the integration loop (modest, deterministic — full
 // mood/skills/trait fidelity is the remaining parity work, not this stage).
@@ -90,6 +90,7 @@ const BIRTH_MOOD_MIN = 50;     // colony must be reasonably content to grow
 const STARVED_HEALTH = 0;      // health at/under this → death (swap-removed)
 const HARVEST_TILES_PER_WORKER = 4; // zone tiles one settler can work per day (labour cap)
 const HARVEST_YIELD = 1;            // raw goods a worked zone tile yields per day
+const FORAGE_REGROW_DAYS = 30;      // days before a harvested forage deposit regenerates
 const BUILD_WORK_PER_WORKER = 30;   // construction work one settler delivers per day
 const WALL_WORK = 20, FLOOR_WORK = 10;
 const WALL_COST: Partial<Record<ResourceKind, number>> = { wood: 1 };
@@ -850,6 +851,8 @@ export class TownCore {
     this.harvestZones();
     // Sapling regrowth: woodcutter-felled tiles grow back into forest over days.
     this._tickSaplings();
+    // Forage regrowth: harvested deposits regenerate after FORAGE_REGROW_DAYS.
+    this._tickForageRegrow();
     // Construction: spend the day's labour on the blueprint queue.
     this.tickConstruction();
 
@@ -1226,6 +1229,8 @@ export class TownCore {
       if (def.seasonal && !growingSeason) { budget--; continue; }
       const x = i % grid.width, y = (i / grid.width) | 0;
       if (!grid.canZone(x, y, z)) { grid.zone[i] = ZONE.NONE; continue; } // terrain changed under it
+      // Forage: skip depleted tiles (deposit cleared, regrow timer running).
+      if (z === ZONE.FORAGE && grid.forage[i] === FORAGE.NONE) { budget--; continue; }
       const res = z === ZONE.QUARRY && grid.ore[i] ? 'iron_ore'
         : z === ZONE.FORAGE ? (grid.forage[i] === FORAGE.HERBS ? 'herbs' : 'meal')
         : def.resource;
@@ -1237,6 +1242,12 @@ export class TownCore {
         grid.zone[i] = ZONE.NONE;
         // Woodcutter-cleared tiles start regrowing (sapling age 1 = day 1 of growth).
         if (z === ZONE.WOODCUTTER) grid.saplingAge[i] = 1;
+      } else if (z === ZONE.FORAGE) {
+        // Deplete the deposit; start countdown — zone stays painted so it auto-resumes.
+        const kind = grid.forage[i];
+        grid.forage[i] = FORAGE.NONE;
+        grid.forageRegrow[i] = FORAGE_REGROW_DAYS;
+        this.addLog(`Forage deposit (${kind === FORAGE.HERBS ? 'herbs' : kind === FORAGE.MUSHROOMS ? 'mushrooms' : 'berries'}) exhausted — regrowing in ${FORAGE_REGROW_DAYS} days.`, 'info');
       }
     }
   }
@@ -1251,6 +1262,22 @@ export class TownCore {
       if (grid.saplingAge[i] > TUNING.saplingGrowDays) {
         grid.setTerrain(i % grid.width, (i / grid.width) | 0, TERRAIN.TREE);
         grid.saplingAge[i] = 0;
+      }
+    }
+  }
+
+  /** Count down forage regrow timers; restore deposits when they expire. */
+  private _tickForageRegrow(): void {
+    const grid = this.grid;
+    for (let i = 0; i < grid.size; i++) {
+      if (grid.forageRegrow[i] === 0) continue;
+      grid.forageRegrow[i]--;
+      if (grid.forageRegrow[i] === 0 && grid.forage[i] === FORAGE.NONE) {
+        // Restore a random deposit type on the tile (only if still grass, no other deposit).
+        if (grid.terrain[i] === TERRAIN.GRASS) {
+          const roll = Math.random();
+          grid.forage[i] = roll < 0.5 ? FORAGE.BERRIES : roll < 0.8 ? FORAGE.MUSHROOMS : FORAGE.HERBS;
+        }
       }
     }
   }

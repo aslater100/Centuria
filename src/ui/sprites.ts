@@ -161,6 +161,7 @@ export interface SpriteSet {
   water: HTMLCanvasElement[];
   rock: HTMLCanvasElement;
   rockMarked: HTMLCanvasElement;
+  sand: HTMLCanvasElement;
   soil: HTMLCanvasElement;
   soilSown: HTMLCanvasElement;
   soilGrown: HTMLCanvasElement;
@@ -398,6 +399,41 @@ function rockSprite(marked: boolean): HTMLCanvasElement {
     g.fillRect(24, 2, 6, 6);
     g.fillStyle = '#f08040';
     g.fillRect(25, 3, 4, 4);
+  }
+  return c;
+}
+
+/**
+ * Sandy beach tile — warm gold with subtle ripple texture and the occasional
+ * pebble, distinct from dark-brown soil (farmable earth).
+ */
+function sandTile(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  // Base sandy gold
+  g.fillStyle = '#c8a84c';
+  g.fillRect(0, 0, TILE, TILE);
+  // Subtle ripple lines (wave-dried patterns)
+  g.fillStyle = '#d4b45a';
+  for (let y = 3; y < TILE; y += 7) g.fillRect(0, y, TILE, 2);
+  g.fillStyle = '#b89640';
+  for (let y = 5; y < TILE; y += 7) g.fillRect(0, y, TILE, 1);
+  // Fine highlight flecks
+  const rnd = mulberry(99);
+  g.fillStyle = '#dfc070';
+  for (let i = 0; i < 8; i++) {
+    const fx = Math.floor(rnd() * (TILE - 2));
+    const fy = Math.floor(rnd() * (TILE - 2));
+    g.fillRect(fx, fy, 2, 1);
+  }
+  // Small pebbles
+  g.fillStyle = '#a08030';
+  for (let i = 0; i < 3; i++) {
+    const px = Math.floor(rnd() * (TILE - 3)) + 1;
+    const py = Math.floor(rnd() * (TILE - 3)) + 1;
+    g.fillRect(px, py, 2, 1);
+    g.fillRect(px + 1, py + 1, 1, 1);
   }
   return c;
 }
@@ -2164,6 +2200,170 @@ function stationSprite(id: string, w: number, h: number): HTMLCanvasElement {
       }
       break;
     }
+    case 'crate': {
+      shadow();
+      // Outer box
+      g.fillStyle = P.trunkDark; g.fillRect(m, m, W - 2 * m, H - 2 * m);
+      g.fillStyle = P.trunk; g.fillRect(m + 1, m + 1, W - 2 * m - 2, H - 2 * m - 2);
+      g.fillStyle = P.wood; g.fillRect(m + 2, m + 2, W - 2 * m - 4, H - 2 * m - 4);
+      // Cross braces
+      g.fillStyle = P.woodDark;
+      g.fillRect(m, Math.floor(H / 2) - 1, W - 2 * m, 2); // horizontal band
+      g.fillRect(Math.floor(W / 2) - 1, m, 2, H - 2 * m); // vertical band
+      // Top highlight
+      g.fillStyle = P.woodLight; g.fillRect(m + 2, m + 2, W - 2 * m - 4, 2);
+      break;
+    }
+    case 'shrine': {
+      // Plinth base
+      g.fillStyle = P.rock; g.fillRect(m + 2, H - 10, W - 2 * m - 4, 8);
+      g.fillStyle = P.rockDark; g.fillRect(m + 2, H - 11, W - 2 * m - 4, 2); // top edge
+      g.fillStyle = P.rockLight; g.fillRect(m + 3, H - 9, 4, 2); // light catch
+      // Column
+      g.fillStyle = P.wallCream; g.fillRect(W / 2 - 3, 14, 6, H - 24);
+      g.fillStyle = P.wallCreamDk; g.fillRect(W / 2 - 3, 14, 1, H - 24); // shadow side
+      // Capital (top of column)
+      g.fillStyle = P.wallCreamDk; g.fillRect(W / 2 - 6, 10, 12, 5);
+      g.fillStyle = P.wallCream; g.fillRect(W / 2 - 5, 11, 10, 3);
+      // Flame / holy symbol
+      g.fillStyle = '#f0b030'; g.fillRect(W / 2 - 2, 3, 4, 6);
+      g.fillStyle = '#f8d860'; g.fillRect(W / 2 - 1, 2, 2, 4);
+      g.fillStyle = '#ffffff'; g.fillRect(W / 2, 1, 1, 2);
+      break;
+    }
+    case 'well': {
+      shadow();
+      // Stone surround
+      g.fillStyle = P.rockDark; g.fillRect(m + 2, m + 2, W - 2 * m - 4, H - 2 * m - 4);
+      g.fillStyle = P.rock; g.fillRect(m + 4, m + 4, W - 2 * m - 8, H - 2 * m - 8);
+      // Dark interior shaft
+      g.fillStyle = '#0e1820'; g.fillRect(W / 2 - 5, m + 5, 10, H / 2 - 4);
+      g.fillStyle = P.water2; g.fillRect(W / 2 - 4, H / 2 - 2, 8, 4); // water glint
+      g.fillStyle = P.waterGlint; g.fillRect(W / 2 - 2, H / 2 - 1, 3, 1);
+      // Crossbeam
+      g.fillStyle = P.woodDark; g.fillRect(m, m + 2, W - 2 * m, 3);
+      g.fillStyle = P.wood; g.fillRect(m + 1, m + 3, W - 2 * m - 2, 1);
+      // Rope/bucket
+      g.fillStyle = '#8a7050'; g.fillRect(W / 2 - 1, m + 5, 2, H / 2 - 8); // rope
+      g.fillStyle = P.woodDark; g.fillRect(W / 2 - 3, H / 2 - 7, 6, 4); // bucket top
+      g.fillStyle = P.wood; g.fillRect(W / 2 - 2, H / 2 - 6, 4, 3);
+      break;
+    }
+    case 'watch_post': {
+      shadow();
+      // Platform floor
+      g.fillStyle = P.woodDark; g.fillRect(m, H - 10, W - 2 * m, 3);
+      g.fillStyle = P.wood; g.fillRect(m + 1, H - 9, W - 2 * m - 2, 2);
+      // Support legs
+      g.fillStyle = P.trunkDark;
+      g.fillRect(m + 2, H - 7, 3, 6); g.fillRect(W - m - 5, H - 7, 3, 6);
+      // Ladder rungs
+      g.fillStyle = P.trunk;
+      g.fillRect(W / 2 - 3, m + 4, 2, H - 14); g.fillRect(W / 2 + 1, m + 4, 2, H - 14);
+      for (let ry = m + 8; ry < H - 11; ry += 5) g.fillRect(W / 2 - 3, ry, 6, 1);
+      // Watchtower roof
+      g.fillStyle = P.roofWood; g.fillRect(m, m, W - 2 * m, 5);
+      g.fillStyle = P.roofLight; g.fillRect(m, m + 1, W - 2 * m, 2);
+      // Arrow slit
+      g.fillStyle = '#0e0c08'; g.fillRect(W / 2 - 1, m + 5, 2, 4);
+      break;
+    }
+    case 'grave_marker': {
+      // Dirt mound
+      g.fillStyle = P.soilDark; g.fillRect(m + 2, H - 9, W - 2 * m - 4, 7);
+      g.fillStyle = P.soil; g.fillRect(m + 3, H - 9, W - 2 * m - 6, 5);
+      // Stone marker
+      g.fillStyle = P.rockDark; g.fillRect(W / 2 - 4, m + 2, 8, H - 14);
+      g.fillStyle = P.rock; g.fillRect(W / 2 - 3, m + 3, 6, H - 16);
+      g.fillStyle = P.rockLight; g.fillRect(W / 2 - 2, m + 3, 2, 3);
+      // Cross notch
+      g.fillStyle = P.rockDark; g.fillRect(W / 2 - 3, m + 6, 6, 1); // crossbar
+      break;
+    }
+    case 'training_post': {
+      shadow();
+      // Central post
+      g.fillStyle = P.trunkDark; g.fillRect(W / 2 - 3, m + 2, 6, H - 2 * m - 4);
+      g.fillStyle = P.trunk; g.fillRect(W / 2 - 2, m + 3, 4, H - 2 * m - 6);
+      // Cross arm
+      g.fillStyle = P.trunkDark; g.fillRect(m + 2, H / 2 - 2, W - 2 * m - 4, 4);
+      g.fillStyle = P.trunk; g.fillRect(m + 3, H / 2 - 1, W - 2 * m - 6, 2);
+      // Rope circles
+      g.fillStyle = '#8a7050';
+      disc(m + 6, H / 2, 4, '#8a7050'); g.fillStyle = '#b89a6a'; disc(m + 6, H / 2, 2, '#b89a6a');
+      disc(W - m - 6, H / 2, 4, '#8a7050'); g.fillStyle = '#b89a6a'; disc(W - m - 6, H / 2, 2, '#b89a6a');
+      break;
+    }
+    case 'hunting_lodge': {
+      // Floor/ground
+      g.fillStyle = P.grassB; g.fillRect(1, 1, W - 2, H - 2);
+      g.fillStyle = P.dirtPatch; g.fillRect(m + 2, H - 14, W - 2 * m - 4, 12);
+      // Small log cabin
+      const lx = Math.floor(W / 2) - 10, lw = 20;
+      g.fillStyle = P.trunkDark; g.fillRect(lx, 12, lw, H - 26);
+      g.fillStyle = P.trunk; g.fillRect(lx + 1, 13, lw - 2, H - 28);
+      // Log lines
+      g.fillStyle = P.trunkDark;
+      for (let ly = 18; ly < H - 16; ly += 5) g.fillRect(lx + 1, ly, lw - 2, 1);
+      // Roof
+      g.fillStyle = P.roofWood; g.fillRect(lx - 3, 6, lw + 6, 8);
+      g.fillStyle = P.roofLight; g.fillRect(lx - 2, 7, lw + 4, 3);
+      // Door
+      g.fillStyle = '#1e1408'; g.fillRect(Math.floor(W / 2) - 3, H - 24, 6, 10);
+      // Antlers
+      g.fillStyle = '#c0a86a';
+      g.fillRect(lx - 4, 8, 2, 8); g.fillRect(lx - 6, 6, 2, 4); g.fillRect(lx - 2, 6, 2, 3);
+      g.fillRect(lx + lw + 2, 8, 2, 8); g.fillRect(lx + lw, 6, 2, 4); g.fillRect(lx + lw + 4, 6, 2, 3);
+      break;
+    }
+    case 'market_stall': {
+      // Ground
+      g.fillStyle = P.gravelB; g.fillRect(1, H - 10, W - 2, 9);
+      // Awning posts
+      g.fillStyle = P.woodDark;
+      g.fillRect(m + 2, 16, 3, H - 26); g.fillRect(W - m - 5, 16, 3, H - 26);
+      g.fillStyle = P.wood;
+      g.fillRect(m + 3, 17, 2, H - 28); g.fillRect(W - m - 4, 17, 2, H - 28);
+      // Awning
+      g.fillStyle = '#b83828'; // red cloth
+      g.fillRect(m, 8, W - 2 * m, 10);
+      g.fillStyle = '#cc5040';
+      g.fillRect(m, 8, W - 2 * m, 3); // lighter top stripe
+      // Scalloped edge
+      for (let ex = m; ex < W - m - 6; ex += 6) {
+        g.fillStyle = '#b83828';
+        g.fillRect(ex + 1, 18, 4, 4);
+        g.fillStyle = P.shadow;
+        g.fillRect(ex, 18, 1, 3); g.fillRect(ex + 5, 18, 1, 3);
+      }
+      // Counter table
+      g.fillStyle = P.woodDark; g.fillRect(m + 4, H - 17, W - 2 * m - 8, 6);
+      g.fillStyle = P.wood; g.fillRect(m + 5, H - 16, W - 2 * m - 10, 4);
+      // Goods
+      g.fillStyle = '#b84020'; g.fillRect(m + 6, H - 22, 6, 5); // pottery
+      g.fillStyle = '#a8b040'; g.fillRect(m + 14, H - 21, 5, 4); // greens
+      g.fillStyle = P.grain; g.fillRect(W - m - 14, H - 20, 6, 3); // grain sack
+      break;
+    }
+    case 'carpentry_bench': {
+      shadow(); woodTop(m, 11, W - 2 * m, H - 13);
+      // Wood shavings
+      g.fillStyle = P.woodLight;
+      g.fillRect(m + 4, 14, 6, 2); g.fillRect(m + 12, 16, 5, 1); g.fillRect(W - m - 10, 13, 7, 2);
+      // Chisel and mallet
+      g.fillStyle = P.rockLight; // chisel blade
+      g.fillRect(W / 2 + 2, 12, 2, 6);
+      g.fillStyle = P.woodDark; // mallet handle
+      g.fillRect(W / 2 + 2, 18, 2, 8);
+      g.fillStyle = P.trunk; // mallet head
+      g.fillRect(W / 2 - 1, 14, 8, 5);
+      // Wood block being worked
+      g.fillStyle = P.trunkDark;
+      g.fillRect(m + 3, 14, 10, 12);
+      g.fillStyle = P.trunk;
+      g.fillRect(m + 4, 15, 8, 10);
+      break;
+    }
     default: { // generic crate
       shadow();
       woodTop(m + 2, m + 3, W - 2 * m - 4, H - 2 * m - 5);
@@ -2222,6 +2422,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     water: [waterTile(0), waterTile(1)],
     rock: rockSprite(false),
     rockMarked: rockSprite(true),
+    sand: sandTile(),
     soil: soilTile('bare'),
     soilSown: soilTile('sown'),
     soilGrown: soilTile('grown'),

@@ -109,6 +109,8 @@ export interface BuildGridSave {
   zone?: string;
   /** base64 of the wild-forage-deposit layer (optional: absent in pre-forage saves). */
   forage?: string;
+  /** base64 of the forage regrow countdown layer (optional: absent in pre-regrow saves). */
+  forageRegrow?: string;
   /** base64 of the sapling-age layer (optional: absent in pre-forester saves). Days growing; 0 = no sapling. */
   saplingAge?: string;
   floor: string;
@@ -129,10 +131,10 @@ const NY4 = [0, 0, 1, -1];
  * irrigates. Order mirrors `world.ts`'s `TileKind` so a renderer can share a
  * colour table. GRASS (0) is the default — an all-grass grid behaves exactly as
  * a terrain-free one did, which keeps every pre-terrain test and save valid. */
-export const TERRAIN = { GRASS: 0, TREE: 1, WATER: 2, SOIL: 3, ROCK: 4 } as const;
+export const TERRAIN = { GRASS: 0, TREE: 1, WATER: 2, SOIL: 3, ROCK: 4, SAND: 5 } as const;
 export type TerrainCode = (typeof TERRAIN)[keyof typeof TERRAIN];
 /** Index-aligned with TERRAIN values — for renderers/inspectors. */
-export const TERRAIN_NAMES = ['grass', 'tree', 'water', 'soil', 'rock'] as const;
+export const TERRAIN_NAMES = ['grass', 'tree', 'water', 'soil', 'rock', 'sand'] as const;
 
 /**
  * Harvest zones (B-6 PART 3, Songs-of-Syx primary production). The player paints a
@@ -233,6 +235,8 @@ export class BuildGrid {
   readonly zone: Uint8Array;
   /** Wild forage deposit on this tile (see FORAGE). 0 = none. Only on GRASS. */
   readonly forage: Uint8Array;
+  /** Forage regrow countdown (days until the deposit returns). 0 = no countdown. */
+  readonly forageRegrow: Uint8Array;
   /** Days since the tile's tree was felled; 0 = no sapling. Advances in TownCore dailyUpdate. */
   readonly saplingAge: Uint8Array;
 
@@ -261,6 +265,7 @@ export class BuildGrid {
     this.ore = new Uint8Array(this.size);
     this.zone = new Uint8Array(this.size);
     this.forage = new Uint8Array(this.size);
+    this.forageRegrow = new Uint8Array(this.size);
     this.saplingAge = new Uint8Array(this.size);
     this._visited = new Uint8Array(this.size);
   }
@@ -471,15 +476,16 @@ export class BuildGrid {
         x = nx; y = ny;
       }
     }
-    // Beaches: a sandy (soil) shore wherever grass/forest meets water. One pass
-    // over a snapshot so the ring doesn't grow into itself.
+    // Beaches: sandy shore wherever grass/forest meets water (dedicated SAND
+    // terrain so it's visually distinct from farmable soil). One pass over a
+    // snapshot so the ring doesn't grow into itself.
     const land = this.terrain.slice();
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const i = y * W + x;
       if (land[i] !== TERRAIN.GRASS && land[i] !== TERRAIN.TREE) continue;
       for (let d = 0; d < 4; d++) {
         const ax = x + NX4[d], ay = y + NY4[d];
-        if (ax >= 0 && ay >= 0 && ax < W && ay < H && land[ay * W + ax] === TERRAIN.WATER) { this.terrain[i] = TERRAIN.SOIL; break; }
+        if (ax >= 0 && ay >= 0 && ax < W && ay < H && land[ay * W + ax] === TERRAIN.WATER) { this.terrain[i] = TERRAIN.SAND; break; }
       }
     }
     // Wild forage deposits scattered on grassland — berries/mushrooms/herbs you
@@ -827,6 +833,7 @@ export class BuildGrid {
       ore: bytesToB64(this.ore),
       zone: bytesToB64(this.zone),
       forage: bytesToB64(this.forage),
+      forageRegrow: bytesToB64(this.forageRegrow),
       saplingAge: bytesToB64(this.saplingAge),
       floor: bytesToB64(this.floor),
       roomType: bytesToB64(this.roomType),
@@ -845,6 +852,7 @@ export class BuildGrid {
     if (data.ore) g.ore.set(b64ToBytes(data.ore, g.size));
     if (data.zone) g.zone.set(b64ToBytes(data.zone, g.size)); // backfill: old saves have no zones
     if (data.forage) g.forage.set(b64ToBytes(data.forage, g.size)); // backfill: old saves have no deposits
+    if (data.forageRegrow) g.forageRegrow.set(b64ToBytes(data.forageRegrow, g.size));
     if (data.saplingAge) g.saplingAge.set(b64ToBytes(data.saplingAge, g.size));
     g.floor.set(b64ToBytes(data.floor, g.size));
     g.roomType.set(b64ToBytes(data.roomType, g.size));
