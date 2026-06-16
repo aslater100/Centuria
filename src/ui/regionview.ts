@@ -76,7 +76,7 @@ export class RegionView {
   private winDismissed = false;
   /** Era-branch reveal modal: shown once when the century forks (GDD §3.2). */
   private eraModal: HTMLElement;
-  private eraShown = false;
+  private eraDismissed = false;
   private frame = 0;
   // ---- Static-map cache. Terrain + territory fills are O(N²) and barely change,
   //      so render them once into an offscreen canvas (base coords) and blit it
@@ -102,9 +102,9 @@ export class RegionView {
 
   constructor(private canvas: HTMLCanvasElement, private region: RegionSim, root: HTMLElement) {
     this.g = canvas.getContext('2d')!;
-    // If the era was already decided in a prior session (loaded save), don't
-    // replay the reveal — only fire for a fork that happens live in this view.
-    this.eraShown = region.eraBranch !== null;
+    // If the era was already decided in a prior session (loaded save), treat the
+    // reveal as already dismissed — only fire for a fork that happens live here.
+    this.eraDismissed = region.eraBranch !== null;
     this.panel = document.createElement('div');
     this.panel.className = 'inspector region-panel hidden';
     root.appendChild(this.panel);
@@ -1265,8 +1265,8 @@ export class RegionView {
    *  Convention, and the win paths, instead of a single log line. */
   private drawEraModal(): void {
     const branch = this.region.eraBranch;
-    if (!branch || this.eraShown) { this.eraModal.classList.add('hidden'); return; }
-    this.eraShown = true; // fire once
+    if (!branch || this.eraDismissed) { this.eraModal.classList.add('hidden'); return; }
+    if (!this.eraModal.classList.contains('hidden')) return; // already showing — leave it until dismissed
     this.eraModal.classList.remove('hidden');
     const titles: Record<string, string> = {
       solarpunk: '☀ THE GARDEN CENTURY',
@@ -1291,6 +1291,7 @@ export class RegionView {
       `<button class="win-modal-btn" id="era-face-on">Face the Century</button>` +
       `</div>`;
     this.eraModal.querySelector<HTMLButtonElement>('#era-face-on')!.onclick = () => {
+      this.eraDismissed = true;
       this.eraModal.classList.add('hidden');
     };
   }
