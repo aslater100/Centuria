@@ -696,7 +696,15 @@ function draw(): void {
     // Wild forage deposit: berry bush / mushroom cluster / herb patch sprite.
     if (g.forage[i]) {
       const fspr = sprites.forage[g.forage[i]];
-      if (fspr) ctx.drawImage(fspr, x * px, y * px, px, px);
+      if (fspr) {
+        if (seasonIdx === 3) ctx.globalAlpha = 0.62; // winter: dormant, sparse
+        ctx.drawImage(fspr, x * px, y * px, px, px);
+        ctx.globalAlpha = 1;
+        if (seasonIdx === 3) { // frost dusting over dormant forage
+          ctx.fillStyle = 'rgba(180,208,238,0.32)';
+          ctx.fillRect(x * px, y * px, px, px);
+        }
+      }
     }
 
     // Zone outline + drought/flood tint + small resource icon in corner.
@@ -732,11 +740,26 @@ function draw(): void {
       }
     }
 
-    // Road / bridge overlay
+    // Road / bridge overlay — rotate 90° for E-W dominant segments so ruts/planks align
     if (g.road[i]) {
+      const rt = g.road[i];
       const roadNames = ['', 'dirt', 'plank', 'gravel', 'bridge'];
-      const rImg = sprites.roads[roadNames[g.road[i]]];
-      if (rImg) blit(rImg, x, y);
+      const rImg = sprites.roads[roadNames[rt]];
+      if (rImg) {
+        const nsConn = ((y > 0     && g.road[(y-1)*MAP+x] === rt) ? 1 : 0)
+                     + ((y < MAP-1 && g.road[(y+1)*MAP+x] === rt) ? 1 : 0);
+        const ewConn = ((x > 0     && g.road[y*MAP+(x-1)] === rt) ? 1 : 0)
+                     + ((x < MAP-1 && g.road[y*MAP+(x+1)] === rt) ? 1 : 0);
+        if (ewConn > nsConn) {
+          ctx.save();
+          ctx.translate(x * px + px / 2, y * px + px / 2);
+          ctx.rotate(Math.PI / 2);
+          ctx.drawImage(rImg, -px / 2, -px / 2, px, px);
+          ctx.restore();
+        } else {
+          blit(rImg, x, y);
+        }
+      }
     }
 
     if (g.gate[i]) {
