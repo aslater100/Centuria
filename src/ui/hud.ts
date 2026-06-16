@@ -846,8 +846,9 @@ export class Hud {
 
   private drawTopBar(): void {
     const s = this.sim;
-    const hh = String(Math.floor(s.hour)).padStart(2, '0');
-    const mm = String(Math.floor((s.hour % 1) * 60)).padStart(2, '0');
+    const hrFrac = s.hour / 24; // 0=midnight, 0.25=6am, 0.5=noon, 0.75=6pm
+    const dayPhase = hrFrac < 0.21 ? 'Night' : hrFrac < 0.33 ? 'Dawn' : hrFrac < 0.5 ? 'Morning'
+      : hrFrac < 0.58 ? 'Midday' : hrFrac < 0.71 ? 'Afternoon' : hrFrac < 0.88 ? 'Dusk' : 'Night';
     const pop = s.settlers.length;
     const housing = s.housingCapacity();
     // Population is gated by built beds: show pop against housing, not the old soft cap.
@@ -865,7 +866,7 @@ export class Hud {
       `<span class="${w.level === 'red' ? 'tb-over' : 'tb-warn'}" title="${w.text}">⚠ ${w.text}</span>`
     ).join('');
     this.setHtml(this.topBar,
-      `<span class="tb-date">${s.dateLabel} ${hh}:${mm}</span>` +
+      `<span class="tb-date">${s.dateLabel} · ${dayPhase}</span>` +
       eraLabel +
       `<span>${skyIcon} ${Math.round(s.temperature() * 9 / 5 + 32)}°F${drought}</span>` +
       `<span>${popDisplay}${capWarn}</span>` +

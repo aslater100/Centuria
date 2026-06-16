@@ -576,11 +576,12 @@ function draw(): void {
 
   const seasonIdx = Math.floor((core.day % DAYS_PER_YEAR) / DAYS_PER_SEASON);
   const year = START_YEAR + Math.floor(core.day / DAYS_PER_YEAR);
-  const seasonLabel = `${SEASONS[seasonIdx]} ${year}`;
+  const dayOfSzn = (core.day % DAYS_PER_YEAR) % DAYS_PER_SEASON + 1;
+  const seasonLabel = `${SEASONS[seasonIdx]} ${dayOfSzn}/${DAYS_PER_SEASON}, ${year}`;
   const SEASON_BASE_C = [10, 22, 8, -8]; // spring/summer/fall/winter base °C
   const tempC = Math.round(SEASON_BASE_C[seasonIdx] + core.weather.forDay(core.day).tempAnomalyC);
   const tempLabel = `${tempC > 0 ? '+' : ''}${tempC}°C`;
-  line(0, `${core.townName}  ${seasonLabel}  day ${core.day}  ${tempLabel}  pop ${core.population}  mood ${core.averageMood().toFixed(0)}  gold ${core.gold.toFixed(0)}  era ${core.era}  [${core.focus}]`);
+  line(0, `${core.townName}  ${seasonLabel}  ${tempLabel}  pop ${core.population}  mood ${core.averageMood().toFixed(0)}  gold ${core.gold.toFixed(0)}  era ${core.era}  [${core.focus}]`);
   const flowStr = (kind: Parameters<typeof core.netFlow>[0]) => {
     const f = core.netFlow(kind);
     return f === 0 ? '' : (f > 0 ? `+${f.toFixed(1)}` : f.toFixed(1));
@@ -621,10 +622,13 @@ function draw(): void {
   line(6, `${raidLine}  ${skyLabel}${droughtFlood}`, weatherColor);
   { const TICKS_PER_DAY = MINUTES_PER_DAY / MINUTES_PER_TICK;
     const frac = (core.tickNo % TICKS_PER_DAY) / TICKS_PER_DAY;
-    const hour = Math.floor(frac * 24);
-    const min = Math.floor((frac * 24 - hour) * 60);
-    const timeStr = `  ${hour.toString().padStart(2,'0')}:${min.toString().padStart(2,'0')}`;
-    line(7, `${paused ? 'PAUSED' : 'speed ' + speed + '×'}${timeStr}${core.builds.length > 0 ? `  blueprints: ${core.builds.length}` : ''}`); }
+    // frac: 0=midnight 0.25=dawn 0.5=noon 0.75=dusk
+    const phase = frac < 0.21 ? 'Night' : frac < 0.33 ? 'Dawn' : frac < 0.5 ? 'Morning'
+      : frac < 0.58 ? 'Midday' : frac < 0.71 ? 'Afternoon' : frac < 0.88 ? 'Dusk' : 'Night';
+    const seasonDayOfYear = core.day % DAYS_PER_YEAR;
+    const dayOfSeason = (seasonDayOfYear % DAYS_PER_SEASON) + 1;
+    const seasonLabel2 = `${SEASONS[Math.floor(seasonDayOfYear / DAYS_PER_SEASON)]} day ${dayOfSeason}/${DAYS_PER_SEASON}`;
+    line(7, `${paused ? 'PAUSED' : 'speed ' + speed + '×'}  ${phase}  ${seasonLabel2}${core.builds.length > 0 ? `  blueprints: ${core.builds.length}` : ''}`); }
   { const svc = core.services();
     const parts: string[] = [`sleep ${svc.sleep}`];
     if (svc.watch > 0) parts.push(`watch ${svc.watch}`);
