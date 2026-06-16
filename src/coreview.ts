@@ -41,7 +41,7 @@ import { applyOverrides } from './ui/spriteOverrides';
 const sprites = buildSprites([]);
 void applyOverrides(sprites);
 
-const MAP = 64;
+const MAP = 96; // room to grow — the colony starts as a cluster in a wider world
 let core = new TownCore({ width: MAP, height: MAP, seed: Date.now() % 100000, terrain: true });
 (window as unknown as { core: TownCore }).core = core;
 
@@ -129,16 +129,23 @@ const TILE = 14; // base px per tile at zoom 1
 const view = { x: 0, y: 0, scale: 1 };
 const MIN_SCALE = 0.4, MAX_SCALE = 4;
 
-/** Frame the whole map centered in the viewport (the default + reset view). */
+/** Frame the whole map centered in the viewport (the O / reset view). */
 function fitView(): void {
   view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(canvas.width, canvas.height) / (MAP * TILE)));
   view.x = (MAP * TILE * view.scale - canvas.width) / 2;
   view.y = (MAP * TILE * view.scale - canvas.height) / 2;
 }
+/** Center on the colony at a comfortable zoom — the initial view, so the player
+ *  starts looking at their town rather than a tiny dot in a wide map. */
+function focusTown(span = 46): void {
+  view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(canvas.width, canvas.height) / (span * TILE)));
+  view.x = core.homeX * TILE * view.scale - canvas.width / 2;
+  view.y = core.homeY * TILE * view.scale - canvas.height / 2;
+}
 function resize(): void { canvas.width = innerWidth; canvas.height = innerHeight; ctx.imageSmoothingEnabled = false; }
 resize();
-fitView();
-addEventListener('resize', () => { resize(); fitView(); });
+focusTown();
+addEventListener('resize', resize); // preserve the current pan/zoom across resizes
 
 /** Screen (canvas-local) px → tile coords, undoing the camera transform. */
 const tileAt = (mx: number, my: number) => ({
