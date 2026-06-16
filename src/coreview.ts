@@ -198,12 +198,14 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (e.key === ' ') { paused = !paused; e.preventDefault(); return; }
-  // Camera: arrows pan, O frames the whole map.
+  // Camera: WASD / arrows pan, O frames the whole map. (WASD skipped when a
+  // modifier is held so Ctrl+S save etc. still work.)
   const PAN = 60;
-  if (e.key === 'ArrowUp')    { view.y -= PAN; e.preventDefault(); return; }
-  if (e.key === 'ArrowDown')  { view.y += PAN; e.preventDefault(); return; }
-  if (e.key === 'ArrowLeft')  { view.x -= PAN; e.preventDefault(); return; }
-  if (e.key === 'ArrowRight') { view.x += PAN; e.preventDefault(); return; }
+  const mod = e.ctrlKey || e.metaKey;
+  if (e.key === 'ArrowUp'    || (k === 'w' && !mod)) { view.y -= PAN; e.preventDefault(); return; }
+  if (e.key === 'ArrowDown'  || (k === 's' && !mod)) { view.y += PAN; e.preventDefault(); return; }
+  if (e.key === 'ArrowLeft'  || (k === 'a' && !mod)) { view.x -= PAN; e.preventDefault(); return; }
+  if (e.key === 'ArrowRight' || (k === 'd' && !mod)) { view.x += PAN; e.preventDefault(); return; }
   if (k === 'o') { fitView(); return; }
   if (e.key === '1') { speed = 1; return; }
   if (e.key === '2') { speed = 3; return; }
@@ -229,12 +231,12 @@ addEventListener('keydown', (e) => {
     return;
   }
   // Tool keys
-  if (k === 'w') { tool = 'wall'; return; }
+  if (k === 'h') { tool = 'wall'; return; }    // H/J/K: WASD now pans, so the
   if (k === 'e') { tool = 'erase'; return; }
   if (k === 'g') { tool = 'gate'; return; }
-  if (k === 'd') { tool = 'floor'; return; }
+  if (k === 'j') { tool = 'floor'; return; }   // wall/floor/station tools moved
   if (k === 'z') { tool = 'room'; return; }
-  if (k === 'a') { tool = 'station'; return; }
+  if (k === 'k') { tool = 'station'; return; } // off W/D/A onto H/J/K
   if (k === 'f') { tool = 'field'; return; }
   if (k === 'c') { tool = 'woodcutter'; return; }
   if (k === 'q') { tool = 'quarry'; return; }
@@ -269,9 +271,10 @@ let panning = false;
 let panLast = { x: 0, y: 0 };
 canvas.addEventListener('mousedown', (e) => {
   if (e.button === 1) { panning = true; panLast = { x: e.clientX, y: e.clientY }; e.preventDefault(); return; }
+  // Left-click on a settler inspects it (any tool) instead of painting.
+  if (e.button === 0 && maybeInspect(e)) return;
   painting = e.button === 2 ? 2 : 1;
   paintAt(e);
-  if (e.button === 0 && tool === 'wall') maybeInspect(e); // click in non-paint = inspect
 });
 addEventListener('mouseup', () => {
   panning = false;
@@ -295,18 +298,21 @@ canvas.addEventListener('wheel', (e) => {
   zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1 : -1);
 }, { passive: false });
 
-/** Click near a settler to open the inspector. Used when no paint action fired. */
-function maybeInspect(e: MouseEvent): void {
+/** Click on/near a settler to open the inspector. Returns true if one was hit
+ *  (so the caller can skip painting). */
+function maybeInspect(e: MouseEvent): boolean {
   const r = canvas.getBoundingClientRect();
   const t = tileAt(e.clientX - r.left, e.clientY - r.top);
   const a = core.agents;
-  let bestDist = 2; // Manhattan tiles, threshold for "near"
+  let bestDist = 1.2; // Manhattan tiles — basically "clicked the settler's tile"
   let bestIdx = -1;
   for (let i = 0; i < a.count; i++) {
     const d = Math.abs(a.posX[i] - t.x) + Math.abs(a.posY[i] - t.y);
-    if (d < bestDist) { bestDist = d; bestIdx = i; }
+    if (d <= bestDist) { bestDist = d; bestIdx = i; }
   }
-  inspected = bestIdx >= 0 ? core.inspect(bestIdx) : null;
+  if (bestIdx < 0) return false;
+  inspected = core.inspect(bestIdx);
+  return true;
 }
 
 function paintAt(e: MouseEvent): void {
@@ -576,9 +582,9 @@ function draw(): void {
 
   // Key hints
   ctx.fillStyle = '#888'; ctx.font = '11px monospace';
-  ctx.fillText('W wall  E erase  G gate  D floor  T trap  Z room([ ])  A station(, .)', 8, 20 + 10 * 17);
+  ctx.fillText('H wall  E erase  G gate  J floor  T trap  Z room([ ])  K station(, .)', 8, 20 + 10 * 17);
   ctx.fillText('F field  C chop  Q quarry  B fishery  L flax  R raid  N settler  X queue  Y focus  1-4 speed  space pause', 8, 20 + 11 * 17);
-  ctx.fillText('camera: scroll zoom · arrows / middle-drag pan · O overview', 8, 20 + 12 * 17);
+  ctx.fillText('camera: WASD / arrows pan · scroll zoom · middle-drag · O overview   ·   click a settler to inspect', 8, 20 + 12 * 17);
 
   // ── Settler inspector panel (top-right) ──────────────────────────────────
   if (inspected) {
