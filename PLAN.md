@@ -253,10 +253,12 @@ PART 3, not a one-commit wire-up.
    a reloaded settler keeps its name), maintained through swap-remove, serialized (old saves derive
    from id). Prerequisite for the HUD settler panels + the event log (deaths/births now name the
    settler). Tests: `tests/persona.test.ts` (names suite).
-4. **View adapter (`TownCoreView`)** — read-model exposing what a renderer needs (agents/stations/
-   rooms/terrain/raiders as plain iterables, settlers as `{ name, mood, traits, … }`) so the renderer
-   and HUD never reach into SoA internals. *Partial:* `TownCore.inspect(i) → SettlerView` landed (the
-   per-settler record for the inspector panel); the iterables for tiles/stations/raiders are still TODO.
+4. **View adapter (`TownCoreView`)** ✅ *(PR #134)* — read-model exposing what a renderer needs so the
+   renderer and HUD never reach into SoA internals. Landed: `TownCore.inspect(i) → SettlerView` (the
+   per-settler record for the inspector panel) plus the renderer-facing generators
+   `settlers()` / `stationViews()` / `raiders()` (with `SettlerView`/`StationView`/`RaiderView`
+   interfaces). *Remaining (lands with the Stage 5 renderer):* `tiles()`/`zones()`/`builds()`
+   iterables, if needed beyond the existing getters.
 5. **SoA renderer** — a render path that draws a `TownCore` via the adapter (terrain + painted
    walls/floors/rooms/stations + agents + raiders). Large; **GUI-verify required** (not headless).
 6. **Live wiring behind a flag** — boot `TownCore` in `main.ts` parallel to `Simulation` behind a
@@ -284,11 +286,18 @@ need GUI verification, so they should not be landed blind from headless CI.
 **Plan file:** `PLAN.md` (this file, committed to repo)  
 **Toolchain:** `npm ci` once per fresh container, then `npx vitest run` (full suite ~90s), `npx tsc --noEmit`, `npm run build`. CI (`.github/workflows/test.yml`) runs `npm install → npm run build → npm test` on Node 24. Note: `tsconfig` `include` is `["src"]`, so `tsc` checks `src/` only — `tests/` and `scripts/` are verified by `vitest`/`tsx` at run time, not by `tsc`.
 
-### Current state (updated 2026-06-15, PRs #134–137 merged)
+### Current state (updated 2026-06-16, PRs #134–141 merged; macro/longrun re-landed on main)
 
-**Test baseline: 839 passing** (↑ from 616). `tsc` + `vite build` clean. PRs #134–137 merged. **Stage 4 behavior port: traits+skills, wounds/medical, relationships/thoughts, and raids/combat landed. B-6 PART 1 (TownCore) fully integrated.** All additive — the live game is untouched. SAVE_VERSION is 10. The B-6 PART 3 swap remains gated on GUI play-verify.
+**Test baseline: 839 passing** (↑ from 616). `tsc` + `vite build` clean. Version **v0.41.1**. **Stage 4
+behavior port: traits+skills, wounds/medical, relationships/thoughts, and raids/combat landed. B-6
+PART 1 (TownCore) fully integrated.** All additive — the live game is untouched. SAVE_VERSION is 10.
+The B-6 PART 3 swap remains gated on GUI play-verify.
 
-**Active trunk:** `claude/loving-gates-3luzuc` (contains PRs #135–137 merged in; ahead of main by those merges — push a follow-up PR to land on main when ready).
+**Trunk reconciliation (2026-06-16):** PRs #136/#137 (macro harness + region long-run test) had been
+merged only into the `claude/loving-gates-3luzuc` sub-branch, never onto `main` — so main sat at 825
+tests while this file claimed 839. Those two feature commits are now cherry-picked back onto `main`
+(`src/sim/macro-headless.ts`, `tests/macro.test.ts`, `tests/region-longrun.test.ts`, `sim:macro`
+script), restoring the 839 baseline. `main` is the active trunk again; no stranded sub-branch.
 
 **PR #134 (merged) adds — full feature list:**
 - Comprehensive event tests (all choice/non-choice events tested), drought/flood HUD indicator, research ETA per tech, Y-key focus cycle, prestige for pop milestones and tiers (25/50/100/200), Scholar Traveller event, sick indicator on settlers, colony health warning in HUD.
