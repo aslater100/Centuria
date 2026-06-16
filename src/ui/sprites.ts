@@ -170,6 +170,7 @@ export interface SpriteSet {
   soilSown: HTMLCanvasElement;
   soilGrown: HTMLCanvasElement;
   soilRipe: HTMLCanvasElement;
+  soilWinter: HTMLCanvasElement;
   roads: Record<string, HTMLCanvasElement>;
   roadPlans: Record<string, HTMLCanvasElement>;
   stockpileZone: HTMLCanvasElement;
@@ -181,6 +182,8 @@ export interface SpriteSet {
   gateVariants: HTMLCanvasElement[];
   gatePlan: HTMLCanvasElement;
   sapling: HTMLCanvasElement;
+  /** Index matches FORAGE type: 0=none(unused), 1=berries, 2=mushrooms, 3=herbs */
+  forage: HTMLCanvasElement[];
   settler: HTMLCanvasElement[][];
   settlerArmed: HTMLCanvasElement[][];
   raider: HTMLCanvasElement[];
@@ -619,6 +622,27 @@ function soilTile(stage: 'bare' | 'sown' | 'grown' | 'ripe'): HTMLCanvasElement 
       }
     }
   }
+  return c;
+}
+
+/** Frozen winter farmland — frost-grey furrows with ice-blue sheen and snow streaks. */
+function soilWinterTile(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  // desaturated grey-brown base
+  g.fillStyle = '#5a5450'; g.fillRect(0, 0, TILE, TILE);
+  for (let y = 0; y < TILE; y += 6) {
+    g.fillStyle = '#484440'; g.fillRect(0, y + 4, TILE, 2); // frozen trough
+    g.fillStyle = '#6e6a64'; g.fillRect(0, y, TILE, 2);     // ridge
+    g.fillStyle = '#c8d0d8'; // ice sheen on crest
+    for (let x = 2; x < TILE; x += 9) g.fillRect(x, y, 2, 1);
+  }
+  // snow streaks across the top of ridges
+  g.fillStyle = '#d8e0e8';
+  for (let y = 0; y < TILE; y += 6) g.fillRect(0, y, TILE, 1);
+  g.fillStyle = '#eef2f8';
+  for (let x = 1; x < TILE; x += 14) g.fillRect(x, 0, 4, TILE);
   return c;
 }
 
@@ -2083,6 +2107,78 @@ function wolfSprite(frame: number): HTMLCanvasElement {
   }));
 }
 
+/** Berry bush — dark green leaves, red/purple berry clusters. */
+function berryBushSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  // shadow
+  fillDisc(g, 16, 27, 8, 3, P.shadow);
+  // bush body (two overlapping leaf clumps)
+  fillDisc(g, 13, 19, 9, 8, P.treeLeafDark);
+  fillDisc(g, 20, 20, 8, 7, P.treeLeafDark);
+  fillDisc(g, 13, 18, 8, 7, P.treeLeaf);
+  fillDisc(g, 19, 19, 7, 6, P.treeLeaf);
+  // warm lit highlight
+  fillDisc(g, 11, 16, 5, 4, P.treeLeafLight);
+  g.fillStyle = P.treeLeafTop; g.fillRect(10, 14, 3, 2);
+  // berry clusters — red+dark red
+  const berries: [number, number][] = [[12,20],[15,22],[18,19],[21,21],[14,18],[20,23]];
+  for (const [bx, by] of berries) {
+    g.fillStyle = '#8a2838'; g.fillRect(bx, by, 3, 2);
+    g.fillStyle = '#c03848'; g.fillRect(bx, by, 2, 1);
+    g.fillStyle = '#e05060'; g.fillRect(bx, by, 1, 1);
+  }
+  return c;
+}
+
+/** Mushroom cluster — pale tan caps with buff stems. */
+function mushroomClusterSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  fillDisc(g, 16, 28, 8, 2, P.shadow);
+  // stems
+  g.fillStyle = '#c8b890'; g.fillRect(10, 22, 3, 5); g.fillRect(17, 23, 3, 4); g.fillRect(22, 21, 3, 6);
+  g.fillStyle = '#a89870'; g.fillRect(11, 23, 1, 4); g.fillRect(18, 24, 1, 3); g.fillRect(23, 22, 1, 5);
+  // caps (rounded top, darker underside)
+  const drawCap = (cx: number, cy: number, rw: number, rh: number) => {
+    fillDisc(g, cx, cy, rw, rh, '#7a5030');        // shadow underside
+    fillDisc(g, cx, cy - 1, rw - 1, rh - 1, '#b88060'); // mid cap
+    g.fillStyle = '#c89870'; g.fillRect(cx - rw + 3, cy - rh + 1, rw * 2 - 5, 2); // warm lit top
+    g.fillStyle = '#d8a880'; g.fillRect(cx - rw + 4, cy - rh + 1, 3, 1);
+  };
+  drawCap(11, 21, 6, 4);
+  drawCap(18, 22, 5, 3);
+  drawCap(23, 20, 5, 4);
+  return c;
+}
+
+/** Herb patch — soft leafy clumps in sage and muted green. */
+function herbPatchSprite(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  fillDisc(g, 16, 27, 9, 3, P.shadow);
+  // several leaf rosettes at different heights
+  const clumps: [number, number, string, string][] = [
+    [10, 22, '#7a9040', '#a0b858'],
+    [17, 20, '#5e7830', '#849848'],
+    [22, 23, '#7a9040', '#98b050'],
+    [14, 18, '#5e7830', '#7a9040'],
+    [20, 17, '#6a8838', '#90aa50'],
+  ];
+  for (const [cx, cy, dark, light] of clumps) {
+    // small leaf splays (3-4 pixel leaf shapes)
+    g.fillStyle = dark;
+    g.fillRect(cx - 2, cy, 5, 2); g.fillRect(cx, cy - 2, 2, 5);
+    g.fillStyle = light;
+    g.fillRect(cx - 1, cy, 3, 1); g.fillRect(cx, cy - 1, 1, 3);
+    g.fillStyle = '#b8cc68'; g.fillRect(cx, cy - 2, 1, 1); // bright tip
+  }
+  return c;
+}
+
 function saplingSprite(): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = TILE; c.height = TILE;
@@ -2617,6 +2713,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     soilSown: soilTile('sown'),
     soilGrown: soilTile('grown'),
     soilRipe: soilTile('ripe'),
+    soilWinter: soilWinterTile(),
     roads,
     roadPlans,
     stockpileZone: stockpileZoneTile(),
@@ -2628,6 +2725,7 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
     gateVariants: Array.from({ length: 16 }, (_, i) => gateVariantTile(i)),
     gatePlan: gatePlanTile(),
     sapling: saplingSprite(),
+    forage: [saplingSprite() /* unused slot 0 */, berryBushSprite(), mushroomClusterSprite(), herbPatchSprite()],
     settler: pawnLooks.map((lk) => [pawnSprite(lk, 0), pawnSprite(lk, 1)]),
     settlerArmed: pawnLooks.map((lk) => [pawnSprite(lk, 0, true), pawnSprite(lk, 1, true)]),
     raider: [pawnSprite(raiderLook, 0, true), pawnSprite(raiderLook, 1, true)],

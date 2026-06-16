@@ -459,7 +459,7 @@ function paintAt(e: MouseEvent): void {
 // ── Render ────────────────────────────────────────────────────────────────
 const ZONE_OUTLINE = ['', '#d4d46a', '#6ad48a', '#c8c8d8', '#6ad4d4', '#d4a06a', '#c060d0', '#e07090', '#90c050']; // forage=violet, orchard=pink, veg=green
 // Wild forage deposit marker colours by FORAGE type (berries/mushrooms/herbs).
-const FORAGE_COLOR = ['', '#e0405a', '#c8a060', '#50c060'];
+
 // Station ids that produce heat/smoke — rendered with rising smoke puffs while active.
 const SMOKE_STATIONS = new Set(['oven', 'baking_oven', 'smelter', 'kiln', 'coke_oven', 'brew_vat']);
 
@@ -490,9 +490,10 @@ function draw(): void {
     if (t === TERRAIN.WATER) blit(sprites.water[anim], x, y);
     else if (t === TERRAIN.SOIL) {
       const fz = g.zone[i] === ZONE.FIELD || g.zone[i] === ZONE.VEGGARDEN;
-      if (fz && seasonIdx === 0) blit(sprites.soilSown, x, y);   // spring: sown
+      if (fz && seasonIdx === 0) blit(sprites.soilSown, x, y);        // spring: sown
       else if (fz && seasonIdx === 1) blit(sprites.soilGrown, x, y); // summer: green
       else if (fz && seasonIdx === 2) blit(sprites.soilRipe, x, y);  // autumn: ripe
+      else if (seasonIdx === 3) blit(sprites.soilWinter, x, y);      // winter: frozen
       else blit(sprites.soil, x, y);
     }
     else if (t === TERRAIN.ROCK) blit(g.ore[i] ? sprites.rockMarked : sprites.rock, x, y);
@@ -514,11 +515,10 @@ function draw(): void {
       ctx.drawImage(sprites.sapling, x * px + off, y * px + off, sz, sz);
     }
 
-    // Wild forage deposit: a coloured dot in the tile centre (berries/mushrooms/herbs).
+    // Wild forage deposit: berry bush / mushroom cluster / herb patch sprite.
     if (g.forage[i]) {
-      ctx.fillStyle = FORAGE_COLOR[g.forage[i]];
-      const c = px / 2, rdot = Math.max(1.5, px * 0.18);
-      ctx.beginPath(); ctx.arc(x * px + c, y * px + c, rdot, 0, Math.PI * 2); ctx.fill();
+      const fspr = sprites.forage[g.forage[i]];
+      if (fspr) ctx.drawImage(fspr, x * px, y * px, px, px);
     }
 
     // Zone outline + drought/flood tint + small resource icon in corner.
