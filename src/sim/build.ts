@@ -414,8 +414,10 @@ export class BuildGrid {
     const fine = octave(Math.max(3, Math.round(W / 22)));
     const forest = octave(Math.max(3, Math.round(W / 14)));
 
+    const height = new Float32Array(W * H);
     for (let i = 0; i < W * H; i++) {
       const h = 0.55 * big[i] + 0.3 * mid[i] + 0.15 * fine[i]; // 0..1 elevation
+      height[i] = h;
       this.terrain[i] =
         h < 0.32 ? TERRAIN.WATER :
         h < 0.37 ? TERRAIN.SOIL :                         // fertile shoreline flats
@@ -426,6 +428,31 @@ export class BuildGrid {
     // Ore seams in the high rock (deterministic, capped).
     for (let i = 0, deposits = 0; i < W * H && deposits < 6; i++) {
       if (this.terrain[i] === TERRAIN.ROCK && fine[i] > 0.8) { this.ore[i] = 1; deposits++; }
+    }
+    // Rivers: from a few high points, follow steepest descent down the heightmap
+    // to the sea (or a local-minimum lake), carving a 1-tile water channel.
+    const DX8 = [1, -1, 0, 0, 1, 1, -1, -1], DY8 = [0, 0, 1, -1, 1, -1, 1, -1];
+    for (let r = 0, rivers = Math.max(2, Math.round(W / 28)); r < rivers; r++) {
+      let sx = -1, sy = -1, sh = 0.6; // pick a high-ish source
+      for (let tries = 0; tries < 40; tries++) {
+        const x = rng.int(W), y = rng.int(H);
+        if (height[y * W + x] > sh) { sx = x; sy = y; sh = height[y * W + x]; }
+      }
+      if (sx < 0) continue;
+      let x = sx, y = sy;
+      for (let step = 0; step < W * 2; step++) {
+        const i = y * W + x;
+        if (this.terrain[i] === TERRAIN.WATER) break; // reached the sea / a lake
+        this.terrain[i] = TERRAIN.WATER; this.ore[i] = 0;
+        let nx = x, ny = y, nh = height[i];
+        for (let d = 0; d < 8; d++) {
+          const ax = x + DX8[d], ay = y + DY8[d];
+          if (ax < 0 || ay < 0 || ax >= W || ay >= H) continue;
+          if (height[ay * W + ax] < nh) { nh = height[ay * W + ax]; nx = ax; ny = ay; }
+        }
+        if (nx === x && ny === y) break; // local minimum — river ends here
+        x = nx; y = ny;
+      }
     }
     // Heart clearing: a guaranteed buildable, walkable grass patch for the colony.
     const cx0 = Math.floor(W / 2), cy0 = Math.floor(H / 2);
