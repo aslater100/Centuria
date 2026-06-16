@@ -286,12 +286,48 @@ need GUI verification, so they should not be landed blind from headless CI.
 **Plan file:** `PLAN.md` (this file, committed to repo)  
 **Toolchain:** `npm ci` once per fresh container, then `npx vitest run` (full suite ~90s), `npx tsc --noEmit`, `npm run build`. CI (`.github/workflows/test.yml`) runs `npm install → npm run build → npm test` on Node 24. Note: `tsconfig` `include` is `["src"]`, so `tsc` checks `src/` only — `tests/` and `scripts/` are verified by `vitest`/`tsx` at run time, not by `tsc`.
 
-### Current state (updated 2026-06-16, PRs #134–141 merged; macro/longrun re-landed on main)
+### Current state (updated 2026-06-16, PRs #142–158 merged — **the swap shipped**)
 
-**Test baseline: 839 passing** (↑ from 616). `tsc` + `vite build` clean. Version **v0.41.1**. **Stage 4
-behavior port: traits+skills, wounds/medical, relationships/thoughts, and raids/combat landed. B-6
-PART 1 (TownCore) fully integrated.** All additive — the live game is untouched. SAVE_VERSION is 10.
-The B-6 PART 3 swap remains gated on GUI play-verify.
+**Test baseline: 852 passing** (↑ from 616). `tsc` + `vite build` clean. Version **v0.41.1**.
+
+**▶ THE SWAP HAPPENED — at the entry point.** "New Colony" on the title screen now boots the SoA
+`TownCore` (`coreview.ts` / `core.html`); the fat `Simulation` (town→region→nation) is now a secondary
+**"Classic Colony"** (PR #158, reversible — swap two handlers in `main.ts`). Rather than the
+destructive `render.ts`/`hud.ts` rewrite (un-verifiable headlessly), the SoA engine was made the
+default and fleshed out to Songs-of-Syx depth in a live, user-verified session.
+
+**SoA colony now has (PRs #145–158):** camera pan/zoom, a 96² map, **heightmap terrain** (seas/
+continents/mountains + **rivers** + **beaches**, via `generateTerrainHeightmap`), **forage** deposits
+(`ZONE.FORAGE`), **specialized farms** (orchard/veg-garden → `produce`), **husbandry** (pasture/animal
+pen → `dairy`), **storage logistics** (pop+building-scaled `storageCap()` with overflow spoilage +
+bulk `crate`; food exempt), **religion** (temple/shrine → faith mood), and an **economy/storage panel**
+(toggle **I**). All on top of the existing town sim (needs/mood/traits/skills, medical, weather,
+raids/wolves, research tech tree, market, event deck, seasonal farming).
+
+**Storage design note (research-backed):** caps are colony-tier only (SoS model — scale with built
+warehouses). The region/nation tier (`RegionSim`) already uses a **Victoria-3 flow model** (treasury +
+GDP, no per-good stockpiles), so it correctly needs no caps.
+
+**What "the swap" still does NOT include (the long pole):** the destructive render-path rewrite —
+driving the live `render.ts`/`hud.ts` from `TownCore` and retiring `Simulation` + the region flip.
+The SoA default still boots a *separate page* (`core.html`): no in-game "← Menu", and **Continue**
+resumes *Classic* saves (SoA uses its own `centuria_save` slot). See **Ways Ahead** below.
+
+**Pre-statehood fix (#144):** the Classic region tier no longer soft-locks before statehood — the
+monthly economy (tax/services) now runs pre-State and the routes/economy/settlement panels unlock
+early. Plus a `canvasXY` CSS→buffer zoom-drift fix.
+
+### Ways Ahead (next session — pick up here)
+1. **Close the SoA game loop** *(highest value, small)* — in-game "← Menu"/Esc in `coreview.ts`, and
+   wire **Continue** + the main save slot to SoA saves (it owns its own `centuria_save` today).
+2. **Yearly Report** — annual in/out/net ledger per resource (+ population) in the **I** panel.
+3. **Deep render-path swap** *(long pole, GUI-gated)* — `TownCore` into `render.ts`/`hud.ts`, retire
+   the fat `Simulation` + region flip. Only in a watched session.
+4. **Region/nation on `TownCore`** — a Victoria-3 flow tier above the colony.
+5. **Polish:** dedicated `SAND` terrain (beaches reuse SOIL); river bridges/fords; forage depletion/
+   regrow; bespoke sprites for `animal_pen`/`shrine`/`crate`; per-settlement crisis tools (`cityHtml`)
+   still gated pre-statehood in the Classic UI.
+6. **Macro tuning** is a draft baseline — `LEVERAGE_FRAGILE`/`FRAGILITY_GAIN` dial the business cycle.
 
 **Trunk reconciliation (2026-06-16):** PRs #136/#137 (macro harness + region long-run test) had been
 merged only into the `claude/loving-gates-3luzuc` sub-branch, never onto `main` — so main sat at 825
@@ -332,13 +368,18 @@ script), restoring the 839 baseline. `main` is the active trunk again; no strand
 **Build-system rewrite (replaces pre-built buildings with painted walls/floors/rooms/workstations):**
 - **B-1 ✅** (PR #101, merged) — `src/sim/build.ts` (`BuildGrid`) + `src/data/rooms.json` (14 room types) + `src/data/stations.json` (19 workstations) + `ROOM_DEFS`/`STATION_DEFS` loaders in `defs.ts` + `tests/build.test.ts`.
 
-**▶ Pick up next: Build-system B-6 PART 2 — the live swap (gated).** B-1→B-5 and **B-6 PART 1**
-(the integrated `TownCore` swap candidate) have landed. `TownCore` already composes all the
-scale-engine modules into one deterministic, serializable town sim with tests. The behavior
-parity port is now largely complete — traits/skills, wounds/medical, relationships/thoughts,
-weather, market, **and raids/combat (`src/sim/raid.ts`)** all run on the SoA columns, with
-headless parity tests (`tests/parity.test.ts`) asserting the new core matches the old sim's
-high-level dynamics. What still blocks a *safe* swap:
+**▶ UPDATE (2026-06-16): the swap shipped at the entry point.** "New Colony" now boots the SoA
+`TownCore` (via `coreview.ts`/`core.html`); the fat sim is "Classic Colony" (PR #158). The SoA colony
+was fleshed out to Songs-of-Syx depth (terrain/rivers/beaches, forage, farms, husbandry, storage caps,
+religion, camera, economy panel — PRs #145–157). See the **Current state** + **Ways Ahead** sections
+above for the live status; the *deep render-path swap* (below) is still the remaining long pole.
+
+**Original plan — Build-system B-6 PART 2, the live swap (now superseded by the entry-point swap).**
+B-1→B-5 and **B-6 PART 1** (the integrated `TownCore` swap candidate) have landed. `TownCore` already
+composes all the scale-engine modules into one deterministic, serializable town sim with tests. The
+behavior parity port is complete — traits/skills, wounds/medical, relationships/thoughts, weather,
+market, **and raids/combat (`src/sim/raid.ts`)** all run on the SoA columns, with headless parity
+tests (`tests/parity.test.ts`). What still blocks the *deep/destructive* swap (render.ts/hud.ts):
 - **GUI play-test** the new core (paint a town, watch it run, fight a raid) — the destructive
   swap can't be validated from headless CI alone, and **raid balance needs tuning there** (the
   headless numbers are deliberately conservative).

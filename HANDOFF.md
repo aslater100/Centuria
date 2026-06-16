@@ -1,14 +1,83 @@
 # Handoff — Centuria Development Guide
 
 **Last updated:** 2026-06-16  
-**Current test count:** 839 passing  
+**Current test count:** 852 passing  
 **Current version:** v0.41.1  
+**Default engine:** **SoA `TownCore`** — "New Colony" boots it; the fat `Simulation` is now "Classic Colony"  
 **Branch pattern:** feature branches off `main` via `claude/...` naming; merge via draft PR  
 **Model guidance:** See PLAN.md § Model Assignment for context ceilings per task
 
 ---
 
-## Session Snapshot — What Just Landed (2026-06-16)
+## Session Snapshot — What Just Landed (2026-06-16, SoA swap-to-default session)
+
+**Headline: the swap happened — `TownCore` is now the default "New Colony."** Rather than the
+destructive render-path rewrite (which can't be GUI-verified from a headless agent), the swap was
+done *at the entry point* and the colony sim was fleshed out to Songs-of-Syx depth. ~16 PRs (#142–158),
+all merged. Test baseline **825 → 852**. The session ran as a live, user-verified loop (each PR
+play-tested in the browser, then merged within minutes).
+
+### The swap (PRs #145–158)
+- **#145 launcher** — title-screen entry that boots the SoA core (`coreview.ts` / `core.html`).
+- **#146 camera** — pan/zoom on the SoA renderer (scroll zoom, WASD/arrows/middle-drag pan, **O**
+  overview). World drawn under a `translate+scale` transform; HUD stays screen-space.
+- **#147 bigger world** — map 64²→**96²**, initial view centred on the colony; also fixed WASD pan
+  (was colliding with build-tool keys → tools moved to **H/J/K**) and unreliable settler click-inspect.
+- **#148 heightmap terrain** — `BuildGrid.generateTerrainHeightmap()`: a value-noise elevation field
+  banded SoS-style into sea / fertile shore / land(+lowland forests) / mountains(+ore). Opt-in via
+  `new TownCore({ terrain: 'heightmap' })`. Replaces the old scattered-blob generator (still present).
+- **#150 rivers** — steepest-descent carving from high points to the sea (1-tile water channels).
+- **#151 beaches** — a SOIL "sand" shore wherever land meets water (seas/lakes/rivers).
+- **#152 forage** — a `forage` deposit layer (berries/mushrooms/herbs) scattered on grass + a
+  `ZONE.FORAGE` that only works a deposit → food/herbs.
+- **#153 economy panel** — toggle **I**: every stored good with count, net flow/day, market price,
+  plus gold/inflation and (after #156) storage used/cap.
+- **#154 farms** — `ZONE.ORCHARD` (grass) + `ZONE.VEGGARDEN` (soil) → **`produce`**, wired into the
+  feeding priority + food-variety mood system.
+- **#155 husbandry** — `pasture` room + `animal_pen` station (grain → **`dairy`**), dairy as food.
+- **#156 logistics** — **colony storage cap** that scales with **population + built shelves/crates**
+  (`storageCap()`); non-food overflow spoils daily (food is exempt — own freshness cap). New bulk
+  `crate` station. (Region/nation deliberately stays a **Victoria-3 flow model** — treasury + GDP, no
+  good stockpiles — see research note below.)
+- **#157 religion** — `temple` room + `shrine` station (`CapacityKind 'faith'`) → a daily mood lift
+  for worshippers (reuses the capacity-station pattern; no new per-agent need column).
+- **#158 default-flip** — primary **New Colony → SoA engine**; fat sim demoted to **Classic Colony**.
+  Reversible (swap two handlers); nothing deleted.
+
+**Storage research (drove #156).** SoS = colony-tier physical storage that scales with built
+warehouses (unwarehoused food spoils faster); Victoria 3 = *no* national stockpiles, goods are pure
+flow and "storage" is value (treasury/wealth). So caps live at the **colony** tier; the region/nation
+tier (`RegionSim`) already matches Victoria 3 and needs none.
+
+### Pre-statehood + bug fixes (#142–144, also this session)
+- **#142** re-landed the stranded macro harness on main + reconciled docs (see next snapshot).
+- **#143** Minsky credit-cycle tuning (cycles now emerge ~2.9 busts/century; see next snapshot).
+- **#144 pre-statehood governance** — the fat-sim region had a soft-lock: the whole monthly economy
+  (`monthlyEconomy()`) only ran *after* statehood, but statehood needs £8k treasury, so a pre-State
+  deficit had no lever. Now the economy runs pre-statehood (tax/services work), and the routes /
+  economy / settlement panels + a trimmed Treasury panel are unlocked early (Politics/Diplomacy/
+  central-bank stay nation-tier). Also a **zoom-drift fix**: `canvasXY` now maps CSS→canvas-buffer px.
+
+### Ways ahead (identified, not yet started)
+1. **Close the SoA game loop** — the default still opens a *separate page* (`core.html`): add an
+   in-game **"← Menu"/Esc** and make **Continue** resume SoA saves (it currently resumes *Classic*
+   saves; SoA uses its own `centuria_save` slot). *Highest-value next step.*
+2. **Yearly Report** — annual in/out/net ledger per resource (+ population) in the economy panel
+   (the SoS report). Small, additive, accumulate flows over a year.
+3. **Deep render-path swap** — the long pole: drive the live `render.ts`/`hud.ts` from `TownCore`,
+   retire the fat `Simulation` + the region flip. Big, GUI-gated; only attempt in a watched session.
+4. **Region/nation on `TownCore`** — a Victoria-3-style flow tier above the colony (the macro engine
+   in `region.ts` already models this; the swap would point the colony→region flip at `TownCore`).
+5. **Polish:** dedicated `SAND` terrain (beaches reuse SOIL); river bridges/fords (water blocks
+   movement); forage depletion/regrow; bespoke sprites for `animal_pen`/`shrine`/`crate` (coreview
+   draws a labelled marker fallback today); per-settlement crisis tools (`cityHtml`) still gated
+   pre-statehood in the Classic region UI.
+6. **Macro tuning** is a draft baseline — `LEVERAGE_FRAGILE`/`FRAGILITY_GAIN` are the dials if the
+   business cycle should be busier/calmer.
+
+---
+
+## Session Snapshot — What Landed (2026-06-16, earlier — macro reconciliation)
 
 ### Reconciliation + recovered macro work
 
