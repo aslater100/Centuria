@@ -90,6 +90,25 @@ describe('Win conditions fire', () => {
     expect(r.winCondition).toBeNull();
   });
 
+  it('nation gate opens once a proclaimed state holds half the map', () => {
+    const r = region();
+    const gate = () => (r as unknown as { checkProclamationGate(): void }).checkProclamationGate();
+    r.stateProclaimed = true;
+    r.playerTerritoryControl = () => 0.4; // below the hegemon threshold
+    gate();
+    expect(r.proclamationReady).toBe(false);
+    r.playerTerritoryControl = () => 0.5; // regional hegemon
+    gate();
+    expect(r.proclamationReady).toBe(true);
+  });
+
+  it('nation gate stays shut before statehood', () => {
+    const r = region();
+    r.playerTerritoryControl = () => 0.9; // holds the map but is not yet a state
+    (r as unknown as { checkProclamationGate(): void }).checkProclamationGate();
+    expect(r.proclamationReady).toBe(false);
+  });
+
   it('the first achieved path is locked in (not overwritten)', () => {
     const r = region();
     r.eraBranch = 'solarpunk';
