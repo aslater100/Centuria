@@ -607,6 +607,15 @@ function draw(): void {
     const variant = i % sprites.settler.length;
     const frame = a.state[i] === AState.Sleeping ? 0 : settlerFrame;
     blit((a.armed[i] ? sprites.settlerArmed : sprites.settler)[variant][frame], a.posX[i], a.posY[i]);
+    // Mood tint: miserable settlers have a subtle red overlay, very happy ones green.
+    const mood = a.mood[i];
+    if (mood < -10) {
+      ctx.fillStyle = `rgba(220,40,40,${Math.min(0.45, (-mood - 10) * 0.008)})`;
+      ctx.fillRect(a.posX[i] * px, a.posY[i] * px, px, px);
+    } else if (mood > 60) {
+      ctx.fillStyle = `rgba(60,220,80,${Math.min(0.25, (mood - 60) * 0.004)})`;
+      ctx.fillRect(a.posX[i] * px, a.posY[i] * px, px, px);
+    }
     if (a.woundUntreated[i]) {
       ctx.strokeStyle = '#ff4040';
       ctx.strokeRect(a.posX[i] * px, a.posY[i] * px, px, px);
