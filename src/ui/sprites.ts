@@ -600,6 +600,10 @@ function treeSprite(marked: boolean): HTMLCanvasElement {
   g.fillRect(18, 28, 4, 13);
   g.fillStyle = marked ? '#e07848' : P.trunkLight;
   g.fillRect(18, 28, 2, 11);
+  // bark texture lines
+  g.fillStyle = marked ? '#a04020' : P.trunkDark;
+  g.fillRect(19, 33, 1, 4);
+  g.fillRect(20, 38, 1, 4);
 
   const cx = 19, cy = 16;
   // base/deep canopy (cool, occluded underside)
