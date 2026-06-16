@@ -11,7 +11,21 @@
 
 ---
 
-## Session Snapshot — Backbone M1: world overview in CoreView (2026-06-16, latest)
+## Session Snapshot — UX: bottom command bar + RTS hotkeys (2026-06-16, latest)
+
+**What landed (branch `claude/game-build-iteration-assets-2kd2z0`):** Reworked CoreView
+input toward RTS conventions (user ask: "way too many hotkeys; want a SoS-style central
+command bar"). Added a **bottom-centre command bar** — categories `Build / Rooms / Work
+/ Plans / Farm / Gather`, the active one's items wrap in a grid above; click a button to
+pick the tool/room/station/blueprint. Rebuilt per frame into a `barHit` list, hit-tested
+in `mousedown` before the map gets the click. **H now recentres on the colony** (the
+"town hall"/base-camp key) instead of selecting the wall tool. Trimmed the two giant
+tool-hotkey hint lines to one concise camera/global line. Single-letter tool keys still
+work as optional shortcuts. UI-only — no sim change, 887 tests still green; browser-verified.
+
+---
+
+## Session Snapshot — Backbone M1: world overview in CoreView (2026-06-16)
 
 **What landed (branch `claude/game-build-iteration-assets-2kd2z0`):** First *visible*
 seamless-world step. `TownCore` now exposes a **lazy** `regionMap` + `site` (a
