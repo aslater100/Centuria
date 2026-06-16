@@ -10,29 +10,6 @@ import { STATION_DEFS } from '../sim/defs';
 
 export const TILE = 32;
 
-type Px = string | null;
-
-function sheet(pixels: Px[][]): HTMLCanvasElement {
-  const h = pixels.length;
-  const w = pixels[0].length;
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  const g = c.getContext('2d')!;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const col = pixels[y][x];
-      if (!col) continue;
-      g.fillStyle = col;
-      g.fillRect(x, y, 1, 1);
-    }
-  }
-  return c;
-}
-
-function grid(rows: string[], pal: Record<string, string>): Px[][] {
-  return rows.map((r) => [...r].map((ch) => (ch === '.' ? null : pal[ch] ?? null)));
-}
 
 // ---------------------------------------------------------------------------
 // COHESIVE, HUE-SHIFTED PALETTE
@@ -2023,90 +2000,136 @@ function gatePlanTile(): HTMLCanvasElement {
   return c;
 }
 
+/**
+ * Deer: top-down perspective, warm tan body, antlers rising from head.
+ * Fills most of the 32×32 tile so it reads clearly when blitted at 20px.
+ */
 function deerSprite(frame: number): HTMLCanvasElement {
-  const legA = frame === 0 ? 'LL..' : '..LL';
-  const legB = frame === 0 ? '..LL' : 'LL..';
-  const rows = [
-    '................................',
-    '................................',
-    '............e...................',
-    '...........hh...................',
-    '...........hhn..................',
-    '.......bbbbbh...................',
-    '......bbbbbbb...................',
-    '......tbbbbbbb..................',
-    `........${legA}${legB}..................`,
-    `........${legA}${legB}..................`,
-    `........${legA}${legB}..................`,
-    '.......SSSSSSSSSS...............',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-  ];
-  return sheet(grid(rows, {
-    b: '#b48a58', h: '#9c7448', n: '#231c16', e: '#6b4a2a',
-    t: '#efe7d6', L: '#7a5a36', S: 'rgba(28,22,40,0.30)',
-  }));
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const f0 = frame === 0;
+
+  const bod = '#b87848', bodDk = '#8a5a2c', bodLt = '#d09c60';
+  const legC = '#7a5028', ant = '#9c7238';
+
+  // Shadow
+  g.fillStyle = P.shadow; g.fillRect(6, 27, 20, 4);
+
+  // Legs — 2px wide stubs, front pair and back pair swap forward each frame
+  g.fillStyle = legC;
+  if (f0) {
+    g.fillRect(10, 22, 2, 6); g.fillRect(15, 21, 2, 5); // front: left fwd, right back
+    g.fillRect(20, 21, 2, 5); g.fillRect(25, 22, 2, 6); // rear: left back, right fwd
+  } else {
+    g.fillRect(10, 21, 2, 5); g.fillRect(15, 22, 2, 6); // alternate
+    g.fillRect(20, 22, 2, 6); g.fillRect(25, 21, 2, 5);
+  }
+
+  // Body — tapered oval, shadow right/lower, lit upper-left
+  fillDisc(g, 18, 17, 12, 7, bodDk);
+  fillDisc(g, 17, 16, 12, 7, bod);
+  fillDisc(g, 12, 13, 8,  5, bodLt);
+
+  // White rump patch
+  g.fillStyle = '#ece4cc'; g.fillRect(26, 12, 4, 6);
+  g.fillStyle = '#f4ede0'; g.fillRect(27, 12, 3, 5);
+
+  // Neck (connects body to head)
+  g.fillStyle = bod;    g.fillRect(7, 10, 8, 8);
+  g.fillStyle = bodLt;  g.fillRect(7, 10, 4, 6);  // lit side
+  g.fillStyle = bodDk;  g.fillRect(13, 10, 2, 8); // shadow side
+
+  // Head
+  fillDisc(g, 7, 7, 6, 5, bodDk);
+  fillDisc(g, 6, 6, 6, 5, bod);
+  fillDisc(g, 3, 4, 4, 3, bodLt);
+
+  // Snout / nose
+  g.fillStyle = '#5a2e10'; g.fillRect(1, 8, 5, 3);
+  g.fillStyle = '#3a1a08'; g.fillRect(1, 9, 2, 1); // nostril
+
+  // Eye
+  g.fillStyle = P.outline; g.fillRect(8, 5, 2, 1);
+  g.fillStyle = '#e0c890'; g.fillRect(8, 5, 1, 1); // glint
+
+  // Ear (visible from above)
+  g.fillStyle = bodDk; g.fillRect(9, 2, 4, 4);
+  g.fillStyle = '#c07050'; g.fillRect(10, 3, 2, 2); // inner pink
+
+  // Antlers
+  g.fillStyle = ant;
+  g.fillRect(5, 0, 2, 5); g.fillRect(3, 0, 3, 1); g.fillRect(4, 1, 1, 1); // left + tine
+  g.fillRect(9, 0, 2, 4); g.fillRect(9, 0, 5, 1); g.fillRect(11, 1, 1, 1); // right + tine
+
+  return c;
 }
 
+/**
+ * Wolf: stockier dark-grey body, prominent fanged snout, pointed ears, bushy tail.
+ * Differentiated from deer by color and silhouette at small display sizes.
+ */
 function wolfSprite(frame: number): HTMLCanvasElement {
-  const legA = frame === 0 ? 'LL..' : '..LL';
-  const legB = frame === 0 ? '..LL' : 'LL..';
-  const rows = [
-    '................................',
-    '................................',
-    '.........e.e....................',
-    '.........hhh....................',
-    '.........hhhn...................',
-    '......bbbbbh....................',
-    '.....tbbbbbb....................',
-    '......bbbbbb....................',
-    `......${legA}${legB}..................`,
-    `......${legA}${legB}..................`,
-    `......${legA}${legB}..................`,
-    '......SSSSSSSSSS................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-    '................................',
-  ];
-  return sheet(grid(rows, {
-    b: '#72717a', h: '#5e5d66', n: '#231c16', e: '#5e5d66',
-    t: '#92929c', L: '#4a4a52', S: 'rgba(28,22,40,0.30)',
-  }));
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const g = c.getContext('2d')!;
+  const f0 = frame === 0;
+
+  const bod = '#727280', bodDk = '#4a4a58', bodLt = '#9090a0';
+  const legC = '#38384a';
+
+  // Shadow
+  g.fillStyle = P.shadow; g.fillRect(5, 27, 22, 4);
+
+  // Bushy tail (curls up on the right side)
+  g.fillStyle = bodDk;  g.fillRect(26,  8, 4, 10);
+  g.fillStyle = bod;    g.fillRect(27,  8, 2,  9);
+  g.fillStyle = '#ccccd8'; g.fillRect(26, 7, 4, 3); // white tip
+
+  // Legs — slightly heavier than deer
+  g.fillStyle = legC;
+  if (f0) {
+    g.fillRect(9,  23, 2, 5); g.fillRect(14, 22, 2, 4);
+    g.fillRect(20, 22, 2, 4); g.fillRect(25, 23, 2, 5);
+  } else {
+    g.fillRect(9,  22, 2, 4); g.fillRect(14, 23, 2, 5);
+    g.fillRect(20, 23, 2, 5); g.fillRect(25, 22, 2, 4);
+  }
+
+  // Body — heavier/broader than deer
+  fillDisc(g, 18, 18, 12, 8, bodDk);
+  fillDisc(g, 17, 17, 12, 8, bod);
+  fillDisc(g, 11, 13,  8, 6, bodLt);
+
+  // Neck
+  g.fillStyle = bod;   g.fillRect(6, 11, 9, 8);
+  g.fillStyle = bodLt; g.fillRect(6, 11, 5, 6);
+  g.fillStyle = bodDk; g.fillRect(13, 11, 2, 8);
+
+  // Head (broader, lower-set)
+  fillDisc(g, 7, 8, 7, 5, bodDk);
+  fillDisc(g, 6, 7, 7, 5, bod);
+  fillDisc(g, 2, 5, 4, 3, bodLt);
+
+  // Pointed ears
+  g.fillStyle = bodDk;
+  g.fillRect(5, 2, 3, 5);  // left ear
+  g.fillRect(11, 3, 3, 4); // right ear (partially hidden)
+  g.fillStyle = '#c05858'; g.fillRect(6, 3, 1, 3); // inner ear flush
+  g.fillStyle = '#c05858'; g.fillRect(12, 4, 1, 2);
+
+  // Snout (longer and broader than deer)
+  g.fillStyle = bodDk; g.fillRect(0, 10, 6, 4);
+  g.fillStyle = bod;   g.fillRect(0, 10, 4, 3);
+  g.fillStyle = '#141010'; g.fillRect(0, 11, 2, 1); // nostril
+  // Teeth hint
+  g.fillStyle = '#e0dcd0'; g.fillRect(1, 13, 4, 1);
+
+  // Eye — intense yellow glint
+  g.fillStyle = '#141010'; g.fillRect(7, 6, 2, 2);
+  g.fillStyle = '#c8c040'; g.fillRect(8, 6, 1, 1);
+
+  return c;
 }
 
 /** Berry bush — dark green leaves, red/purple berry clusters. */
@@ -2725,6 +2748,93 @@ function stationSprite(id: string, w: number, h: number): HTMLCanvasElement {
       g.fillRect(m + 12, m + 11, 5, 1);
       break;
     }
+    case 'game_meal': {
+      // Cooked game meat — bone-in leg piece.
+      // (default shadow at y=21 acts as underlay)
+      // Bone handle
+      g.fillStyle = '#c0b890'; g.fillRect(21, 17, 4, 12);
+      g.fillStyle = '#d8d0a8'; g.fillRect(22, 17, 2, 11);
+      fillDisc(g, 23, 29, 4, 2, '#c0b890'); // knob end
+      g.fillStyle = '#d8d0a8'; g.fillRect(21, 28, 3, 1);
+      // Meat mass — charred outside, warmer inside
+      fillDisc(g, 13, 14, 10, 8, '#4e2010'); // dark char rim
+      fillDisc(g, 12, 13, 10, 8, '#8a3c22'); // charred surface
+      fillDisc(g, 10, 11,  8, 6, '#ae5830'); // main meat
+      fillDisc(g,  7,  9,  5, 4, '#c87040'); // warm lit highlight
+      g.fillStyle = '#d8904c'; g.fillRect(6, 8, 4, 2); // bright spot
+      break;
+    }
+    case 'preserved': {
+      // Preserved / smoked meat — dark tied bundle.
+      g.fillStyle = P.shadow; g.fillRect(4, 23, 24, 6);
+      // Main bundle
+      g.fillStyle = '#4a2418'; g.fillRect(5, 11, 22, 13);
+      g.fillStyle = '#6a3828'; g.fillRect(5, 11, 22, 4); // slightly lighter top
+      g.fillStyle = '#3a1c10'; g.fillRect(5, 22, 22, 2); // dark bottom
+      // Smoke grain lines
+      g.fillStyle = '#38200e';
+      for (let lx = 6; lx < 26; lx += 5) g.fillRect(lx, 12, 1, 11);
+      // Binding twine
+      g.fillStyle = '#c8a858'; g.fillRect(4, 14, 24, 2); g.fillRect(4, 20, 24, 2);
+      // Vertical cord + knot
+      g.fillStyle = '#b09040'; g.fillRect(14, 10, 4, 13);
+      g.fillStyle = '#d4b860'; g.fillRect(15, 10, 2, 12);
+      // Lit surface hint
+      g.fillStyle = '#7a4434'; g.fillRect(6, 12, 8, 2);
+      break;
+    }
+    case 'clay': {
+      // Clay — smooth wet lump, grey-tan
+      g.fillStyle = P.shadow; g.fillRect(4, 23, 22, 6);
+      fillDisc(g, 15, 15, 11, 8, '#706050'); // dark rim
+      fillDisc(g, 14, 14, 11, 8, '#9a7858'); // mid clay
+      fillDisc(g, 10, 11,  7, 5, '#b89070'); // lit surface
+      g.fillStyle = '#c8a888'; g.fillRect(8, 10, 5, 2); // wet sheen
+      break;
+    }
+    case 'coal': {
+      // Coal — rough black chunks with subtle sheen
+      g.fillStyle = P.shadow; g.fillRect(4, 22, 24, 7);
+      g.fillStyle = '#2a2820'; g.fillRect(5, 12, 12, 10); g.fillRect(15, 14, 12, 10);
+      g.fillStyle = '#3c3a30'; g.fillRect(5, 12, 10, 8); g.fillRect(15, 14, 10, 8);
+      g.fillStyle = '#545248'; g.fillRect(5, 12, 10, 1); g.fillRect(15, 14, 10, 1); // edge sheen
+      g.fillStyle = '#403e36'; g.fillRect(5, 12, 1, 9); g.fillRect(15, 14, 1, 9);
+      break;
+    }
+    case 'iron_ore': {
+      // Iron ore — reddish-brown heavy chunk with metallic gleam
+      g.fillStyle = P.shadow; g.fillRect(4, 22, 24, 7);
+      fillDisc(g, 16, 15, 12, 8, '#543828'); // dark rim
+      fillDisc(g, 15, 14, 12, 8, '#7a5040'); // main ore (reddish-brown)
+      fillDisc(g, 11, 11,  7, 5, '#966454'); // lit surface
+      g.fillStyle = '#b08070'; g.fillRect(9, 10, 5, 2); // metallic highlight
+      // Companion chunk (lower right)
+      g.fillStyle = '#6a4030'; g.fillRect(21, 17, 7, 5);
+      g.fillStyle = '#9a6050'; g.fillRect(22, 17, 5, 4);
+      g.fillStyle = '#b08070'; g.fillRect(22, 17, 3, 1);
+      break;
+    }
+    case 'flax': {
+      // Flax — tied bundle of pale yellow-green fibers with blue flowers
+      g.fillStyle = P.shadow; g.fillRect(5, 23, 20, 5);
+      const fc = '#9cb860', fd = '#7a9040';
+      // Fiber stalks
+      for (let i = 0; i < 5; i++) {
+        const fx = 8 + i * 4;
+        g.fillStyle = (i % 2 === 0) ? fc : fd;
+        g.fillRect(fx, 6, 2, 16);
+      }
+      // Binding twine at center
+      g.fillStyle = '#c8a840'; g.fillRect(5, 12, 20, 3);
+      g.fillStyle = '#e0c050'; g.fillRect(5, 12, 20, 1);
+      // Tufted fiber tips (top)
+      g.fillStyle = '#c0d880';
+      for (let i = 0; i < 5; i++) { g.fillRect(8 + i * 4, 5, 2, 2); }
+      // Blue flower buds on some stalks
+      g.fillStyle = '#7878d0'; g.fillRect(10, 4, 2, 2); g.fillRect(18, 3, 2, 2);
+      g.fillStyle = '#a0a0f0'; g.fillRect(10, 4, 1, 1); g.fillRect(18, 3, 1, 1);
+      break;
+    }
     default: { // generic crate
       shadow();
       woodTop(m + 2, m + 3, W - 2 * m - 4, H - 2 * m - 5);
@@ -2817,10 +2927,10 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
       stone:      itemSprite('stone'),
       clothes:    itemSprite('clothes'),
       weapons:    weaponSprite(),
-      clay:       genericItemSprite('#9c6b40', '#7a5030'),
-      coal:       genericItemSprite('#3c3830', '#2a2820'),
-      iron_ore:   genericItemSprite('#786050', '#5e4840'),
-      flax:       genericItemSprite('#9cb060', '#7a9040'),
+      clay:       craftedItemSprite('clay'),
+      coal:       craftedItemSprite('coal'),
+      iron_ore:   craftedItemSprite('iron_ore'),
+      flax:       craftedItemSprite('flax'),
       herbs:      craftedItemSprite('herbs'),
       timber:     craftedItemSprite('timber'),
       brick:      craftedItemSprite('brick'),
@@ -2833,9 +2943,9 @@ export function buildSprites(buildingDefs: { id: string; w: number; h: number; u
       bread:      craftedItemSprite('bread'),
       dairy:      craftedItemSprite('dairy'),
       produce:    craftedItemSprite('produce'),
-      game_meal:  genericItemSprite('#8c5c3c', '#6a4028'),
+      game_meal:  craftedItemSprite('game_meal'),
       fish_meal:  craftedItemSprite('fish_meal'),
-      preserved:  genericItemSprite('#6a4030', '#502820'),
+      preserved:  craftedItemSprite('preserved'),
       coke:       genericItemSprite('#2a2010', '#1a1408'),
       petroleum:  genericItemSprite('#1c1e28', '#14161e'),
     },

@@ -652,6 +652,14 @@ function draw(): void {
       ctx.strokeStyle = '#ff4040';
       ctx.strokeRect(a.posX[i] * px, a.posY[i] * px, px, px);
     }
+    // Health bar under any settler who's taken damage
+    if (a.health[i] < 98) {
+      const hpFrac = Math.max(0, a.health[i]) / 100;
+      ctx.fillStyle = '#1a1a1a88';
+      ctx.fillRect(a.posX[i] * px + 1, (a.posY[i] + 1) * px - 3, px - 2, 2);
+      ctx.fillStyle = hpFrac > 0.6 ? '#44cc44' : hpFrac > 0.35 ? '#ccaa22' : '#cc2222';
+      ctx.fillRect(a.posX[i] * px + 1, (a.posY[i] + 1) * px - 3, Math.round((px - 2) * hpFrac), 2);
+    }
     if (a.sickUntilTick[i] > core.tickNo) {
       ctx.fillStyle = '#ddcc00';
       ctx.fillText('~', a.posX[i] * px + px - 4, a.posY[i] * px + px);
