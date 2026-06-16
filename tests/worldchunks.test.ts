@@ -145,3 +145,33 @@ describe('worldchunks — ChunkCache', () => {
     expect(cache.size).toBe(0);
   });
 });
+
+// ── TownCore (BuildGrid) summary ────────────────────────────────────────────
+import { TownCore } from '../src/sim/towncore';
+import { computeTownChunkSummary, TOWN_TERRAIN_COLORS } from '../src/ui/worldchunks';
+
+describe('worldchunks — TownCore parcel summary', () => {
+  it('produces a res×res raster and a valid dominant biome from a BuildGrid', () => {
+    const core = new TownCore({ width: 96, height: 96, seed: 7, terrain: 'heightmap' });
+    const s = computeTownChunkSummary(core.grid, 3, 4);
+    expect(s.res).toBe(CHUNK_RES);
+    expect(s.pixels.length).toBe(CHUNK_RES * CHUNK_RES * 4);
+    expect(s.cellX).toBe(3);
+    expect(s.cellY).toBe(4);
+    expect(TOWN_TERRAIN_COLORS).toContain(s.biome);
+    // Alpha channel fully opaque on every pixel.
+    for (let i = 3; i < s.pixels.length; i += 4) expect(s.pixels[i]).toBe(255);
+  });
+
+  it('an all-grass grid summarises to the grass colour', () => {
+    const core = new TownCore({ width: 96, height: 96, seed: 1 });
+    core.grid.terrain.fill(0); // TERRAIN.GRASS
+    const s = computeTownChunkSummary(core.grid);
+    expect(s.biome).toBe(TOWN_TERRAIN_COLORS[0]);
+  });
+
+  it('rejects a resolution that does not divide the grid', () => {
+    const core = new TownCore({ width: 96, height: 96, seed: 1 });
+    expect(() => computeTownChunkSummary(core.grid, 0, 0, 7)).toThrow();
+  });
+});

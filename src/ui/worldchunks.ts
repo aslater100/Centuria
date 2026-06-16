@@ -230,6 +230,50 @@ export function biomeColorOf(world: World): string {
   return TERRAIN_COLORS[dominantKind(counts)];
 }
 
+// ── TownCore (BuildGrid) summary ────────────────────────────────────────────
+// The primary engine stores terrain as a flat Uint8Array of the TERRAIN enum
+// (build.ts), not sim/world's TileKind objects — so it gets its own tiny
+// downsampler. Colours are indexed by the TERRAIN enum order
+// (grass,tree,water,soil,rock,sand). ponytail: raster + biome only; building/
+// stockpile markers come when the world-view renderer (M1) actually needs them.
+export const TOWN_TERRAIN_COLORS = ['#4a7c3a', '#2f5e2a', '#2f6fb0', '#8a6a3f', '#7a7a7a', '#caa46a'];
+
+export function computeTownChunkSummary(
+  grid: { width: number; height: number; terrain: Uint8Array },
+  cellX = 0,
+  cellY = 0,
+  res = CHUNK_RES,
+): ChunkSummary {
+  const { width: W, height: H } = grid;
+  if (W % res !== 0 || H % res !== 0) {
+    throw new Error(`worldchunks: res ${res} must divide grid ${W}×${H}`);
+  }
+  const blockW = W / res, blockH = H / res;
+  const pixels = new Uint8ClampedArray(res * res * 4);
+  const global = new Array(TOWN_TERRAIN_COLORS.length).fill(0);
+  for (let gy = 0; gy < res; gy++) {
+    for (let gx = 0; gx < res; gx++) {
+      const counts = new Array(TOWN_TERRAIN_COLORS.length).fill(0);
+      for (let dy = 0; dy < blockH; dy++) {
+        for (let dx = 0; dx < blockW; dx++) {
+          const k = grid.terrain[(gy * blockH + dy) * W + (gx * blockW + dx)];
+          counts[k]++; global[k]++;
+        }
+      }
+      const [r, g, b] = parseHex(TOWN_TERRAIN_COLORS[argmax(counts)]);
+      const i = (gy * res + gx) * 4;
+      pixels[i] = r; pixels[i + 1] = g; pixels[i + 2] = b; pixels[i + 3] = 255;
+    }
+  }
+  return { cellX, cellY, res, pixels, biome: TOWN_TERRAIN_COLORS[argmax(global)], buildings: [], stockpile: null };
+}
+
+function argmax(a: number[]): number {
+  let best = 0, bestN = -1;
+  for (let i = 0; i < a.length; i++) if (a[i] > bestN) { bestN = a[i]; best = i; }
+  return best;
+}
+
 // ── Cache ────────────────────────────────────────────────────────────────────────
 // Keyed by "cellX,cellY". A parcel is summarised lazily on first request and
 // reused until the render layer marks it dirty (build/demolish/stock change).

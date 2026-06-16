@@ -11,7 +11,26 @@
 
 ---
 
-## Session Snapshot — Content: extraction-zone yield techs (2026-06-16, latest)
+## Session Snapshot — Backbone M0 slice: TownCore chunk summary (2026-06-16, latest)
+
+**What landed (branch `claude/game-build-iteration-assets-2kd2z0`):** First step of the
+seamless-world reconciliation (M0). `worldchunks.computeChunkSummary` only understood
+sim/world's `TileKind` objects (classic engine); added `computeTownChunkSummary(grid…)`
+that downsamples a primary-engine `BuildGrid` (flat `TERRAIN` Uint8Array) into the same
+`ChunkSummary` raster + dominant biome. Pure, DOM-free, headless-tested (885 tests).
+Raster + biome only for now — building/stockpile markers come when the M1 world-view
+renderer needs them (ponytail-noted). This is the piece M1 (world view in CoreView)
+will blit for off-screen parcels.
+
+**Note:** A trait-pool expansion was tried this session and **reverted** — adding 5
+personality traits shifted seeded colony balance harsher (a default-seed colony died,
+avg mood dropped below a pinned threshold). Not worth chasing seeded thresholds for
+cosmetic variety. Also audited `region.ts`/`towncore.ts` for dead tech-id references
+(after the `food_preservation` fix in #173): none remain.
+
+---
+
+## Session Snapshot — Content: extraction-zone yield techs (2026-06-16)
 
 **What landed (branch `claude/game-build-iteration-assets-2kd2z0`):** Finished the
 harvest-yield story. Field/flax zones had tech multipliers but woodcutter/quarry/fishery
