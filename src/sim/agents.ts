@@ -528,7 +528,7 @@ export class AgentStore {
    * and side-effect-free). Returns nothing — death handling is the caller's job
    * via a post-pass over `health` (kept simple for the proof).
    */
-  tick(tickNo: number, rand: () => number, infectionChanceMult = 1.0, infectionBleedMult = 1.0): void {
+  tick(tickNo: number, rand: () => number, infectionChanceMult = 1.0, infectionBleedMult = 1.0, road?: Uint8Array, gridWidth = 64): void {
     const n = this.count;
     for (let i = 0; i < n; i++) {
       // --- needs decay (tight, branch-light: the part that vectorizes) ---
@@ -601,15 +601,18 @@ export class AgentStore {
 
       // --- movement ---
       if (this.state[i] === AState.Moving) {
-        const step = SPEED * MINUTES_PER_TICK;
+        const tx0 = Math.floor(this.posX[i]);
+        const ty0 = Math.floor(this.posY[i]);
+        const onRoad = road && road[ty0 * gridWidth + tx0] > 0;
+        const step = SPEED * MINUTES_PER_TICK * (onRoad ? 1.5 : 1.0); // 50% faster on roads
         const fi = this.field[i];
         if (fi >= 0) {
           // Flow-field follow: read this tile's precomputed step direction (O(1)).
           // The field index can dangle if the owner cleared `fields` (e.g. no open
           // jobs this tick) while we were mid-move — treat a missing field as "arrived".
           const field = this.fields[fi];
-          const tx = Math.floor(this.posX[i]);
-          const ty = Math.floor(this.posY[i]);
+          const tx = tx0;
+          const ty = ty0;
           if (field && field.dirAt(tx, ty, this._dir)) {
             const len = Math.sqrt(this._dir.x * this._dir.x + this._dir.y * this._dir.y) || 1;
             this.posX[i] += (this._dir.x / len) * step;

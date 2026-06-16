@@ -553,11 +553,13 @@ function draw(): void {
     }
   }
 
-  // Agents
+  // Agents (animate: alternate walk frames every 6 ticks)
+  const settlerFrame = (core.tickNo / 6 | 0) % 2;
   const a = core.agents;
   for (let i = 0; i < a.count; i++) {
     const variant = i % sprites.settler.length;
-    blit(sprites.settler[variant][0], a.posX[i], a.posY[i]);
+    const frame = a.state[i] === AState.Sleeping ? 0 : settlerFrame;
+    blit((a.armed[i] ? sprites.settlerArmed : sprites.settler)[variant][frame], a.posX[i], a.posY[i]);
     if (a.woundUntreated[i]) {
       ctx.strokeStyle = '#ff4040';
       ctx.strokeRect(a.posX[i] * px, a.posY[i] * px, px, px);
@@ -586,6 +588,14 @@ function draw(): void {
   // Raiders
   for (const r of core.raids.raiders) {
     blit(sprites.raider[r.fleeing ? 0 : (performance.now() / 200 | 0) % sprites.raider.length], r.x, r.y);
+  }
+
+  // Wolves
+  if (core.wolves.active) {
+    const wolfFrame = (performance.now() / 250 | 0) % sprites.wolf.length;
+    for (const w of core.wolves.wolves) {
+      blit(sprites.wolf[w.leaving ? 0 : wolfFrame], w.x | 0, w.y | 0);
+    }
   }
 
   // Blueprint ghosts
@@ -900,6 +910,13 @@ function draw(): void {
     if (g.wall[i]) parts.push('wall');
     if (g.gate[i]) parts.push('gate');
     if (g.trap[i]) parts.push('spike trap');
+    // Settlers on this tile
+    for (let si = 0; si < a.count; si++) {
+      if ((a.posX[si] | 0) === hoverX && (a.posY[si] | 0) === hoverY) {
+        const stateLabel = a.state[si] === AState.Sleeping ? 'sleeping' : a.state[si] === AState.Working ? 'working' : a.state[si] === AState.Moving ? 'moving' : 'idle';
+        parts.push(`${a.name(si)} (${stateLabel})`);
+      }
+    }
     if (parts.length > 0) {
       const tip = `(${hoverX},${hoverY}) ${parts.join(' · ')}`;
       ctx.font = '11px monospace';

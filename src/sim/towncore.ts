@@ -621,7 +621,8 @@ export class TownCore {
       * (this._hasWell ? (1 - TUNING.wellInfectionReduction) : 1.0);
     a.tick(t, this._rand,
       infectionChanceMult,
-      this.researchBook.hasTech('germ_theory') ? 0.5 : 1.0);
+      this.researchBook.hasTech('germ_theory') ? 0.5 : 1.0,
+      this.grid.road, this.grid.width);
 
     // 5b. Mental break: a miserable settler may crack, leaving a sour thought.
     for (let i = 0; i < a.count; i++) {
