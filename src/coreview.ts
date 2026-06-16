@@ -111,6 +111,12 @@ const app = document.getElementById('app')!;
 const canvas = document.createElement('canvas');
 app.appendChild(canvas);
 const ctx = canvas.getContext('2d')!;
+// CSS (layout) dimensions of the canvas. The backing store is sized at
+// cw·DPR × ch·DPR so the scene renders at the display's native resolution
+// ("more pixels" on HiDPI screens); every coordinate below stays in CSS px and
+// the per-frame base transform (set in draw) scales it up uniformly, so layout,
+// input and the world camera are unchanged — only sharper.
+let cw = 0, ch = 0, DPR = 1;
 
 // Minimap: off-screen canvas rendered at 2px/tile, overlaid in bottom-right corner.
 const MINI_PX = 2; // px per tile in the minimap
@@ -138,22 +144,32 @@ app.appendChild(menuBtn);
 // screen-space offset (px); `view.scale` is the zoom.
 const TILE = 20; // base px per tile at zoom 1 (sprites render at 32; ~62% scale gives crisp detail)
 const view = { x: 0, y: 0, scale: 1 };
+// Reused each frame for the agent painter's-algorithm y-sort, so the draw loop
+// doesn't allocate a fresh index array (and its closures) every frame.
+const agentOrder: number[] = [];
 const MIN_SCALE = 0.4, MAX_SCALE = 4;
 
 /** Frame the whole map centered in the viewport (the O / reset view). */
 function fitView(): void {
-  view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(canvas.width, canvas.height) / (MAP * TILE)));
-  view.x = (MAP * TILE * view.scale - canvas.width) / 2;
-  view.y = (MAP * TILE * view.scale - canvas.height) / 2;
+  view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(cw, ch) / (MAP * TILE)));
+  view.x = (MAP * TILE * view.scale - cw) / 2;
+  view.y = (MAP * TILE * view.scale - ch) / 2;
 }
 /** Center on the colony at a comfortable zoom — the initial view, so the player
  *  starts looking at their town rather than a tiny dot in a wide map. */
 function focusTown(span = 36): void {
-  view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(canvas.width, canvas.height) / (span * TILE)));
-  view.x = core.homeX * TILE * view.scale - canvas.width / 2;
-  view.y = core.homeY * TILE * view.scale - canvas.height / 2;
+  view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(cw, ch) / (span * TILE)));
+  view.x = core.homeX * TILE * view.scale - cw / 2;
+  view.y = core.homeY * TILE * view.scale - ch / 2;
 }
-function resize(): void { canvas.width = innerWidth; canvas.height = innerHeight; ctx.imageSmoothingEnabled = false; }
+function resize(): void {
+  cw = innerWidth; ch = innerHeight;
+  // Cap DPR at 2 — beyond that the extra fill cost outweighs the visible gain.
+  DPR = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+  canvas.width = Math.round(cw * DPR); canvas.height = Math.round(ch * DPR);
+  canvas.style.width = cw + 'px'; canvas.style.height = ch + 'px';
+  ctx.imageSmoothingEnabled = false; // crisp pixel art (setting width resets ctx state)
+}
 resize();
 focusTown();
 addEventListener('resize', resize); // preserve the current pan/zoom across resizes
@@ -337,12 +353,12 @@ canvas.addEventListener('wheel', (e) => {
 canvas.addEventListener('click', (e) => {
   const r = canvas.getBoundingClientRect();
   const cx = e.clientX - r.left, cy = e.clientY - r.top;
-  const mmSize = MAP * MINI_PX, mmX = canvas.width - mmSize - 4, mmY = canvas.height - mmSize - 4;
+  const mmSize = MAP * MINI_PX, mmX = cw - mmSize - 4, mmY = ch - mmSize - 4;
   if (cx >= mmX && cx < mmX + mmSize && cy >= mmY && cy < mmY + mmSize) {
     const tx = Math.floor((cx - mmX) / MINI_PX);
     const ty = Math.floor((cy - mmY) / MINI_PX);
-    view.x = tx * TILE * view.scale - canvas.width / 2;
-    view.y = ty * TILE * view.scale - canvas.height / 2;
+    view.x = tx * TILE * view.scale - cw / 2;
+    view.y = ty * TILE * view.scale - ch / 2;
   }
 });
 
@@ -433,8 +449,12 @@ function draw(): void {
   const px = TILE; // world is drawn in base px under the camera transform below
   const g = core.grid;
   const blit = (img: CanvasImageSource, x: number, y: number) => ctx.drawImage(img, x * px, y * px, px, px);
+  // Base transform maps CSS px → device px at the display's pixel ratio. Set
+  // fresh each frame (it also clears any stale transform); every coordinate
+  // below is in CSS px, so positions are identical to before — just sharper.
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = '#15151a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, cw, ch);
   // Enter world space: pan (view.x/y) + zoom (view.scale). Restored before the
   // screen-space HUD overlays below.
   ctx.save();
@@ -459,7 +479,26 @@ function draw(): void {
 
   const anim = (performance.now() / 500 | 0) % sprites.water.length;
 
-  for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+  // Viewport culling — only iterate tiles that can touch the screen. At higher
+  // zoom most of the 96×96 grid is off-screen, so clamping the terrain loop (and
+  // the full-map shadow/trap/candlelight passes below) to the visible window is
+  // the single biggest frame-time win. The 2-tile margin covers sprites that
+  // overhang their tile (tree canopies, settler heads drawn 1.35× tall).
+  const MARGIN = 2;
+  const vx0 = Math.max(0, Math.floor(view.x / view.scale / TILE) - MARGIN);
+  const vy0 = Math.max(0, Math.floor(view.y / view.scale / TILE) - MARGIN);
+  const vx1 = Math.min(MAP, Math.ceil((view.x + cw) / view.scale / TILE) + MARGIN);
+  const vy1 = Math.min(MAP, Math.ceil((view.y + ch) / view.scale / TILE) + MARGIN);
+  // Same window in world-pixel space, for culling free-moving entities (agents,
+  // animals, stations) by their footprint. A 2-tile slack keeps oversized/y-offset
+  // sprites from popping at the edges.
+  const wL = view.x / view.scale - MARGIN * TILE, wT = view.y / view.scale - MARGIN * TILE;
+  const wR = (view.x + cw) / view.scale + MARGIN * TILE;
+  const wB = (view.y + ch) / view.scale + MARGIN * TILE;
+  const onScreen = (tileX: number, tileY: number): boolean =>
+    tileX * TILE >= wL && tileX * TILE <= wR && tileY * TILE >= wT && tileY * TILE <= wB;
+
+  for (let y = vy0; y < vy1; y++) for (let x = vx0; x < vx1; x++) {
     const i = y * MAP + x;
     const t = g.terrain[i];
 
@@ -742,7 +781,7 @@ function draw(): void {
   // Tree cast shadow pass — batched after all terrain tiles so shadows land on top
   { ctx.fillStyle = 'rgba(20,18,12,0.16)';
     ctx.beginPath();
-    for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+    for (let y = vy0; y < vy1; y++) for (let x = vx0; x < vx1; x++) {
       if (g.terrain[y * MAP + x] === TERRAIN.TREE) {
         ctx.ellipse((x + 0.58) * px, (y + 1) * px + px * 0.07, px * 0.60, px * 0.17, 0, 0, Math.PI * 2);
       }
@@ -769,7 +808,7 @@ function draw(): void {
   // Spike traps (rendered as a red X over the tile)
   ctx.strokeStyle = '#cc2222';
   ctx.lineWidth = 1;
-  for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) {
+  for (let y = vy0; y < vy1; y++) for (let x = vx0; x < vx1; x++) {
     if (g.trap[y * MAP + x]) {
       ctx.beginPath();
       ctx.moveTo(x * px + 2, y * px + 2); ctx.lineTo((x + 1) * px - 2, (y + 1) * px - 2);
@@ -791,6 +830,9 @@ function draw(): void {
   // Stations — blit at the full tile footprint (multi-tile stations span def.w × def.h tiles).
   for (const sv of core.stationViews()) {
     const def = STATION_DEF_BY_NUM[sv.typeId];
+    // Footprint-aware cull: keep the station if either corner is on screen, so
+    // multi-tile stations straddling the viewport edge don't pop.
+    if (!onScreen(sv.x, sv.y) && !onScreen(sv.x + (def?.w ?? 1) - 1, sv.y + (def?.h ?? 1) - 1)) continue;
     const img = def && sprites.stations[def.id];
     if (img) ctx.drawImage(img, sv.x * px, sv.y * px, def!.w * px, def!.h * px);
     else if (def) { // generic marker fallback
@@ -850,9 +892,13 @@ function draw(): void {
   // Agents (animate: alternate walk frames every 6 ticks)
   const settlerFrame = (core.tickNo / 6 | 0) % 2;
   const a = core.agents;
-  // Y-sort so units lower on screen draw over those above (painter's algorithm)
-  const sortedAgents = Array.from({length: a.count}, (_, i) => i).sort((ia, ib) => a.posY[ia] - a.posY[ib]);
-  for (const i of sortedAgents) {
+  // Y-sort so units lower on screen draw over those above (painter's algorithm).
+  // Rebuild the reused index buffer in place rather than allocating per frame.
+  agentOrder.length = a.count;
+  for (let i = 0; i < a.count; i++) agentOrder[i] = i;
+  agentOrder.sort((ia, ib) => a.posY[ia] - a.posY[ib]);
+  for (const i of agentOrder) {
+    if (!onScreen(a.posX[i], a.posY[i])) continue;
     const variant = i % sprites.settler.length;
     const frame = a.state[i] === AState.Sleeping ? 0 : settlerFrame;
     // Draw settlers 35% taller than a tile, anchored to the tile bottom (head pokes up).
@@ -911,6 +957,7 @@ function draw(): void {
   const deerFrame = (performance.now() / 400 | 0) % sprites.deer.length;
   { const dW = Math.round(px * 1.25), dH = Math.round(px * 1.15);
     for (const d of core.deerViews()) {
+      if (!onScreen(d.x | 0, d.y | 0)) continue;
       const dx = (d.x | 0) * px - (dW - px) / 2, dy = (d.y | 0) * px - (dH - px);
       ctx.fillStyle = 'rgba(28,20,12,0.18)';
       ctx.beginPath(); ctx.ellipse((d.x | 0) * px + px * 0.5, (d.y | 0 + 1) * px - 1, px * 0.44, px * 0.11, 0, 0, Math.PI * 2); ctx.fill();
@@ -921,6 +968,7 @@ function draw(): void {
   // Raiders — same oversized rendering as settlers, y-sorted
   const sortedRaiders = [...core.raids.raiders].sort((a2, b2) => a2.y - b2.y);
   for (const r of sortedRaiders) {
+    if (!onScreen(r.x, r.y)) continue;
     const rSpr = sprites.raider[r.fleeing ? 0 : (performance.now() / 200 | 0) % sprites.raider.length];
     const rH = Math.round(px * 1.35);
     const rax = r.x * px, ray = r.y * px - (rH - px);
@@ -941,6 +989,7 @@ function draw(): void {
     const wolfFrame = (performance.now() / 250 | 0) % sprites.wolf.length;
     const wW = Math.round(px * 1.2), wH = Math.round(px * 1.2);
     for (const w of core.wolves.wolves) {
+      if (!onScreen(w.x | 0, w.y | 0)) continue;
       const wwx = (w.x | 0) * px - (wW - px) / 2, wwy = (w.y | 0) * px - (wH - px);
       ctx.fillStyle = 'rgba(28,20,12,0.20)';
       ctx.beginPath(); ctx.ellipse((w.x | 0) * px + px * 0.5, (w.y | 0 + 1) * px - 1, px * 0.40, px * 0.11, 0, 0, Math.PI * 2); ctx.fill();
@@ -990,7 +1039,7 @@ function draw(): void {
     // ponytail: flat rect per tile, no gradient. Good enough at this scale.
     if (nightAlpha > 0.08) {
       ctx.fillStyle = `rgba(255,190,60,${(nightAlpha * 0.28).toFixed(2)})`;
-      for (let ty = 0; ty < MAP; ty++) for (let tx = 0; tx < MAP; tx++) {
+      for (let ty = vy0; ty < vy1; ty++) for (let tx = vx0; tx < vx1; tx++) {
         const i = ty * MAP + tx;
         if (!g.floor[i]) continue;
         const roomDef = ROOM_DEF_BY_NUM[g.roomId[i]];
@@ -1230,7 +1279,7 @@ function draw(): void {
     const frac2 = (core.tickNo % TPDAY) / TPDAY; // 0=midnight, 0.5=noon
     // Moon rises at 6pm (0.75), transits midnight (0/1), sets at 6am (0.25)
     const arc = frac2 > 0.75 ? (frac2 - 0.75) / 0.5 : (frac2 + 0.25) / 0.5;
-    const mx = canvas.width * 0.88 - arc * canvas.width * 0.76;
+    const mx = cw * 0.88 - arc * cw * 0.76;
     const my = 48 - Math.sin(arc * Math.PI) * 26;
     const mr = 10;
     const ma = Math.min(1, nightAlpha * 7);
@@ -1413,7 +1462,7 @@ function draw(): void {
       }
       const flagLines = [live.wounded && 'wounded', live.infected && 'infected', live.sick && 'sick'].filter(Boolean);
       const PW = 300, PH = 188 + flagLines.length * 16 + thoughts.length * 16;
-      const px2 = canvas.width - PW - 8;
+      const px2 = cw - PW - 8;
       ctx.fillStyle = '#000c'; ctx.fillRect(px2, 8, PW, PH);
       ctx.fillStyle = '#ffd700'; ctx.font = 'bold 13px monospace';
       ctx.fillText(live.name, px2 + 8, 28);
@@ -1444,7 +1493,7 @@ function draw(): void {
   const queuedDescExtra = rb.queue && avail.some(t => t.id === rb.queue) ? 1 : 0;
   const RP_ROWS = 2 + Math.min(avail.length, 5) + queuedDescExtra + Math.min(done.length, 3);
   const RPW = 300, RPH_TOTAL = RP_ROWS * RPH + 16;
-  const rpx = canvas.width - RPW - 8, rpy = canvas.height - RPH_TOTAL - 8;
+  const rpx = cw - RPW - 8, rpy = ch - RPH_TOTAL - 8;
   ctx.fillStyle = '#000a'; ctx.fillRect(rpx, rpy, RPW, RPH_TOTAL);
   ctx.fillStyle = '#ffd700'; ctx.font = 'bold 12px monospace';
   ctx.fillText(`Research  ${rb.points.toFixed(0)} pts${ptsPerDay > 0 ? `  (+${ptsPerDay}/day)` : ''}`, rpx + 6, rpy + 14);
@@ -1521,7 +1570,7 @@ function draw(): void {
       // Hover tile → screen px (the tooltip is drawn in screen space).
       const sx = hoverX * TILE * view.scale - view.x;
       const sy = hoverY * TILE * view.scale - view.y;
-      const tx = Math.min(sx + TILE * view.scale + 4, canvas.width - tw - 8);
+      const tx = Math.min(sx + TILE * view.scale + 4, cw - tw - 8);
       const ty = Math.max(sy - 4, 20);
       ctx.fillStyle = '#000c'; ctx.fillRect(tx - 2, ty - 13, tw + 4, 16);
       ctx.fillStyle = '#ddd'; ctx.fillText(tip, tx, ty);
@@ -1532,7 +1581,7 @@ function draw(): void {
   if (flashMsg && Date.now() < flashUntil) {
     ctx.font = 'bold 18px monospace';
     const fw = ctx.measureText(flashMsg).width;
-    const fx = (canvas.width - fw) / 2, fy = 40;
+    const fx = (cw - fw) / 2, fy = 40;
     ctx.fillStyle = '#000b'; ctx.fillRect(fx - 8, fy - 18, fw + 16, 28);
     ctx.fillStyle = '#7fe07f'; ctx.fillText(flashMsg, fx, fy);
   } else { flashMsg = ''; }
@@ -1592,15 +1641,15 @@ function draw(): void {
     }
     minimapCtx.putImageData(minimapData, 0, 0);
     const mmSize = MAP * MINI_PX;
-    const mmX = canvas.width - mmSize - 4, mmY = canvas.height - mmSize - 4;
+    const mmX = cw - mmSize - 4, mmY = ch - mmSize - 4;
     // Border + background
     ctx.fillStyle = '#000a'; ctx.fillRect(mmX - 1, mmY - 1, mmSize + 2, mmSize + 2);
     ctx.drawImage(minimapCanvas, mmX, mmY);
     // Viewport rect overlay
     const vLeft = view.x / view.scale / TILE * MINI_PX;
     const vTop  = view.y / view.scale / TILE * MINI_PX;
-    const vW = canvas.width  / view.scale / TILE * MINI_PX;
-    const vH = canvas.height / view.scale / TILE * MINI_PX;
+    const vW = cw  / view.scale / TILE * MINI_PX;
+    const vH = ch / view.scale / TILE * MINI_PX;
     ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1;
     ctx.strokeRect(mmX + vLeft, mmY + vTop, vW, vH);
     ctx.lineWidth = 1;
@@ -1613,25 +1662,25 @@ function draw(): void {
   for (let k = 0; k < recent.length; k++) {
     const entry = recent[recent.length - 1 - k];
     ctx.fillStyle = logColors[entry.kind];
-    ctx.fillText(`d${entry.day} ${entry.text}`, 8, canvas.height - 10 - k * 16);
+    ctx.fillText(`d${entry.day} ${entry.text}`, 8, ch - 10 - k * 16);
   }
 
   // ── Pending choice modal (center) ─────────────────────────────────────
   if (core.pendingChoice) {
-    const ch: PendingEventChoice = core.pendingChoice;
-    const MW = 440, MH = 30 + ch.choices.length * 36 + 32;
-    const mx = (canvas.width - MW) / 2;
-    const my = (canvas.height - MH) / 2;
+    const pc: PendingEventChoice = core.pendingChoice;
+    const MW = 440, MH = 30 + pc.choices.length * 36 + 32;
+    const mx = (cw - MW) / 2;
+    const my = (ch - MH) / 2;
     ctx.fillStyle = '#111d'; ctx.fillRect(mx - 4, my - 4, MW + 8, MH + 8);
     ctx.strokeStyle = '#ffd700'; ctx.lineWidth = 2;
     ctx.strokeRect(mx - 4, my - 4, MW + 8, MH + 8);
     ctx.lineWidth = 1;
     ctx.fillStyle = '#ffd700'; ctx.font = 'bold 14px monospace';
-    ctx.fillText(ch.title, mx + 8, my + 18);
+    ctx.fillText(pc.title, mx + 8, my + 18);
     ctx.fillStyle = '#ccc'; ctx.font = '12px monospace';
-    ctx.fillText(ch.text, mx + 8, my + 36);
-    for (let ci = 0; ci < ch.choices.length; ci++) {
-      const opt = ch.choices[ci];
+    ctx.fillText(pc.text, mx + 8, my + 36);
+    for (let ci = 0; ci < pc.choices.length; ci++) {
+      const opt = pc.choices[ci];
       const oy = my + 56 + ci * 36;
       ctx.fillStyle = '#1a2a1a'; ctx.fillRect(mx + 4, oy - 2, MW - 8, 28);
       ctx.strokeStyle = '#88ff88'; ctx.strokeRect(mx + 4, oy - 2, MW - 8, 28);
@@ -1647,9 +1696,9 @@ function draw(): void {
   // ── Colony perished overlay ───────────────────────────────────────────
   if (core.population === 0 && core.day > 0) {
     ctx.fillStyle = 'rgba(0,0,0,0.72)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, cw, ch);
     const GW = 420, GH = 160;
-    const gx = (canvas.width - GW) / 2, gy = (canvas.height - GH) / 2;
+    const gx = (cw - GW) / 2, gy = (ch - GH) / 2;
     ctx.fillStyle = '#1a0808'; ctx.fillRect(gx, gy, GW, GH);
     ctx.strokeStyle = '#882222'; ctx.lineWidth = 2; ctx.strokeRect(gx, gy, GW, GH); ctx.lineWidth = 1;
     ctx.fillStyle = '#ff4444'; ctx.font = 'bold 22px monospace';

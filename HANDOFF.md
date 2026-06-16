@@ -11,7 +11,35 @@
 
 ---
 
-## Session Snapshot — Seamless World Architecture Foundation (2026-06-16, latest)
+## Session Snapshot — CoreView render efficiency + HiDPI sharpness (2026-06-16, latest)
+
+**What landed (branch `claude/game-build-iteration-assets-2kd2z0`):** Render-path
+work on the primary SoA `CoreView` (`src/coreview.ts`) — efficiency + fidelity, no
+sim/balance changes (all 874 tests still pass).
+
+- **Viewport culling.** The `draw()` terrain loop (and the tree-shadow, trap, and
+  night-candlelight passes) iterated the full 96×96 grid every frame. They now clamp
+  to the visible tile window (`vx0..vx1`, `vy0..vy1`, 2-tile margin for canopy/head
+  overhang) — the single biggest frame-time win when zoomed in, where most of the
+  grid is off-screen. Free-moving entities (settlers, deer, wolves, raiders, stations)
+  are culled by an `onScreen()` footprint test; stations check both corners so
+  multi-tile ones don't pop at the edge.
+- **HiDPI rendering ("more pixels").** The canvas backing store is now sized at
+  `cssW·DPR × cssH·DPR` (DPR capped at 2) with a per-frame `setTransform(DPR…)` base.
+  Every coordinate stays in CSS px, so layout/input/camera are mathematically
+  unchanged — the whole scene just renders at the display's native resolution
+  (crisper sprites and HUD text on Retina/HiDPI). `cw`/`ch` module vars replace the
+  old `canvas.width/height` reads.
+- **Per-frame allocation removed.** The agent y-sort reuses a module `agentOrder`
+  buffer instead of `Array.from(...).sort(...)` each frame.
+
+**Note for next session:** `render.ts` (Classic Colony / fat sim) already culls but
+is *not* DPR-aware; the same backing-store treatment could be applied there if the
+classic path is revisited. CoreView is the default/primary engine.
+
+---
+
+## Session Snapshot — Seamless World Architecture Foundation (2026-06-16)
 
 **What landed (PR #168 — revised):**
 - **Phase 0 — ParcelManager integration:** Replaced bare `Simulation` with `ParcelManager(home)` throughout boot. The parcel grid (`64×64` cells) is now the world model; each parcel can host a town. Save format bumped to v3 (town + parcels, optional region). Backward compatible with v1/v2 saves via migration.
