@@ -838,6 +838,27 @@ function draw(): void {
     }
   }
 
+  // Day/night cycle: 360 ticks per day. Dawn 0-45, day 45-270, dusk 270-315, night 315-360.
+  { const TICKS_PER_DAY = MINUTES_PER_DAY / MINUTES_PER_TICK;
+    const tod = (core.tickNo % TICKS_PER_DAY) / TICKS_PER_DAY; // 0=midnight, 0.5=noon
+    let nightAlpha = 0;
+    if (tod < 0.125) nightAlpha = 0.5 - tod * 4;          // midnight→dawn: 0.5→0
+    else if (tod > 0.875) nightAlpha = (tod - 0.875) * 4; // dusk→midnight: 0→0.5
+    else if (tod < 0.25) nightAlpha = (tod - 0.125) * 2.4 - 0.3; // dawn fade (negative = day)
+    nightAlpha = Math.max(0, nightAlpha);
+    if (nightAlpha > 0.02) {
+      ctx.fillStyle = `rgba(8,12,40,${(nightAlpha * 0.7).toFixed(3)})`;
+      ctx.fillRect(0, 0, MAP * px, MAP * px);
+    }
+    // Golden dusk/dawn tint when transitioning
+    const dawnDusk = tod < 0.25 ? Math.max(0, 0.22 - Math.abs(tod - 0.125) * 3.5)
+                    : tod > 0.75 ? Math.max(0, 0.22 - Math.abs(tod - 0.875) * 3.5) : 0;
+    if (dawnDusk > 0.01) {
+      ctx.fillStyle = `rgba(255,160,40,${(dawnDusk * 0.35).toFixed(3)})`;
+      ctx.fillRect(0, 0, MAP * px, MAP * px);
+    }
+  }
+
   ctx.restore(); // leave world space — HUD overlays below are screen-space
 
   // ── Stats overlay (top-left) ────────────────────────────────────────────
