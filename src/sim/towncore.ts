@@ -316,16 +316,21 @@ export class TownCore {
   /** Station-type speed multiplier from unlocked production techs + focus bonus. */
   private readonly _stationSpeedMult = (stationId: string): number => {
     const rb = this.researchBook;
-    const focusMult = this.focus === 'industrial' ? 1.20 : 1.0;
+    // Industrial focus and the Mechanization capstone speed every station; both
+    // compose with the per-craft tech bonus below.
+    const focusMult = (this.focus === 'industrial' ? 1.20 : 1.0) * (rb.hasTech('mechanization') ? 1.15 : 1);
     switch (stationId) {
       case 'loom': case 'rope_walk': return (rb.hasTech('textile_farming') ? 1.25 : 1) * focusMult;
       case 'herb_table': return (rb.hasTech('herbalism') ? 1.30 : 1) * focusMult;
-      case 'saw_bench': return (rb.hasTech('carpentry') ? 1.25 : 1) * focusMult;
+      case 'saw_bench': case 'carpentry_bench': return (rb.hasTech('carpentry') ? 1.25 : 1) * focusMult;
       case 'anvil': case 'weapon_bench': return (rb.hasTech('blacksmithing') ? 1.25 : 1) * focusMult;
       case 'millstone': return (rb.hasTech('milling') ? 1.30 : 1) * focusMult;
+      case 'oven': case 'baking_oven': return (rb.hasTech('baking') ? 1.25 : 1) * focusMult;
+      case 'kiln': case 'coke_oven': return (rb.hasTech('ceramics') ? 1.25 : 1) * focusMult;
       case 'brew_vat': return (rb.hasTech('fermentation') ? 1.30 : 1) * focusMult;
       case 'smelter': return (rb.hasTech('iron_smelting') ? 1.30 : 1) * focusMult;
       case 'smoke_rack': return (rb.hasTech('food_preservation') ? 1.40 : 1) * focusMult;
+      case 'animal_pen': return (rb.hasTech('animal_husbandry') ? 1.30 : 1) * focusMult;
       default: return focusMult;
     }
   };
