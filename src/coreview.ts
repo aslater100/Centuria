@@ -5,18 +5,15 @@
  * the gate that blocks the destructive swap — without ripping anything out.
  *
  * Builds a working starter town, runs the core on a fixed timestep, and draws
- * the BuildGrid + agents + raiders with a stats overlay. Controls:
+ * the BuildGrid + agents + raiders with a stats overlay. Controls (RTS-style):
  *
- *   Simulation:
- *     space pause · 1/2/3 speed · R raid now · N add settler
+ *   Camera/global keys:
+ *     WASD / arrows pan · H recentre on the colony · O overview · scroll zoom ·
+ *     Space pause · 1-4 speed · I economy · 🌐 World button · Esc menu
  *
- *   Paint tools (left-drag paint, right-drag erase):
- *     W  wall blueprint     E  erase tile
- *     G  gate (passable)    D  floor (bare, no designation)
- *     Z  room floor+designation  [ ] cycle room type
- *     A  place station      , . cycle station type
- *     F  field zone    C  woodcutter zone
- *     Q  quarry zone   B  fishery zone
+ *   Tools: pick from the bottom-centre command bar (Build / Rooms / Work / Plans
+ *     / Farm / Gather). Left-drag paints the selected tool, right-drag erases.
+ *     The old single-letter tool keys still work as optional shortcuts.
  *
  *   Inspect:  click an agent to open the settler inspector
  *
@@ -286,8 +283,9 @@ addEventListener('keydown', (e) => {
     }
     return;
   }
-  // Tool keys
-  if (k === 'h') { tool = 'wall'; return; }    // H/J/K: WASD now pans, so the
+  // RTS convention: H recentres on the colony (your "town hall"/base camp).
+  if (k === 'h') { focusTown(); return; }
+  // Tool keys (optional shortcuts — the bottom command bar is the primary way in)
   if (k === 'e') { tool = 'erase'; return; }
   if (k === 'g') { tool = 'gate'; return; }
   if (k === 'j') { tool = 'floor'; return; }   // wall/floor/station tools moved
@@ -342,6 +340,11 @@ let panLast = { x: 0, y: 0 };
 canvas.addEventListener('mousedown', (e) => {
   if (worldView) return; // overview is look-only
   if (e.button === 1) { panning = true; panLast = { x: e.clientX, y: e.clientY }; e.preventDefault(); return; }
+  // Command bar takes the click before the map does.
+  if (e.button === 0) {
+    const rr = canvas.getBoundingClientRect();
+    if (clickCommandBar(e.clientX - rr.left, e.clientY - rr.top)) return;
+  }
   // Left-click on a settler inspects it (any tool) instead of painting.
   if (e.button === 0 && maybeInspect(e)) return;
   painting = e.button === 2 ? 2 : 1;
@@ -515,6 +518,62 @@ function drawWorld(): void {
   ctx.fillText('The Wider World', ox, oy - 14);
   ctx.fillStyle = '#90a0b0'; ctx.font = '12px monospace';
   ctx.fillText('Your colony sits where the gold marker pulses.  V or Esc to return.', ox, oy - 1);
+}
+
+// ── Command bar (SoS-style bottom-centre build menu) ────────────────────────
+// Mouse-first tool selection so the keyboard is freed for RTS camera + global
+// actions. Categories sit at the very bottom; the active category's items wrap
+// in a grid above. ponytail: rebuilt into `barHit` each frame and hit-tested on
+// click — a few dozen rects, no retained layout.
+interface BarItem { label: string; apply: () => void; active: () => boolean; }
+const niceName = (s: string) => s.replace(/_/g, ' ');
+const toolItem = (label: string, t: Tool): BarItem => ({ label, apply: () => { tool = t; }, active: () => tool === t });
+const BAR_CATS = ['Build', 'Rooms', 'Work', 'Plans', 'Farm', 'Gather'] as const;
+let activeCat = 0;
+function catItems(cat: string): BarItem[] {
+  switch (cat) {
+    case 'Build': return [toolItem('Wall', 'wall'), toolItem('Floor', 'floor'), toolItem('Gate', 'gate'), toolItem('Bridge', 'bridge'), toolItem('Erase', 'erase')];
+    case 'Rooms': return ROOM_DEFS.map((d, i) => ({ label: (d as { name?: string }).name ?? niceName(d.id), apply: () => { tool = 'room'; roomTypeIdx = i; }, active: () => tool === 'room' && roomTypeIdx === i }));
+    case 'Work': return STATION_DEFS.map((d, i) => ({ label: (d as { name?: string }).name ?? niceName(d.id), apply: () => { tool = 'station'; stationTypeIdx = i; }, active: () => tool === 'station' && stationTypeIdx === i }));
+    case 'Plans': return BLUEPRINT_DEFS.map((d, i) => ({ label: d.name, apply: () => { tool = 'blueprint'; blueprintIdx = i; }, active: () => tool === 'blueprint' && blueprintIdx === i }));
+    case 'Farm': return [toolItem('Field', 'field'), toolItem('Veg', 'veggarden'), toolItem('Orchard', 'orchard'), toolItem('Flax', 'flax'), toolItem('Forage', 'forage')];
+    case 'Gather': return [toolItem('Wood', 'woodcutter'), toolItem('Quarry', 'quarry'), toolItem('Fishery', 'fishery'), toolItem('Trap', 'trap')];
+  }
+  return [];
+}
+let barHit: { x: number; y: number; w: number; h: number; on: () => void }[] = [];
+function drawCommandBar(): void {
+  barHit = [];
+  const BH = 22, gap = 4, catW = 84, itemW = 96;
+  const drawBtn = (x: number, y: number, w: number, label: string, on: () => void, hot: boolean) => {
+    ctx.fillStyle = hot ? '#2f5168' : '#161d27';
+    ctx.fillRect(x, y, w, BH);
+    ctx.strokeStyle = hot ? '#7fd0f0' : '#33424f'; ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, BH - 1);
+    ctx.fillStyle = hot ? '#dff1ff' : '#aab8c4';
+    ctx.font = '11px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(label.length > 13 ? label.slice(0, 12) + '…' : label, x + w / 2, y + 15);
+    ctx.textAlign = 'left';
+    barHit.push({ x, y, w, h: BH, on });
+  };
+  const catY = ch - BH - 4;
+  const catRowW = BAR_CATS.length * (catW + gap) - gap;
+  let cx = Math.round((cw - catRowW) / 2);
+  BAR_CATS.forEach((c, i) => { drawBtn(cx, catY, catW, c, () => { activeCat = i; }, i === activeCat); cx += catW + gap; });
+  const items = catItems(BAR_CATS[activeCat]);
+  const perRow = Math.max(1, Math.floor((cw * 0.96) / (itemW + gap)));
+  const rows = Math.ceil(items.length / perRow);
+  for (let r = 0; r < rows; r++) {
+    const rowItems = items.slice(r * perRow, (r + 1) * perRow);
+    const rowW = rowItems.length * (itemW + gap) - gap;
+    let ix = Math.round((cw - rowW) / 2);
+    const iy = catY - (rows - r) * (BH + gap) - 2;
+    for (const it of rowItems) { drawBtn(ix, iy, itemW, it.label, it.apply, it.active()); ix += itemW + gap; }
+  }
+}
+function clickCommandBar(mx: number, my: number): boolean {
+  for (const b of barHit) if (mx >= b.x && mx < b.x + b.w && my >= b.y && my < b.y + b.h) { b.on(); return true; }
+  return false;
 }
 
 function draw(): void {
@@ -1470,9 +1529,8 @@ function draw(): void {
 
   // Key hints
   ctx.fillStyle = '#888'; ctx.font = '11px monospace';
-  ctx.fillText('H wall  E erase  G gate  J floor  T trap  Z room([ ])  K station(, .)  Shift+B bridge  Shift+K blueprint([ ])', 8, 20 + 10 * 17);
-  ctx.fillText('F field  C chop  Q quarry  B fishery  L flax  P forage  U orchard  V veg  R raid  M wolves  N settler  X tech  Y focus  1-4 speed  space pause', 8, 20 + 11 * 17);
-  ctx.fillText('camera: WASD / arrows pan · scroll zoom · middle-drag · O overview  ·  click settler to inspect · I economy · Ctrl+S save', 8, 20 + 12 * 17);
+  // Concise RTS-style hint line — tools live in the bottom command bar now.
+  ctx.fillText('WASD pan · H home · O overview · scroll zoom · Space pause · 1-4 speed · I economy · click settler · Esc menu', 8, 20 + 10 * 17);
 
   // ── Economy / storage panel (toggle I): every stored resource with its
   //    net flow and market price — the SoS per-resource economy readout. ──
@@ -1749,6 +1807,9 @@ function draw(): void {
     ctx.fillStyle = logColors[entry.kind];
     ctx.fillText(`d${entry.day} ${entry.text}`, 8, ch - 10 - k * 16);
   }
+
+  // ── Command bar (bottom-centre, SoS-style) ───────────────────────────
+  drawCommandBar();
 
   // ── Pending choice modal (center) ─────────────────────────────────────
   if (core.pendingChoice) {
