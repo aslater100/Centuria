@@ -11,7 +11,19 @@
 
 ---
 
-## Session Snapshot — UX: event toasts (2026-06-16, latest)
+## Session Snapshot — Audio in the primary engine (2026-06-17, latest)
+
+**What landed (branch `claude/game-build-iteration-assets-2kd2z0`):** CoreView (the primary
+engine) was **silent** — the tested `Music` / `Soundscape` / `Sfx` modules were only wired
+into the classic `main.ts`. Now CoreView instantiates all three (unlocked on first gesture):
+era-aware procedural soundtrack by year, diegetic ambience driven by build activity, and
+SFX on events — chime/thud/knell from new good/bad log entries (via `pollEvents`), plus a
+raid-onset horn. A shared `tension` scalar (raid → 1, decays) swells the music. One master
+`🔊 Sound` button toggles all three. Reuse-only, no new audio code; 893 tests still green.
+
+---
+
+## Session Snapshot — UX: event toasts (2026-06-16)
 
 **What landed (branch `claude/game-build-iteration-assets-2kd2z0`):** Notable events
 (`good`/`bad` log entries — raids, deaths, milestones, breakthroughs) now pop as
