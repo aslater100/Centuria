@@ -1206,3 +1206,209 @@ body {
 .cv-log .log-good { color: #8fd07a; }
 .cv-log .log-bad  { color: #e07a5a; }
 .cv-log .log-info { color: #b7a98e; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   4X MODERN UI THEME — scoped to body.cv-app so the classic game is untouched.
+   A cohesive cool-ink panel system with the brand gold for headings, soft
+   depth (blur + shadow + radius), pill tabs, polished controls and slim
+   scrollbars. Overrides the legacy wood/parchment look only inside the shell.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.cv-app {
+  --ink:    rgba(14, 19, 28, 0.92);
+  --ink2:   #131a26;
+  --line:   #2b3a4d;
+  --line2:  #1d2735;
+  --gold:   #e8d27a;
+  --accent: #5aa9d8;
+  --accent2:#2b6f96;
+  --text:   #dde6ef;
+  --muted:  #8ea3b8;
+  --good:   #7fc26a;
+  --bad:    #e07a5a;
+  --sans:   ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  --mono:   ui-monospace, "SF Mono", "DejaVu Sans Mono", monospace;
+  font-family: var(--sans);
+}
+
+/* ---- Floating panels: ink glass with depth ---- */
+.cv-app .inspector,
+.cv-app .palette,
+.cv-app .route-network-panel,
+.cv-app .settlement-list-panel,
+.cv-app .economy-panel {
+  background: var(--ink) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 10px !important;
+  padding: 12px 12px 14px !important;
+  color: var(--text) !important;
+  font-family: var(--sans) !important;
+  font-size: 12px !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+/* Panel headings */
+.cv-app .inspector h3,
+.cv-app .pal-title,
+.cv-app .ceremony-box h2,
+.cv-app .win-modal-box h1 {
+  color: var(--gold) !important;
+  font-family: var(--sans) !important;
+  letter-spacing: 0.4px;
+  font-weight: 700;
+}
+
+/* Numbers stay tabular monospace for alignment */
+.cv-app .inspector p,
+.cv-app .state-panel p,
+.cv-app .research-panel p,
+.cv-app .res-row,
+.cv-app .cv-topbar,
+.cv-app .cv-log { font-variant-numeric: tabular-nums; }
+
+/* ---- Buttons: flat, with a clear hover + active and an accent variant ---- */
+.cv-app .inspector button,
+.cv-app .palette button,
+.cv-app .region-panel button,
+.cv-app .route-network-panel button,
+.cv-app .settlement-list-panel button,
+.cv-app .economy-panel button,
+.cv-app .mini,
+.cv-app .tb-btn {
+  background: linear-gradient(180deg, #223047, #1a2738) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 6px !important;
+  font-family: var(--sans) !important;
+  padding: 4px 10px !important;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.06s ease;
+}
+.cv-app .inspector button:hover:not(:disabled),
+.cv-app .palette button:hover:not(:disabled),
+.cv-app .region-panel button:hover:not(:disabled),
+.cv-app .route-network-panel button:hover:not(:disabled),
+.cv-app .settlement-list-panel button:hover:not(:disabled),
+.cv-app .economy-panel button:hover:not(:disabled),
+.cv-app .mini:hover,
+.cv-app .tb-btn:hover {
+  background: linear-gradient(180deg, #2c3e59, #223247) !important;
+  border-color: var(--accent2) !important;
+}
+.cv-app .inspector button:active:not(:disabled),
+.cv-app .palette button:active:not(:disabled),
+.cv-app .region-panel button:active:not(:disabled),
+.cv-app .tb-btn:active { transform: translateY(1px); }
+.cv-app .inspector button:disabled,
+.cv-app .palette button:disabled,
+.cv-app .region-panel button:disabled,
+.cv-app .route-network-panel button:disabled,
+.cv-app .settlement-list-panel button:disabled,
+.cv-app .economy-panel button:disabled {
+  background: #161e2a !important;
+  color: #4f5d6e !important;
+  border-color: var(--line2) !important;
+  cursor: not-allowed !important;
+}
+/* Primary / destructive accents */
+.cv-app .inspector button.upgrade,
+.cv-app .inspector button.primary,
+.cv-app .palette button.primary {
+  background: linear-gradient(180deg, #3a86b5, #2b6f96) !important;
+  border-color: #5aa9d8 !important;
+  color: #f2f8fc !important;
+}
+.cv-app .inspector button.danger,
+.cv-app .route-network-panel button.rn-delete-btn {
+  background: linear-gradient(180deg, #7a3324, #5e2a1f) !important;
+  border-color: #b5532f !important;
+  color: #f6d9cd !important;
+}
+
+/* ---- Tabs as pills ---- */
+.cv-app .pal-tab,
+.cv-app .insp-tab,
+.cv-app .pal-subtab {
+  background: #18222f !important;
+  color: var(--muted) !important;
+  border: 1px solid var(--line2) !important;
+  border-radius: 999px !important;
+  font-family: var(--sans) !important;
+  font-size: 10px !important;
+  padding: 3px 9px !important;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.cv-app .pal-tab:hover,
+.cv-app .insp-tab:hover,
+.cv-app .pal-subtab:hover { background: #213040 !important; color: var(--text) !important; }
+.cv-app .pal-tab.active,
+.cv-app .insp-tab.active,
+.cv-app .pal-subtab.active {
+  background: linear-gradient(180deg, rgba(90,169,216,0.28), rgba(43,111,150,0.22)) !important;
+  border-color: var(--accent) !important;
+  color: #eaf4fb !important;
+}
+
+/* ---- Inputs / sliders ---- */
+.cv-app .inspector input,
+.cv-app .palette input,
+.cv-app .palette select,
+.cv-app .rename-input {
+  background: #0e151f !important;
+  color: var(--text) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 5px !important;
+  font-family: var(--sans) !important;
+}
+.cv-app input[type='range'] { accent-color: var(--accent); }
+
+/* ---- Research / list rows: clearer state colouring ---- */
+.cv-app .res-active { background: rgba(90,169,216,0.10) !important; border-left-color: var(--accent) !important; color: #eaf4fb !important; }
+.cv-app .res-done  { color: var(--good) !important; border-left-color: var(--good) !important; }
+.cv-app .res-bar-fill { background: linear-gradient(90deg, var(--accent2), var(--accent)) !important; }
+
+/* ---- Top HUD ---- */
+.cv-app .topbar {
+  background: linear-gradient(180deg, rgba(10,14,20,0.96), rgba(10,14,20,0.86)) !important;
+  border-bottom: 1px solid var(--line) !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  font-family: var(--sans) !important;
+  gap: 18px;
+  padding: 7px 14px !important;
+}
+.cv-app .topbar .tb-date { color: var(--gold) !important; font-weight: 700; }
+
+/* ---- Event log ---- */
+.cv-app .cv-log {
+  background: var(--ink) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.4);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  font-family: var(--sans);
+}
+
+/* ---- Modals ---- */
+.cv-app .ceremony-box,
+.cv-app .win-modal-box {
+  background: linear-gradient(180deg, #141c28, #0e141d) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 24px 70px rgba(0,0,0,0.6) !important;
+}
+
+/* ---- Slim WebKit scrollbars inside panels ---- */
+.cv-app .inspector::-webkit-scrollbar,
+.cv-app .palette::-webkit-scrollbar,
+.cv-app .route-network-panel::-webkit-scrollbar,
+.cv-app .settlement-list-panel::-webkit-scrollbar,
+.cv-app .economy-panel::-webkit-scrollbar { width: 8px; height: 8px; }
+.cv-app .inspector::-webkit-scrollbar-thumb,
+.cv-app .palette::-webkit-scrollbar-thumb,
+.cv-app .route-network-panel::-webkit-scrollbar-thumb,
+.cv-app .settlement-list-panel::-webkit-scrollbar-thumb,
+.cv-app .economy-panel::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
+.cv-app ::-webkit-scrollbar-track { background: transparent; }
