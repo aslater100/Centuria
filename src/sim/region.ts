@@ -2253,8 +2253,12 @@ export class RegionSim {
     const base = this.settlements.length * 0.5 + this.totalPop() * 0.004;
     let mult = 1;
     if (this.has('public_education')) mult *= 1.5;
+    if (this.has('compulsory_schooling')) mult *= 1.2;
+    if (this.has('womens_suffrage')) mult *= 1.1;
     if (this.has('electrical_grid')) mult *= 1.25;
+    if (this.has('telecommunications')) mult *= 1.15;
     if (this.has('computing')) mult *= 1.25;
+    if (this.has('internet')) mult *= 1.15;
     if (this.has('artificial_intelligence')) mult *= 1.25;
     if (this.passedLaws.includes('national_education_act')) mult *= 1.3;
     // Phase 2: every university adds its laboratories to the effort
@@ -2368,9 +2372,11 @@ export class RegionSim {
   playerEmissions(): number {
     let intensity = 0.15; // the steam era's coal-fired baseline
     if (this.has('steel_industry')) intensity += 0.2;
+    if (this.has('chemical_industry')) intensity += 0.15;
     if (this.has('combustion_engine')) intensity += 0.25;
     if (this.has('electrical_grid')) intensity += 0.25;
     if (this.has('mass_production')) intensity += 0.3;
+    if (this.has('smart_grid')) intensity *= 0.8;
     if (this.has('renewables')) intensity *= 0.6;
     if (this.has('fusion_power')) intensity *= 0.15;
     if (this.has('carbon_capture')) intensity *= 0.4;
@@ -3043,6 +3049,8 @@ export class RegionSim {
         (this.day - t.lastRaidDay < 10 ? 10 : 0) +
         5 * this.roleMult(t, 'Mayor') +
         (this.has('universal_suffrage') ? 3 : 0) +
+        (this.has('womens_suffrage') ? 2 : 0) +
+        (this.has('civil_rights') ? 3 : 0) +
         (this.has('participatory_democracy') ? 3 : 0) +
         this.buildingSatisfaction(t) + // Phase 2: waterworks and wards make town life kinder
         stateTerms;
@@ -3050,7 +3058,8 @@ export class RegionSim {
       // Grievance: heavy taxes build pressure daily; services and contentment vent it.
       // Labor Standards research slows buildup 30%; Border Constabulary policy adds another 25%.
       if (this.stateProclaimed) {
-        const laborFactor = (this.has('labor_law') ? 0.7 : 1) * (this.has('welfare_state') ? 0.8 : 1);
+        const laborFactor = (this.has('labor_law') ? 0.7 : 1) * (this.has('welfare_state') ? 0.8 : 1) *
+          (this.has('social_insurance') ? 0.85 : 1) * (this.has('civil_rights') ? 0.85 : 1);
         const constabFactor = this.policyActive('border_constabulary') ? 0.75 : 1;
         const pressure =
           (Math.max(0, this.taxRate - 0.15) * 35 - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05) * laborFactor * constabFactor +
@@ -3173,8 +3182,11 @@ export class RegionSim {
       const services = this.stateProclaimed ? 1 - 0.05 * this.servicesLevel * interiorBonus : 1;
       const healthPolicy = this.policyActive('public_health_policy') ? 0.8 : 1;
       const healthcareLaw = this.passedLaws.includes('healthcare_act') ? 0.85 : 1;
+      // Tech & civics that bend the death rate: antibiotics end lethal infection,
+      // social insurance funds the clinics that keep people out of the grave.
+      const techHealth = (this.has('antibiotics') ? 0.85 : 1) * (this.has('social_insurance') ? 0.92 : 1);
       for (let i = 0; i < b.length; i++) {
-        b[i] -= b[i] * (BASE_MORTALITY_PER_YEAR[i] / 12) * doctor * services * healthPolicy * healthcareLaw;
+        b[i] -= b[i] * (BASE_MORTALITY_PER_YEAR[i] / 12) * doctor * services * healthPolicy * healthcareLaw * techHealth;
       }
       // Immigration: the frontier draws people to fed, content towns
       const reeve = 1 + 0.1 * this.roleMult(t, 'Reeve');
@@ -3490,6 +3502,8 @@ export class RegionSim {
       (this.playerWar?.blockade ? pop * BLOCKADE_UPKEEP_PER_POP : 0); // coal and crews for the gunboats
     // Income Tax (civic research): a progressive levy adds 3% of GDP on top
     const incomeTaxBonus = this.has('income_tax') ? this.gdpLastMonth * 0.03 : 0;
+    // Central Banking (civic research): a national reserve adds a further 1% of GDP
+    const centralBankingBonus = this.has('central_banking') ? this.gdpLastMonth * 0.01 : 0;
     // Estate Tax law: a wealth levy on the land
     const estateLevyBonus = this.estateTaxActive ? this.totalPop() * 0.1 : 0;
     // Progressive Taxation law: graduated bands yield 2% extra of GDP
@@ -3515,7 +3529,7 @@ export class RegionSim {
     // Your own war contests the lanes (GDD §7.3) — and your own blockade
     // requisitions the merchantmen that would have carried the exports
     if (this.playerWar) this.exportEarningsLastMonth *= this.playerWar.blockade ? 0.6 : 0.7;
-    this.treasury += revenue - spending + incomeTaxBonus + estateLevyBonus +
+    this.treasury += revenue - spending + incomeTaxBonus + centralBankingBonus + estateLevyBonus +
       progressiveTaxBonus + protectionismBonus + bankInterest + carbonLevyBonus + this.exportEarningsLastMonth;
     if (this.treasury < 0) {
       this.treasury = 0;
@@ -3743,10 +3757,12 @@ export class RegionSim {
         boost('electrical_grid', 1.5);     // electrified irrigation and tools
         boost('combustion_engine', 2.5);   // tractors replace the horse
         boost('mass_production', 3.5);     // industrialised farming at scale
+        boost('green_revolution', 1.8);    // high-yield cultivars and synthetic inputs
         boost('renewables', 2.0);          // precision agriculture, sustainable yields
         break;
       case 'industry':
         boost('steel_industry', 2.0);      // steel mills and heavy equipment
+        boost('chemical_industry', 1.6);   // synthetics, fertilizer, process chemistry
         boost('electrical_grid', 2.0);     // electrified factories
         boost('mass_production', 4.0);     // assembly lines, Fordism
         boost('atomic_age', 2.5);          // nuclear power drives heavy industry
@@ -3756,12 +3772,16 @@ export class RegionSim {
         boost('free_press', 1.5);          // literacy drives commerce
         boost('labor_law', 1.3);           // protected workers are productive workers
         boost('electrical_grid', 2.0);     // electrified retail, refrigeration
+        boost('aviation', 1.4);            // air mobility multiplies trade and travel
         boost('asphalt', 2.0);             // road mobility multiplies trade
+        boost('smart_grid', 1.3);          // sensors and demand-response trim waste
         boost('computing', 8.0);           // the productivity leap of the office PC
         break;
       case 'information':
         boost('free_press', 2.0);          // free information accelerates learning
+        boost('telecommunications', 2.0);  // exchanges and broadcast knit the region
         boost('computing', 10.0);          // digital revolution, internet economy
+        boost('internet', 3.0);            // packet-switched networks at scale
         boost('automated_logistics', 5.0); // global information networks
         boost('maglev', 2.0);              // ultra-fast connectivity
         break;
