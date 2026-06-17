@@ -982,6 +982,29 @@ export const OCCUPATION_SCORE_DISCOUNT = 6;
 /** Blockade upkeep: gunboats and requisitioned merchantmen, £/pop/month. */
 export const BLOCKADE_UPKEEP_PER_POP = 0.02;
 
+/** Unit type recruitment costs and supply needs (GDD §7.1 military depth). */
+export const UNIT_TYPES: Record<ArmyUnitType, {
+  recruitCost: number;   // £ per unit
+  trainingDays: number;  // days to recruit
+  powerPerUnit: number;  // military power contribution
+  supplyCost: number;    // food/ammo per unit per day
+}> = {
+  militia: { recruitCost: 10, trainingDays: 1, powerPerUnit: 1.0, supplyCost: 0.04 },
+  cavalry: { recruitCost: 25, trainingDays: 14, powerPerUnit: 1.5, supplyCost: 0.06 },
+  artillery: { recruitCost: 40, trainingDays: 21, powerPerUnit: 2.0, supplyCost: 0.08 },
+};
+
+/** Unit types for armies: different training, equipment, supply needs. */
+export type ArmyUnitType = 'militia' | 'cavalry' | 'artillery';
+
+/** Recruited army units: type, count, morale. */
+export interface ArmyUnit {
+  type: ArmyUnitType;
+  count: number;
+  morale: number; // 0–100; affects combat power, desertion risk
+  suppliedDays: number; // food/ammo remaining at current supply rate
+}
+
 export interface PlayerWar {
   rivalId: number;
   cb: CasusBelli;
@@ -1004,6 +1027,10 @@ export interface PlayerWar {
   occupationPolicy: OccupationPolicy;
   /** Once brutal, always remembered — the record follows the peace. */
   brutality: boolean;
+  /** Army composition: different unit types. */
+  units: ArmyUnit[];
+  /** Food/ammunition reserve for the army (months of supply). */
+  supplyReserve: number;
 }
 
 /** Regime × war (GDD §7.5): below this floor the war eats the regime;
@@ -3384,6 +3411,7 @@ export class RegionSim {
     this.monthlyEconomy();
     if (this.stateProclaimed) this.updateFactions();
     this.updateDiplomacy();
+    this.consumeWarSupply(); // deplete supply reserves based on army size and supply consumption rate
     this.updateRivalAI(); // staggered AI updates for rivals (GDD §6.2)
     this.updateScouts(); // update faction scouts: movement, spawning, expiry (GDD §6.2)
     this.tickClimate(); // the ledger runs from the first decade (GDD §8.2)
@@ -5980,6 +6008,7 @@ export class RegionSim {
       score: 0, mobilization: 'peacetime', casualties: 0,
       blockade: false, allies: [], enemyAllies: [],
       occupied: 0, resistance: 0, occupationPolicy: 'conciliatory', brutality: false,
+      units: [], supplyReserve: 3, // 3 months of supply to start
     };
     rv.relations = this.clampRel(Math.min(rv.relations, -60));
     // Their allies turn cold toward you — sides harden (as in startForeignWar),
@@ -6006,27 +6035,76 @@ export class RegionSim {
     );
   }
 
-  /** Combat power (GDD §7.3): manpower^0.6 × quality × mobilization — the
-   *  sub-linear exponent makes funding and industry matter more than mass. */
+  /** Recruit military units for the active war (GDD §7.1). Returns cost if successful, null if failed. */
+  recruitUnits(type: ArmyUnitType, count: number): number | null {
+    const w = this.playerWar;
+    if (!w) {
+      this.addLog('No active war — cannot recruit units.', 'info');
+      return null;
+    }
+    if (count <= 0) return null;
+
+    const unitDef = UNIT_TYPES[type];
+    const totalCost = count * unitDef.recruitCost;
+
+    if (this.treasury < totalCost) {
+      this.addLog(`Insufficient funds to recruit ${count} ${type}(s): costs £${totalCost}, have £${Math.round(this.treasury)}.`, 'info');
+      return null;
+    }
+
+    this.treasury -= totalCost;
+
+    // Check if we already have this unit type; if so, add to existing, else create new
+    const existing = w.units.find(u => u.type === type);
+    if (existing) {
+      existing.count += count;
+    } else {
+      w.units.push({
+        type,
+        count,
+        morale: 100,
+        suppliedDays: w.supplyReserve * 30, // supply in days based on reserve
+      });
+    }
+
+    this.addLog(`Recruited ${count} ${type}(s) for £${totalCost} — ${w.units.reduce((sum, u) => sum + u.count, 0)} total units.`, 'good');
+    return totalCost;
+  }
+
+  /** Combat power (GDD §7.3): unit-based power from armies with supply penalties. */
   warPower(): number {
+    const w = this.playerWar;
+    let basePower: number;
+
+    if (w && w.units.length > 0) {
+      // Unit-based power: each unit type contributes based on count, morale, and supply
+      const supplyPenalty = w.supplyReserve >= 1 ? 1 : 0.5 + 0.5 * w.supplyReserve;
+      basePower = w.units.reduce((sum, unit) => {
+        const unitDef = UNIT_TYPES[unit.type];
+        const unitPower = unit.count * unitDef.powerPerUnit * (unit.morale / 100);
+        return sum + unitPower;
+      }, 0) * supplyPenalty;
+    } else {
+      // Fallback to population-based power (militia level) if no units recruited
+      basePower = Math.pow(Math.max(1, this.totalPop()), 0.6) * (1 + 0.25 * this.militiaLevel);
+    }
+
     const quality =
-      (1 + 0.25 * this.militiaLevel + (this.policyActive('standing_army') ? 0.5 : 0)) *
+      (this.policyActive('standing_army') ? 1.5 : 1) *
       (this.ministerFor('defence') ? 1.2 : 1) *
       (this.passedLaws.includes('military_reform') ? 1.2 : 1) *
       (this.govType === 'junta' ? 1.15 : 1) *
-      // Doctrine (nation design): expansionists drill for the offensive,
-      // defensive doctrines trade punch for cheaper, homeland-bound garrisons.
       (this.militaryDoctrine === 'expansionist' ? 1.15 : this.militaryDoctrine === 'defensive' ? 0.9 : 1);
-    const mob = this.playerWar ? MOBILIZATION_DEFS[this.playerWar.mobilization].power : 1;
+    const mob = w ? MOBILIZATION_DEFS[w.mobilization].power : 1;
     // Defensive pacts put allied arms on your front (GDD §5.4); a called
     // co-belligerent commits its army, not just its sympathy (GDD §7.3)
     const allies = this.rivals.reduce((s, rv) => {
-      if (rv.id === this.playerWar?.rivalId) return s;
-      if (this.playerWar?.allies.includes(rv.id)) return s + Math.pow(rv.pop, 0.6) * 0.5;
+      if (rv.id === w?.rivalId) return s;
+      if (w?.allies.includes(rv.id)) return s + Math.pow(rv.pop, 0.6) * 0.5;
       if (rv.treaties.includes('defensive_pact')) return s + Math.pow(rv.pop, 0.6) * 0.25;
       return s;
     }, 0);
-    return Math.pow(Math.max(1, this.totalPop()), 0.6) * quality * mob + allies;
+    return basePower * quality * mob + allies;
   }
 
   /** The other side of the front: their mass, discounted by their appetite —
@@ -6126,6 +6204,50 @@ export class RegionSim {
     w.mobilization = m;
     this.addLog(`MOBILIZATION: ${MOBILIZATION_DEFS[m].name.toLowerCase()} — ${MOBILIZATION_DEFS[m].desc}`, 'info');
     return true;
+  }
+
+  /** Consume supply reserves based on army size and unit types (GDD §7.1, §7.3). */
+  private consumeWarSupply(): void {
+    const w = this.playerWar;
+    if (!w || w.units.length === 0) return;
+
+    // Calculate monthly supply demand from all units
+    const monthDays = 30;
+    const supplyDemand = w.units.reduce((total, unit) => {
+      const unitDef = UNIT_TYPES[unit.type];
+      return total + unit.count * unitDef.supplyCost * monthDays;
+    }, 0);
+
+    // Deduct from supply reserve
+    w.supplyReserve -= supplyDemand;
+
+    // Log supply status
+    if (w.supplyReserve > 3) {
+      // Army is well-supplied
+    } else if (w.supplyReserve > 1) {
+      if (this.rng.chance(0.3)) this.addLog('Supply lines stretching thin — rations cut.', 'info');
+    } else if (w.supplyReserve > 0) {
+      if (this.rng.chance(0.3)) this.addLog('SUPPLY CRISIS: The army goes hungry. Morale plummets.', 'bad');
+      // Reduce morale on critical shortage
+      for (const unit of w.units) {
+        unit.morale = Math.max(30, unit.morale - 10);
+      }
+    } else {
+      // No supply left — army begins to disband
+      if (this.rng.chance(0.5)) {
+        const disbanded = Math.ceil(w.units.reduce((sum, u) => sum + u.count, 0) * 0.1);
+        let remaining = disbanded;
+        for (const unit of w.units) {
+          const loss = Math.min(remaining, unit.count);
+          unit.count -= loss;
+          remaining -= loss;
+          if (remaining === 0) break;
+        }
+        w.units = w.units.filter(u => u.count > 0);
+        this.addLog(`DESERTION: ${disbanded} troops abandon the army — supply exhausted.`, 'bad');
+      }
+      w.supplyReserve = 0;
+    }
   }
 
   /** What the enemy wants on the scoreboard before signing — the §6.3
