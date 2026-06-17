@@ -21,6 +21,7 @@ import { RegionView } from './ui/regionview';
 import { RegionMap } from './sim/worldgen';
 import { Weather } from './sim/weather';
 import { Rng } from './sim/rng';
+import { TAX_BAND_LABELS, SECTOR_NAMES } from './sim/region';
 import { buildSprites } from './ui/sprites';
 import { applyOverrides } from './ui/spriteOverrides';
 import { Sfx } from './ui/audio';
@@ -69,7 +70,6 @@ const weather = new Weather(seed);
 let region = new RegionSim(rng, 0, map, weather);
 
 let regionView: RegionView | null = null;
-let selectedSettlementId: number | null = null;
 let paused = false;
 let speed = 1;
 
@@ -94,10 +94,9 @@ canvas.addEventListener('mousedown', (e) => {
     e.preventDefault();
     return;
   }
-  if (e.button === 0) { // left click to select
-    // TODO: convert screen coords to world coords, find settlement under click
-    // For now, just toggle a settlement selection in UI
-    selectedSettlementId = region.settlements[0]?.id ?? null;
+  if (e.button === 0 && regionView) { // left click to select
+    const r = canvas.getBoundingClientRect();
+    regionView.click(e.clientX - r.left, e.clientY - r.top);
   }
 });
 
@@ -133,7 +132,7 @@ addEventListener('keydown', (e) => {
     case 's': case 'arrowdown': if (regionView) regionView.panBy(0, -20); break;
     case 'a': case 'arrowleft': if (regionView) regionView.panBy(20, 0); break;
     case 'd': case 'arrowright': if (regionView) regionView.panBy(-20, 0); break;
-    case 'escape': selectedSettlementId = null; break;
+    case 'escape': if (regionView) regionView.selectedId = null; break;
   }
 });
 
@@ -142,11 +141,11 @@ addEventListener('keydown', (e) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function drawSettlementPanel(): void {
-  if (!selectedSettlementId) return;
-  const s = region.settlements.find(t => t.id === selectedSettlementId);
+  if (!regionView || !regionView.selectedId) return;
+  const s = region.settlements.find(t => t.id === regionView!.selectedId);
   if (!s) return;
 
-  const panelW = 320, pad = 8;
+  const panelW = 320, pad = 8, lineH = 16;
   ctx.fillStyle = '#0b1118dd';
   ctx.fillRect(cw - panelW, 0, panelW, ch);
   ctx.strokeStyle = '#33424f';
@@ -154,44 +153,77 @@ function drawSettlementPanel(): void {
 
   ctx.font = '11px monospace';
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#7fd0f0';
 
   let y = pad + 12;
+  const sep = () => { ctx.fillStyle = '#666'; ctx.fillRect(cw - panelW + pad, y, panelW - pad * 2, 1); y += 12; };
+  const title = (t: string) => { ctx.fillStyle = '#7fd0f0'; ctx.font = 'bold 12px monospace'; ctx.fillText(t, cw - panelW + pad, y); y += 18; };
   const line = (label: string, val: string | number) => {
-    ctx.fillStyle = '#aab8c4';
+    ctx.font = '11px monospace'; ctx.fillStyle = '#aab8c4';
     ctx.fillText(label, cw - panelW + pad, y);
     ctx.fillStyle = '#dff1ff';
     ctx.textAlign = 'right';
-    ctx.fillText(String(val), cw - pad - 2, y);
+    ctx.fillText(String(val), cw - panelW + panelW - pad - 2, y);
     ctx.textAlign = 'left';
-    y += 16;
+    y += lineH;
   };
 
-  // Settlement info
-  ctx.fillStyle = '#7fd0f0';
-  ctx.font = 'bold 12px monospace';
-  ctx.fillText(s.name, cw - panelW + pad, y);
-  y += 20;
+  // Settlement header
+  title(s.name);
 
+  // Status
   const pop = s.cohorts.bands.reduce((a, b) => a + b, 0);
   line('Population', Math.round(pop));
   line('Satisfaction', Math.round(s.satisfaction) + '%');
+
+  sep();
+
+  // Resources
   line('Food', Math.round(s.food));
   line('Wood', Math.round(s.wood));
-  line('Garrison', Math.round(s.garrisonStrength));
+  line('Military', Math.round(s.garrisonStrength));
 
-  y += 8;
-  ctx.fillStyle = '#666';
-  ctx.fillRect(cw - panelW + pad, y, panelW - pad * 2, 1);
-  y += 12;
+  sep();
 
-  // Basic policy levers (placeholder)
-  ctx.font = '11px monospace';
-  ctx.fillStyle = '#aab8c4';
+  // Policies
+  ctx.fillStyle = '#7fd0f0';
+  ctx.font = 'bold 11px monospace';
   ctx.fillText('Policies', cw - panelW + pad, y);
-  y += 16;
-  ctx.fillStyle = '#666';
-  ctx.fillText('(tax, labor, garrison)', cw - panelW + pad, y);
+  y += lineH + 4;
+
+  ctx.font = '10px monospace';
+  ctx.fillStyle = '#aab8c4';
+  ctx.fillText('Tax:', cw - panelW + pad, y);
+  ctx.fillStyle = '#dff1ff';
+  ctx.fillText(TAX_BAND_LABELS[s.policies.taxBand], cw - panelW + pad + 35, y);
+  y += lineH;
+
+  ctx.fillStyle = '#aab8c4';
+  ctx.fillText('Wages:', cw - panelW + pad, y);
+  ctx.fillStyle = '#dff1ff';
+  ctx.fillText(s.policies.wagePolicy, cw - panelW + pad + 40, y);
+  y += lineH;
+
+  ctx.fillStyle = '#aab8c4';
+  ctx.fillText('Services:', cw - panelW + pad, y);
+  ctx.fillStyle = '#dff1ff';
+  const svc = ['Minimal', 'Standard', 'Generous'];
+  ctx.fillText(svc[s.policies.serviceLevel], cw - panelW + pad + 50, y);
+  y += lineH + 4;
+
+  // Sectors
+  sep();
+  ctx.fillStyle = '#7fd0f0';
+  ctx.font = 'bold 11px monospace';
+  ctx.fillText('Employment', cw - panelW + pad, y);
+  y += lineH + 4;
+
+  ctx.font = '9px monospace';
+  for (const [sid, sector] of Object.entries(s.sectors)) {
+    ctx.fillStyle = '#aab8c4';
+    const pct = Math.round(sector.share * 100);
+    ctx.fillText(`${SECTOR_NAMES[sid as keyof typeof SECTOR_NAMES]} ${pct}%`, cw - panelW + pad, y);
+    y += 12;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
