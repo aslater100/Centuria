@@ -1,13 +1,50 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-16  
-**Branch**: `claude/keen-hypatia-2mj4dl` (merged to main)  
-**Current test count:** 874 passing  
+**Last updated:** 2026-06-17  
+**Branch**: `claude/game-build-iteration-assets-2kd2z0` (all work merged to main, through PR #182)  
+**Current test count:** 894 passing  
 **Current version:** v0.41.1  
-**Primary game vision:** **Seamless world** with click-to-view navigation (SoA `TownCore` + `ParcelManager`)  
-**Region/nation tier:** Planned for Phase 2 (multi-parcel economy + rivals)  
+**Primary game vision:** **Seamless world** with click-to-view navigation (SoA `TownCore`)  
+**Seamless-world status:** **Backbone M0–M3 COMPLETE** on the primary engine — open the
+🌐 World overview, claim adjacent land, holdings pay daily tribute. (See latest snapshots below.)
 **Branch pattern:** feature branches off `main` via `claude/...` naming; merge via draft PR  
 **Model guidance:** See PLAN.md § Model Assignment for context ceilings per task
+
+---
+
+## Where things stand (2026-06-17)
+
+A long session shipped **13 PRs (#170–#182)** across all facets — the seamless-world backbone
+is complete and the primary engine (CoreView / `core.html`, reached via title-screen **New
+Colony**) is a full, audible, mouse-driven game. Highlights, newest first (details in the
+dated snapshots below):
+
+- **Seamless world M0→M3** (the backbone): `TownCore` chunk summary (#175), lazy
+  `regionMap`/`site` + 🌐 World overview (#176), claim parcels (#178), holdings daily tribute
+  (#179) + Provincial Roads tech (#182). `ParcelManager` (classic) was **not** re-based —
+  the primary engine got a small native parcel model sharing one `parcelCost()`.
+- **UX**: SoS-style bottom **command bar** + RTS hotkeys, `H`=home (#177); event **toasts**
+  (#180); **audio** wired into CoreView — era music + ambience + SFX, 🔊 toggle (#181).
+- **Content**: late-century **region tech tree** 2050–2100 (#172); **TownCore production
+  techs** incl. a fixed dead `food_preservation` effect (#173); **extraction-zone** yield
+  techs (#174).
+- **Render/perf**: viewport culling + **HiDPI/DPR** (#170); ground-seam fix + station-view
+  reuse (#171).
+
+**Known follow-ups / deferred (good next-session candidates):**
+- **Dormant per-parcel sim** — holdings currently give a flat biome tribute; a real dormant
+  tick (crops grow, population drifts, each holding hosts its own grid) is the upgrade path
+  (ponytail-noted in `TownCore.tickHoldings`).
+- **Re-base `ParcelManager` on `TownCore`** if the classic↔primary parcel models should
+  converge (a `ParcelHost` interface) — only needed if the region/nation tier moves onto SoA.
+- **Town-tier expansion-tech gating** (`land_survey`/`road_building`/`cartography` are
+  region-tier; town overview uses adjacency-only).
+- **Content depth**: late-game buildings/stations (data-driven, opt-in/balance-safe, but need
+  art or accept the generic fallback); region random events are still hardcoded.
+- **UX**: first-run onboarding/tutorial; a real settings panel (audio toggle exists as a button).
+- **Caution learned this session:** adding traits to `traits.json` perturbs seeded balance
+  (a default-seed colony died) — content that changes the persona roll or core balance needs
+  the headless harnesses (`npm run sim:town` / `sim:macro`) checked, not just unit tests.
 
 ---
 
@@ -341,12 +378,17 @@ All four are implemented in `region.ts`:
 
 ---
 
-### Seamless-world checklist (Phases 1B–3)
-1. ✅ **Phase 0** — ParcelManager integration (merged)
-2. ✅ **Phase 1** — Click-to-world navigation (merged)
-3. 🔶 **Phase 1B** — World rendering with WorldCamera + parcel grid (in progress)
-4. ⬜ **Phase 2** — Parcel purchase UI + tech gating (identified)
-5. ⬜ **Phase 3** — Dormant tick for off-screen parcels (identified)
+### Seamless-world checklist
+> **Re-based on the primary engine (TownCore) this session — see "Where things stand" up top.**
+> The Phase 0/1 items below were the *classic-`Simulation`* scaffolding (`ParcelManager`,
+> `main.ts` world mode). The shipped game uses TownCore-native M0–M3 instead.
+1. ✅ **M0** — `computeTownChunkSummary` over `BuildGrid` (#175)
+2. ✅ **M1** — lazy `TownCore.regionMap`/`site` + 🌐 World overview in CoreView (#176)
+3. ✅ **M2** — claim adjacent parcels from the overview; shared `parcelCost()` (#178)
+4. ✅ **M3** — holdings daily tribute + Provincial Roads tech (#179, #182)
+5. ⬜ **Next** — real dormant per-parcel sim (crops/pop/grid per holding); optional
+   `ParcelManager`↔TownCore convergence; town-tier expansion-tech gating
+6. ℹ️ *Classic scaffolding (superseded):* Phase 0 ParcelManager + Phase 1 main.ts world mode
 
 ### Polish & future (post-seamless-world)
 1. **Yearly Report** — annual in/out/net ledger per resource in the economy panel (the SoS report). Additive.
