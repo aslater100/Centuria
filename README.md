@@ -38,9 +38,9 @@ npm run sim      # headless tuning harness: `npm run sim -- <days> <runs>`
 npm run build    # production build
 ```
 
-## Playing the prototype
+## Gameplay overview
 
-### Town Phase (1900–1915, ~1 hour)
+### Town Phase (1900–1915)
 
 You start in Spring 1900 with 12 settlers, two cabins, a stockpile, and
 about three weeks of provisions. Build farm plots and a cookhouse before
@@ -55,7 +55,7 @@ battlefield. Keep a good medic: untreated wounds fester.
   **Work Priorities** opens the per-settler job table (click cells, 0–3).
 - **Controls:** **Space** pause · **1/2/5/10×** game speed · **WASD/arrows** pan · **Esc** deselect.
 
-### Regional Phase (1910–1940+, ~2–3 hours)
+### Regional Phase (1910–1940+)
 
 At 20 settlers you can **found a second town** — the moment you do, the game flips: the population becomes cohort statistics on a region map, your most storied settlers become named **Notables** with roles, and the economy shifts to a currency-based system.
 
@@ -69,16 +69,16 @@ At 20 settlers you can **found a second town** — the moment you do, the game f
 
 **Military & Garrison:** maintain a garrison to deter raids and rival aggression. Military readiness becomes a charter requirement and a defensive necessity as rivals grow stronger.
 
-### Nation Phase (1930–2100, ~2–3 hours)
+### Nation Phase (1930–2100)
 
 Reaching 9 towns, 6,000 citizens, and researching Statecraft unlocks the **Constitutional Convention** — a scripted event where you choose your government type (democracy, monarchy, junta, corporate state, etc.). Your chosen ideology and notable ministers shape your nation's laws, trade blocs, and diplomatic options.
 
 At the nation tier, you manage provinces, sign treaties, wage wars, and steer a macroeconomy with interest rates and trade policies. The same valley plays utterly differently as a liberal democracy, a junta, or a corporate oligarchy.
 
 **Scope and timeline:**
-- **Years simulated:** 300 years (1800–2100); you begin in 1900
-- **Era boundaries:** Industrial (1850), Modern (1920), Information (1980) — palettes and tech trees shift at each boundary
-- **Game speed:** Play at 1×–10× acceleration; at 1× a full game runs ~5–6 hours (roughly 1 hour per in-game century's key decisions)
+- **Years simulated:** 300 years (1800–2100); you begin in 1900 and the game ends 1 January 2100
+- **Era boundaries:** Industrial (1850), Modern (1920), Information (1980) — palettes and tech trees shift at each boundary  
+- **Game pacing:** Real-time with pause; calendar accelerates per tier to keep decision rate constant. At 1× speed: ~1 hour per in-game year. Play at 1×–10× acceleration; pause anytime to manage crises, plan infrastructure, or just breathe
 
 ## Systems
 
@@ -95,7 +95,7 @@ The simulation is built on a three-tier spine (Town → State → Nation), with 
 
 **Sectoral Economy** — Each settlement has labor distributed across sectors (agriculture, industry, commerce, services, artisan). Population growth, tech choices, zoning, and policies steer which sectors dominate, shaping your economy and tax base.
 
-**Notables System** — Named individuals (carpenter, medic, guard captain) persist from the town phase through state and nation tiers. They age, gain experience, form relationships, develop ideology, and fill government roles. The founding carpenter's journey from town builder to agriculture minister creates the emotional through-line across two centuries.
+**Notables System** — Named individuals (carpenter, medic, guard captain) persist from the town phase through state and nation tiers. They age, gain experience, form relationships, develop ideology, and fill government roles. The founding carpenter's journey from town builder to agriculture minister can span three centuries (1800–2100), creating an emotional through-line across entire eras.
 
 **Zoning & City Management** — Starting at Tier 2, unlock the Drafting Table to zone towns and manage services (schools, hospitals, markets). Zoning decisions shape population growth, sector specialization, and district culture.
 
