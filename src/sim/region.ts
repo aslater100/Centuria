@@ -1955,9 +1955,15 @@ export class RegionSim {
     return AI_DIFFICULTY[this.aiDifficulty] ?? AI_DIFFICULTY.normal;
   }
 
-  /** Get garrison strength of a settlement. */
+  /** Get garrison strength of a settlement, including stationed units (GDD §7.1). */
   garrisonOf(settlement: Settlement): number {
-    return settlement.garrisonStrength || 0;
+    let strength = settlement.garrisonStrength || 0;
+    // Add contribution from stationed units: each unit contributes power proportional to its type
+    for (const unit of settlement.stationedUnits) {
+      const unitDef = UNIT_TYPES[unit.type];
+      strength += unit.count * unitDef.powerPerUnit;
+    }
+    return strength;
   }
 
   /** Get comprehensive statistics for a faction (Phase 4: UI foundation).
@@ -4805,7 +4811,7 @@ export class RegionSim {
   /** Per-requirement breakdown of the Incorporation gate, so the UI can show
    *  exactly which conditions are met and which still block the Charter. */
   charterGates(): { label: string; met: boolean; detail: string }[] {
-    const garrison = this.settlements.reduce((sum, s) => sum + (s.garrisonStrength || 0), 0);
+    const garrison = this.settlements.reduce((sum, s) => sum + this.garrisonOf(s), 0);
     const net = this.getNetTreasury();
     return [
       { label: 'towns', met: this.settlements.length >= 3, detail: `${this.settlements.length}/3` },
@@ -4822,7 +4828,7 @@ export class RegionSim {
     // Economic gate: £8k net (after loans) — roughly 3-4 months of surplus at charter scale
     if (this.getNetTreasury() < 8000) return false;
     // Military gate: must have 10+ garrison across all settlements
-    const totalGarrison = this.settlements.reduce((sum, s) => sum + (s.garrisonStrength || 0), 0);
+    const totalGarrison = this.settlements.reduce((sum, s) => sum + this.garrisonOf(s), 0);
     if (totalGarrison < 10) return false;
     return true;
   }
@@ -5234,7 +5240,7 @@ export class RegionSim {
   /** Per-requirement breakdown for the Constitutional Convention, so the UI
    *  can show exactly which conditions are met and which still block the call. */
   canCallConventionGates(): { label: string; met: boolean; detail: string }[] {
-    const totalGarrison = this.settlements.reduce((sum, s) => sum + (s.garrisonStrength || 0), 0);
+    const totalGarrison = this.settlements.reduce((sum, s) => sum + this.garrisonOf(s), 0);
     const combined = totalGarrison + (this.militiaLevel || 0) * 3;
     const net = this.getNetTreasury();
     const pop = this.totalPop();
