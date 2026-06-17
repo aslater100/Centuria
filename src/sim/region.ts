@@ -264,6 +264,10 @@ export const REGION_EVENT_DEFS: RegionalEventDef[] = [
   { kind: 'automation_surge', name: 'Automation Surge', sector: 'information', outputMult: 1.50, durationDays: 50, probability: 0.02, grievance: 5, minYear: 2010, desc: 'Robots take the line; the terminal booms, the floor grumbles. Information +50%.' },
 ];
 
+// Fast lookups for building and event definitions.
+const REGION_BUILDINGS_MAP = new Map(REGION_BUILDINGS.map((b) => [b.id, b]));
+const REGION_EVENT_DEFS_MAP = new Map(REGION_EVENT_DEFS.map((d) => [d.kind, d]));
+
 // ---- Phase 5: Local Policies ----
 
 export type WagePolicy = 'low' | 'market' | 'high';
@@ -2381,7 +2385,7 @@ export class RegionSim {
     // Phase 2: every university adds its laboratories to the effort
     for (const t of this.settlements) {
       for (const id of t.buildings) {
-        const def = REGION_BUILDINGS.find((b) => b.id === id);
+        const def = REGION_BUILDINGS_MAP.get(id);
         if (def?.research) mult *= 1 + def.research;
       }
     }
@@ -4126,7 +4130,7 @@ export class RegionSim {
     let mult = 1;
     for (const ev of t.activeEvents) {
       if (ev.untilDay <= this.day) continue;
-      const def = REGION_EVENT_DEFS.find((d) => d.kind === ev.kind);
+      const def = REGION_EVENT_DEFS_MAP.get(ev.kind);
       if (!def) continue;
       if (def.sector === sector || def.sector === 'all') mult *= def.outputMult;
     }
@@ -4181,7 +4185,7 @@ export class RegionSim {
    *  when the scaffolding comes down. */
   buildCity(townId: number, defId: string): boolean {
     const t = this.settlement(townId);
-    const def = REGION_BUILDINGS.find((b) => b.id === defId);
+    const def = REGION_BUILDINGS_MAP.get(defId);
     if (!t || !def || !this.cityBuildCheck(t, def).ok) return false;
     const cost = this.cityBuildCost(def);
     this.treasury -= cost;
@@ -4211,7 +4215,7 @@ export class RegionSim {
   private buildingBonus(t: Settlement, sector: SectorId): number {
     let bonus = 0;
     for (const id of t.buildings) {
-      const def = REGION_BUILDINGS.find((b) => b.id === id);
+      const def = REGION_BUILDINGS_MAP.get(id);
       if (def && (def.sector === sector || def.sector === 'all')) bonus += def.bonus;
     }
     return bonus;
@@ -4219,12 +4223,12 @@ export class RegionSim {
 
   /** Flat satisfaction bonus from civic works (waterworks, hospital…). */
   private buildingSatisfaction(t: Settlement): number {
-    return t.buildings.reduce((s, id) => s + (REGION_BUILDINGS.find((b) => b.id === id)?.satisfaction ?? 0), 0);
+    return t.buildings.reduce((s, id) => s + (REGION_BUILDINGS_MAP.get(id)?.satisfaction ?? 0), 0);
   }
 
   /** Extra survey radius from this town's works (telegraph office). */
   private buildingSight(t: Settlement): number {
-    return t.buildings.reduce((s, id) => s + (REGION_BUILDINGS.find((b) => b.id === id)?.sight ?? 0), 0);
+    return t.buildings.reduce((s, id) => s + (REGION_BUILDINGS_MAP.get(id)?.sight ?? 0), 0);
   }
 
   /** £/month the built works cost to keep running. */
@@ -4232,7 +4236,7 @@ export class RegionSim {
     let total = 0;
     for (const t of this.settlements) {
       if (t.factionId !== this.playerFactionId) continue;
-      for (const id of t.buildings) total += REGION_BUILDINGS.find((b) => b.id === id)?.upkeep ?? 0;
+      for (const id of t.buildings) total += REGION_BUILDINGS_MAP.get(id)?.upkeep ?? 0;
     }
     // Wagner tilt: the public sector's share of GDP rises as the nation develops.
     return total * this.devFactor() ** TUNING.wagnerExp;
@@ -4425,7 +4429,7 @@ export class RegionSim {
   private updateConstruction(): void {
     for (const t of this.settlements) {
       if (t.construction && this.day >= t.construction.doneDay) {
-        const def = REGION_BUILDINGS.find((b) => b.id === t.construction!.id);
+        const def = REGION_BUILDINGS_MAP.get(t.construction!.id);
         t.buildings.push(t.construction.id);
         t.construction = null;
         if (def) {
