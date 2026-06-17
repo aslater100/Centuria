@@ -838,12 +838,12 @@ export interface RivalRegimeDef {
 }
 
 export const RIVAL_REGIMES: RivalRegimeDef[] = [
-  { id: 'parliamentary', name: 'Parliamentary Democracy', bloc: 'liberal', eraFrom: 1900 },
-  { id: 'merchant_republic', name: 'Merchant Republic', bloc: 'liberal', eraFrom: 1900 },
-  { id: 'const_monarchy', name: 'Constitutional Monarchy', bloc: 'traditional', eraFrom: 1900 },
-  { id: 'abs_monarchy', name: 'Absolute Monarchy', bloc: 'traditional', eraFrom: 1900 },
-  { id: 'theocracy', name: 'Theocracy', bloc: 'traditional', eraFrom: 1900 },
-  { id: 'junta', name: 'Military Junta', bloc: 'autocratic', eraFrom: 1900 },
+  { id: 'parliamentary', name: 'Parliamentary Democracy', bloc: 'liberal', eraFrom: 1800 },
+  { id: 'merchant_republic', name: 'Merchant Republic', bloc: 'liberal', eraFrom: 1800 },
+  { id: 'const_monarchy', name: 'Constitutional Monarchy', bloc: 'traditional', eraFrom: 1800 },
+  { id: 'abs_monarchy', name: 'Absolute Monarchy', bloc: 'traditional', eraFrom: 1800 },
+  { id: 'theocracy', name: 'Theocracy', bloc: 'traditional', eraFrom: 1800 },
+  { id: 'junta', name: 'Military Junta', bloc: 'autocratic', eraFrom: 1800 },
   { id: 'peoples_republic', name: "People's Republic", bloc: 'revolutionary', eraFrom: 1917 },
   { id: 'one_party', name: 'One-Party State', bloc: 'autocratic', eraFrom: 1920 },
   { id: 'fascist', name: 'Fascist State', bloc: 'autocratic', eraFrom: 1925 },
