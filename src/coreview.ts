@@ -32,6 +32,7 @@ import {
   STATION_DEF_BY_NUM, STATION_DEFS,
   TICKS_PER_SECOND, SEASONS, START_YEAR, DAYS_PER_SEASON, DAYS_PER_YEAR, MINUTES_PER_TICK, MINUTES_PER_DAY,
   RESOURCE_KINDS, BLUEPRINT_DEFS, TUNING,
+  type ResourceKind,
 } from './sim/defs';
 import { RESEARCH_PER_DESK_PER_DAY } from './sim/research';
 import { REGION_N, type Biome } from './sim/worldgen';
@@ -127,6 +128,9 @@ const ctx = canvas.getContext('2d')!;
 // the per-frame base transform (set in draw) scales it up uniformly, so layout,
 // input and the world camera are unchanged — only sharper.
 let cw = 0, ch = 0, DPR = 1;
+
+// Left panel: resource/building info sidebar (SoS-style).
+const PANEL_W = 140;
 
 // Minimap: off-screen canvas rendered at 2px/tile, overlaid in bottom-right corner.
 const MINI_PX = 2; // px per tile in the minimap
@@ -822,6 +826,52 @@ function clickCommandBar(mx: number, my: number): boolean {
   return false;
 }
 
+function drawLeftPanel(): void {
+  const pad = 4, lineH = 14;
+  ctx.fillStyle = '#0b1118dd';
+  ctx.fillRect(0, 0, PANEL_W, ch);
+  ctx.strokeStyle = '#33424f'; ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, PANEL_W - 1, ch - 1);
+
+  ctx.font = '10px monospace'; ctx.textAlign = 'left';
+  let y = pad + 8;
+  const print = (label: string, val: string | number) => {
+    ctx.fillStyle = '#aab8c4'; ctx.fillText(label, pad, y);
+    ctx.fillStyle = '#dff1ff'; ctx.textAlign = 'right'; ctx.fillText(String(val), PANEL_W - pad - 2, y);
+    ctx.textAlign = 'left';
+    y += lineH;
+  };
+
+  // Time & population
+  const seasonNames = ['Spr', 'Sum', 'Aut', 'Win'];
+  const season = seasonNames[Math.floor((core.day % DAYS_PER_YEAR) / DAYS_PER_SEASON)];
+  const year = Math.floor(core.day / DAYS_PER_YEAR) + 1900;
+  print(`Y${year} ${season}`, core.day % DAYS_PER_YEAR);
+  print('Pop', core.agents.count);
+
+  y += 2;
+  ctx.fillStyle = '#666'; ctx.fillRect(pad, y, PANEL_W - pad * 2, 1);
+  y += 6;
+
+  // Resources
+  const resOrder: ResourceKind[] = ['meal', 'wood', 'stone', 'grain', 'clay'];
+  for (const rid of resOrder) {
+    const cnt = core.stock.count(rid);
+    if (cnt > 0 || resOrder.indexOf(rid) < 3) {
+      const shortName = rid.length > 3 ? rid.split('_').map(w => w[0]).join('') : rid;
+      print(shortName, cnt | 0);
+    }
+  }
+
+  y += 2;
+  ctx.fillStyle = '#666'; ctx.fillRect(pad, y, PANEL_W - pad * 2, 1);
+  y += 6;
+
+  // Station count
+  const stationCnt = [...core.stationViews()].length;
+  print('Stations', stationCnt);
+  print('Builds', core.builds.length);
+}
 function draw(): void {
   if (worldView) { drawWorld(); return; }
   const px = TILE; // world is drawn in base px under the camera transform below
@@ -1065,6 +1115,23 @@ function draw(): void {
           if (wallW) ctx.fillRect(x*px, y*px, 4, px);
         }
       }
+    }
+
+    // Zone overlays: light-colored grid for designated zones (SoS-style).
+    if (g.zone[i]) {
+      const cols = ['', 'rgba(212,212,106,0.25)', 'rgba(106,212,138,0.25)', 'rgba(200,200,216,0.25)', 'rgba(106,212,212,0.25)', 'rgba(212,160,106,0.25)', 'rgba(192,96,208,0.25)', 'rgba(224,112,144,0.25)', 'rgba(144,192,80,0.25)'];
+      const col = cols[g.zone[i]] || '#fff';
+      ctx.fillStyle = col;
+      ctx.fillRect(x * px, y * px, px, px);
+      // Zone boundary edge highlight: darker edge on zone transitions
+      const zoneN = y > 0 && g.zone[(y-1)*MAP+x];
+      const zoneS = y < MAP-1 && g.zone[(y+1)*MAP+x];
+      const zoneE = x < MAP-1 && g.zone[y*MAP+(x+1)];
+      const zoneW = x > 0 && g.zone[y*MAP+(x-1)];
+      if (g.zone[i] !== zoneN || !zoneN) { ctx.fillStyle = 'rgba(100,100,100,0.4)'; ctx.fillRect(x*px, y*px, px, 1); }
+      if (g.zone[i] !== zoneS || !zoneS) { ctx.fillStyle = 'rgba(100,100,100,0.4)'; ctx.fillRect(x*px, (y+1)*px-1, px, 1); }
+      if (g.zone[i] !== zoneE || !zoneE) { ctx.fillStyle = 'rgba(100,100,100,0.4)'; ctx.fillRect((x+1)*px-1, y*px, 1, px); }
+      if (g.zone[i] !== zoneW || !zoneW) { ctx.fillStyle = 'rgba(100,100,100,0.4)'; ctx.fillRect(x*px, y*px, 1, px); }
     }
 
     // Sapling: scale by age so young trees are tiny and nearly mature ones are full-size.
@@ -2056,6 +2123,9 @@ function draw(): void {
     ctx.fillStyle = logColors[entry.kind];
     ctx.fillText(`d${entry.day} ${entry.text}`, 8, ch - 10 - k * 16);
   }
+
+  // ── Left panel (resource/building info, SoS-style) ───────────────────────────
+  drawLeftPanel();
 
   // ── Command bar (bottom-centre, SoS-style) ───────────────────────────
   drawCommandBar();
