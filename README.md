@@ -1,10 +1,12 @@
 # CENTURIA
 
-A colony-to-nation deep-simulation builder, 1900–2100. Begin with twelve
-named settlers stepping off a wagon; end the century signing peace treaties
-as a great power — RimWorld-intimate at town scale, Cities/Citystate at
-state scale, Civ at nation scale, all in pixel art over lush
-era-evolving backdrops.
+A deep 4X civilization simulator spanning 1800–2100. Begin with twelve named
+settlers stepping off a wagon in 1900; end three centuries later as a great
+power signing peace treaties — Explore a procedural valley, Expand across
+three strategic tiers (town, state, nation), eXploit resources through a
+dynamic sectoral economy, and eXterminate rivals through diplomacy and war.
+RimWorld-intimate at town scale, Cities/Citystate at state scale, Civ at
+nation scale, all in pixel art over lush era-evolving backdrops.
 
 - **Design:** [GDD.md](GDD.md) — the full game design document.
 - **Milestones:** [01 Tier-1 colony](docs/specs/01-tier1-colony.md) ·
@@ -38,7 +40,7 @@ npm run build    # production build
 
 ## Playing the prototype
 
-### Town Phase (1900–1915)
+### Town Phase (1900–1915, ~1 hour)
 
 You start in Spring 1900 with 12 settlers, two cabins, a stockpile, and
 about three weeks of provisions. Build farm plots and a cookhouse before
@@ -51,9 +53,9 @@ battlefield. Keep a good medic: untreated wounds fester.
   Shift-click to place repeatedly. *Chop Trees* marks trees for felling.
 - **Click a settler** for needs, mood, traits, thoughts, and current task;
   **Work Priorities** opens the per-settler job table (click cells, 0–3).
-- **Controls:** **Space** pause · **1/2/3** speed · **WASD/arrows** pan · **Esc** deselect.
+- **Controls:** **Space** pause · **1/2/5/10×** game speed · **WASD/arrows** pan · **Esc** deselect.
 
-### Regional Phase (1910–1940+)
+### Regional Phase (1910–1940+, ~2–3 hours)
 
 At 20 settlers you can **found a second town** — the moment you do, the game flips: the population becomes cohort statistics on a region map, your most storied settlers become named **Notables** with roles, and the economy shifts to a currency-based system.
 
@@ -67,11 +69,16 @@ At 20 settlers you can **found a second town** — the moment you do, the game f
 
 **Military & Garrison:** maintain a garrison to deter raids and rival aggression. Military readiness becomes a charter requirement and a defensive necessity as rivals grow stronger.
 
-### Nation Phase (1930–2100)
+### Nation Phase (1930–2100, ~2–3 hours)
 
 Reaching 9 towns, 6,000 citizens, and researching Statecraft unlocks the **Constitutional Convention** — a scripted event where you choose your government type (democracy, monarchy, junta, corporate state, etc.). Your chosen ideology and notable ministers shape your nation's laws, trade blocs, and diplomatic options.
 
 At the nation tier, you manage provinces, sign treaties, wage wars, and steer a macroeconomy with interest rates and trade policies. The same valley plays utterly differently as a liberal democracy, a junta, or a corporate oligarchy.
+
+**Scope and timeline:**
+- **Years simulated:** 300 years (1800–2100); you begin in 1900
+- **Era boundaries:** Industrial (1850), Modern (1920), Information (1980) — palettes and tech trees shift at each boundary
+- **Game speed:** Play at 1×–10× acceleration; at 1× a full game runs ~5–6 hours (roughly 1 hour per in-game century's key decisions)
 
 ## Systems
 
