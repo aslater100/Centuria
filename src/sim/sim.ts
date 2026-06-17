@@ -636,6 +636,33 @@ export class Simulation {
     this.addLog(`${def.name} demolished; recovered ${Math.floor((def.cost.wood ?? 0) / 2)} wood.`, 'info');
   }
 
+  sellBuilding(id: number): void {
+    const b = this.buildings.find((x) => x.id === id && x.built);
+    if (!b) return;
+    const def = buildingDef(b.defId);
+    let cash = 0;
+    for (const [res, amt] of Object.entries(def.cost)) {
+      const quantity = amt as number;
+      if (this.stock[res as ResourceKind] !== undefined) {
+        this.addStock(res as ResourceKind, quantity, b.x, b.y);
+        cash += this.sellToMarket(res as ResourceKind, quantity);
+      }
+    }
+    const w = this.buildingW(b);
+    const h = this.buildingH(b);
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        this.world.at(b.x + dx, b.y + dy).buildingId = null;
+      }
+    }
+    for (const s of this.settlers) {
+      if (s.bedId === id) s.bedId = null;
+      if (s.assignedBuildingId === id) s.assignedBuildingId = null;
+    }
+    this.buildings = this.buildings.filter((x) => x.id !== id);
+    this.addLog(`${def.name} sold for ${formatCurrency(cash)}.`, 'good');
+  }
+
   upgradeBuilding(id: number): boolean {
     const b = this.buildings.find((x) => x.id === id && x.built);
     if (!b) return false;

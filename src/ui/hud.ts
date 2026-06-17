@@ -326,7 +326,7 @@ export class Hud {
           break;
         case 'sell':
           if (confirm('Sell this building to passing merchants?')) {
-            this.sim.destroyBuilding(bid); // use destroy for now (sell = better refund TODO)
+            this.sim.sellBuilding(bid);
             this.cam.selectedBuilding = null;
           }
           break;
