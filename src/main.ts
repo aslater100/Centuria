@@ -600,6 +600,58 @@ canvas.addEventListener('contextmenu', (e) => {
   sim.bulldozeTile(t.x, t.y);
 });
 
+// ---- world view rendering ----
+function drawWorldMap(
+  ctx: CanvasRenderingContext2D,
+  regionMap: any,
+  site: any,
+  width: number,
+  height: number,
+): void {
+  const gridSize = 64;
+  const cellWidth = width / gridSize;
+  const cellHeight = height / gridSize;
+
+  for (let y = 0; y < gridSize; y++) {
+    for (let x = 0; x < gridSize; x++) {
+      const cell = regionMap.at(x, y);
+      let color: string;
+      switch (cell.biome) {
+        case 'sea': color = '#1a2a3a'; break;
+        case 'lake': color = '#2a3a5a'; break;
+        case 'river': color = '#3a4a7a'; break;
+        case 'marsh': color = '#3a4a3a'; break;
+        case 'plains': color = '#5a6a4a'; break;
+        case 'forest': color = '#3a5a2a'; break;
+        case 'hills': color = '#7a7a5a'; break;
+        case 'mountains': color = cell.elevation > 0.85 ? '#b0ada5' : '#8a7a6a'; break;
+        default: color = '#4a4a4a'; break;
+      }
+      ctx.fillStyle = color;
+      ctx.fillRect(Math.floor(x * cellWidth), Math.floor(y * cellHeight), Math.ceil(cellWidth), Math.ceil(cellHeight));
+    }
+  }
+
+  // Draw the settlement marker
+  const mx = (site.cellX / gridSize) * width;
+  const my = (site.cellY / gridSize) * height;
+  ctx.fillStyle = '#ffd700';
+  ctx.beginPath();
+  ctx.arc(mx, my, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#ffed4e';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Title and hint
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 24px sans-serif';
+  ctx.fillText('Continental Map', 20, 40);
+  ctx.font = '14px sans-serif';
+  ctx.fillStyle = '#aaa';
+  ctx.fillText('Click minimap to return to town view', 20, 65);
+}
+
 // ---- main loop: fixed-timestep sim, rAF render ----
 let acc = 0;
 let last = performance.now();
@@ -647,14 +699,9 @@ function loop(now: number): void {
     minimapCanvas.classList.remove('hidden');
     drawMinimap(minimapCtx, sim.regionMap, sim.site, MINIMAP_W, MINIMAP_H);
   } else if (mode === 'world') {
-    // World view: for now, show placeholder in main canvas
-    // TODO: Phase 1B implement full world view with WorldCamera rendering
+    // World view: display the regional map at continental scale
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#888';
-    ctx.font = '16px monospace';
-    ctx.fillText('World Map (Click minimap to return to town)', 20, 40);
+    drawWorldMap(ctx, sim.regionMap, sim.site, canvas.width, canvas.height);
     minimapCanvas.classList.add('hidden');
     hud.update();
   } else if (region) {
