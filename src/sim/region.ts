@@ -1770,6 +1770,8 @@ export class RegionSim {
   proclamationReady = false;
   /** Scout units exploring the map */
   scouts: Scout[] = [];
+  /** Monthly history for sparklines: last 12 months of key metrics. */
+  monthlyHistory: Array<{ gdp: number; treasury: number; inflation: number; employment: number }> = [];
   /** Regional factions competing for dominance (includes player faction) */
   regionalFactions: RegionalFaction[] = [];
   /** Player faction id (always 0 or first in list) */
@@ -3388,6 +3390,10 @@ export class RegionSim {
     if (this.stateProclaimed) this.collectVassalTribute();
     this.checkProclamationGate();
     this.checkWinConditions();
+    // Record monthly history for sparklines (last 12 months)
+    const gdp = this.settlements.reduce((s, t) => s + SECTOR_IDS.reduce((ss, id) => ss + t.sectors[id].output, 0), 0);
+    this.monthlyHistory.push({ gdp, treasury: this.treasury, inflation: this.inflationRate * 100, employment: 100 });
+    if (this.monthlyHistory.length > 12) this.monthlyHistory.shift();
   }
 
   /** Check all four victory paths; set winCondition on the first achieved.
