@@ -1688,7 +1688,7 @@ export class RegionSim {
   gdpLastMonth = 0;
   gameOver = false;
   /** Research: nodes that have been completed (ids). Start nodes (cost 0) pre-seeded. */
-  researched: string[] = ['steam_power', 'common_law'];
+  researched: Set<string> = new Set(['steam_power', 'common_law']);
   /** The node currently being invested in, or null if idle. */
   activeResearch: string | null = null;
   /** Accumulated research points invested in activeResearch. */
@@ -2365,7 +2365,7 @@ export class RegionSim {
 
   /** Query whether a tech/civics node has been researched. */
   has(id: string): boolean {
-    return this.researched.includes(id);
+    return this.researched.has(id);
   }
 
   /** Research points generated per day; scales with population and boosts from nodes. */
@@ -2456,7 +2456,7 @@ export class RegionSim {
     if (!node) { this.activeResearch = null; return; }
     this.researchProgress += this.researchRate();
     if (this.researchProgress >= this.techCost(node)) {
-      this.researched.push(this.activeResearch);
+      this.researched.add(this.activeResearch);
       const label = node.tree === 'tech' ? 'Technology' : 'Civics';
       this.addLog(`${label} breakthrough: "${node.name}". ${node.desc.split('.')[0]}.`, 'good');
       this.activeResearch = null;
@@ -2754,7 +2754,7 @@ export class RegionSim {
       treasury: Math.round(this.treasury),
       co2ppm: Math.round(this.co2ppm),
       warmingC: Math.round(this.warmingC * 10) / 10,
-      techs: this.researched.length,
+      techs: this.researched.size,
       laws: this.passedLaws.length,
       legitimacy: Math.round(this.legitimacy),
       grades: { stewardship, prosperity, liberty, standing },
@@ -6691,7 +6691,7 @@ export class RegionSim {
       railAnnounced: this.railAnnounced,
       highwayAnnounced: this.highwayAnnounced,
       maglevAnnounced: this.maglevAnnounced,
-      researched: this.researched,
+      researched: [...this.researched],
       activeResearch: this.activeResearch,
       researchProgress: this.researchProgress,
       politicalCapital: this.politicalCapital,
@@ -6808,7 +6808,7 @@ export class RegionSim {
     r.railAnnounced = d.railAnnounced;
     r.highwayAnnounced = d.highwayAnnounced ?? false;
     r.maglevAnnounced = d.maglevAnnounced ?? false;
-    r.researched = d.researched ?? ['steam_power', 'common_law'];
+    r.researched = new Set(d.researched ?? ['steam_power', 'common_law']);
     r.activeResearch = d.activeResearch ?? null;
     r.researchProgress = d.researchProgress ?? 0;
     r.politicalCapital = d.politicalCapital ?? 0;

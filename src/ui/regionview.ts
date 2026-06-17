@@ -1434,7 +1434,7 @@ export class RegionView {
       `<div class="ceremony-box">` +
       `<h2>★ THE CONSTITUTIONAL CONVENTION ★</h2>` +
       `<p style="font-size:11px;color:#9ab0c4;letter-spacing:2px;text-transform:uppercase">` +
-      `${Math.round(r.totalPop()).toLocaleString()} citizens · ${r.settlements.length} towns · ${r.researched.length} discoveries</p>` +
+      `${Math.round(r.totalPop()).toLocaleString()} citizens · ${r.settlements.length} towns · ${r.researched.size} discoveries</p>` +
       `<p>${flavourLine}</p>` +
       `<p><b>Nation name:</b></p>` +
       `<input id="nation-name" type="text" maxlength="36" placeholder="Name the nation…" value="${suggestedName}">` +
