@@ -287,11 +287,28 @@ function updateTopBar(): void {
     `<li>Steer economy, diplomacy, war &amp; climate to 2100.</li>` +
     `<li>Watch the <b>Path to Nationhood</b> panel for your next step.</li>` +
     `</ul></div>` +
-    `<div><h3>Controls</h3><ul>` +
-    `<li><b>Pan</b> WASD / arrows / drag · <b>Zoom</b> wheel / +− · <b>0</b> reset</li>` +
-    `<li><b>Click</b> a town to manage it · <b>Esc</b> deselect</li>` +
-    `<li>Panels: <b>T</b> research · <b>R</b> routes · <b>L</b> towns · <b>E</b> economy</li>` +
-    `<li><b>Space</b> pause · <b>1–4</b> speed · <b>Ctrl/⌘-S</b> save · <b>M</b> sound</li>` +
+    `<div><h3>Map controls</h3><ul>` +
+    `<li><b>W/A/S/D</b> pan map</li>` +
+    `<li><b>Arrow keys</b> pan map</li>` +
+    `<li><b>Middle-drag</b> or <b>left-drag</b> pan</li>` +
+    `<li><b>Scroll wheel</b> zoom in/out</li>` +
+    `<li><b>+/−</b> zoom</li>` +
+    `<li><b>0</b> reset zoom</li>` +
+    `</ul></div>` +
+    `<div><h3>Panels &amp; UI</h3><ul>` +
+    `<li><b>Click town</b> select &amp; manage</li>` +
+    `<li><b>T</b> — Research panel</li>` +
+    `<li><b>R</b> — Routes panel</li>` +
+    `<li><b>L</b> — Settlements list</li>` +
+    `<li><b>E</b> — Economy panel</li>` +
+    `<li><b>H</b> or <b>?</b> — This help</li>` +
+    `</ul></div>` +
+    `<div><h3>Game &amp; settings</h3><ul>` +
+    `<li><b>Space</b> pause / resume</li>` +
+    `<li><b>1–4</b> game speed</li>` +
+    `<li><b>Ctrl/⌘-S</b> save game</li>` +
+    `<li><b>M</b> toggle sound</li>` +
+    `<li><b>Esc</b> deselect</li>` +
     `</ul></div>` +
     `</div>` +
     `<button class="cv-help-start">Begin ▸</button>` +
