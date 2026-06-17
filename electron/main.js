@@ -29,12 +29,22 @@ function createGameWindow() {
   });
 }
 
+let gameOpening = false;
+
 function openGame(launcher) {
+  // The auto-updater can schedule openGame from multiple code paths (e.g. the
+  // `error` event and the rejected checkForUpdates() promise both fire when no
+  // release is reachable). Guard against opening a second game window, whose
+  // ready-to-show would call launcher.close() on an already-destroyed window
+  // and crash the main process with "Object has been destroyed".
+  if (gameOpening) return;
+  gameOpening = true;
+
   const game = createGameWindow();
   game.loadFile(path.join(__dirname, '../dist/index.html'));
   game.once('ready-to-show', () => {
-    launcher.close();
-    game.show();
+    if (launcher && !launcher.isDestroyed()) launcher.close();
+    if (!game.isDestroyed()) game.show();
   });
 }
 
