@@ -7426,6 +7426,73 @@ export class RegionSim {
         this.addLog(`${rival.name} sends a gift of goodwill.`, 'good');
       }
     }
+
+    // Rare dramatic moments and special events (GDD §6.4: the world has its own politics)
+    this.checkRivalSpecialEvents(rival);
+  }
+
+  /** Rare special diplomatic moments: leadership changes, alliances, betrayals. */
+  private checkRivalSpecialEvents(rival: RivalNation): void {
+    // Very rare: a rival seeks alliance against a mutual hostile third party
+    // (only if they have good relations with us and low relations with someone else)
+    if (
+      rival.relations >= 40 && rival.treaties.includes('non_aggression') &&
+      !rival.treaties.includes('defensive_pact') &&
+      this.rivals.length >= 2 && this.aiRng.chance(0.015)
+    ) {
+      // Find a mutual hostile (someone both dislike)
+      const mutualHostiles = this.rivals.filter(
+        (other) => other.id !== rival.id &&
+          other.relations < rival.relations - 30 &&
+          (this.rivalPairs[this.pairKey(rival.id, other.id)] ?? 0) < rival.relations - 30
+      );
+      if (mutualHostiles.length > 0 && this.aiRng.chance(0.5)) {
+        const hostile = mutualHostiles[0];
+        this.offers.push({
+          rivalId: rival.id,
+          kind: 'defensive_pact',
+          expiresDay: this.day + 180,
+        });
+        this.addLog(
+          `ALLIANCE PROPOSAL: ${rival.name} proposes a pact against ${hostile.name} ` +
+          `— their mutual enmity draws you together.`,
+          'info',
+        );
+        this.noteHistory(rival, `Sought defensive pact against ${hostile.name}, ${this.year}.`);
+      }
+    }
+
+    // Very rare: if relations collapse, a rival might demand tribute or vassalage
+    // (only aggressive/expansionist types do this)
+    if (
+      rival.relations < -70 && rival.weights.expansion >= 7 && rival.pop > 15000 &&
+      !this.playerWar && this.aiRng.chance(0.012)
+    ) {
+      const tributeDemand = Math.round(this.treasury * 0.1);
+      this.addLog(
+        `ULTIMATUM: ${rival.name}, emboldened by power, demands ` + formatCurrency(tributeDemand) + ` in tribute. ` +
+        `${rival.leader} threatens grave consequences for refusal.`,
+        'bad',
+      );
+      this.noteHistory(rival, `Demanded tribute from ${this.stateName || 'the State'}, ${this.year}.`);
+    }
+
+    // Rare: honorable rivals may fulfill verbal agreements or surprising displays of honor
+    // (builds legendary status for noble rivals)
+    if (
+      rival.relations >= 60 && rival.weights.honor >= 8 &&
+      rival.history.filter((h) => h.includes(this.stateName || 'State')).length >= 2 &&
+      this.aiRng.chance(0.02)
+    ) {
+      const bonus = 5 + rival.weights.honor;
+      rival.relations = this.clampRel(rival.relations + bonus);
+      this.addLog(
+        `HONOR UPHELD: ${rival.name} fulfills an ancient agreement with surprising integrity. ` +
+        `The envoys speak of ${rival.leader}'s legendary word.`,
+        'good',
+      );
+      this.noteHistory(rival, `Displayed honor in dealings with ${this.stateName || 'the State'}, ${this.year}.`);
+    }
   }
 
   /** Appetite (0–100) for AI to initiate an offer: based on relations and personality. */
