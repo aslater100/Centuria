@@ -54,6 +54,7 @@ void applyOverrides(sprites);
 // device pixels and the screen→device ratio (canvas.width / rect.width) keeps
 // pointer input aligned.
 // ─────────────────────────────────────────────────────────────────────────────
+document.body.classList.add('cv-app'); // scopes the 4X modern-UI theme
 const app = document.getElementById('app') ?? document.body;
 const canvas = document.createElement('canvas');
 canvas.className = 'cv-canvas';
