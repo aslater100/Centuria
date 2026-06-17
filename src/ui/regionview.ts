@@ -2837,8 +2837,7 @@ export class RegionView {
   /** Phase 2: the drafting table — civic works and zoning for managed cities. */
   private cityHtml(t: Settlement): string {
     const r = this.region;
-    if (!r.stateProclaimed) return '';
-    const manage = r.canManageCity(t);
+    const manage = r.stateProclaimed ? r.canManageCity(t) : { ok: true, reason: '' };
     if (!manage.ok) {
       // the player's own towns advertise the gate; the hamlets run themselves
       return t.factionId === r.playerFactionId
