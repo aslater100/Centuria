@@ -19,7 +19,7 @@ function runDays(r: RegionSim, days: number): void {
 
 describe('Tech tree: node definitions', () => {
   it('has the expected number of nodes', () => {
-    expect(TECH_TREE.length).toBe(32);
+    expect(TECH_TREE.length).toBe(44);
   });
 
   it('spans the late century — has tech and civics nodes past 2050', () => {
@@ -27,6 +27,26 @@ describe('Tech tree: node definitions', () => {
     expect(late.some((n) => n.tree === 'tech')).toBe(true);
     expect(late.some((n) => n.tree === 'civics')).toBe(true);
     expect(late.some((n) => n.era >= 2085)).toBe(true); // reaches the end of the century
+  });
+
+  it('covers every quarter-century of the 1900–2100 span', () => {
+    // Each 25-year window from 1900 should hold at least one researchable node,
+    // so the research UI never goes empty for a generation.
+    const windows = [1900, 1925, 1950, 1975, 2000, 2025, 2050, 2075];
+    for (const start of windows) {
+      const inWindow = TECH_TREE.filter((n) => n.era >= start && n.era < start + 25 && n.cost > 0);
+      expect(inWindow.length, `no nodes in ${start}–${start + 24}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('nodes surface in historical order — every node\'s era is >= its prereqs\' eras', () => {
+    const byId = new Map(TECH_TREE.map((n) => [n.id, n]));
+    for (const n of TECH_TREE) {
+      for (const p of n.prereqs) {
+        const pre = byId.get(p)!;
+        expect(n.era, `${n.id} (${n.era}) gated before prereq ${p} (${pre.era})`).toBeGreaterThanOrEqual(pre.era);
+      }
+    }
   });
 
   it('start nodes have zero cost and no prereqs', () => {
@@ -353,6 +373,91 @@ describe('Tech tree: gameplay effects', () => {
     runDays(r2, 30);
 
     expect(r.treasury).toBeGreaterThan(r2.treasury);
+  });
+});
+
+describe('Tech tree: new mid-century depth effects', () => {
+  it('compulsory_schooling multiplies research rate by 1.2', () => {
+    const r = makeRegion();
+    const before = r.researchRate();
+    r.researched.push('compulsory_schooling');
+    expect(r.researchRate()).toBeCloseTo(before * 1.2, 5);
+  });
+
+  it('telecommunications and internet stack on the research rate', () => {
+    const r = makeRegion();
+    const before = r.researchRate();
+    r.researched.push('telecommunications', 'internet');
+    expect(r.researchRate()).toBeCloseTo(before * 1.15 * 1.15, 5);
+  });
+
+  it('chemical_industry raises player emissions', () => {
+    const r = makeRegion();
+    const before = r.playerEmissions();
+    r.researched.push('chemical_industry');
+    expect(r.playerEmissions()).toBeGreaterThan(before);
+  });
+
+  it('antibiotics slows population mortality', () => {
+    const r = makeRegion();
+    runDays(r, 12); // found town #2
+    const r2 = makeRegion();
+    runDays(r2, 12);
+    // Zero out immigration/birth confounds by freezing satisfaction below the
+    // immigration threshold, then compare deaths over a long stretch.
+    for (const t of r.settlements) { t.satisfaction = 30; t.cohorts.bands[4] += 200; }
+    for (const t of r2.settlements) { t.satisfaction = 30; t.cohorts.bands[4] += 200; }
+    r2.researched.push('antibiotics');
+    const popStart1 = r.settlements.reduce((s, t) => s + t.cohorts.bands[4], 0);
+    const popStart2 = r2.settlements.reduce((s, t) => s + t.cohorts.bands[4], 0);
+    runDays(r, 365);
+    runDays(r2, 365);
+    const dead1 = popStart1 - r.settlements.reduce((s, t) => s + t.cohorts.bands[4], 0);
+    const dead2 = popStart2 - r2.settlements.reduce((s, t) => s + t.cohorts.bands[4], 0);
+    expect(dead2).toBeLessThan(dead1); // fewer elders die with antibiotics
+  });
+
+  it('civil_rights slows grievance buildup on top of universal_suffrage', () => {
+    const setup = () => {
+      const r = makeRegion();
+      runDays(r, 12);
+      r.stateProclaimed = true;
+      r.stateName = 'Test State';
+      r.govLean = 'council';
+      r.taxRate = 0.25;
+      return r;
+    };
+    const r = setup();
+    const r2 = setup();
+    r2.researched.push('civil_rights');
+    for (const t of r.settlements) t.grievance = 0;
+    for (const t of r2.settlements) t.grievance = 0;
+    runDays(r, 30);
+    runDays(r2, 30);
+    const g1 = r.settlements.reduce((s, t) => s + t.grievance, 0);
+    const g2 = r2.settlements.reduce((s, t) => s + t.grievance, 0);
+    expect(g2).toBeLessThan(g1);
+  });
+
+  it('central_banking adds 1% of GDP to the treasury each month', () => {
+    const setup = () => {
+      const r = makeRegion();
+      runDays(r, 12);
+      r.stateProclaimed = true;
+      r.stateName = 'Test State';
+      r.govLean = 'council';
+      r.taxRate = 0.1;
+      for (const t of r.settlements) t.cohorts.bands[2] += 100;
+      r.gdpLastMonth = 100;
+      r.treasury = 0;
+      return r;
+    };
+    const r = setup();
+    const r2 = setup();
+    r2.researched.push('central_banking');
+    runDays(r, 30);
+    runDays(r2, 30);
+    expect(r2.treasury).toBeGreaterThan(r.treasury);
   });
 });
 
