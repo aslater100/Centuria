@@ -500,6 +500,9 @@ export class RegionView {
     }
     g.textAlign = 'left';
 
+    // Animated water shimmer (per-frame overlay, static map cache can't animate)
+    this.drawWaterAnimation();
+
     // City lights pop on the map as dusk falls (still in map-space).
     const lit = this.atmosphere();
     this.drawCityLights(lit);
@@ -698,6 +701,33 @@ export class RegionView {
       g.beginPath();
       g.arc(px, py, radius, 0, Math.PI * 2);
       g.fill();
+    }
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  /** Subtle per-frame water shimmer to suggest flow and life (map-space overlay). */
+  private drawWaterAnimation(): void {
+    const { g, region } = this;
+    const map = region.map;
+    const N = REGION_N;
+    const wave = Math.sin(this.frame * 0.05) * 0.5 + 0.5; // 0..1, cycles every ~126 frames
+    const m = 60;
+    const cw = (this.canvas.width - 2 * m) / N;
+    const ch = (this.canvas.height - 2 * m) / N;
+    const isWater = (x: number, y: number): boolean =>
+      x >= 0 && y >= 0 && x < N && y < N && RegionView.WATER_BIOMES.has(map.at(x, y).biome);
+
+    g.globalCompositeOperation = 'overlay';
+    g.fillStyle = `rgba(200, 220, 240, ${wave * 0.04})`; // very subtle shimmer
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        if (!isWater(x, y)) continue;
+        const bx = Math.floor(m + x * cw);
+        const by = Math.floor(m + y * ch);
+        const bw = Math.ceil(cw);
+        const bh = Math.ceil(ch);
+        g.fillRect(bx, by, bw, bh);
+      }
     }
     g.globalCompositeOperation = 'source-over';
   }
