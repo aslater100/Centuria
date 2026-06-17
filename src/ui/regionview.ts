@@ -10,6 +10,8 @@ import type { CurrencySymbol } from '../sim/defs';
 import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
 import { REGION_N } from '../sim/worldgen';
 import { DesignScreen } from './designscreen';
+import { Minimap } from './minimap';
+import { sparklineGrid } from './sparklines';
 
 /** Parse a #rrggbb (or #rgb) hex string to {r,g,b}; falls back to grey. */
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
@@ -99,6 +101,11 @@ export class RegionView {
   private camY = 0;
   private static readonly MIN_SCALE = 1;
   private static readonly MAX_SCALE = 6;
+  // ---- Minimap (corner navigation aid) ----
+  private minimap: Minimap;
+  // ---- Tooltips (settlement hover info) ----
+  private tooltip: HTMLElement;
+  private tooltipSettlementId: number | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private region: RegionSim, root: HTMLElement) {
     this.g = canvas.getContext('2d')!;
@@ -147,6 +154,11 @@ export class RegionView {
     this.rivalPanel = document.createElement('div');
     this.rivalPanel.className = 'inspector region-panel hidden';
     root.appendChild(this.rivalPanel);
+    this.minimap = new Minimap(region, root, { size: 140, position: 'bottom-right' });
+    // Create tooltip element
+    this.tooltip = document.createElement('div');
+    this.tooltip.className = 'cv-tooltip hidden';
+    root.appendChild(this.tooltip);
   }
 
   /** Draggable panels for the WindowManager (region mode). */
@@ -245,6 +257,63 @@ export class RegionView {
     this.camScale = 1;
     this.camX = 0;
     this.camY = 0;
+  }
+
+  /** Pan to a logical coordinate (0..100), centering the viewport on it. */
+  panTo(regionX: number, regionY: number): void {
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    // Convert logical coords to screen center
+    const p = this.toPx(regionX, regionY);
+    // Pan so that (p.px, p.py) appears at the screen center
+    this.camX = W / 2 - p.px;
+    this.camY = H / 2 - p.py;
+    this.clampCamera();
+  }
+
+  /** Update tooltip position and visibility based on mouse position. */
+  updateTooltip(screenX: number, screenY: number): void {
+    const mx = (screenX - this.camX) / this.camScale;
+    const my = (screenY - this.camY) / this.camScale;
+    const radius = 26;
+    let hoveredId: number | null = null;
+
+    for (const t of this.region.settlements) {
+      const p = this.toPx(t.x, t.y);
+      if (Math.hypot(p.px - mx, p.py - my) < radius) {
+        hoveredId = t.id;
+        break;
+      }
+    }
+
+    if (hoveredId !== this.tooltipSettlementId) {
+      this.tooltipSettlementId = hoveredId;
+      if (hoveredId !== null) {
+        const settlement = this.region.settlement(hoveredId);
+        if (settlement) {
+          const pop = Math.round(this.region.popOf(settlement));
+          const happy = Math.round(settlement.satisfaction || 0);
+          const food = settlement.food || 0;
+          const foodStatus = food < pop * 5 ? '⚠ low' : 'ok';
+          this.tooltip.innerHTML = `<b>${settlement.name}</b><br>` +
+            `pop ${pop} · happy ${happy}% · food ${foodStatus}`;
+          this.tooltip.classList.remove('hidden');
+        }
+      } else {
+        this.tooltip.classList.add('hidden');
+      }
+    }
+
+    if (hoveredId !== null) {
+      // Position tooltip near cursor, avoiding edges
+      let tx = screenX + 12;
+      let ty = screenY + 12;
+      const rect = this.tooltip.getBoundingClientRect();
+      if (tx + rect.width > window.innerWidth) tx = screenX - rect.width - 12;
+      if (ty + rect.height > window.innerHeight) ty = screenY - rect.height - 12;
+      this.tooltip.style.left = tx + 'px';
+      this.tooltip.style.top = ty + 'px';
+    }
   }
 
   /** Keep the scaled map from drifting off-screen; at scale 1 it stays pinned. */
@@ -484,11 +553,17 @@ export class RegionView {
     }
     g.textAlign = 'left';
 
+    // Animated water shimmer (per-frame overlay, static map cache can't animate)
+    this.drawWaterAnimation();
+
     // City lights pop on the map as dusk falls (still in map-space).
     const lit = this.atmosphere();
     this.drawCityLights(lit);
 
     g.restore(); // end map-space; HUD below draws in screen space
+
+    // Draw the minimap in the corner, showing camera frame.
+    this.minimap.draw(this.camX, this.camY, this.camScale, W, H);
 
     // Time-of-day + seasonal tint and a soft vignette frame the whole scene.
     this.drawAtmosphere(W, H, lit);
@@ -679,6 +754,33 @@ export class RegionView {
       g.beginPath();
       g.arc(px, py, radius, 0, Math.PI * 2);
       g.fill();
+    }
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  /** Subtle per-frame water shimmer to suggest flow and life (map-space overlay). */
+  private drawWaterAnimation(): void {
+    const { g, region } = this;
+    const map = region.map;
+    const N = REGION_N;
+    const wave = Math.sin(this.frame * 0.05) * 0.5 + 0.5; // 0..1, cycles every ~126 frames
+    const m = 60;
+    const cw = (this.canvas.width - 2 * m) / N;
+    const ch = (this.canvas.height - 2 * m) / N;
+    const isWater = (x: number, y: number): boolean =>
+      x >= 0 && y >= 0 && x < N && y < N && RegionView.WATER_BIOMES.has(map.at(x, y).biome);
+
+    g.globalCompositeOperation = 'overlay';
+    g.fillStyle = `rgba(200, 220, 240, ${wave * 0.04})`; // very subtle shimmer
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        if (!isWater(x, y)) continue;
+        const bx = Math.floor(m + x * cw);
+        const by = Math.floor(m + y * ch);
+        const bw = Math.ceil(cw);
+        const bh = Math.ceil(ch);
+        g.fillRect(bx, by, bw, bh);
+      }
     }
     g.globalCompositeOperation = 'source-over';
   }
@@ -3030,9 +3132,13 @@ export class RegionView {
       );
     }).join('');
     const etab = this.economyTab;
+    const gdpHist = r.monthlyHistory.map((h) => h.gdp);
+    const treasuryHist = r.monthlyHistory.map((h) => h.treasury);
+    const inflationHist = r.monthlyHistory.map((h) => h.inflation);
     const overviewBody =
       `<p>treasury ` + formatCurrency(Math.floor(r.treasury)) + ` · GDP ` + formatCurrency(Math.floor(r.gdpLastMonth)) + `/mo</p>` +
       `<p>global tax ${Math.round(r.taxRate * 100)}% · trade ` + formatCurrency(Math.floor(r.tradeValueLastMonth)) + `/mo</p>` +
+      sparklineGrid(r.gdpLastMonth, r.treasury, r.inflationRate * 100, gdpHist, treasuryHist, inflationHist) +
       (factionHtml ? `<p class="insp-skills">FACTION MOOD</p>${factionHtml}` : '') +
       actionsHtml;
     return (
