@@ -264,6 +264,10 @@ export const REGION_EVENT_DEFS: RegionalEventDef[] = [
   { kind: 'automation_surge', name: 'Automation Surge', sector: 'information', outputMult: 1.50, durationDays: 50, probability: 0.02, grievance: 5, minYear: 2010, desc: 'Robots take the line; the terminal booms, the floor grumbles. Information +50%.' },
 ];
 
+// Fast lookups for building and event definitions.
+const REGION_BUILDINGS_MAP = new Map(REGION_BUILDINGS.map((b) => [b.id, b]));
+const REGION_EVENT_DEFS_MAP = new Map(REGION_EVENT_DEFS.map((d) => [d.kind, d]));
+
 // ---- Phase 5: Local Policies ----
 
 export type WagePolicy = 'low' | 'market' | 'high';
@@ -1684,7 +1688,7 @@ export class RegionSim {
   gdpLastMonth = 0;
   gameOver = false;
   /** Research: nodes that have been completed (ids). Start nodes (cost 0) pre-seeded. */
-  researched: string[] = ['steam_power', 'common_law'];
+  researched: Set<string> = new Set(['steam_power', 'common_law']);
   /** The node currently being invested in, or null if idle. */
   activeResearch: string | null = null;
   /** Accumulated research points invested in activeResearch. */
@@ -1699,7 +1703,7 @@ export class RegionSim {
   /** Computed each month; live display of faction power/support. */
   factions: Faction[] = [];
   /** Law ids that have been enacted (one-time, permanent). */
-  passedLaws: string[] = [];
+  passedLaws: Set<string> = new Set();
   /** Trade levy taken from merchant turnover; default 5%, reducible by law. */
   tradeLevyRate = 0.05;
   /** Estate Tax law active: monthly wealth levy. */
@@ -2361,7 +2365,7 @@ export class RegionSim {
 
   /** Query whether a tech/civics node has been researched. */
   has(id: string): boolean {
-    return this.researched.includes(id);
+    return this.researched.has(id);
   }
 
   /** Research points generated per day; scales with population and boosts from nodes. */
@@ -2376,12 +2380,12 @@ export class RegionSim {
     if (this.has('computing')) mult *= 1.25;
     if (this.has('internet')) mult *= 1.15;
     if (this.has('artificial_intelligence')) mult *= 1.25;
-    if (this.passedLaws.includes('national_education_act')) mult *= 1.3;
+    if (this.passedLaws.has('national_education_act')) mult *= 1.3;
     if (this.policyActive('research_grants')) mult *= 1.2;
     // Phase 2: every university adds its laboratories to the effort
     for (const t of this.settlements) {
       for (const id of t.buildings) {
-        const def = REGION_BUILDINGS.find((b) => b.id === id);
+        const def = REGION_BUILDINGS_MAP.get(id);
         if (def?.research) mult *= 1 + def.research;
       }
     }
@@ -2452,7 +2456,7 @@ export class RegionSim {
     if (!node) { this.activeResearch = null; return; }
     this.researchProgress += this.researchRate();
     if (this.researchProgress >= this.techCost(node)) {
-      this.researched.push(this.activeResearch);
+      this.researched.add(this.activeResearch);
       const label = node.tree === 'tech' ? 'Technology' : 'Civics';
       this.addLog(`${label} breakthrough: "${node.name}". ${node.desc.split('.')[0]}.`, 'good');
       this.activeResearch = null;
@@ -2497,7 +2501,7 @@ export class RegionSim {
     if (this.has('renewables')) intensity *= 0.6;
     if (this.has('fusion_power')) intensity *= 0.15;
     if (this.has('carbon_capture')) intensity *= 0.4;
-    if (this.passedLaws.includes('carbon_levy')) intensity *= 0.7;
+    if (this.passedLaws.has('carbon_levy')) intensity *= 0.7;
     if (this.policyActive('green_subsidies')) intensity *= 0.85;
     if (this.eraBranch === 'solarpunk') intensity *= 0.8;
     return (this.totalPop() / 1000) * intensity * 0.04;
@@ -2750,8 +2754,8 @@ export class RegionSim {
       treasury: Math.round(this.treasury),
       co2ppm: Math.round(this.co2ppm),
       warmingC: Math.round(this.warmingC * 10) / 10,
-      techs: this.researched.length,
-      laws: this.passedLaws.length,
+      techs: this.researched.size,
+      laws: this.passedLaws.size,
       legitimacy: Math.round(this.legitimacy),
       grades: { stewardship, prosperity, liberty, standing },
       verdict,
@@ -3230,13 +3234,13 @@ export class RegionSim {
           (this.govLean === 'council' ? 6 : this.govLean === 'mayor' ? -6 : 0) -
           (this.day < t.strikeUntil ? 5 : 0) +
           (this.policyActive('welfare_state') ? 6 : 0) +
-          (this.passedLaws.includes('welfare_benefits') ? 5 : 0) +
-          (this.passedLaws.includes('sanitation_act') ? 3 : 0) +
+          (this.passedLaws.has('welfare_benefits') ? 5 : 0) +
+          (this.passedLaws.has('sanitation_act') ? 3 : 0) +
           (this.policyActive('austerity') ? -4 : 0) +
           (this.eraBranch === 'solarpunk' ? 4 : 0) // the garden century is good to live in
         : 0;
       // Land Reform (nation law) boosts food production 5%
-      if (this.passedLaws.includes('land_reform')) t.food += workers * 1.15 * seasonMult * t.landQuality * weatherMult * granger * strike * 0.05;
+      if (this.passedLaws.has('land_reform')) t.food += workers * 1.15 * seasonMult * t.landQuality * weatherMult * granger * strike * 0.05;
       const target =
         50 +
         Math.min(20, foodDays * 1.5) -
@@ -3256,7 +3260,7 @@ export class RegionSim {
         const laborFactor = (this.has('labor_law') ? 0.7 : 1) * (this.has('welfare_state') ? 0.8 : 1) *
           (this.has('social_insurance') ? 0.85 : 1) * (this.has('civil_rights') ? 0.85 : 1);
         const constabFactor = (this.policyActive('border_constabulary') ? 0.75 : 1) *
-          (this.passedLaws.includes('trade_unions_act') ? 0.7 : 1) *
+          (this.passedLaws.has('trade_unions_act') ? 0.7 : 1) *
           (this.policyActive('civic_pride') ? 0.8 : 1);
         const pressure =
           (Math.max(0, this.taxRate - 0.15) * 35 - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05) * laborFactor * constabFactor +
@@ -3361,6 +3365,17 @@ export class RegionSim {
     // Record the prior month's net treasury swing before this month's books move.
     this.treasuryDeltaMonth = this.treasury - this.prevMonthTreasury;
     this.prevMonthTreasury = this.treasury;
+
+    // ponytail: cache policy/law checks that are constant across all settlements
+    const hasHealthcare = this.passedLaws.has('healthcare_act');
+    const hasSanitation = this.passedLaws.has('sanitation_act');
+    const hasAntibiotics = this.has('antibiotics');
+    const hasSocialInsurance = this.has('social_insurance');
+    const hasPublicHealth = this.policyActive('public_health_policy');
+    const hasOpenBorders = this.policyActive('open_borders');
+    const hasGuestWorkers = this.policyActive('guest_workers');
+    const interiorMinister = this.ministerFor('interior');
+
     for (const t of this.settlements) {
       const b = t.cohorts.bands;
       // Births from fertile bands
@@ -3375,26 +3390,27 @@ export class RegionSim {
       // Mortality: doctor, services, Public Health policy, and Healthcare Act law all help
       const doctor = this.roleMult(t, 'Doctor') ? 0.85 : 1;
       // Interior Minister makes services 15% more effective (GDD §8.7)
-      const interiorBonus = this.ministerFor('interior') ? 1.15 : 1;
+      const interiorBonus = interiorMinister ? 1.15 : 1;
       const services = this.stateProclaimed ? 1 - 0.05 * this.servicesLevel * interiorBonus : 1;
-      const healthPolicy = this.policyActive('public_health_policy') ? 0.8 : 1;
-      const healthcareLaw = this.passedLaws.includes('healthcare_act') ? 0.85 : 1;
-      const sanitationLaw = this.passedLaws.includes('sanitation_act') ? 0.9 : 1;
+      const healthPolicy = hasPublicHealth ? 0.8 : 1;
+      const healthcareLaw = hasHealthcare ? 0.85 : 1;
+      const sanitationLaw = hasSanitation ? 0.9 : 1;
       // Tech & civics that bend the death rate: antibiotics end lethal infection,
       // social insurance funds the clinics that keep people out of the grave.
-      const techHealth = (this.has('antibiotics') ? 0.85 : 1) * (this.has('social_insurance') ? 0.92 : 1);
+      const techHealth = (hasAntibiotics ? 0.85 : 1) * (hasSocialInsurance ? 0.92 : 1);
       for (let i = 0; i < b.length; i++) {
         b[i] -= b[i] * (BASE_MORTALITY_PER_YEAR[i] / 12) * doctor * services * healthPolicy * healthcareLaw * sanitationLaw * techHealth;
       }
       // Immigration: the frontier draws people to fed, content towns
       const reeve = 1 + 0.1 * this.roleMult(t, 'Reeve');
-      const openBorders = (this.policyActive('open_borders') ? 1.3 : 1) * (this.policyActive('guest_workers') ? 1.2 : 1);
+      const openBorders = (hasOpenBorders ? 1.3 : 1) * (hasGuestWorkers ? 1.2 : 1);
       // Drought suppresses immigration: news of failed harvests travels fast
       const agriEventMult = this.eventOutputMult(t, 'agriculture');
       // High taxes deter settlers: each tax band reduces immigration appeal by 10%
       const taxImmigrantMult = 1 - TAX_BAND_RATES[Math.min(3, Math.max(0, t.policies.taxBand))] * 2;
-      if (t.satisfaction > 55 && t.food > this.popOf(t) * 2) {
-        const arrivals = (this.popOf(t) * 0.02 + 2) * reeve * openBorders * agriEventMult * taxImmigrantMult;
+      const pop = this.popOf(t);
+      if (t.satisfaction > 55 && t.food > pop * 2) {
+        const arrivals = (pop * 0.02 + 2) * reeve * openBorders * agriEventMult * taxImmigrantMult;
         b[1] += arrivals * 0.6;
         b[2] += arrivals * 0.3;
         b[0] += arrivals * 0.1;
@@ -3404,8 +3420,9 @@ export class RegionSim {
       }
       // Population milestone events
       const popNow = Math.round(this.popOf(t));
+      const totalBands = Math.round(b.reduce((a, x) => a + x, 0) * 0.001);
       for (const milestone of [50, 100, 200, 500, 1000, 2000]) {
-        const popBefore = popNow - Math.round(b.reduce((a, x) => a + x, 0) * 0.001);
+        const popBefore = popNow - totalBands;
         if (popBefore < milestone && popNow >= milestone) {
           this.townEvent(t, `Population reaches ${milestone} — a true town now.`, 'good');
         }
@@ -3430,7 +3447,7 @@ export class RegionSim {
     this.updateRivalAI(); // staggered AI updates for rivals (GDD §6.2)
     this.updateScouts(); // update faction scouts: movement, spawning, expiry (GDD §6.2)
     this.tickClimate(); // the ledger runs from the first decade (GDD §8.2)
-    if (this.passedLaws.includes('central_bank_charter')) this.tickMonetary();
+    if (this.passedLaws.has('central_bank_charter')) this.tickMonetary();
     this.updateLoans(); // process loan interest and check for defaults
     if (this.stateProclaimed) this.collectVassalTribute();
     this.checkProclamationGate();
@@ -3742,7 +3759,7 @@ export class RegionSim {
     // The neon century (era 8 dystopia branch): the economy roars — at a price paid in grievance
     if (this.eraBranch === 'dystopia') gdp *= 1.08;
     // Credit cycle (GDD §5.1): boom raises GDP, confidence collapse contracts it
-    if (this.passedLaws.includes('central_bank_charter')) {
+    if (this.passedLaws.has('central_bank_charter')) {
       const boom = Math.max(0, (this.confidence - 50) * 0.002);
       const bust = this.confidence < 30 ? (30 - this.confidence) * 0.004 : 0;
       const inflDrag = Math.max(0, (this.inflationRate - 0.08) * 2.0);
@@ -3760,7 +3777,7 @@ export class RegionSim {
       this.buildingUpkeep() + // Phase 2: the civic works keep their lights on
       this.policyServiceUpkeep() + // Phase 5: generous city services cost the treasury
       this.policyUpkeep() + // active policy running costs
-      (this.passedLaws.includes('welfare_benefits') ? pop * 0.01 : 0) + // welfare relief payments
+      (this.passedLaws.has('welfare_benefits') ? pop * 0.01 : 0) + // welfare relief payments
       (warMob ? pop * warMob.upkeepPerPop : 0) + // …and the drain runs concurrently (GDD §7.2)
       (this.playerWar?.blockade ? pop * BLOCKADE_UPKEEP_PER_POP : 0); // coal and crews for the gunboats
     // Income Tax (civic research): a progressive levy adds 3% of GDP on top
@@ -3770,20 +3787,20 @@ export class RegionSim {
     // Estate Tax law: a wealth levy on the land
     const estateLevyBonus = this.estateTaxActive ? this.totalPop() * 0.1 : 0;
     // Progressive Taxation law: graduated bands yield 2% extra of GDP
-    const progressiveTaxBonus = this.passedLaws.includes('progressive_tax') ? this.gdpLastMonth * 0.02 : 0;
+    const progressiveTaxBonus = this.passedLaws.has('progressive_tax') ? this.gdpLastMonth * 0.02 : 0;
     // Protectionism policy: tariff wall adds flat £3/month
     const protectionismBonus = this.policyActive('protectionism') ? 3 : 0;
     // Austerity policy: belt-tightening adds a flat £4/month (paid in satisfaction elsewhere)
     const austerityBonus = this.policyActive('austerity') ? 4 : 0;
     // Central Bank Charter: treasury earns interest at the policy rate
-    const bankInterest = this.passedLaws.includes('central_bank_charter') ? this.treasury * (this.policyRate / 12) : 0;
+    const bankInterest = this.passedLaws.has('central_bank_charter') ? this.treasury * (this.policyRate / 12) : 0;
     // Carbon Levy law: the smoke pays 1% of GDP into the treasury
-    const carbonLevyBonus = this.passedLaws.includes('carbon_levy') ? this.gdpLastMonth * 0.01 : 0;
+    const carbonLevyBonus = this.passedLaws.has('carbon_levy') ? this.gdpLastMonth * 0.01 : 0;
     // Trade agreements (GDD §5.4): export earnings per signed rival, scaled to
     // GDP and the rival's commerce appetite. Foreign wars make buyers pay more.
     // FX boost (GDD §5.1): a devalued currency makes exports cheaper for buyers.
     const warBoom = this.day < this.warBoomUntil ? 1.5 : 1;
-    const fxBoost = this.passedLaws.includes('central_bank_charter') ? 1 / Math.max(0.5, this.exchangeRate) : 1;
+    const fxBoost = this.passedLaws.has('central_bank_charter') ? 1 / Math.max(0.5, this.exchangeRate) : 1;
     this.exportEarningsLastMonth = this.rivals.reduce(
       (s, rv) =>
         rv.treaties.includes('trade_agreement')
@@ -3825,7 +3842,7 @@ export class RegionSim {
   /** Issue sovereign bonds into the treasury. Returns false if the rating or
    *  debt ceiling blocks issuance. */
   issueBonds(amount: number): boolean {
-    if (!this.nationProclaimed || !this.passedLaws.includes('central_bank_charter')) return false;
+    if (!this.nationProclaimed || !this.passedLaws.has('central_bank_charter')) return false;
     if (this.creditRating === 'D') return false;
     const ceiling = Math.max(1, this.gdpLastMonth * 12) * 2.0;
     if (this.nationalDebt + amount > ceiling) return false;
@@ -4113,7 +4130,7 @@ export class RegionSim {
     let mult = 1;
     for (const ev of t.activeEvents) {
       if (ev.untilDay <= this.day) continue;
-      const def = REGION_EVENT_DEFS.find((d) => d.kind === ev.kind);
+      const def = REGION_EVENT_DEFS_MAP.get(ev.kind);
       if (!def) continue;
       if (def.sector === sector || def.sector === 'all') mult *= def.outputMult;
     }
@@ -4168,7 +4185,7 @@ export class RegionSim {
    *  when the scaffolding comes down. */
   buildCity(townId: number, defId: string): boolean {
     const t = this.settlement(townId);
-    const def = REGION_BUILDINGS.find((b) => b.id === defId);
+    const def = REGION_BUILDINGS_MAP.get(defId);
     if (!t || !def || !this.cityBuildCheck(t, def).ok) return false;
     const cost = this.cityBuildCost(def);
     this.treasury -= cost;
@@ -4198,7 +4215,7 @@ export class RegionSim {
   private buildingBonus(t: Settlement, sector: SectorId): number {
     let bonus = 0;
     for (const id of t.buildings) {
-      const def = REGION_BUILDINGS.find((b) => b.id === id);
+      const def = REGION_BUILDINGS_MAP.get(id);
       if (def && (def.sector === sector || def.sector === 'all')) bonus += def.bonus;
     }
     return bonus;
@@ -4206,12 +4223,12 @@ export class RegionSim {
 
   /** Flat satisfaction bonus from civic works (waterworks, hospital…). */
   private buildingSatisfaction(t: Settlement): number {
-    return t.buildings.reduce((s, id) => s + (REGION_BUILDINGS.find((b) => b.id === id)?.satisfaction ?? 0), 0);
+    return t.buildings.reduce((s, id) => s + (REGION_BUILDINGS_MAP.get(id)?.satisfaction ?? 0), 0);
   }
 
   /** Extra survey radius from this town's works (telegraph office). */
   private buildingSight(t: Settlement): number {
-    return t.buildings.reduce((s, id) => s + (REGION_BUILDINGS.find((b) => b.id === id)?.sight ?? 0), 0);
+    return t.buildings.reduce((s, id) => s + (REGION_BUILDINGS_MAP.get(id)?.sight ?? 0), 0);
   }
 
   /** £/month the built works cost to keep running. */
@@ -4219,7 +4236,7 @@ export class RegionSim {
     let total = 0;
     for (const t of this.settlements) {
       if (t.factionId !== this.playerFactionId) continue;
-      for (const id of t.buildings) total += REGION_BUILDINGS.find((b) => b.id === id)?.upkeep ?? 0;
+      for (const id of t.buildings) total += REGION_BUILDINGS_MAP.get(id)?.upkeep ?? 0;
     }
     // Wagner tilt: the public sector's share of GDP rises as the nation develops.
     return total * this.devFactor() ** TUNING.wagnerExp;
@@ -4412,7 +4429,7 @@ export class RegionSim {
   private updateConstruction(): void {
     for (const t of this.settlements) {
       if (t.construction && this.day >= t.construction.doneDay) {
-        const def = REGION_BUILDINGS.find((b) => b.id === t.construction!.id);
+        const def = REGION_BUILDINGS_MAP.get(t.construction!.id);
         t.buildings.push(t.construction.id);
         t.construction = null;
         if (def) {
@@ -4516,7 +4533,7 @@ export class RegionSim {
     // Defence Minister adds 20% militia effectiveness (GDD §8.7)
     const defenceBonus = this.ministerFor('defence') ? 1.2 : 1;
     // Military Reform law: professional officers +20%; Standing Army policy: +2 effective militia
-    const militaryReformBonus = this.passedLaws.includes('military_reform') ? 1.2 : 1;
+    const militaryReformBonus = this.passedLaws.has('military_reform') ? 1.2 : 1;
     const standingArmyBonus = this.policyActive('standing_army') ? 2 : 0;
     const funded = this.stateProclaimed
       ? (1 + 0.2 * (this.militiaLevel + standingArmyBonus) + (this.govLean === 'mayor' ? 0.2 : 0)) * defenceBonus * militaryReformBonus
@@ -4935,36 +4952,36 @@ export class RegionSim {
     const workerSupport = Math.max(0, Math.min(100,
       50 + (this.servicesLevel - 1) * 20
       - Math.max(0, this.taxRate - 0.15) * 100
-      + (this.passedLaws.includes('workers_charter') ? 20 : 0)
-      - (this.passedLaws.includes('conscription_act') ? 5 : 0)
-      + (this.passedLaws.includes('estate_tax') ? 10 : 0)
-      + (this.passedLaws.includes('progressive_tax') ? 15 : 0)
-      + (this.passedLaws.includes('welfare_benefits') ? 10 : 0)
-      + (this.passedLaws.includes('national_education_act') ? 10 : 0)
-      + (this.passedLaws.includes('healthcare_act') ? 10 : 0)
-      + (this.passedLaws.includes('land_reform') ? 20 : 0)
-      + (this.passedLaws.includes('trade_unions_act') ? 20 : 0),
+      + (this.passedLaws.has('workers_charter') ? 20 : 0)
+      - (this.passedLaws.has('conscription_act') ? 5 : 0)
+      + (this.passedLaws.has('estate_tax') ? 10 : 0)
+      + (this.passedLaws.has('progressive_tax') ? 15 : 0)
+      + (this.passedLaws.has('welfare_benefits') ? 10 : 0)
+      + (this.passedLaws.has('national_education_act') ? 10 : 0)
+      + (this.passedLaws.has('healthcare_act') ? 10 : 0)
+      + (this.passedLaws.has('land_reform') ? 20 : 0)
+      + (this.passedLaws.has('trade_unions_act') ? 20 : 0),
     ));
 
     const landownerPower = Math.min(50, 15 + food * 0.005);
     const landownerSupport = Math.max(0, Math.min(100,
       70 - this.taxRate * 160
-      - (this.passedLaws.includes('estate_tax') ? 25 : 0)
-      - (this.passedLaws.includes('workers_charter') ? 10 : 0)
-      - (this.passedLaws.includes('progressive_tax') ? 10 : 0)
-      - (this.passedLaws.includes('land_reform') ? 30 : 0)
-      - (this.passedLaws.includes('trade_unions_act') ? 10 : 0)
-      + (this.passedLaws.includes('tariff_act') ? 10 : 0),
+      - (this.passedLaws.has('estate_tax') ? 25 : 0)
+      - (this.passedLaws.has('workers_charter') ? 10 : 0)
+      - (this.passedLaws.has('progressive_tax') ? 10 : 0)
+      - (this.passedLaws.has('land_reform') ? 30 : 0)
+      - (this.passedLaws.has('trade_unions_act') ? 10 : 0)
+      + (this.passedLaws.has('tariff_act') ? 10 : 0),
     ));
 
     const merchantPower = Math.min(40, 10 + trade * 0.12);
     const merchantSupport = Math.max(0, Math.min(100,
       50 + trade * 0.05
-      + (this.passedLaws.includes('merchants_charter') ? 25 : 0)
-      - (this.passedLaws.includes('workers_charter') ? 10 : 0)
-      - (this.passedLaws.includes('progressive_tax') ? 10 : 0)
-      + (this.passedLaws.includes('press_freedom_act') ? 10 : 0)
-      - (this.passedLaws.includes('tariff_act') ? 10 : 0),
+      + (this.passedLaws.has('merchants_charter') ? 25 : 0)
+      - (this.passedLaws.has('workers_charter') ? 10 : 0)
+      - (this.passedLaws.has('progressive_tax') ? 10 : 0)
+      + (this.passedLaws.has('press_freedom_act') ? 10 : 0)
+      - (this.passedLaws.has('tariff_act') ? 10 : 0),
     ));
 
     this.factions = [
@@ -5140,7 +5157,7 @@ export class RegionSim {
     return REGION_LAWS
       .filter(
         (l) =>
-          !this.passedLaws.includes(l.id) &&
+          !this.passedLaws.has(l.id) &&
           (!l.requiresState || this.stateProclaimed) &&
           (!l.requiresNation || this.nationProclaimed) &&
           l.prereqs.every((p) => this.has(p)),
@@ -5190,7 +5207,7 @@ export class RegionSim {
 
   /** Enact a law: spend political capital and apply the permanent effect. */
   enactLaw(id: string): boolean {
-    if (this.passedLaws.includes(id)) return false;
+    if (this.passedLaws.has(id)) return false;
     const law = REGION_LAWS.find((l) => l.id === id);
     if (!law) return false;
     if (law.requiresState && !this.stateProclaimed) return false;
@@ -5198,7 +5215,7 @@ export class RegionSim {
     if (this.politicalCapital < law.cost) return false;
 
     this.politicalCapital -= law.cost;
-    this.passedLaws.push(id);
+    this.passedLaws.add(id);
 
     switch (id) {
       case 'workers_charter':
@@ -5298,7 +5315,7 @@ export class RegionSim {
   private tickLegitimacy(): void {
     if (!this.nationProclaimed) return;
     // Press Freedom Act law slows legitimacy decay by 30%
-    const decayRate = this.passedLaws.includes('press_freedom_act') ? 0.35 : 0.5;
+    const decayRate = this.passedLaws.has('press_freedom_act') ? 0.35 : 0.5;
     this.legitimacy = Math.max(0, this.legitimacy - decayRate);
     if (this.govType === 'junta') {
       const ws = this.factions.find((f) => f.id === 'workers')?.support ?? 50;
@@ -6113,7 +6130,7 @@ export class RegionSim {
     const quality =
       (this.policyActive('standing_army') ? 1.5 : 1) *
       (this.ministerFor('defence') ? 1.2 : 1) *
-      (this.passedLaws.includes('military_reform') ? 1.2 : 1) *
+      (this.passedLaws.has('military_reform') ? 1.2 : 1) *
       (this.govType === 'junta' ? 1.15 : 1) *
       (this.militaryDoctrine === 'expansionist' ? 1.15 : this.militaryDoctrine === 'defensive' ? 0.9 : 1);
     const mob = w ? MOBILIZATION_DEFS[w.mobilization].power : 1;
@@ -6674,13 +6691,13 @@ export class RegionSim {
       railAnnounced: this.railAnnounced,
       highwayAnnounced: this.highwayAnnounced,
       maglevAnnounced: this.maglevAnnounced,
-      researched: this.researched,
+      researched: [...this.researched],
       activeResearch: this.activeResearch,
       researchProgress: this.researchProgress,
       politicalCapital: this.politicalCapital,
       nextElectionDay: this.nextElectionDay,
       lastElectionYear: this.lastElectionYear,
-      passedLaws: this.passedLaws,
+      passedLaws: [...this.passedLaws],
       tradeLevyRate: this.tradeLevyRate,
       estateTaxActive: this.estateTaxActive,
       nationProclaimed: this.nationProclaimed,
@@ -6791,13 +6808,13 @@ export class RegionSim {
     r.railAnnounced = d.railAnnounced;
     r.highwayAnnounced = d.highwayAnnounced ?? false;
     r.maglevAnnounced = d.maglevAnnounced ?? false;
-    r.researched = d.researched ?? ['steam_power', 'common_law'];
+    r.researched = new Set(d.researched ?? ['steam_power', 'common_law']);
     r.activeResearch = d.activeResearch ?? null;
     r.researchProgress = d.researchProgress ?? 0;
     r.politicalCapital = d.politicalCapital ?? 0;
     r.nextElectionDay = d.nextElectionDay ?? -1;
     r.lastElectionYear = d.lastElectionYear ?? -1;
-    r.passedLaws = d.passedLaws ?? [];
+    r.passedLaws = new Set(d.passedLaws ?? []);
     r.tradeLevyRate = d.tradeLevyRate ?? 0.05;
     r.estateTaxActive = d.estateTaxActive ?? false;
     r.nationProclaimed = d.nationProclaimed ?? false;
@@ -7019,7 +7036,7 @@ export class RegionSim {
    * Available once the central_bank_charter is enacted; limited to half of treasury.
    */
   borrowFromCentralBank(amount: number): { ok: boolean; reason?: string } {
-    if (!this.passedLaws.includes('central_bank_charter')) {
+    if (!this.passedLaws.has('central_bank_charter')) {
       return { ok: false, reason: 'Central bank not established' };
     }
     if (amount <= 0) return { ok: false, reason: 'Amount must be positive' };

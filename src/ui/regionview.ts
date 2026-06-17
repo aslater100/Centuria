@@ -1434,7 +1434,7 @@ export class RegionView {
       `<div class="ceremony-box">` +
       `<h2>★ THE CONSTITUTIONAL CONVENTION ★</h2>` +
       `<p style="font-size:11px;color:#9ab0c4;letter-spacing:2px;text-transform:uppercase">` +
-      `${Math.round(r.totalPop()).toLocaleString()} citizens · ${r.settlements.length} towns · ${r.researched.length} discoveries</p>` +
+      `${Math.round(r.totalPop()).toLocaleString()} citizens · ${r.settlements.length} towns · ${r.researched.size} discoveries</p>` +
       `<p>${flavourLine}</p>` +
       `<p><b>Nation name:</b></p>` +
       `<input id="nation-name" type="text" maxlength="36" placeholder="Name the nation…" value="${suggestedName}">` +
@@ -2140,9 +2140,9 @@ export class RegionView {
     const lawButtons =
       renderLawButtons(stateLaws, 'STATE LAWS') +
       (r.nationProclaimed ? renderLawButtons(nationLaws, 'NATION LAWS') : '') ||
-      (r.passedLaws.length > 0 ? `<p class="insp-skills">all available laws enacted</p>` : '');
-    const enacted = r.passedLaws.length > 0
-      ? `<p class="insp-skills">enacted: ${r.passedLaws.map((id) => REGION_LAWS.find((l) => l.id === id)?.name ?? id).join(', ')}</p>`
+      (r.passedLaws.size > 0 ? `<p class="insp-skills">all available laws enacted</p>` : '');
+    const enacted = r.passedLaws.size > 0
+      ? `<p class="insp-skills">enacted: ${Array.from(r.passedLaws).map((id) => REGION_LAWS.find((l) => l.id === id)?.name ?? id).join(', ')}</p>`
       : '';
 
     return `<p class="insp-skills">POLITICS</p>` +
@@ -2461,7 +2461,7 @@ export class RegionView {
   /** Central bank dashboard (GDD §5.1): policy rate, credit cycle, FX, bonds. */
   private monetaryHtml(): string {
     const r = this.region;
-    if (!r.passedLaws.includes('central_bank_charter')) return '';
+    if (!r.passedLaws.has('central_bank_charter')) return '';
     const annualGDP = Math.max(1, r.gdpLastMonth * 12);
     const debtPct = Math.round(r.nationalDebt / annualGDP * 100);
     const leverPct = (r.privateLeverage * r.policyRate * 100).toFixed(0); // debt service %
@@ -2522,7 +2522,7 @@ export class RegionView {
   /** Central Bank discount window: short-term borrowing at the policy rate. */
   private discountWindowHtml(): string {
     const r = this.region;
-    if (!r.passedLaws.includes('central_bank_charter')) return '';
+    if (!r.passedLaws.has('central_bank_charter')) return '';
     const maxDraw = Math.max(0, r.treasury * 0.5 - r.centralBankLoan);
     const cbCol = r.centralBankLoan > r.treasury * 0.3 ? '#e55' : '#4e9';
     return `<p class="insp-skills" title="The discount window lets you borrow short-term from your own central bank at the policy rate. Interest compounds monthly. Outstanding balance is capped at 50% of current treasury.">` +
@@ -2545,14 +2545,14 @@ export class RegionView {
     if (!r.stateProclaimed) return '';
     const hasMarket = r.settlements.some((s) => s.buildings.some((b) => b.includes('market')));
     const hasBank = r.settlements.some((s) => s.buildings.some((b) => b.includes('bank')));
-    const hasCbCharter = r.passedLaws.includes('central_bank_charter');
+    const hasCbCharter = r.passedLaws.has('central_bank_charter');
     if (!hasMarket && !hasBank && !hasCbCharter) return '';
 
     let html = `<p class="insp-skills">LENDERS</p>`;
 
     // Show available lenders
     if (r.lenders.length > 0) {
-      const rateNote = r.passedLaws.includes('central_bank_charter')
+      const rateNote = r.passedLaws.has('central_bank_charter')
         ? ` <span style="color:#888;font-size:9px">(policy ${(r.policyRate * 100).toFixed(0)}% + spread)</span>`
         : '';
       html += `<div style="font-size:11px;margin:4px 0">Available lenders:${rateNote}</div>`;
