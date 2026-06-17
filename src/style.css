@@ -1681,4 +1681,16 @@ body {
   color: var(--accent);
 }
 
+/* ---- Minimap (corner navigator) ---- */
+.cv-minimap {
+  background: rgba(20, 28, 40, 0.9) !important;
+  border: 1px solid rgba(90, 169, 216, 0.4) !important;
+  border-radius: 4px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+}
+
+.cv-minimap:hover {
+  border-color: rgba(90, 169, 216, 0.7) !important;
+}
+
 @keyframes cv-fade-in { from { opacity: 0; } to { opacity: 1; } }

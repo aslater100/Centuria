@@ -10,6 +10,7 @@ import type { CurrencySymbol } from '../sim/defs';
 import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
 import { REGION_N } from '../sim/worldgen';
 import { DesignScreen } from './designscreen';
+import { Minimap } from './minimap';
 
 /** Parse a #rrggbb (or #rgb) hex string to {r,g,b}; falls back to grey. */
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
@@ -99,6 +100,8 @@ export class RegionView {
   private camY = 0;
   private static readonly MIN_SCALE = 1;
   private static readonly MAX_SCALE = 6;
+  // ---- Minimap (corner navigation aid) ----
+  private minimap: Minimap;
 
   constructor(private canvas: HTMLCanvasElement, private region: RegionSim, root: HTMLElement) {
     this.g = canvas.getContext('2d')!;
@@ -147,6 +150,7 @@ export class RegionView {
     this.rivalPanel = document.createElement('div');
     this.rivalPanel.className = 'inspector region-panel hidden';
     root.appendChild(this.rivalPanel);
+    this.minimap = new Minimap(region, root, { size: 140, position: 'bottom-right' });
   }
 
   /** Draggable panels for the WindowManager (region mode). */
@@ -489,6 +493,9 @@ export class RegionView {
     this.drawCityLights(lit);
 
     g.restore(); // end map-space; HUD below draws in screen space
+
+    // Draw the minimap in the corner, showing camera frame.
+    this.minimap.draw(this.camX, this.camY, this.camScale, W, H);
 
     // Time-of-day + seasonal tint and a soft vignette frame the whole scene.
     this.drawAtmosphere(W, H, lit);
