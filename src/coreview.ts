@@ -196,6 +196,32 @@ function updateTopBar(): void {
   if (soundBtn) soundBtn.onclick = toggleSound;
 }
 
+// ── Event toasts ────────────────────────────────────────────────────────────
+// Notable events (good/bad log entries — raids, treaty offers, breakthroughs,
+// disasters, milestones) pop as transient top-centre cards so they aren't lost
+// in the rolling log. Primed on first poll so the founding history is silent.
+const toastBox = document.createElement('div');
+toastBox.className = 'cv-toasts';
+document.body.appendChild(toastBox);
+
+let lastToastLen = region.log.length; // prime: skip boot history
+function pollToasts(): void {
+  const log = region.log;
+  if (log.length <= lastToastLen) { lastToastLen = log.length; return; }
+  for (let i = Math.max(lastToastLen, log.length - 4); i < log.length; i++) {
+    const e = log[i];
+    if (e.kind === 'info') continue; // only surface the notable ones
+    const t = document.createElement('div');
+    t.className = `cv-toast cv-toast-${e.kind}`;
+    t.textContent = e.text;
+    toastBox.appendChild(t);
+    while (toastBox.childElementCount > 4) toastBox.firstElementChild!.remove();
+    setTimeout(() => { t.classList.add('cv-toast-out'); }, 3800);
+    setTimeout(() => { t.remove(); }, 4400);
+  }
+  lastToastLen = log.length;
+}
+
 let lastLogLen = -1;
 function updateLog(): void {
   if (region.log.length === lastLogLen) return;
@@ -303,6 +329,7 @@ function frame(): void {
   regionView.draw();
   updateTopBar();
   updateLog();
+  pollToasts();
   updateObjectives(uiFrame);
 
   // Diegetic audio: era soundtrack + ambience that swells with unrest.
