@@ -1,5 +1,5 @@
 # CENTURIA — Game Design Document
-### A colony-to-nation deep-simulation builder, 1900–2100
+### A colony-to-nation deep-simulation builder, 1800–2100
 
 **Version 0.1 — Foundational GDD**
 
