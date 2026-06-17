@@ -27,9 +27,15 @@
 > - The classic town game (`index.html` → `main.ts` → `TownCore`/`Simulation`) still exists
 >   and is reachable as "Classic Colony" from the title screen, but is **not** the focus.
 >
-> ### Overnight 4X PR queue (stacked on `main`)
-> - **PR #189 — 4X foundation** (`claude/4x-foundation`): `foundColony` + clean shell. *Merge first.*
-> - (subsequent terrain / atmosphere / modern-UI / depth PRs branch off the previous, stacked)
+> ### Overnight 4X PR queue (draft) — merge BOTTOM-UP (each stacked on the prior)
+> 1. **#189 — 4X foundation** (`claude/4x-foundation`, off `main`): `foundColony` + clean RegionView shell. *Merge first.*
+> 2. **#190 — terrain: fog of war + sea bathymetry** (`claude/4x-terrain-fog`, on #189).
+> 3. **#191 — atmosphere: day/night + city lights + season + vignette** (`claude/4x-atmosphere`, on #190).
+> 4. **#193 — modern UI theme** (`claude/4x-ui-polish`, on #191, scoped to `.cv-app`).
+> 5. **#194 — "Path to Nationhood" objectives panel** (`claude/4x-objectives`, on #193).
+> 6. **#195 — event toasts** (`claude/4x-toasts`, on #194). ← stack tip (this HANDOFF lives here).
+> - **#192 — tech & civics depth** (`claude/4x-tech-depth`, INDEPENDENT off `main`): +12 wired nodes, 899→902 tests, sim:macro ON TARGET. Merge any time.
+> - All CI green at time of writing. node_modules worktrees live under `.claude/worktrees/` — exclude them from vitest with `--exclude '**/.claude/**'` or test counts double.
 >
 > ### Gotchas learned this session
 > - `RegionView`'s camera works in **backing-store (device) pixels** (`canvas.width/height`,
