@@ -5,7 +5,7 @@
  */
 import type { Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, TownFocus, WagePolicy, Route, SectorId } from '../sim/region';
 import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES, BRANCH_YEAR } from '../sim/region';
-import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS } from '../sim/defs';
+import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS, MINUTES_PER_DAY } from '../sim/defs';
 import type { CurrencySymbol } from '../sim/defs';
 import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
 import { REGION_N } from '../sim/worldgen';
@@ -184,6 +184,16 @@ export class RegionView {
     const H = this.canvas.height;
     const m = 60; // margin
     return { px: m + (x / 100) * (W - 2 * m), py: m + (y / 100) * (H - 2 * m) };
+  }
+
+  /** Has the player explored or scouted the tile under this region coord
+   *  (0..100)? Used to keep undiscovered rivals hidden under the fog. */
+  private revealedAt(rx: number, ry: number): boolean {
+    const emap = this.region.explorationMap;
+    const E = emap.length;
+    const ex = Math.min(E - 1, Math.max(0, Math.floor((rx / 100) * E)));
+    const ey = Math.min(E - 1, Math.max(0, Math.floor((ry / 100) * E)));
+    return emap[ex][ey] !== 'fogged';
   }
 
   click(px: number, py: number): void {
@@ -403,6 +413,7 @@ export class RegionView {
       for (const settlementId of faction.settlementIds) {
         const s = region.settlement(settlementId);
         if (!s) continue;
+        if (!this.revealedAt(s.x, s.y)) continue; // hidden until discovered
         const { px, py } = this.toPx(s.x, s.y);
         if (!this.inView(px, py, 24)) continue;
         const selected = this.selectedFactionId === faction.id;
@@ -443,6 +454,7 @@ export class RegionView {
     for (const scout of region.scouts) {
       const faction = region.faction(scout.factionId);
       if (!faction || faction.id === region.playerFactionId) continue;
+      if (!this.revealedAt(scout.x, scout.y)) continue; // unseen beyond the frontier
       const { px, py } = this.toPx(scout.x, scout.y);
       if (!this.inView(px, py, 16)) continue;
       const bob = Math.floor(this.frame / 20) % 2;
@@ -471,7 +483,15 @@ export class RegionView {
       g.fillText(`→ ${e.name}`, px, py - 8);
     }
     g.textAlign = 'left';
+
+    // City lights pop on the map as dusk falls (still in map-space).
+    const lit = this.atmosphere();
+    this.drawCityLights(lit);
+
     g.restore(); // end map-space; HUD below draws in screen space
+
+    // Time-of-day + seasonal tint and a soft vignette frame the whole scene.
+    this.drawAtmosphere(W, H, lit);
 
     // Charter banner — the path to the State. Each requirement reads as a
     // ✓/✗ chip so the player can see exactly what still blocks Incorporation.
@@ -597,6 +617,11 @@ export class RegionView {
     const r = this.region;
     let s = `${this.canvas.width}x${this.canvas.height}|${r.regionalFactions.length}`;
     for (const t of r.settlements) s += `;${t.id},${t.factionId},${Math.round(t.x)},${Math.round(t.y)}`;
+    // Fog-of-war frontier: rebuild the cache as the explored count advances
+    // (reveals are monotonic, so a running count is a sufficient change key).
+    let explored = 0;
+    for (const col of r.explorationMap) for (const v of col) if (v !== 'fogged') explored++;
+    s += `|fog${explored}`;
     return s;
   }
 
@@ -615,7 +640,113 @@ export class RegionView {
     cg.clearRect(0, 0, W, H);
     this.drawTerrain(cg, W, H);
     this.drawTerritories(cg, W, H);
+    this.drawFog(cg, W, H);
     this.mapCacheSig = sig;
+  }
+
+  /** Compute the current lighting state from the in-game clock + season: a
+   *  night factor (0 day … 1 deep night), a warm golden-hour amount at dawn/
+   *  dusk, and the season index. Drives both the city-light glows and the
+   *  full-screen tint so they stay in sync. */
+  private atmosphere(): { night: number; golden: number; season: number } {
+    const dayFrac = (this.region.minute % MINUTES_PER_DAY) / MINUTES_PER_DAY; // 0 = midnight
+    const sun = Math.sin(dayFrac * Math.PI); // 0 at midnight, 1 at noon
+    const night = Math.pow(Math.max(0, 1 - sun), 1.5);
+    // Golden hour peaks mid-morning (~05:00) and mid-evening (~19:00).
+    const bump = (c: number) => Math.max(0, 1 - Math.abs(dayFrac - c) / 0.09);
+    const golden = Math.min(1, bump(0.22) + bump(0.78));
+    return { night, golden, season: this.region.seasonIndex };
+  }
+
+  /** Warm hearth-glow under each known settlement once dusk sets in — scaled by
+   *  population so cities blaze and hamlets flicker. Drawn in map-space. */
+  private drawCityLights(lit: { night: number }): void {
+    if (lit.night < 0.15) return;
+    const { g, region } = this;
+    g.globalCompositeOperation = 'lighter';
+    for (const t of region.settlements) {
+      if (!this.revealedAt(t.x, t.y)) continue;
+      const { px, py } = this.toPx(t.x, t.y);
+      if (!this.inView(px, py, 40)) continue;
+      const pop = region.popOf(t);
+      const radius = 10 + Math.min(26, Math.sqrt(pop) * 1.6);
+      const a = lit.night * Math.min(0.7, 0.28 + pop / 4000);
+      const grad = g.createRadialGradient(px, py, 0, px, py, radius);
+      grad.addColorStop(0, `rgba(255,214,140,${a})`);
+      grad.addColorStop(0.5, `rgba(240,170,90,${a * 0.45})`);
+      grad.addColorStop(1, 'rgba(240,170,90,0)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(px, py, radius, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.globalCompositeOperation = 'source-over';
+  }
+
+  /** Full-screen atmospheric pass (screen-space): a night/golden-hour tint, a
+   *  subtle seasonal wash, and a vignette. Cheap — a few rects + one gradient. */
+  private drawAtmosphere(W: number, H: number, lit: { night: number; golden: number; season: number }): void {
+    const { g } = this;
+    // Deep-night cool overlay.
+    if (lit.night > 0.01) {
+      g.fillStyle = `rgba(12,20,46,${(0.5 * lit.night).toFixed(3)})`;
+      g.fillRect(0, 0, W, H);
+    }
+    // Golden hour warmth at dawn/dusk.
+    if (lit.golden > 0.01) {
+      g.fillStyle = `rgba(232,150,72,${(0.20 * lit.golden).toFixed(3)})`;
+      g.fillRect(0, 0, W, H);
+    }
+    // Seasonal wash — faint, so it colours the mood without fighting the map.
+    const seasonTint = ['rgba(120,180,96,0.07)', 'rgba(255,206,120,0.06)', 'rgba(208,138,60,0.08)', 'rgba(150,182,224,0.09)'][lit.season] ?? '';
+    if (seasonTint) { g.fillStyle = seasonTint; g.fillRect(0, 0, W, H); }
+    // Vignette: a darkened frame that draws the eye inward.
+    const vg = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.36, W / 2, H / 2, Math.max(W, H) * 0.72);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(4,6,12,0.5)');
+    g.fillStyle = vg;
+    g.fillRect(0, 0, W, H);
+  }
+
+  /** Fog of war: the world beyond the explored frontier lies under a soft,
+   *  cloud-mottled shroud. Cells you have never seen ('fogged') sink under a
+   *  near-opaque veil; the frontier feathers (lighter where it abuts known
+   *  ground) so the discovered map melts into the unknown rather than ending at
+   *  a hard rectangle. Baked into the map cache (over terrain + territory, so
+   *  undiscovered rivals stay hidden) and rebuilt when the frontier advances. */
+  private drawFog(g: CanvasRenderingContext2D, W: number, H: number): void {
+    const N = REGION_N;
+    const m = 60;
+    const cw = (W - 2 * m) / N;
+    const ch = (H - 2 * m) / N;
+    const known = (cx: number, cy: number): boolean => {
+      if (cx < 0 || cy < 0 || cx >= N || cy >= N) return false;
+      return this.revealedAt((cx / N) * 100, (cy / N) * 100);
+    };
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        if (known(x, y)) continue;
+        // Feather toward the frontier: any known neighbour thins the veil.
+        const frontier =
+          known(x - 1, y) || known(x + 1, y) || known(x, y - 1) || known(x, y + 1) ||
+          known(x - 1, y - 1) || known(x + 1, y - 1) || known(x - 1, y + 1) || known(x + 1, y + 1);
+        const bx = Math.floor(m + x * cw);
+        const by = Math.floor(m + y * ch);
+        const bw = Math.ceil(cw);
+        const bh = Math.ceil(ch);
+        // Painterly cloud mottle so the shroud reads as drifting fog, not a slab.
+        const hash = (x * 374761393 ^ y * 668265263) >>> 0;
+        const mottle = ((hash % 7) - 3) * 0.012;
+        const base = frontier ? 0.48 : 0.9;
+        g.fillStyle = `rgba(9,13,21,${Math.max(0, Math.min(0.96, base + mottle))})`;
+        g.fillRect(bx, by, bw, bh);
+        // A cool, sparse cloud highlight catching light over the deep unknown.
+        if (!frontier && (hash >> 4) % 6 === 0) {
+          g.fillStyle = 'rgba(74,88,116,0.10)';
+          g.fillRect(bx, by, bw, bh);
+        }
+      }
+    }
   }
 
   /** Is a base-coord point within the current viewport (plus margin)? */
@@ -976,7 +1107,13 @@ export class RegionView {
         // Base biome colour
         let col: string;
         switch (c.biome) {
-          case 'sea':       col = c.elevation < -0.3 ? '#1c3244' : '#243d52'; break;
+          case 'sea': {
+            // Continuous depth ramp: open ocean sinks toward near-black blue,
+            // shelf water lifts toward a teal shore — the map reads as bathymetry.
+            const d = Math.max(0, Math.min(1, -c.elevation / 0.6));
+            col = `rgb(${Math.round(40 - 22 * d)},${Math.round(64 - 30 * d)},${Math.round(86 - 36 * d)})`;
+            break;
+          }
           case 'lake':      col = '#2e4a5c'; break;
           case 'river':     col = '#36586e'; break;
           case 'marsh':     col = '#39503e'; break;

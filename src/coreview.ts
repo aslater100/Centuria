@@ -54,6 +54,7 @@ void applyOverrides(sprites);
 // device pixels and the screen→device ratio (canvas.width / rect.width) keeps
 // pointer input aligned.
 // ─────────────────────────────────────────────────────────────────────────────
+document.body.classList.add('cv-app'); // scopes the 4X modern-UI theme
 const app = document.getElementById('app') ?? document.body;
 const canvas = document.createElement('canvas');
 canvas.className = 'cv-canvas';
@@ -79,12 +80,43 @@ function devicePos(e: { clientX: number; clientY: number }): { x: number; y: num
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Game state — a fresh colony on a freshly generated region.
+// Game state — continue a saved campaign if one exists, else found a fresh
+// colony on a freshly generated region. The save stores the world seed so the
+// procedural map/weather rebuild deterministically on load.
 // ─────────────────────────────────────────────────────────────────────────────
-const seed = Date.now() % 100000;
-const map = new RegionMap(seed);
-const weather = new Weather(seed);
-const region = RegionSim.foundColony(new Rng(seed), map, weather);
+const SAVE_KEY = 'centuria-4x-save';
+type DeserializeSim = Parameters<typeof RegionSim.deserialize>[1];
+
+function loadSaved(): { region: RegionSim; seed: number } | null {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const save = JSON.parse(raw) as { seed: number; data: string };
+    if (typeof save.seed !== 'number' || typeof save.data !== 'string') return null;
+    const stub = { rng: new Rng(save.seed), regionMap: new RegionMap(save.seed), weather: new Weather(save.seed) } as unknown as DeserializeSim;
+    return { region: RegionSim.deserialize(save.data, stub), seed: save.seed };
+  } catch { return null; }
+}
+
+let gameSeed: number;
+let region: RegionSim;
+const loaded = loadSaved();
+if (loaded) {
+  region = loaded.region;
+  gameSeed = loaded.seed;
+} else {
+  gameSeed = Date.now() % 100000;
+  region = RegionSim.foundColony(new Rng(gameSeed), new RegionMap(gameSeed), new Weather(gameSeed));
+}
+
+function saveGame(): void {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 1, seed: gameSeed, data: region.serialize() })); } catch { /* quota/full — ignore */ }
+}
+function newGame(): void {
+  if (!confirm('Abandon this campaign and start a new colony? Your saved game will be overwritten.')) return;
+  localStorage.removeItem(SAVE_KEY);
+  location.reload();
+}
 
 const regionView = new RegionView(canvas, region, document.body);
 // Centre the camera on the founding valley once the layout is known.
@@ -112,6 +144,62 @@ const logBox = document.createElement('div');
 logBox.className = 'cv-log';
 document.body.appendChild(logBox);
 
+// ── "Path to Nationhood" objectives panel ──────────────────────────────────
+// Surfaces the model's own gate logic (canFoundTown / charterGates /
+// canCallConventionGates) as a live checklist, so the deep colony→nation arc is
+// legible: the player always sees the next milestone and exactly what blocks it.
+const objBox = document.createElement('div');
+objBox.className = 'cv-objectives';
+objBox.id = 'cv-objectives';
+document.body.appendChild(objBox);
+windows.register({ id: 'cv-objectives', element: objBox, baseZ: 14 });
+
+let lastObjFrame = -999;
+function updateObjectives(frameNo: number): void {
+  if (frameNo - lastObjFrame < 30) return; // ~twice a second
+  lastObjFrame = frameNo;
+  const r = region;
+  const row = (g: { label: string; met: boolean; detail: string }) =>
+    `<div class="cv-obj-row ${g.met ? 'cv-obj-done' : ''}">` +
+    `<span class="cv-obj-mark">${g.met ? '✓' : '○'}</span>` +
+    `<span class="cv-obj-label">${g.label}</span>` +
+    (g.detail ? `<span class="cv-obj-detail">${g.detail}</span>` : '') +
+    `</div>`;
+
+  let stage: string, goal: string, gates: { label: string; met: boolean; detail: string }[];
+  if (!r.stateProclaimed) {
+    stage = 'Colony';
+    goal = 'Charter a State';
+    gates = r.charterGates();
+    // Until there's a second town, the first concrete step is expansion.
+    if (r.settlements.length < 2) {
+      const cap = r.settlements[0];
+      if (cap) {
+        const ft = r.canFoundTown(cap.id);
+        gates = [{ label: 'Found your first daughter town', met: false, detail: ft.ok ? 'ready — open the town panel' : ft.reason }, ...gates];
+      }
+    }
+  } else if (!r.nationProclaimed) {
+    stage = 'State';
+    goal = 'Proclaim a Nation';
+    gates = r.canCallConventionGates();
+  } else {
+    stage = 'Nation';
+    goal = 'Lead the century to 2100';
+    const terr = Math.round(r.playerTerritoryControl() * 100);
+    gates = [
+      { label: 'Unification', met: terr >= 75, detail: `${terr}% territory (75%+ by 2070)` },
+      { label: 'Endure to 2100', met: false, detail: `year ${r.year}` },
+    ];
+  }
+  const done = gates.filter((g) => g.met).length;
+  objBox.innerHTML =
+    `<div class="cv-obj-head"><span class="cv-obj-stage">${stage}</span>` +
+    `<span class="cv-obj-goal">▸ ${goal}</span>` +
+    `<span class="cv-obj-prog">${done}/${gates.length}</span></div>` +
+    gates.map(row).join('');
+}
+
 function updateTopBar(): void {
   const r = region;
   const wx = r.weather.forDay(r.day);
@@ -132,11 +220,81 @@ function updateTopBar(): void {
     `<span title="your share of regional territory">⬣ ${terr}%</span>` +
     `<span title="living notables">NOTABLES ${r.notables.filter((n) => n.alive).length}</span>` +
     `<span class="tb-date">${tierLabel}</span>` +
-    `<button class="tb-btn" data-cv="sound" title="toggle audio">${soundOn ? '🔊' : '🔈'}</button>` +
+    `<button class="tb-btn" data-cv="sound" title="toggle audio (M)">${soundOn ? '🔊' : '🔈'}</button>` +
+    `<button class="tb-btn" data-cv="save" title="save campaign">💾 Save</button>` +
+    `<button class="tb-btn" data-cv="new" title="start a new colony">New</button>` +
+    `<button class="tb-btn" data-cv="help" title="how to play (H)">?</button>` +
     `<span class="tb-speed">${paused ? '⏸ PAUSED' : '▶'.repeat(speed)} <i>(space · 1-4)</i></span>` +
     (r.gameOver ? `<span class="tb-over">THE COLONY HAS PERISHED</span>` : '');
   const soundBtn = topBar.querySelector<HTMLButtonElement>('[data-cv="sound"]');
   if (soundBtn) soundBtn.onclick = toggleSound;
+  const saveBtn = topBar.querySelector<HTMLButtonElement>('[data-cv="save"]');
+  if (saveBtn) saveBtn.onclick = () => { saveGame(); saveBtn.textContent = '✓ Saved'; setTimeout(() => { saveBtn.textContent = '💾 Save'; }, 1200); };
+  const newBtn = topBar.querySelector<HTMLButtonElement>('[data-cv="new"]');
+  if (newBtn) newBtn.onclick = newGame;
+  const helpBtn = topBar.querySelector<HTMLButtonElement>('[data-cv="help"]');
+  if (helpBtn) helpBtn.onclick = showHelp;
+}
+
+// ── Event toasts ────────────────────────────────────────────────────────────
+// Notable events (good/bad log entries — raids, treaty offers, breakthroughs,
+// disasters, milestones) pop as transient top-centre cards so they aren't lost
+// in the rolling log. Primed on first poll so the founding history is silent.
+const toastBox = document.createElement('div');
+toastBox.className = 'cv-toasts';
+document.body.appendChild(toastBox);
+
+// ── Welcome / help overlay ──────────────────────────────────────────────────
+// A first-run guide to the colony→nation arc + controls, reopenable via the
+// HUD "?" button or the H/? keys. Additive overlay — never blocks the sim.
+const helpOverlay = document.createElement('div');
+helpOverlay.className = 'cv-help hidden';
+helpOverlay.innerHTML =
+  `<div class="cv-help-box">` +
+  `<h1>CENTURIA</h1>` +
+  `<p class="cv-help-tag">Build · Endure · Govern — one valley to a nation, 1900–2100.</p>` +
+  `<div class="cv-help-cols">` +
+  `<div><h3>The arc</h3><ul>` +
+  `<li>Grow your colony, then <b>found daughter towns</b>.</li>` +
+  `<li>Charter a <b>State</b>, then proclaim a <b>Nation</b>.</li>` +
+  `<li>Steer economy, diplomacy, war &amp; climate to 2100.</li>` +
+  `<li>Watch the <b>Path to Nationhood</b> panel for your next step.</li>` +
+  `</ul></div>` +
+  `<div><h3>Controls</h3><ul>` +
+  `<li><b>Pan</b> WASD / arrows / drag · <b>Zoom</b> wheel / +− · <b>0</b> reset</li>` +
+  `<li><b>Click</b> a town to manage it · <b>Esc</b> deselect</li>` +
+  `<li>Panels: <b>T</b> research · <b>R</b> routes · <b>L</b> towns · <b>E</b> economy</li>` +
+  `<li><b>Space</b> pause · <b>1–4</b> speed · <b>Ctrl/⌘-S</b> save · <b>M</b> sound</li>` +
+  `</ul></div>` +
+  `</div>` +
+  `<button class="cv-help-start">Begin ▸</button>` +
+  `</div>`;
+document.body.appendChild(helpOverlay);
+const showHelp = () => helpOverlay.classList.remove('hidden');
+const hideHelp = () => helpOverlay.classList.add('hidden');
+helpOverlay.addEventListener('mousedown', (e) => { if (e.target === helpOverlay || (e.target as HTMLElement).classList.contains('cv-help-start')) hideHelp(); });
+// Show once for a brand-new campaign (not when continuing a save).
+if (!loaded && !localStorage.getItem('centuria-4x-seen')) {
+  localStorage.setItem('centuria-4x-seen', '1');
+  showHelp();
+}
+
+let lastToastLen = region.log.length; // prime: skip boot history
+function pollToasts(): void {
+  const log = region.log;
+  if (log.length <= lastToastLen) { lastToastLen = log.length; return; }
+  for (let i = Math.max(lastToastLen, log.length - 4); i < log.length; i++) {
+    const e = log[i];
+    if (e.kind === 'info') continue; // only surface the notable ones
+    const t = document.createElement('div');
+    t.className = `cv-toast cv-toast-${e.kind}`;
+    t.textContent = e.text;
+    toastBox.appendChild(t);
+    while (toastBox.childElementCount > 4) toastBox.firstElementChild!.remove();
+    setTimeout(() => { t.classList.add('cv-toast-out'); }, 3800);
+    setTimeout(() => { t.remove(); }, 4400);
+  }
+  lastToastLen = log.length;
 }
 
 let lastLogLen = -1;
@@ -217,7 +375,10 @@ addEventListener('keydown', (e) => {
     case 'l': regionView.settlementListOpen = !regionView.settlementListOpen; break;
     case 'e': regionView.economyOpen = !regionView.economyOpen; break;
     case 'm': toggleSound(); break;
-    case 'escape': regionView.selectedId = null; regionView.selectedFactionId = null; break;
+    case 'h': case '?': if (helpOverlay.classList.contains('hidden')) showHelp(); else hideHelp(); break;
+    case 'escape':
+      if (!helpOverlay.classList.contains('hidden')) { hideHelp(); break; }
+      regionView.selectedId = null; regionView.selectedFactionId = null; break;
   }
 });
 
@@ -226,8 +387,10 @@ addEventListener('keydown', (e) => {
 // ─────────────────────────────────────────────────────────────────────────────
 let lastTime = performance.now();
 let acc = 0;
+let uiFrame = 0;
 
 function frame(): void {
+  uiFrame++;
   const now = performance.now();
   const dt = Math.min(0.1, (now - lastTime) / 1000); // clamp after tab-out
   lastTime = now;
@@ -244,6 +407,8 @@ function frame(): void {
   regionView.draw();
   updateTopBar();
   updateLog();
+  pollToasts();
+  updateObjectives(uiFrame);
 
   // Diegetic audio: era soundtrack + ambience that swells with unrest.
   const maxGrievance = region.settlements.reduce((m, s) => Math.max(m, s.grievance || 0), 0);
@@ -255,3 +420,12 @@ function frame(): void {
 }
 
 requestAnimationFrame(frame);
+
+// Autosave: every 45s of real time, and whenever the tab is hidden or closed,
+// so a campaign survives a refresh or crash without manual saving.
+setInterval(saveGame, 45000);
+addEventListener('beforeunload', saveGame);
+addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveGame(); });
+addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveGame(); }
+});
