@@ -37,6 +37,18 @@ import { RESEARCH_PER_DESK_PER_DAY } from './sim/research';
 import { REGION_N, type Biome } from './sim/worldgen';
 import { buildSprites } from './ui/sprites';
 import { applyOverrides } from './ui/spriteOverrides';
+import { Sfx } from './ui/audio';
+import { Music } from './ui/music';
+import { Soundscape } from './ui/soundscape';
+
+// Procedural audio for the primary engine (reuses the tested modules main.ts uses).
+const sfx = new Sfx();
+const music = new Music();
+const soundscape = new Soundscape();
+const unlockAudio = () => { sfx.unlock(); music.unlock(); soundscape.unlock(); };
+addEventListener('mousedown', unlockAudio, { once: true });
+addEventListener('keydown', unlockAudio, { once: true });
+let tension = 0; // 0 calm → 1 under attack; drives music/soundscape intensity
 
 const sprites = buildSprites([]);
 void applyOverrides(sprites);
@@ -144,6 +156,19 @@ worldBtn.style.cssText = 'position:fixed;top:8px;right:74px;padding:4px 10px;bac
 worldBtn.title = 'View the wider world your colony sits in';
 worldBtn.addEventListener('click', () => { worldView = !worldView; });
 app.appendChild(worldBtn);
+
+// Master sound toggle (music + ambience + SFX together).
+const soundBtn = document.createElement('button');
+const soundLabel = () => (sfx.muted ? '🔇 Sound' : '🔊 Sound');
+soundBtn.textContent = soundLabel();
+soundBtn.style.cssText = 'position:fixed;top:8px;right:150px;padding:4px 10px;background:#111c;color:#90a8c0;border:1px solid #30485a;border-radius:3px;font:12px monospace;cursor:pointer;z-index:999;';
+soundBtn.title = 'Toggle music, ambience and sound effects';
+soundBtn.addEventListener('click', () => {
+  unlockAudio();
+  sfx.toggleMuted(); music.toggle(); soundscape.toggle();
+  soundBtn.textContent = soundLabel();
+});
+app.appendChild(soundBtn);
 // ── Camera (pan + zoom) ─────────────────────────────────────────────────────
 // World is drawn at `TILE` base px/tile under a translate+scale transform, so
 // the SoA play-test pans and zooms like the real game. `view.x/y` are the
@@ -213,14 +238,22 @@ let lastLogLen = -1;
 const toasts: { text: string; kind: LogEntry['kind']; until: number }[] = [];
 function pollEvents(): void {
   if (lastLogLen < 0 || core.log.length < lastLogLen) { lastLogLen = core.log.length; return; }
+  let good = false, bad = false, death = false;
   for (let i = lastLogLen; i < core.log.length; i++) {
     const e = core.log[i];
     if (e.kind === 'good' || e.kind === 'bad') {
       toasts.push({ text: e.text, kind: e.kind, until: Date.now() + 3500 });
       if (toasts.length > 4) toasts.shift();
     }
+    if (e.kind === 'good') good = true;
+    if (e.kind === 'bad') { bad = true; if (/died|dies|perish|fell|slain/i.test(e.text)) death = true; }
   }
   lastLogLen = core.log.length;
+  // One SFX per poll, by severity; bad news also nudges the music's tension up.
+  if (bad) tension = Math.max(tension, 0.5);
+  if (death) sfx.knell();
+  else if (bad) sfx.thud();
+  else if (good) sfx.chime();
 }
 function drawToasts(): void {
   const now = Date.now();
@@ -1942,12 +1975,21 @@ function draw(): void {
 // ── Loop ──────────────────────────────────────────────────────────────────
 let acc = 0, last = performance.now();
 let _autoSaveDay = -1;
+let _wasRaiding = false;
 function loop(now: number): void {
-  acc += Math.min(0.25, (now - last) / 1000) * TICKS_PER_SECOND * speed;
+  const dtSec = (now - last) / 1000;
+  acc += Math.min(0.25, dtSec) * TICKS_PER_SECOND * speed;
   last = now;
   if (!paused && !core.pendingChoice) { let guard = 0; while (acc >= 1 && guard++ < 64) { core.tick(); acc -= 1; } }
   else acc = 0;
-  pollEvents(); // surface new notable log entries as toasts
+  pollEvents(); // surface new notable log entries as toasts + SFX
+  // Soundtrack: era by year, swelling with tension, ambient when paused.
+  if (core.raidActive && !_wasRaiding) sfx.horn(); // alarm on raid onset
+  _wasRaiding = core.raidActive;
+  tension = core.raidActive ? 1 : Math.max(0, tension - dtSec * 0.12);
+  const year = START_YEAR + Math.floor(core.day / DAYS_PER_YEAR);
+  music.update({ year, paused, tension });
+  soundscape.update({ mode: 'town', paused, year, activeBuildWorkers: core.builds.length, activeRailRoutes: 0, maxGrievance: 0, tension });
   // Auto-save once per game day so progress is never lost.
   if (core.day !== _autoSaveDay) {
     _autoSaveDay = core.day;
