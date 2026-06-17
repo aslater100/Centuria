@@ -1,6 +1,6 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-17 · **Tests:** 911 passing · **Version:** v0.42.0
+**Last updated:** 2026-06-17 · **Tests:** 917 passing · **Version:** v0.43.0
 
 ## The game: a standalone 4X campaign
 
@@ -46,6 +46,13 @@ arc starting from one fogged founding settlement.
   `{rng, regionMap, weather}` stub.
 - **Content depth** — +12 wired tech/civic nodes filling 1900–2100 gaps; +8 era-gated regional
   events, +5 policy cards, +3 laws, all wired to existing sim hooks.
+- **Main menu & UX** — new-game with terrain preferences (river/coast/highlands/random), continue
+  if save exists, classic colony link. Economy sparklines (12-month GDP/treasury/inflation trends).
+  Corner minimap with fog + click-to-pan. Settlement hover tooltips (pop/happiness/food).
+- **Animated visuals** — subtle water shimmer, winter shores ice, seasonal particle effects.
+- **Rival personality & diplomacy** — AI rivals initiate treaties based on personality archetypes
+  (Hegemon/Trading Republic/Hermit Kingdom/Crusader/Opportunist), memorable diplomatic moments,
+  rare special events (tributes, honor displays, alliance proposals).
 
 ## Gotchas
 
@@ -72,17 +79,36 @@ npm install
 npm run dev        # http://localhost:5173/core.html  ← the 4X game
 npm run build      # tsc + vite build (must pass)
 npx tsc --noEmit
-npx vitest run --exclude '**/.claude/**'   # 911 tests
+npx vitest run --exclude '**/.claude/**'   # 917 tests
 npm run sim:macro  # nation-tier monetary harness — keep "ON TARGET"
 ```
 
+## Recent completions (PRs #189–#204)
+
+- ✓ **#189** — 4X foundation: `foundColony()`, clean shell, HUD + log, draggable panels
+- ✓ **#190** — Terrain: fog of war + sea bathymetry
+- ✓ **#191** — Atmosphere: day/night, city lights, seasonal tints, vignette
+- ✓ **#192** — Tech & civics depth: +12 nodes (32→44 total)
+- ✓ **#193** — Modern UI: cool-ink dark theme (`.cv-app` scoped)
+- ✓ **#194** — "Path to Nationhood" objectives panel
+- ✓ **#195** — Event toasts (log highlights as transient cards)
+- ✓ **#196** — Save/load: autosave + continue + localStorage
+- ✓ **#197** — Welcome overlay: first-run guide + ? button
+- ✓ **#199–#200** — Recovery: UI stack + events/governance depth (stacked PR consolidation)
+- ✓ **#201** — Handoff refresh: deleted stale PLAN.md
+- ✓ **#202** — Technical docs: HANDOFF_TECHNICAL, BALANCE_KNOBS, TICK_CYCLE
+- ✓ **#203** — Main menu + sparklines + minimap + settlement tooltips
+- ✓ **#204** — Richer rival behavior: personality-driven diplomacy + rare special events
+
 ## Good next candidates
 
-- **4X start/main menu** for `core.html` — new-game with the `foundColony` start preference
-  (river-valley/coastal/highlands/surprise) + Continue if a save exists.
-- **Minimap** with fog. **Economy sparklines** (needs a small history sampler in `RegionSim`).
-- In-map **tooltips**; deeper **diplomacy/war** UX; richer **rival** behaviour.
-- Animated water/coastline (per-frame overlay, since the cache is static).
+- **World view / province layer** — continental map for nation-tier play (procedural province
+  borders, trade routes, capitals, military deployment).
+- **Per-faction visibility** in settlement founding (currently uses global exploration map).
+- **Advanced diplomacy UI** — treaty editor, trade bloc negotiation, espionage/sabotage.
+- **Military depth** — unit recruitment, garrison management, logistics/supply lines.
+- **Late-game flavor** — era-branching cinematics, victory cinematics, post-2100 epilogue states.
+- **Performance polish** — profile the render loop, optimize hot paths in macro simulation.
 
 ## Design reference
 
