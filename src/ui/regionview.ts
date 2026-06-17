@@ -251,6 +251,18 @@ export class RegionView {
     this.camY = 0;
   }
 
+  /** Pan to a logical coordinate (0..100), centering the viewport on it. */
+  panTo(regionX: number, regionY: number): void {
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    // Convert logical coords to screen center
+    const p = this.toPx(regionX, regionY);
+    // Pan so that (p.px, p.py) appears at the screen center
+    this.camX = W / 2 - p.px;
+    this.camY = H / 2 - p.py;
+    this.clampCamera();
+  }
+
   /** Keep the scaled map from drifting off-screen; at scale 1 it stays pinned. */
   private clampCamera(): void {
     const W = this.canvas.width;

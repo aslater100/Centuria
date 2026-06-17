@@ -409,6 +409,19 @@ addEventListener('keydown', (e) => {
   }
 });
 
+// Minimap click-to-pan
+const minimapCanvas = regionView.draggablePanels.length > 0 ? (document.querySelector('.cv-minimap') as HTMLCanvasElement) : null;
+if (minimapCanvas) {
+  minimapCanvas.addEventListener('click', (e) => {
+    const rect = minimapCanvas.getBoundingClientRect();
+    const localX = e.clientX - rect.left;
+    const localY = e.clientY - rect.top;
+    const nx = localX / rect.width;
+    const ny = localY / rect.height;
+    regionView.panTo(nx * 100, ny * 100);
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main loop — fixed-timestep accumulator (parity with the classic region tick).
 // ─────────────────────────────────────────────────────────────────────────────
