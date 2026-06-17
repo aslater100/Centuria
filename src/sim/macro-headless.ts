@@ -180,8 +180,8 @@ function setupNation(seed: number): RegionSim {
   r.legitimacy = 60;
   r.activePolicies = [];
   r.treasury = 1000;
-  r.passedLaws.push('central_bank_charter');
-  r.passedLaws.push('income_tax');
+  r.passedLaws.add('central_bank_charter');
+  r.passedLaws.add('income_tax');
   return r;
 }
 
