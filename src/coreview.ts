@@ -87,6 +87,13 @@ Promise.resolve().then(() => {
 let panning = false;
 let panLast = { x: 0, y: 0 };
 
+// Policy button click tracking
+interface PolicyButton {
+  x: number; y: number; w: number; h: number;
+  action: () => void;
+}
+let policyButtons: PolicyButton[] = [];
+
 canvas.addEventListener('mousedown', (e) => {
   if (e.button === 1) { // middle click to pan
     panning = true;
@@ -94,9 +101,20 @@ canvas.addEventListener('mousedown', (e) => {
     e.preventDefault();
     return;
   }
-  if (e.button === 0 && regionView) { // left click to select
-    const r = canvas.getBoundingClientRect();
-    regionView.click(e.clientX - r.left, e.clientY - r.top);
+  if (e.button === 0) { // left click
+    // Check policy buttons first
+    for (const btn of policyButtons) {
+      if (e.clientX >= btn.x && e.clientX < btn.x + btn.w &&
+          e.clientY >= btn.y && e.clientY < btn.y + btn.h) {
+        btn.action();
+        return;
+      }
+    }
+    // Otherwise select settlement
+    if (regionView) {
+      const r = canvas.getBoundingClientRect();
+      regionView.click(e.clientX - r.left, e.clientY - r.top);
+    }
   }
 });
 
@@ -145,7 +163,9 @@ function drawSettlementPanel(): void {
   const s = region.settlements.find(t => t.id === regionView!.selectedId);
   if (!s) return;
 
-  const panelW = 320, pad = 8, lineH = 16;
+  policyButtons = [];
+
+  const panelW = 320, pad = 8, lineH = 16, btnH = 18;
   ctx.fillStyle = '#0b1118dd';
   ctx.fillRect(cw - panelW, 0, panelW, ch);
   ctx.strokeStyle = '#33424f';
@@ -165,6 +185,19 @@ function drawSettlementPanel(): void {
     ctx.fillText(String(val), cw - panelW + panelW - pad - 2, y);
     ctx.textAlign = 'left';
     y += lineH;
+  };
+  const drawBtn = (x: number, w: number, label: string, onClick: () => void) => {
+    const bx = cw - panelW + x, by = y;
+    ctx.fillStyle = '#1a3a4a';
+    ctx.fillRect(bx, by, w, btnH);
+    ctx.strokeStyle = '#4a8aaa';
+    ctx.strokeRect(bx + 0.5, by + 0.5, w - 1, btnH - 1);
+    ctx.font = '9px monospace';
+    ctx.fillStyle = '#7fd0f0';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, bx + w / 2, by + 12);
+    ctx.textAlign = 'left';
+    policyButtons.push({ x: bx, y: by, w, h: btnH, action: onClick });
   };
 
   // Settlement header
@@ -190,25 +223,35 @@ function drawSettlementPanel(): void {
   ctx.fillText('Policies', cw - panelW + pad, y);
   y += lineH + 4;
 
+  // Tax band buttons
   ctx.font = '10px monospace';
   ctx.fillStyle = '#aab8c4';
   ctx.fillText('Tax:', cw - panelW + pad, y);
-  ctx.fillStyle = '#dff1ff';
-  ctx.fillText(TAX_BAND_LABELS[s.policies.taxBand], cw - panelW + pad + 35, y);
-  y += lineH;
+  const taxBtnW = 65;
+  drawBtn(pad + 30, taxBtnW, TAX_BAND_LABELS[s.policies.taxBand], () => {
+    region.setCityPolicy(s.id, 'taxBand', (s.policies.taxBand + 1) % 4);
+  });
+  y += btnH + 4;
 
+  // Wage policy buttons
   ctx.fillStyle = '#aab8c4';
   ctx.fillText('Wages:', cw - panelW + pad, y);
-  ctx.fillStyle = '#dff1ff';
-  ctx.fillText(s.policies.wagePolicy, cw - panelW + pad + 40, y);
-  y += lineH;
+  const wages = ['low', 'market', 'high'] as const;
+  const wageLbl = wages[(wages.indexOf(s.policies.wagePolicy) + 1) % 3];
+  drawBtn(pad + 40, taxBtnW, wageLbl, () => {
+    const idx = wages.indexOf(s.policies.wagePolicy);
+    region.setCityPolicy(s.id, 'wagePolicy', wages[(idx + 1) % 3]);
+  });
+  y += btnH + 4;
 
+  // Service level buttons
   ctx.fillStyle = '#aab8c4';
   ctx.fillText('Services:', cw - panelW + pad, y);
-  ctx.fillStyle = '#dff1ff';
   const svc = ['Minimal', 'Standard', 'Generous'];
-  ctx.fillText(svc[s.policies.serviceLevel], cw - panelW + pad + 50, y);
-  y += lineH + 4;
+  drawBtn(pad + 50, taxBtnW, svc[s.policies.serviceLevel], () => {
+    region.setCityPolicy(s.id, 'serviceLevel', (s.policies.serviceLevel + 1) % 3);
+  });
+  y += btnH + 8;
 
   // Sectors
   sep();
