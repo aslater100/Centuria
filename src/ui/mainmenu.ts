@@ -61,10 +61,7 @@ export function showMainMenu(): Promise<MenuResult> {
     newGameBtn.className = 'cv-menu-btn cv-menu-btn-primary';
     newGameBtn.textContent = 'New Campaign';
     newGameBtn.addEventListener('click', () => {
-      showStartPreferences(container, (pref) => {
-        container.remove();
-        resolve({ action: 'newgame', pref });
-      });
+      showStartPreferences(container, resolve);
     });
     buttonGroup.appendChild(newGameBtn);
 
@@ -82,7 +79,7 @@ export function showMainMenu(): Promise<MenuResult> {
 
 function showStartPreferences(
   menuContainer: HTMLElement,
-  onSelect: (pref: StartPref) => void,
+  resolve: (result: MenuResult) => void,
 ): void {
   // Clear the menu dialog
   const dialog = menuContainer.querySelector('.cv-menu-dialog') as HTMLElement;
@@ -164,8 +161,52 @@ function showStartPreferences(
   backBtn.className = 'cv-menu-btn cv-menu-btn-secondary';
   backBtn.textContent = 'Back';
   backBtn.addEventListener('click', () => {
-    menuContainer.remove();
-    // Re-show the main menu
+    // Rebuild main menu screen
+    const buildMainMenu = () => {
+      dialog.innerHTML = '';
+      const t = document.createElement('h1');
+      t.className = 'cv-menu-title';
+      t.textContent = 'CENTURIA';
+      dialog.appendChild(t);
+
+      const s = document.createElement('p');
+      s.className = 'cv-menu-subtitle';
+      s.textContent = 'A colony-to-nation simulation, 1900–2100';
+      dialog.appendChild(s);
+
+      const bg = document.createElement('div');
+      bg.className = 'cv-menu-buttons';
+      dialog.appendChild(bg);
+
+      if (hasSave()) {
+        const cb = document.createElement('button');
+        cb.className = 'cv-menu-btn cv-menu-btn-primary';
+        cb.textContent = 'Continue Campaign';
+        cb.addEventListener('click', () => {
+          menuContainer.remove();
+          resolve({ action: 'continue' });
+        });
+        bg.appendChild(cb);
+      }
+
+      const nb = document.createElement('button');
+      nb.className = 'cv-menu-btn cv-menu-btn-primary';
+      nb.textContent = 'New Campaign';
+      nb.addEventListener('click', () => {
+        showStartPreferences(menuContainer, resolve);
+      });
+      bg.appendChild(nb);
+
+      const clb = document.createElement('button');
+      clb.className = 'cv-menu-btn cv-menu-btn-secondary';
+      clb.textContent = 'Classic Colony (v0.41)';
+      clb.addEventListener('click', () => {
+        menuContainer.remove();
+        resolve({ action: 'classic' });
+      });
+      bg.appendChild(clb);
+    };
+    buildMainMenu();
   });
   buttonGroup.appendChild(backBtn);
 
@@ -177,7 +218,8 @@ function showStartPreferences(
       'input[name="startpref"]:checked',
     ) as HTMLInputElement | null;
     if (selected) {
-      onSelect(selected.value as StartPref);
+      menuContainer.remove();
+      resolve({ action: 'newgame', pref: selected.value as StartPref });
     }
   });
   buttonGroup.appendChild(startBtn);
