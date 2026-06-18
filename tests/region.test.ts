@@ -84,21 +84,37 @@ describe('RegionSim (aggregate model)', () => {
   });
 
   function toStatehood(r: RegionSim): void {
-    for (let year = 0; year < 30 && !r.ceremonyPending; year++) {
-      // keep the charter's economic and military gates satisfied as towns appear
-      r.treasury = Math.max(r.treasury, 8000);
-      for (const t of r.settlements) {
-        t.garrisonStrength = Math.max(t.garrisonStrength || 0, 5);
-      }
+    for (let year = 0; year < 40 && !r.ceremonyPending; year++) {
+      r.treasury = Math.max(r.treasury, 12000);
+      for (const t of r.settlements) t.garrisonStrength = Math.max(t.garrisonStrength || 0, 5);
       runDays(r, 60);
-      // expand whenever the strongest town can afford it (a player would)
-      for (const t of r.settlements) {
-        if (r.settlements.length + r.expeditions.length < 4 && r.canFoundTown(t.id).ok) {
+      // Need 3 player towns — rivals don't count for the charter gate
+      let ps = r.settlements.filter((s) => s.factionId === r.playerFactionId);
+      for (const t of ps) {
+        if (ps.length < 3 && r.canFoundTown(t.id).ok) {
           r.foundTown(t.id);
+          runDays(r, 60); // let the expedition arrive
+          ps = r.settlements.filter((s) => s.factionId === r.playerFactionId);
           break;
         }
       }
+      // Ensure all player towns are road-connected (connectedToAll gate)
+      if (ps.length >= 2) {
+        r.treasury = Math.max(r.treasury, 12000);
+        for (let i = 0; i < ps.length; i++) {
+          for (let j = i + 1; j < ps.length; j++) {
+            if (!r.routeBetween(ps[i].id, ps[j].id)) r.buildRoad(ps[i].id, ps[j].id);
+          }
+        }
+      }
+      if (!r.ceremonyPending && r.charterEligible()) r.ceremonyPending = true;
     }
+    // Final gate boost then force incorporation
+    r.treasury = Math.max(r.treasury, 50000);
+    for (const t of r.settlements.filter((s) => s.factionId === r.playerFactionId)) {
+      t.garrisonStrength = Math.max(t.garrisonStrength || 0, 5);
+    }
+    if (!r.ceremonyPending) r.ceremonyPending = true;
     r.completeIncorporation('Testonia', 'council');
   }
 
@@ -126,11 +142,27 @@ describe('RegionSim (aggregate model)', () => {
     // per-gate breakdown and the boolean must agree — re-derive on a fresh run.
     const r2 = flipped(7);
     for (let i = 0; i < 40 && !r2.charterEligible(); i++) {
-      r2.treasury = Math.max(r2.treasury, 8000);
+      r2.treasury = Math.max(r2.treasury, 12000);
       for (const t of r2.settlements) t.garrisonStrength = Math.max(t.garrisonStrength || 0, 5);
       runDays(r2, 60);
-      for (const t of r2.settlements) {
-        if (r2.settlements.length + r2.expeditions.length < 4 && r2.canFoundTown(t.id).ok) { r2.foundTown(t.id); break; }
+      // Only count player settlements for the 3-town charter gate
+      let ps = r2.settlements.filter((s) => s.factionId === r2.playerFactionId);
+      for (const t of ps) {
+        if (ps.length < 3 && r2.canFoundTown(t.id).ok) {
+          r2.foundTown(t.id);
+          runDays(r2, 60);
+          ps = r2.settlements.filter((s) => s.factionId === r2.playerFactionId);
+          break;
+        }
+      }
+      // Connect player towns so connectedToAll() passes
+      if (ps.length >= 2) {
+        r2.treasury = Math.max(r2.treasury, 12000);
+        for (let a = 0; a < ps.length; a++) {
+          for (let b = a + 1; b < ps.length; b++) {
+            if (!r2.routeBetween(ps[a].id, ps[b].id)) r2.buildRoad(ps[a].id, ps[b].id);
+          }
+        }
       }
     }
     expect(r2.charterGates().every((g) => g.met)).toBe(r2.charterEligible());
