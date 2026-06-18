@@ -440,6 +440,8 @@ export const MINUTES_PER_DAY = 1440;
 export const DAYS_PER_SEASON = 15;
 export const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'] as const;
 export const DAYS_PER_YEAR = DAYS_PER_SEASON * SEASONS.length;
+export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as const;
+export const DAYS_PER_MONTH = 5; // ~60 days/year ÷ 12 months
 export const START_YEAR = 1800;
 
 // ---- Stockpile / capacity constants ----

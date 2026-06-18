@@ -7,7 +7,7 @@
  * performance answer that lets the game scale to a State and beyond.
  */
 import { Rng } from './rng';
-import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, formatCurrency, setCurrencySymbol, AI_DIFFICULTY, TUNING } from './defs';
+import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, MONTHS, DAYS_PER_MONTH, formatCurrency, setCurrencySymbol, AI_DIFFICULTY, TUNING } from './defs';
 import type { CurrencySymbol, RegionDesign, NationDesign, AiDifficulty } from './defs';
 import { computePenalty, transitionEfficiency, ANNOUNCE_LEAD_DAYS } from './currency';
 import type { CurrencyChangeCause, CurrencyAnnouncement, CurrencyTransition } from './currency';
@@ -1872,9 +1872,17 @@ export class RegionSim {
   get year(): number {
     return START_YEAR + Math.floor(this.day / DAYS_PER_YEAR);
   }
+  get month(): number {
+    return Math.floor((this.day % DAYS_PER_YEAR) / DAYS_PER_MONTH);
+  }
+  get monthDay(): number {
+    return (this.day % DAYS_PER_MONTH) + 1;
+  }
+  get monthName(): string {
+    return MONTHS[this.month];
+  }
   get dateLabel(): string {
-    const dayOfSeason = (this.day % DAYS_PER_YEAR) % DAYS_PER_SEASON + 1;
-    return `${this.season} ${dayOfSeason}, ${this.year}`;
+    return `${this.monthName} ${this.monthDay}, ${this.year}`;
   }
 
   totalPop(): number {
@@ -3124,14 +3132,11 @@ export class RegionSim {
   /** Calendar acceleration per tier keeps decision density constant while spanning centuries.
    *  Applies after mid-game (1950+) to avoid breaking early progression. */
   private calendarAcceleration(): number {
-    if (this.year < 1950) return 1; // Early/mid game: normal pace for now
-    if (!this.stateProclaimed) return 1; // Tier 1: normal pace
-    if (!this.nationProclaimed) {
-      // Tier 2: State. 1.5× speed after 1950 to accelerate mid-game
-      return 1.5;
-    }
-    // Tier 3: Nation (late game). 2–3× speed to compress final century into ~40 real hours
-    return this.year < 2000 ? 2 : 2.5;
+    // Calendar speeds up in late mid-game and beyond to compress centuries into ~4-hour sessions.
+    // Year-based thresholds ensure consistent pacing regardless of proclamation flags.
+    if (this.year < 1950) return 1; // Discovery & exploration: normal pace
+    if (this.year < 2000) return 2; // State/nation eras: moderate speedup
+    return 1.5; // Late game (2000-2100): slower than mid for decision depth
   }
 
   tick(): void {
