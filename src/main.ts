@@ -64,6 +64,12 @@ let paused = false;
 let speed = 1;
 let pauseMenuOpen = false;
 
+function updateUIState(): void {
+  (window as any).gameSpeed = speed;
+  (window as any).gamePaused = paused;
+}
+updateUIState();
+
 const titleScreen = new TitleScreen(root, { sfx, music, soundscape });
 const pauseMenu = new PauseMenu(root);
 const fpsDiv = document.createElement('div');
@@ -92,6 +98,7 @@ function enterRegionMode(r: RegionSim): void {
   (window as any).region = r;
   regionView = new RegionView(canvas, r, root);
   paused = false;
+  updateUIState();
   titleScreen.hide();
 }
 
@@ -116,6 +123,7 @@ titleScreen.onQuit = () => window.close();
 pauseMenu.onResume = () => {
   pauseMenuOpen = false;
   paused = false;
+  updateUIState();
 };
 pauseMenu.onQuit = () => {
   pauseMenuOpen = false;
@@ -145,22 +153,25 @@ window.addEventListener('keydown', (e) => {
   if (e.key === ' ') {
     if (!pauseMenuOpen) {
       paused = !paused;
+      updateUIState();
     }
     e.preventDefault();
     return;
   }
-  if (e.key === '1') speed = 1;
-  if (e.key === '2') speed = 3;
-  if (e.key === '3') speed = 8;
+  if (e.key === '1') { speed = 1; updateUIState(); }
+  if (e.key === '2') { speed = 3; updateUIState(); }
+  if (e.key === '3') { speed = 8; updateUIState(); }
   if (e.key === 's' && e.ctrlKey) { save(); e.preventDefault(); return; }
   if (e.key === 'Escape') {
     if (pauseMenuOpen) {
       pauseMenuOpen = false;
       pauseMenu.hide();
       paused = false;
+      updateUIState();
     } else if (regionView && !regionView.ceremonyOpen) {
       pauseMenuOpen = true;
       paused = true;
+      updateUIState();
       pauseMenu.show();
     }
     e.preventDefault();

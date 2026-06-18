@@ -2623,12 +2623,17 @@ export class RegionView {
     }
 
     const treasury = formatCurrency(r.treasury);
+    const w = window as any;
+    const speed = w.gameSpeed || 1;
+    const paused = w.gamePaused ? '⏸ PAUSED' : '';
+    const speedLabel = speed === 1 ? '1×' : speed === 3 ? '3×' : speed === 8 ? '8×' : `${speed}×`;
     this.topBar.innerHTML = `
       <div class="tb-item tb-date">Year ${year}</div>
       <div class="tb-item tb-time">Month ${month}, Day ${day}</div>
       <div class="tb-item tb-treasury">${treasury}</div>
       <div class="tb-item tb-resources">🌾 ${Math.floor(totalFood)} | 🪵 ${Math.floor(totalWood)}</div>
       ${selected ? `<div class="tb-item tb-population">👥 ${pop}</div>` : ''}
+      <div class="tb-item tb-speed" style="margin-left: auto;">${paused} ${speedLabel}</div>
     `;
   }
 
