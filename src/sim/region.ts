@@ -4168,8 +4168,11 @@ export class RegionSim {
 
   /** Why this building can't be raised here right now — or ok. */
   cityBuildCheck(t: Settlement, def: RegionalBuildingDef): { ok: boolean; reason: string } {
-    const manage = this.canManageCity(t);
-    if (!manage.ok) return manage;
+    if (t.factionId !== this.playerFactionId) return { ok: false, reason: 'not your town' };
+    if (this.stateProclaimed) {
+      const manage = this.canManageCity(t);
+      if (!manage.ok) return manage;
+    }
     if (t.construction) return { ok: false, reason: 'a project is already underway' };
     if (def.prereq && !this.has(def.prereq)) {
       const node = TECH_TREE.find((n) => n.id === def.prereq);
@@ -4868,10 +4871,11 @@ export class RegionSim {
   /** Per-requirement breakdown of the Incorporation gate, so the UI can show
    *  exactly which conditions are met and which still block the Charter. */
   charterGates(): { label: string; met: boolean; detail: string }[] {
-    const garrison = this.settlements.reduce((sum, s) => sum + this.garrisonOf(s), 0);
+    const playerSettlements = this.settlements.filter((s) => s.factionId === this.playerFactionId);
+    const garrison = playerSettlements.reduce((sum, s) => sum + this.garrisonOf(s), 0);
     const net = this.getNetTreasury();
     return [
-      { label: 'towns', met: this.settlements.length >= 3, detail: `${this.settlements.length}/3` },
+      { label: 'towns', met: playerSettlements.length >= 3, detail: `${playerSettlements.length}/3` },
       { label: 'citizens', met: this.totalPop() >= 500, detail: `${this.totalPop()}/500` },
       { label: 'all towns connected', met: this.connectedToAll(), detail: this.connectedToAll() ? 'yes' : 'no' },
       { label: 'treasury', met: net >= 8000, detail: `${formatCurrency(Math.round(net))}/${formatCurrency(8000)}` },
@@ -4881,11 +4885,12 @@ export class RegionSim {
 
   charterEligible(): boolean {
     // GDD §2.2: 3 towns, 500 citizens, all connected by routes, plus economic and military strength
-    if (this.settlements.length < 3 || this.totalPop() < 500 || !this.connectedToAll()) return false;
+    const playerSettlements = this.settlements.filter((s) => s.factionId === this.playerFactionId);
+    if (playerSettlements.length < 3 || this.totalPop() < 500 || !this.connectedToAll()) return false;
     // Economic gate: £8k net (after loans) — roughly 3-4 months of surplus at charter scale
     if (this.getNetTreasury() < 8000) return false;
     // Military gate: must have 10+ garrison across all settlements
-    const totalGarrison = this.settlements.reduce((sum, s) => sum + this.garrisonOf(s), 0);
+    const totalGarrison = playerSettlements.reduce((sum, s) => sum + this.garrisonOf(s), 0);
     if (totalGarrison < 10) return false;
     return true;
   }
