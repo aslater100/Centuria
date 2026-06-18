@@ -7,7 +7,7 @@
  * performance answer that lets the game scale to a State and beyond.
  */
 import { Rng } from './rng';
-import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, MONTHS, DAYS_PER_MONTH, formatCurrency, setCurrencySymbol, AI_DIFFICULTY, TUNING } from './defs';
+import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, MONTHS, DAYS_PER_MONTH, FactionId, FACTION_DEFS, activeFactions, factionDef, formatCurrency, setCurrencySymbol, AI_DIFFICULTY, TUNING } from './defs';
 import type { CurrencySymbol, RegionDesign, NationDesign, AiDifficulty } from './defs';
 import { computePenalty, transitionEfficiency, ANNOUNCE_LEAD_DAYS } from './currency';
 import type { CurrencyChangeCause, CurrencyAnnouncement, CurrencyTransition } from './currency';
@@ -81,6 +81,8 @@ export interface Settlement {
   stationedUnits: ArmyUnit[];
   /** Loyalty to controlling faction (0–100); affects labor productivity and revolt risk */
   loyaltyToFaction: number;
+  /** Faction strength in this settlement (0-100 per faction); higher = more influence */
+  factionStrengths: Map<FactionId, number>;
   /** Phase 1: where this town's labor works, what it produces, what it pays. */
   sectors: Sectors;
   /** Phase 2: civic works raised in a managed city (building def ids). */
@@ -3057,6 +3059,7 @@ export class RegionSim {
       garrisonStrength: 5,
       stationedUnits: [],
       loyaltyToFaction: 100,
+      factionStrengths: new Map(activeFactions(1800).map(f => [f.id, 50] as [FactionId, number])),
       sectors: defaultSectors(),
       buildings: [],
       construction: null,
@@ -3399,6 +3402,7 @@ export class RegionSim {
     // sink). Nation-tier machinery (factions/diplomacy/central bank) stays gated.
     this.monthlyEconomy();
     if (this.stateProclaimed) this.updateFactions();
+    if (this.stateProclaimed) this.updateSettlementFactions();
     this.updateDiplomacy();
     this.consumeWarSupply(); // deplete supply reserves based on army size and supply consumption rate
     this.updateRivalAI(); // staggered AI updates for rivals (GDD §6.2)
@@ -4809,6 +4813,7 @@ export class RegionSim {
           garrisonStrength: 2, // new towns have smaller garrisons
           stationedUnits: [],
           loyaltyToFaction: 100,
+          factionStrengths: new Map(activeFactions(this.year).map(f => [f.id, 50] as [FactionId, number])),
           sectors: defaultSectors(),
           buildings: [],
           construction: null,
@@ -6684,7 +6689,10 @@ export class RegionSim {
       rng: this.rng.getState(),
       aiRng: this.aiRng.getState(),
       minute: this.minute,
-      settlements: this.settlements,
+      settlements: this.settlements.map(s => ({
+        ...s,
+        factionStrengths: Object.fromEntries(s.factionStrengths),
+      })),
       notables: this.notables,
       expeditions: this.expeditions,
       routes: this.routes,
@@ -6799,6 +6807,7 @@ export class RegionSim {
       garrisonStrength: s.garrisonStrength ?? 2,
       stationedUnits: s.stationedUnits ?? [],
       loyaltyToFaction: s.loyaltyToFaction ?? 100,
+      factionStrengths: new Map(Object.entries(s.factionStrengths ?? {}) as [FactionId, number][]),
       sectors: s.sectors ?? defaultSectors(),
       buildings: s.buildings ?? [],
       construction: s.construction ?? null,
@@ -7676,6 +7685,68 @@ export class RegionSim {
     }
   }
 
+  /** Update settlement-level faction strengths based on laws, policies, and economic conditions.
+   *  Factions gain strength when the player enacts laws they support, and lose when blocked. */
+  private updateSettlementFactions(): void {
+    for (const settlement of this.settlements) {
+      // Get active factions for this year
+      const activeFacs = activeFactions(this.year);
+
+      for (const factionDef of activeFacs) {
+        const currentStrength = settlement.factionStrengths.get(factionDef.id) ?? 50;
+        let newStrength = currentStrength;
+
+        // Faction gains 20 strength when player passes a law they promote
+        for (const law of factionDef.promotes) {
+          if (this.passedLaws.has(law)) {
+            newStrength += 2;
+          }
+        }
+
+        // Faction loses 15 strength when player passes a law they oppose
+        for (const law of factionDef.opposes) {
+          if (this.passedLaws.has(law)) {
+            newStrength -= 2;
+          }
+        }
+
+        // Tech research boosts faction strength (if they have modifiers for that tech)
+        // Example: environmentalists boost when solar/wind researched
+        if (factionDef.id === 'environmentalists' && (this.has('solar_cells') || this.has('wind_power'))) {
+          newStrength += 1;
+        }
+        if (factionDef.id === 'oil_barons' && (this.has('coal_mining') || this.has('oil_refining'))) {
+          newStrength += 1;
+        }
+        if (factionDef.id === 'scientists' && (this.has('computing') || this.has('automation'))) {
+          newStrength += 1;
+        }
+
+        // Economic conditions affect factions
+        // Industrialists grow stronger during high GDP growth
+        if (factionDef.id === 'industrialists' && this.gdpLastMonth > 50000) {
+          newStrength += 0.5;
+        }
+        // Pacifists gain strength during peace
+        if (factionDef.id === 'pacifists' && !this.playerWar) {
+          newStrength += 0.5;
+        }
+        // Militarists gain during war
+        if (factionDef.id === 'militarists' && this.playerWar) {
+          newStrength += 0.5;
+        }
+
+        // Natural decay if faction goals are being ignored (very slow)
+        newStrength *= 0.99;
+
+        // Clamp to 0-100
+        newStrength = Math.max(0, Math.min(100, newStrength));
+
+        settlement.factionStrengths.set(factionDef.id, newStrength);
+      }
+    }
+  }
+
   /** Monthly update hook for faction AI: check if any faction is due for update.
    *  Staggered scheduling keeps this O(factions) but amortized O(1) per month. */
   private updateRivalAI(): void {
@@ -8094,6 +8165,7 @@ export class RegionSim {
       garrisonStrength: 2,
       stationedUnits: [],
       loyaltyToFaction: 85, // new settlements are loyal to their faction
+      factionStrengths: new Map(activeFactions(this.year).map(f => [f.id, 50] as [FactionId, number])),
       sectors: defaultSectors(),
       buildings: [],
       construction: null,
