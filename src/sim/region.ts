@@ -223,7 +223,11 @@ export type RegionalEventKind =
   | 'harvest_bonus' | 'trade_windfall' | 'labor_shortage' | 'gold_rush'
   // ---- events-depth: flavorful additions spanning the century ----
   | 'coal_boom' | 'wildfire' | 'pandemic_wave' | 'rail_windfall'
-  | 'factory_unrest' | 'tourism_boom' | 'tech_breakthrough' | 'automation_surge';
+  | 'factory_unrest' | 'tourism_boom' | 'tech_breakthrough' | 'automation_surge'
+  // ---- additional events for gameplay variety ----
+  | 'immigration_wave' | 'bridge_built' | 'school_founded' | 'vice_boom'
+  | 'banking_crisis' | 'commodity_glut' | 'religious_revival' | 'crime_wave'
+  | 'conscription_drive' | 'cholera_outbreak' | 'cultural_festival';
 
 export interface ActiveEvent {
   kind: RegionalEventKind;
@@ -270,6 +274,29 @@ export const REGION_EVENT_DEFS: RegionalEventDef[] = [
   { kind: 'tech_breakthrough', name: 'Tech Breakthrough', sector: 'information', outputMult: 1.45, durationDays: 45, probability: 0.02, satisfaction: 2, minYear: 1980, desc: 'A local lab files a patent that changes everything. Information +45%.' },
   // End-century automation shock: information soars while the floor empties.
   { kind: 'automation_surge', name: 'Automation Surge', sector: 'information', outputMult: 1.50, durationDays: 50, probability: 0.02, grievance: 5, minYear: 2010, desc: 'Robots take the line; the terminal booms, the floor grumbles. Information +50%.' },
+  // ---- Additional events for gameplay depth ----
+  // Population growth
+  { kind: 'immigration_wave', name: 'Immigration Wave', sector: 'all', outputMult: 1.10, durationDays: 40, probability: 0.03, satisfaction: 2, minYear: 1880, desc: 'Word spreads of opportunity. Families arrive seeking work. All output +10%.' },
+  // Infrastructure milestone
+  { kind: 'bridge_built', name: 'Bridge Completed', sector: 'services', outputMult: 1.15, durationDays: 45, probability: 0.02, satisfaction: 2, desc: 'A new crossing knits the region together. Services +15%.' },
+  // Education boom
+  { kind: 'school_founded', name: 'School Founded', sector: 'information', outputMult: 1.20, durationDays: 50, probability: 0.02, satisfaction: 3, minYear: 1890, desc: 'A school opens its doors. Knowledge spreads, spirits lift. Information +20%.' },
+  // Gambling/vice
+  { kind: 'vice_boom', name: 'Vice District Boom', sector: 'services', outputMult: 1.25, durationDays: 35, probability: 0.015, satisfaction: -2, grievance: 3, minYear: 1900, desc: 'Taverns and gambling halls fill. Coin flows, morals slip. Services +25%.' },
+  // Banking crisis
+  { kind: 'banking_crisis', name: 'Banking Crisis', sector: 'services', outputMult: 0.65, durationDays: 30, probability: 0.015, satisfaction: -4, grievance: 3, minYear: 1900, desc: 'A bank fails; savings vanish. Credit freezes. Services -35%.' },
+  // Commodity price spike
+  { kind: 'commodity_glut', name: 'Market Glut', sector: 'agriculture', outputMult: 0.80, durationDays: 25, probability: 0.02, desc: 'Overproduction floods the market. Prices collapse. Agriculture -20%.' },
+  // Religious revival
+  { kind: 'religious_revival', name: 'Religious Revival', sector: 'all', outputMult: 1.05, durationDays: 40, probability: 0.015, satisfaction: 2, desc: 'A fervent preacher awakens the faithful. Spirits lift. All output +5%.' },
+  // Crime wave
+  { kind: 'crime_wave', name: 'Crime Wave', sector: 'all', outputMult: 0.90, durationDays: 30, probability: 0.02, satisfaction: -3, grievance: 2, minYear: 1900, desc: 'Bandits and thieves plague the roads. Trade suffers. All output -10%.' },
+  // Military expansion/conscription
+  { kind: 'conscription_drive', name: 'Conscription Drive', sector: 'all', outputMult: 0.85, durationDays: 30, probability: 0.015, satisfaction: -2, grievance: 4, minYear: 1910, desc: 'The crown calls up soldiers. Workers march to war. All output -15%.' },
+  // Epidemic (different from plague)
+  { kind: 'cholera_outbreak', name: 'Cholera Outbreak', sector: 'all', outputMult: 0.70, durationDays: 35, probability: 0.01, satisfaction: -2, grievance: 2, minYear: 1880, desc: 'Cholera strikes the unsanitary districts. All output -30%.' },
+  // Cultural event
+  { kind: 'cultural_festival', name: 'Grand Festival', sector: 'services', outputMult: 1.15, durationDays: 30, probability: 0.02, satisfaction: 2, desc: 'A festival brings the region together. Music fills the streets. Services +15%.' },
 ];
 
 // Fast lookups for building and event definitions.
