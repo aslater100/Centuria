@@ -7,7 +7,7 @@
  * performance answer that lets the game scale to a State and beyond.
  */
 import { Rng } from './rng';
-import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, MONTHS, DAYS_PER_MONTH, FactionId, FACTION_DEFS, activeFactions, factionDef, formatCurrency, setCurrencySymbol, AI_DIFFICULTY, TUNING } from './defs';
+import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, MONTHS, DAYS_PER_MONTH, FactionId as NewFactionId, activeFactions, formatCurrency, setCurrencySymbol, AI_DIFFICULTY, TUNING } from './defs';
 import type { CurrencySymbol, RegionDesign, NationDesign, AiDifficulty } from './defs';
 import { computePenalty, transitionEfficiency, ANNOUNCE_LEAD_DAYS } from './currency';
 import type { CurrencyChangeCause, CurrencyAnnouncement, CurrencyTransition } from './currency';
@@ -82,7 +82,7 @@ export interface Settlement {
   /** Loyalty to controlling faction (0–100); affects labor productivity and revolt risk */
   loyaltyToFaction: number;
   /** Faction strength in this settlement (0-100 per faction); higher = more influence */
-  factionStrengths: Map<FactionId, number>;
+  factionStrengths: Map<NewFactionId, number>;
   /** Phase 1: where this town's labor works, what it produces, what it pays. */
   sectors: Sectors;
   /** Phase 2: civic works raised in a managed city (building def ids). */
@@ -296,10 +296,10 @@ export type GovLean = 'council' | 'mayor' | 'compact';
 
 // ---- Faction politics (GDD §5.3) ----
 
-export type FactionId = 'workers' | 'landowners' | 'merchants';
+export type LegacyFactionId = 'workers' | 'landowners' | 'merchants';
 
 export interface Faction {
-  id: FactionId;
+  id: LegacyFactionId;
   name: string;
   power: number;   // 0–100: how much economic/social weight they carry
   support: number; // 0–100: how much they back the current regime
@@ -3059,7 +3059,7 @@ export class RegionSim {
       garrisonStrength: 5,
       stationedUnits: [],
       loyaltyToFaction: 100,
-      factionStrengths: new Map(activeFactions(1800).map(f => [f.id, 50] as [FactionId, number])),
+      factionStrengths: new Map(activeFactions(1800).map(f => [f.id, 50] as [NewFactionId, number])),
       sectors: defaultSectors(),
       buildings: [],
       construction: null,
@@ -4813,7 +4813,7 @@ export class RegionSim {
           garrisonStrength: 2, // new towns have smaller garrisons
           stationedUnits: [],
           loyaltyToFaction: 100,
-          factionStrengths: new Map(activeFactions(this.year).map(f => [f.id, 50] as [FactionId, number])),
+          factionStrengths: new Map(activeFactions(this.year).map(f => [f.id, 50] as [NewFactionId, number])),
           sectors: defaultSectors(),
           buildings: [],
           construction: null,
@@ -6807,7 +6807,7 @@ export class RegionSim {
       garrisonStrength: s.garrisonStrength ?? 2,
       stationedUnits: s.stationedUnits ?? [],
       loyaltyToFaction: s.loyaltyToFaction ?? 100,
-      factionStrengths: new Map(Object.entries(s.factionStrengths ?? {}) as [FactionId, number][]),
+      factionStrengths: new Map(Object.entries(s.factionStrengths ?? {}) as [NewFactionId, number][]),
       sectors: s.sectors ?? defaultSectors(),
       buildings: s.buildings ?? [],
       construction: s.construction ?? null,
@@ -8165,7 +8165,7 @@ export class RegionSim {
       garrisonStrength: 2,
       stationedUnits: [],
       loyaltyToFaction: 85, // new settlements are loyal to their faction
-      factionStrengths: new Map(activeFactions(this.year).map(f => [f.id, 50] as [FactionId, number])),
+      factionStrengths: new Map(activeFactions(this.year).map(f => [f.id, 50] as [NewFactionId, number])),
       sectors: defaultSectors(),
       buildings: [],
       construction: null,
