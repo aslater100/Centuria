@@ -14,8 +14,7 @@ export class TitleScreen {
   private animFrame = 0;
   private clouds: Cloud[] = [];
 
-  onNewColony: (() => void) | null = null;        // default = SoA TownCore engine
-  onNewColonyClassic: (() => void) | null = null; // legacy fat-Simulation game
+  onNewColony: (() => void) | null = null;
   onContinue: (() => void) | null = null;
   onQuit: (() => void) | null = null;
 
@@ -385,7 +384,6 @@ export class TitleScreen {
         <div class="ts-panel">
           <nav class="ts-nav">
             <button class="ts-btn ts-btn-primary" id="ts-new" title="The scale-engine colony sim on procedural terrain — paint walls, rooms, zones, and farms">New Colony</button>
-            <button class="ts-btn" id="ts-new-classic" title="The original fat-simulation game (town → region → nation)">Classic Colony</button>
             <button class="ts-btn" id="ts-continue" ${this.hasSave ? '' : 'disabled'}>Continue</button>
             <div class="ts-sep"></div>
             <button class="ts-btn" id="ts-options">Options &nbsp;<span class="ts-arrow">›</span></button>
@@ -437,8 +435,7 @@ export class TitleScreen {
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
     if (!btn || btn.disabled) return;
     switch (btn.id) {
-      case 'ts-new':         this.onNewColony?.(); break;
-      case 'ts-new-classic': this.onNewColonyClassic?.(); break;
+      case 'ts-new':      this.onNewColony?.(); break;
       case 'ts-continue': this.onContinue?.();  break;
       case 'ts-quit':     this.onQuit?.();       break;
       case 'ts-options':  this.view = 'options'; this.render(); break;

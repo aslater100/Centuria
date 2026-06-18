@@ -8,9 +8,9 @@
  * every other system spends against.
  */
 
-export const REGION_N = 128; // region is REGION_N × REGION_N cells over 0..100 coords
+export const REGION_N = 256; // region is REGION_N × REGION_N cells over 0..100 coords
 // Higher resolution = a larger, more detailed continent that fits more towns
-// (spacing is cell-based). Map-gen is O(N²) but one-time (~40ms); the strategic
+// (spacing is cell-based). Map-gen is O(N²) but one-time (~160ms for 256x256); the strategic
 // map renders from a static cache, so this is ~free per frame. See regionview.ts.
 
 /** The grid resolution everything was originally tuned against. */
