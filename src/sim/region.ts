@@ -1083,11 +1083,18 @@ export const WAR_SUPPORT_FLOOR: Record<GovType, number> = {
 const RIVAL_NAMES = [
   'Vasterholm', 'Karelia', 'Tyrennia', 'Meridia', 'Vossland', 'Cantara',
   'Drovny', 'Ilvermoor', 'Skarov', 'Aldenne',
+  'Rethmark', 'Castrion', 'Solvik', 'Tevendale', 'Northhope', 'Estmarch',
+  'Ravensfort', 'Kingstead', 'Silvermoor', 'Grandholm', 'Wynchester', 'Trelaine',
+  'Ironbound', 'Eastwick', 'Summerlake', 'Windcross', 'Stonehart', 'Brightholm',
 ];
 const RIVAL_LEADERS = [
   'Chancellor Aldric', 'Doge Maren', 'King Osric III', 'Marshal Veka',
   'First Citizen Roux', 'Queen Ilsabet', 'Patriarch Symeon', 'General Brandt',
   'Premier Olenka', 'Lord Protector Hale',
+  'Duke Thorsten', 'Countess Verena', 'Burgmeister Klaus', 'Admiral Gryffin',
+  'Cardinal Silas', 'Empress Theodora', 'Warlord Ragnar', 'Baroness Elspeth',
+  'High Consul Marcus', 'Captain-General Vittoria', 'Prince Valdemar', 'Chieftain Aoife',
+  'Archon Lysander', 'Magistrate Cornelius', 'Senator Livia', 'Khan Temüjin',
 ];
 const RIVAL_AGENDAS: Record<RivalArchetype, string> = {
   hegemon: 'unite the river basins under one crown',
@@ -1106,6 +1113,14 @@ const RIVAL_ORIGINS = [
   'born of a miners\' revolt that never disbanded',
   'stitched together from feuding duchies by one ruthless marriage',
   'a garrison province that outlived the army that planted it',
+  'risen from merchant guilds that pooled their wealth into statehood',
+  'a breakaway province seeking independence from imperial rule',
+  'built by refugees fleeing religious persecution across the sea',
+  'a tribal confederation that adopted the trappings of civilization',
+  'established through colonial conquest and held by military might',
+  'a city-state that conquered its hinterland and kept expanding',
+  'a federation of farming communes that grew into a national power',
+  'forged by a visionary who united warring clans under one banner',
 ];
 const COMPASS_FLAVOR: Record<RivalNation['compass'], string> = {
   north: 'beyond the northern ranges',
