@@ -4424,17 +4424,24 @@ export class RegionSim {
    * (treasury < 150). The least-developed non-capital settlement is ceded; player
    * pays £500. Returns true if the purchase completed.
    */
-  buyLand(factionId: number): boolean {
+  buyLand(rivalId: number): boolean {
     const playerFaction = this.faction(this.playerFactionId);
-    const rival = this.faction(factionId);
-    if (!playerFaction || !rival || factionId === this.playerFactionId) return false;
-    if (rival.treasury >= 150) return false; // not desperate enough
+    const rival = this.rival(rivalId);
+    if (!playerFaction || !rival) return false;
+
+    // Check for diplomatic agreement: requires trade agreement or higher relations
+    const hasTradeAgreement = rival.treaties.includes('trade_agreement');
+    const hasFriendlyRelations = rival.relations >= 50;
+    if (!hasTradeAgreement && !hasFriendlyRelations) return false; // no diplomatic ground
+
     const COST = 500;
     if (this.treasury < COST) return false;
 
-    // Find the rival's least-populated non-capital settlement
-    const candidates = rival.settlementIds
-      .filter((id) => id !== rival.capital)
+    // Find the rival's least-populated settlement
+    const rivalFaction = this.regionalFactions.find((f) => f.id === rivalId);
+    if (!rivalFaction) return false;
+
+    const candidates = rivalFaction.settlementIds
       .map((id) => ({ id, pop: this.popOf(this.settlement(id)!) || 0 }))
       .sort((a, b) => a.pop - b.pop);
 
@@ -4445,14 +4452,15 @@ export class RegionSim {
 
     // Transfer settlement to player
     s.factionId = this.playerFactionId;
-    rival.settlementIds = rival.settlementIds.filter((id) => id !== ceded.id);
+    rivalFaction.settlementIds = rivalFaction.settlementIds.filter((id) => id !== ceded.id);
     playerFaction.settlementIds.push(ceded.id);
     this.treasury -= COST;
-    rival.treasury += COST;
+    rivalFaction.treasury += COST;
 
+    const reason = hasTradeAgreement ? 'honoring their trade agreement' : 'their friendly disposition';
     this.addLog(
-      `LAND PURCHASE: ${rival.name} cedes ${s.name} in exchange for ${formatCurrency(COST)}. ` +
-      `Their depleted treasury accepted the offer.`,
+      `LAND PURCHASE: ${rival.name} cedes ${s.name} for ${formatCurrency(COST)}, ` +
+      `${reason}.`,
       'good',
     );
     return true;
