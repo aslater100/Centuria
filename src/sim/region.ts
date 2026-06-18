@@ -3046,7 +3046,7 @@ export class RegionSim {
     }
 
     region.addLog(
-      `Wagons halt in a sheltered valley. ${home.name} is founded, 1900 — ` +
+      `Wagons halt in a sheltered valley. ${home.name} is founded, 1800 — ` +
       `the first stone of a nation yet unnamed.`,
       'good',
     );
