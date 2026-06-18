@@ -64,16 +64,6 @@ export function showMainMenu(): Promise<MenuResult> {
       showStartPreferences(container, resolve);
     });
     buttonGroup.appendChild(newGameBtn);
-
-    // Classic Game button
-    const classicBtn = document.createElement('button');
-    classicBtn.className = 'cv-menu-btn cv-menu-btn-secondary';
-    classicBtn.textContent = 'Classic Colony (v0.41)';
-    classicBtn.addEventListener('click', () => {
-      container.remove();
-      resolve({ action: 'classic' });
-    });
-    buttonGroup.appendChild(classicBtn);
   });
 }
 
@@ -196,15 +186,6 @@ function showStartPreferences(
         showStartPreferences(menuContainer, resolve);
       });
       bg.appendChild(nb);
-
-      const clb = document.createElement('button');
-      clb.className = 'cv-menu-btn cv-menu-btn-secondary';
-      clb.textContent = 'Classic Colony (v0.41)';
-      clb.addEventListener('click', () => {
-        menuContainer.remove();
-        resolve({ action: 'classic' });
-      });
-      bg.appendChild(clb);
     };
     buildMainMenu();
   });
