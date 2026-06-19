@@ -3314,8 +3314,12 @@ export class RegionSim {
         const constabFactor = (this.policyActive('border_constabulary') ? 0.75 : 1) *
           (this.passedLaws.has('trade_unions_act') ? 0.7 : 1) *
           (this.policyActive('civic_pride') ? 0.8 : 1);
+        // Apply reduction factors only to positive (building) pressure, not to negative
+        // (recovering) pressure — otherwise labor_law would slow grievance recovery.
+        const basePressure = Math.max(0, this.taxRate - 0.15) * 35 - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05;
         const pressure =
-          (Math.max(0, this.taxRate - 0.15) * 35 - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05) * laborFactor * constabFactor +
+          Math.max(0, basePressure) * laborFactor * constabFactor +
+          Math.min(0, basePressure) +
           (this.eraBranch === 'dystopia' ? 0.15 : 0); // the neon century simmers
         t.grievance = Math.max(0, Math.min(100, t.grievance + pressure));
       }

@@ -241,7 +241,7 @@ describe('Tech tree: gameplay effects', () => {
     r.govLean = 'council';
     r.taxRate = 0.25; // high tax to generate grievance
 
-    // Run 30 days WITHOUT labor_law
+    // Run WITHOUT labor_law
     const r2 = makeRegion();
     runDays(r2, 5);
     r2.stateProclaimed = true;
@@ -249,13 +249,16 @@ describe('Tech tree: gameplay effects', () => {
     r2.govLean = 'council';
     r2.taxRate = 0.25;
 
-    for (const t of r.settlements) t.grievance = 0;
-    for (const t of r2.settlements) t.grievance = 0;
+    // Reset grievances and pin strikeUntil to prevent strikes from masking the
+    // daily-rate difference: at 15 days * 3.5/day = 52.5, below the 60 threshold.
+    for (const t of r.settlements) { t.grievance = 0; t.strikeUntil = 999999; }
+    for (const t of r2.settlements) { t.grievance = 0; t.strikeUntil = 999999; }
 
-    // Give labor_law to r but not r2
+    // Give labor_law to r but not r2 — measure over 15 days (before expeditions
+    // from the warm-up arrive) so only the pressure-rate effect is visible.
     r.researched.add('labor_law');
-    runDays(r, 30);
-    runDays(r2, 30);
+    runDays(r, 15);
+    runDays(r2, 15);
 
     const grievanceWith = r.settlements.reduce((s, t) => s + t.grievance, 0);
     const grievanceWithout = r2.settlements.reduce((s, t) => s + t.grievance, 0);
