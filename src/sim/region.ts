@@ -692,12 +692,32 @@ export type RivalArchetype =
   | 'hegemon' | 'trading_republic' | 'hermit_kingdom' | 'crusader_state' | 'opportunist';
 
 /** The GDD §6.3 archetypes, verbatim as presets over the weights. */
-export const RIVAL_ARCHETYPES: Record<RivalArchetype, { name: string; weights: RivalPersonality }> = {
-  hegemon: { name: 'the Hegemon', weights: { expansion: 9, commerce: 4, ideology: 5, honor: 4, risk: 7, grudge: 5 } },
-  trading_republic: { name: 'the Trading Republic', weights: { expansion: 3, commerce: 9, ideology: 3, honor: 7, risk: 3, grudge: 3 } },
-  hermit_kingdom: { name: 'the Hermit Kingdom', weights: { expansion: 2, commerce: 2, ideology: 6, honor: 6, risk: 2, grudge: 8 } },
-  crusader_state: { name: 'the Crusader State', weights: { expansion: 6, commerce: 3, ideology: 9, honor: 5, risk: 6, grudge: 6 } },
-  opportunist: { name: 'the Opportunist', weights: { expansion: 6, commerce: 6, ideology: 2, honor: 2, risk: 9, grudge: 4 } },
+export const RIVAL_ARCHETYPES: Record<RivalArchetype, { name: string; desc: string; weights: RivalPersonality }> = {
+  hegemon: {
+    name: 'the Hegemon',
+    desc: 'Seeks regional dominance through military might and territorial expansion. Risks conflict to strengthen position.',
+    weights: { expansion: 9, commerce: 4, ideology: 5, honor: 4, risk: 7, grudge: 5 },
+  },
+  trading_republic: {
+    name: 'the Trading Republic',
+    desc: 'Values commerce and stable trade routes above all else. Prefers negotiation and mutual prosperity over conflict.',
+    weights: { expansion: 3, commerce: 9, ideology: 3, honor: 7, risk: 3, grudge: 3 },
+  },
+  hermit_kingdom: {
+    name: 'the Hermit Kingdom',
+    desc: 'Fiercely independent and isolationist. Holds grudges deeply and avoids entanglement with foreign powers.',
+    weights: { expansion: 2, commerce: 2, ideology: 6, honor: 6, risk: 2, grudge: 8 },
+  },
+  crusader_state: {
+    name: 'the Crusader State',
+    desc: 'Driven by ideology and cultural mission. Builds alliances with like-minded powers to spread influence.',
+    weights: { expansion: 6, commerce: 3, ideology: 9, honor: 5, risk: 6, grudge: 6 },
+  },
+  opportunist: {
+    name: 'the Opportunist',
+    desc: 'Adaptable and unpredictable. Profits from others\' misfortunes while avoiding direct commitment.',
+    weights: { expansion: 6, commerce: 6, ideology: 2, honor: 2, risk: 9, grudge: 4 },
+  },
 };
 
 export type TreatyKind = 'non_aggression' | 'trade_agreement' | 'defensive_pact' | 'climate_accord';
@@ -5783,9 +5803,10 @@ export class RegionSim {
       this.rivalPairs[this.pairKey(rv.id, other.id)] = this.clampRel(Math.max(-60, Math.min(40, rel)));
     }
     this.rivals.push(rv);
+    const archetypeData = RIVAL_ARCHETYPES[arch];
     this.addLog(
       `A NEW POWER: ${COMPASS_FLAVOR[rv.compass]}, ${rv.leader} proclaims ${rv.name}, a ${regime.name.toLowerCase()} ` +
-      `${origin} — ${RIVAL_ARCHETYPES[arch].name}. Its agenda, the envoys say: "${rv.agenda}."`,
+      `${origin} — ${archetypeData.name}. The envoys describe them as follows: "${archetypeData.desc}" Their stated agenda: "${rv.agenda}."`,
       'info',
     );
     return rv;
