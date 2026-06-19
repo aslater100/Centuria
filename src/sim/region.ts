@@ -915,6 +915,13 @@ export interface RivalNation {
   history: string[];
   lastEnvoyDay: number;
   lastGiftDay: number;
+  /** National flag colors and emblem (from named rival definitions). */
+  flagData?: {
+    primary: string;
+    secondary: string;
+    emblem: string;
+    symbol: string;
+  };
 }
 
 /** A war between two rival powers — the player reads about it, and sells into it. */
@@ -5762,6 +5769,7 @@ export class RegionSim {
       history: [`Proclaimed ${this.year}, ${COMPASS_FLAVOR[compass]} — ${origin}.`],
       lastEnvoyDay: -999,
       lastGiftDay: -999,
+      flagData: namedDef ? namedDef.flag : undefined,
     };
 
     // The newcomer arrives into a world with opinions already formed

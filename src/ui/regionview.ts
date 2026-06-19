@@ -1977,8 +1977,12 @@ export class RegionView {
       const personalityInfo = profile
         ? `${profile.traits.join(', ')} — ${profile.approximateStrength}`
         : '';
+      const flagHtml = rv.flagData
+        ? `<span style="display:inline-block;width:16px;height:12px;background:linear-gradient(90deg, ${rv.flagData.primary} 50%, ${rv.flagData.secondary} 50%);border:1px solid #888;margin-right:6px;vertical-align:middle;border-radius:2px" title="${rv.flagData.symbol}"></span>`
+        : '';
+      const emblemHtml = rv.flagData ? `${rv.flagData.emblem}&nbsp;` : '';
       return `<div class="bar-row" title="${RIVAL_ARCHETYPES[rv.archetype].name} — ${personalityInfo}. Agenda: ${rv.agenda}.">` +
-        `<span style="width:80px;display:inline-block"><b>${rv.name}</b></span>` +
+        `${flagHtml}<span style="width:70px;display:inline-block">${emblemHtml}<b>${rv.name}</b></span>` +
         `<div class="bar" style="flex:1"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div>` +
         `<span>${rel}</span></div>` +
         `<p class="insp-skills" title="${recentHistory}">${gov}${rv.borderSettled ? ' · border settled' : ''} · ${personalityInfo}${personalityInfo ? ' · ' : ''}${treaties}</p>` +
