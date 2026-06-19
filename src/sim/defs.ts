@@ -442,7 +442,7 @@ export const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'] as const;
 export const DAYS_PER_YEAR = DAYS_PER_SEASON * SEASONS.length;
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'] as const;
 export const DAYS_PER_MONTH = 5; // ~60 days/year ÷ 12 months
-export const START_YEAR = 1800;
+export const START_YEAR = 1919;
 
 // ---- Stockpile / capacity constants ----
 /** Raw-good storage per stockpile zone tile. */
