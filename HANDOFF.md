@@ -144,18 +144,47 @@ delta = min(12, -6 + 14 × budget)   // 0 = −6/mo; 1.0 = +8/mo; 1.5 = +15/mo
 
 `hasHarbor(t)` — true if settlement has a 'harbor' building. `navalTradeIncome()` runs monthly: each harbor settlement earns `0.8 × sectorOutputOf(t) × 0.05` per month as sea-trade income to treasury. Harbor is `coastal_only: true`, prereq: `cartography`. Warship unit in `UNIT_TYPES` with `recruitCost: 80`, `trainingDays: 45`, `powerPerUnit: 3.0`, `supplyCost: 0.10`.
 
-## Good next candidates
+## Good next candidates (prioritized)
 
-- **Land purchase mechanics** (Issue #26) — allow buying unclaimed land tiles directly; require diplomatic agreement for rival land
-- **World view / province layer** — continental map for nation-tier play (procedural province borders, trade routes, capitals, military deployment)
-- **Advanced diplomacy UI** — treaty editor, trade bloc negotiation, espionage/sabotage (flags/emblems and power comparisons added in #226)
-- **Late-game flavor** — era-branching cinematics, victory cinematics, post-2100 epilogue states
+### Phase 1 ✓ (PR #229 — Land Purchase Mechanics)
+- ✓ **Unclaimed land purchase** — Players buy unclaimed hexes adjacent to settlements (£25/cell) at State tier
+- ✓ **Settlement buyout** — Enhanced `buyLand()` with population-scaled costs (£400+£2/pop)
+- ✓ **UI integration** — "Claim Land Mode" toggle in Diplomacy tab; click-to-claim map UX
+- ✓ **Tests** — 22 comprehensive tests (all passing); 251/251 overall
+
+### Phase 2 — World View / Province Layer (flagged for Sonnet/Opus: procedural generation + large refactor)
+- **Continental map** — Procedural province borders, capitals, trade lanes visible at nation tier
+- **Province system** — Territory hexes cluster into provinces with governors/capitals
+- **Inter-provincial routes** — Rail/road networks connect provincial centers; trade flow visualization
+- **Military deployment UI** — Move units between provinces on nation map
+- **Prerequisite research** — Requires understanding of hexagons, procedural clustering, layer rendering
+
+### Phase 3 — Advanced Diplomacy UI
+- **Treaty editor** — Visual multi-item basket for offer/counter composition
+- **Trade bloc negotiation** — Form economic alliances with shared tariff policies
+- **Espionage/sabotage** — Secret actions (steal tech, sabotage buildings, propaganda)
+
+### Phase 4 — Late-Game Flavor
+- **Era-branching cinematics** — Animated sequences at 2040 fork (solarpunk/cyberpunk/drowned)
+- **Victory cinematics** — Unique end-game cinematics per win condition
+- **Post-2100 epilogue** — Optional sandbox play past the calendar end; legacy narratives
 
 ## Completed in PR #226
 
 - ✓ **Rivals national identity** (Issue #18) — 11 named rival nations (Vasterholm, Kalimera, Tyrennia, Karelia, Sundered Communes, Northern League, Highland Federation, Crescent Sultanate, Iron Republics, Forest Collective, Sunset Empire) with unique flags/emblems, archetype descriptions, personality-driven treaty behavior, power comparison indicators
 - ✓ **Installer UI** — Brightened from dark green to vibrant blue gradient; cyan glowing title with pulsing animation; gold→cyan gradient progress bar
 - ✓ **Package description** — Updated to reflect 4X civilization builder scope (1900–2100, colonial to nation scale)
+
+## Flagged for Sonnet/Opus (complexity beyond Haiku scope)
+
+- **Phase 2: World view / province layer** — This is a large architectural feature requiring:
+  - Procedural hexagonal/polygonal province generation from settlement clusters
+  - New render layer (province overlay) on top of existing region map
+  - Camera/zoom logic to switch between settlement view and province view
+  - Data model: Province entities tracking governor, capital, trade routes, military units
+  - UI: Province inspector panel (like settlement panel), diplomatic actions per province
+  - Testing: Procedural clustering determinism, zone connectivity, border settlement handling
+  - **Recommended model:** Sonnet or Opus (significant refactor + procedural generation expertise)
 
 ## Known weak areas
 
