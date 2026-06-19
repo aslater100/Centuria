@@ -60,6 +60,13 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
+      # Build platforms one at a time. electron-builder's `--publish always`
+      # does a find-or-create on the release then uploads to it; running the
+      # three platforms concurrently races on that step, and a slower build
+      # (typically Windows) can upload its installer to a different release
+      # object than the one publish-release ends up publishing — leaving that
+      # platform's installer missing from the final release.
+      max-parallel: 1
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
