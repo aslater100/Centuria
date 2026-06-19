@@ -1975,7 +1975,7 @@ export class RegionView {
       // Show richer personality information
       const profile = r.rivalProfile(rv.id);
       const personalityInfo = profile
-        ? `${profile.traits.join(', ')} — ${profile.approximateStrength}`
+        ? `${profile.traits.join(', ')} — ${profile.approximateStrength} (${profile.comparison})`
         : '';
       const flagHtml = rv.flagData
         ? `<span style="display:inline-block;width:16px;height:12px;background:linear-gradient(90deg, ${rv.flagData.primary} 50%, ${rv.flagData.secondary} 50%);border:1px solid #888;margin-right:6px;vertical-align:middle;border-radius:2px" title="${rv.flagData.symbol}"></span>`

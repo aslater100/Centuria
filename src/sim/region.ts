@@ -5625,6 +5625,7 @@ export class RegionSim {
     traits: string[];
     recentHistory: string[];
     approximateStrength: string;
+    comparison: string;
   } | null {
     const rv = this.rival(id);
     if (!rv) return null;
@@ -5644,12 +5645,18 @@ export class RegionSim {
     if (rv.pop > 20000) strength = 'great-power scale';
     if (rv.pop > 40000) strength = 'continental hegemon';
 
+    // Power comparison relative to player's total population
+    const playerPop = this.settlements.reduce((sum, t) => sum + t.cohorts.bands.reduce((a, b) => a + b, 0), 0);
+    let comparison = '≈ equal strength';
+    if (rv.pop > playerPop * 1.3) comparison = '⬆ stronger than you';
+    else if (rv.pop < playerPop * 0.7) comparison = '⬇ weaker than you';
+
     // Show most recent history items
     const recentHistory = rv.history.slice(-3);
 
     const personality = RIVAL_ARCHETYPES[rv.archetype].name;
 
-    return { personality, traits, recentHistory, approximateStrength: strength };
+    return { personality, traits, recentHistory, approximateStrength: strength, comparison };
   }
 
   private clampRel(v: number): number {
