@@ -86,7 +86,7 @@ npx vitest run --exclude '**/.claude/**'   # 243 tests
 npm run sim:macro  # nation-tier monetary harness — keep "ON TARGET"
 ```
 
-## Recent completions (PRs #218–#225)
+## Recent completions (PRs #218–#226)
 
 - ✓ **#218** — Fix labor_law grievance test: measurement window and strike masking
 - ✓ **#219** — Tech tree rebuilt as visual DAG: SVG edges, node state coloring, click-to-research
@@ -96,6 +96,7 @@ npm run sim:macro  # nation-tier monetary harness — keep "ON TARGET"
 - ✓ **#223** — Tech tree visual layout fixes; research panel widened to `min(720px, calc(100vw - 240px))`
 - ✓ **#224** — Route budget slider wired: live readout update without panel rebuild; 4 new budget tests
 - ✓ **#225** — Phase 3 polish: dynamic panel sizing (Issue #14), treasury milestone events (Issue #15), music volume reduced 0.5→0.4 (Issue #13)
+- ✓ **#226** — Rivals national identity (Issue #18): 11 named rival nations with unique flags/emblems, archetype-specific AI behavior, power comparison indicators; installer UI brightened (blue gradient, glowing title); package.json description updated
 
 ## UI Architecture Notes (updated 2026-06-19)
 
@@ -145,12 +146,16 @@ delta = min(12, -6 + 14 × budget)   // 0 = −6/mo; 1.0 = +8/mo; 1.5 = +15/mo
 
 ## Good next candidates
 
-- **Rivals national identity** (Issue #18) — 10+ distinct rival nations with named personalities, unique starting bonuses, flag/emblem data; improve AI goal variety
 - **Land purchase mechanics** (Issue #26) — allow buying unclaimed land tiles directly; require diplomatic agreement for rival land
-- **Installer description** (Issue #1) — update `package.json` description to reflect 1919 post-WWI start
 - **World view / province layer** — continental map for nation-tier play (procedural province borders, trade routes, capitals, military deployment)
-- **Advanced diplomacy UI** — treaty editor, trade bloc negotiation, espionage/sabotage
+- **Advanced diplomacy UI** — treaty editor, trade bloc negotiation, espionage/sabotage (flags/emblems and power comparisons added in #226)
 - **Late-game flavor** — era-branching cinematics, victory cinematics, post-2100 epilogue states
+
+## Completed in PR #226
+
+- ✓ **Rivals national identity** (Issue #18) — 11 named rival nations (Vasterholm, Kalimera, Tyrennia, Karelia, Sundered Communes, Northern League, Highland Federation, Crescent Sultanate, Iron Republics, Forest Collective, Sunset Empire) with unique flags/emblems, archetype descriptions, personality-driven treaty behavior, power comparison indicators
+- ✓ **Installer UI** — Brightened from dark green to vibrant blue gradient; cyan glowing title with pulsing animation; gold→cyan gradient progress bar
+- ✓ **Package description** — Updated to reflect 4X civilization builder scope (1900–2100, colonial to nation scale)
 
 ## Known weak areas
 
