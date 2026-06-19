@@ -113,6 +113,26 @@ export interface SettlementResourceStatus {
   goods: ResourceStatus;
 }
 
+/** A named territorial unit at the province layer. One settlement = one province at
+ *  State/Nation tier; the settlement IS the province capital. */
+export interface Province {
+  /** = capitalId — stable identifier tied to the settlement. */
+  id: number;
+  /** Display name shown on the map overlay. */
+  name: string;
+  capitalId: number;
+  factionId: number;
+  /** Region coords 0..100 — the settlement position anchors the province centroid. */
+  centroidX: number;
+  centroidY: number;
+  totalPop: number;
+  satisfaction: number;
+  militaryStrength: number;
+  /** Monthly sector output (GDP contribution). */
+  gdpContribution: number;
+  keyBuildings: string[];
+}
+
 /** Territory control summary: who holds what share of the claimable region. */
 export interface TerritoryControl {
   /** Land cell ownership over the REGION_N×REGION_N grid, row-major (x*N+y).
@@ -4699,6 +4719,26 @@ export class RegionSim {
 
     this.addLog(`Claimed land at (${x}, ${y}) for £${COST}`, 'good');
     return true;
+  }
+
+  // ---- Province Layer ----
+
+  /** Compute province data from current settlements. One settlement = one province;
+   *  the settlement is its own capital. Called by the UI province overlay. */
+  computeProvinces(): Province[] {
+    return this.settlements.map((s) => ({
+      id: s.id,
+      name: s.name,
+      capitalId: s.id,
+      factionId: s.factionId,
+      centroidX: s.x,
+      centroidY: s.y,
+      totalPop: Math.round(this.popOf(s)),
+      satisfaction: Math.round(s.satisfaction),
+      militaryStrength: Math.round(s.garrisonStrength || 0),
+      gdpContribution: Math.round(this.sectorOutputOf(s)),
+      keyBuildings: s.buildings ?? [],
+    }));
   }
 
   // ---- Phase 5: Local Policies ----

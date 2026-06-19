@@ -31,6 +31,13 @@ export class RegionView {
   conventionOpen = false;
   /** True when player is in "claim land" mode — clicking map cells triggers claimCell(). */
   claimLandMode = false;
+  /** Province overlay toggle (P key or State panel button). Shows province labels + stats on map. */
+  provinceViewActive = false;
+  /** Currently selected province id (= settlement id), null if none. */
+  private selectedProvinceId: number | null = null;
+  private provincePanel: HTMLElement;
+  private lastProvincePanelId: number | null = null;
+  private lastProvincePanelBuildFrame = -999;
   private g: CanvasRenderingContext2D;
   private panel: HTMLElement;
   private panelTab: 'overview' | 'economy' | 'people' = 'overview';
@@ -161,6 +168,9 @@ export class RegionView {
     this.rivalPanel = document.createElement('div');
     this.rivalPanel.className = 'inspector region-panel hidden';
     root.appendChild(this.rivalPanel);
+    this.provincePanel = document.createElement('div');
+    this.provincePanel.className = 'inspector region-panel hidden';
+    root.appendChild(this.provincePanel);
     this.minimap = new Minimap(region, root, { size: 140, position: 'bottom-right' });
     // Create tooltip element
     this.tooltip = document.createElement('div');
@@ -194,6 +204,7 @@ export class RegionView {
       { id: 'region-settlements', element: this.settlementListPanel, baseZ: 12 },
       { id: 'region-economy', element: this.economyPanel, baseZ: 12 },
       { id: 'region-rival', element: this.rivalPanel, baseZ: 20 },
+      { id: 'region-province', element: this.provincePanel, baseZ: 20 },
     ];
   }
 
@@ -212,6 +223,7 @@ export class RegionView {
     this.winModal.remove();
     this.eraModal.remove();
     this.rivalPanel.remove();
+    this.provincePanel.remove();
   }
 
   private toPx(x: number, y: number): { px: number; py: number } {
@@ -239,6 +251,22 @@ export class RegionView {
     const mx = (px - this.camX) / this.camScale;
     const my = (py - this.camY) / this.camScale;
     const radius = 26;
+
+    // Province view: clicking a settlement selects its province and opens the panel.
+    if (this.provinceViewActive) {
+      let hit = false;
+      for (const t of this.region.settlements) {
+        const p = this.toPx(t.x, t.y);
+        if (Math.hypot(p.px - mx, p.py - my) < radius) {
+          this.selectedProvinceId = t.id;
+          hit = true;
+          break;
+        }
+      }
+      if (!hit) this.selectedProvinceId = null;
+      return;
+    }
+
     for (const t of this.region.settlements) {
       const p = this.toPx(t.x, t.y);
       if (Math.hypot(p.px - mx, p.py - my) < radius) {
@@ -283,6 +311,13 @@ export class RegionView {
     this.camX = screenX - baseX * next;
     this.camY = screenY - baseY * next;
     this.clampCamera();
+  }
+
+  /** Toggle province view on/off (also clears the selected province). */
+  toggleProvinceView(): void {
+    this.provinceViewActive = !this.provinceViewActive;
+    if (!this.provinceViewActive) this.selectedProvinceId = null;
+    this.lastStatePanelBuildFrame = -999;
   }
 
   /** Pan by a screen-space delta (drag or arrow/WASD keys). */
@@ -612,6 +647,9 @@ export class RegionView {
     const lit = this.atmosphere();
     this.drawCityLights(lit);
 
+    // Province overlay: labels + stat bars + selection ring (Province View mode).
+    if (this.provinceViewActive) this.drawProvinceOverlay();
+
     g.restore(); // end map-space; HUD below draws in screen space
 
     // Draw the minimap in the corner, showing camera frame.
@@ -727,6 +765,7 @@ export class RegionView {
     this.updateEventLog();
     this.drawPanel();
     this.drawRivalPanel();
+    this.drawProvincePanel();
     this.drawStatePanel();
     this.drawResearchPanel();
     this.drawRouteNetworkPanel();
@@ -810,6 +849,131 @@ export class RegionView {
       g.fill();
     }
     g.globalCompositeOperation = 'source-over';
+  }
+
+  /** Province overlay: rendered on top of city lights (still in map-space).
+   *  Draws province name labels, compact stat bars, and a selection ring. */
+  private drawProvinceOverlay(): void {
+    const { g, region } = this;
+    const provinces = region.computeProvinces();
+    for (const prov of provinces) {
+      const faction = region.faction(prov.factionId);
+      const color = faction?.color ?? '#aaa';
+      const { r: cr, g: cg, b: cb } = hexToRgb(color);
+      const { px, py } = this.toPx(prov.centroidX, prov.centroidY);
+
+      // Skip if off-screen
+      if (!this.inView(px, py, 80)) continue;
+
+      // Selection ring
+      if (this.selectedProvinceId === prov.id) {
+        g.strokeStyle = `rgba(${cr},${cg},${cb},0.9)`;
+        g.lineWidth = 2.5;
+        g.setLineDash([6, 3]);
+        g.beginPath();
+        g.arc(px, py, 30, 0, Math.PI * 2);
+        g.stroke();
+        g.setLineDash([]);
+      }
+
+      // Province name label (shifted above the settlement sprite)
+      const labelY = py - 46;
+      g.font = 'bold 11px monospace';
+      g.textAlign = 'center';
+      // Dark shadow for contrast over terrain
+      g.fillStyle = 'rgba(0,0,0,0.75)';
+      g.fillText(prov.name, px + 1, labelY + 1);
+      g.fillStyle = `rgba(${cr},${cg},${cb},1)`;
+      g.fillText(prov.name, px, labelY);
+
+      // Compact stat bar: [pop] [gdp] [sat] under the name
+      const statY = labelY + 12;
+      const barW = 36;
+      const barH = 4;
+      const gap = 3;
+      const startX = px - (barW * 3 + gap * 2) / 2;
+
+      // Population bar (gold) — capped at 2000 for display
+      const popFrac = Math.min(1, prov.totalPop / 2000);
+      g.fillStyle = 'rgba(0,0,0,0.5)';
+      g.fillRect(startX, statY, barW, barH);
+      g.fillStyle = '#c2a14d';
+      g.fillRect(startX, statY, Math.round(barW * popFrac), barH);
+
+      // GDP bar (green) — capped at 500
+      const gdpFrac = Math.min(1, prov.gdpContribution / 500);
+      g.fillStyle = 'rgba(0,0,0,0.5)';
+      g.fillRect(startX + barW + gap, statY, barW, barH);
+      g.fillStyle = '#6ec26a';
+      g.fillRect(startX + barW + gap, statY, Math.round(barW * gdpFrac), barH);
+
+      // Satisfaction bar (blue) — 0..100
+      const satFrac = Math.min(1, Math.max(0, prov.satisfaction / 100));
+      const satColor = prov.satisfaction >= 70 ? '#7ab4d4' : prov.satisfaction >= 40 ? '#c2a14d' : '#c26a6a';
+      g.fillStyle = 'rgba(0,0,0,0.5)';
+      g.fillRect(startX + (barW + gap) * 2, statY, barW, barH);
+      g.fillStyle = satColor;
+      g.fillRect(startX + (barW + gap) * 2, statY, Math.round(barW * satFrac), barH);
+
+      // Tiny legend labels below the bars
+      g.font = '8px monospace';
+      g.fillStyle = 'rgba(200,200,200,0.75)';
+      g.fillText(`${prov.totalPop}`, startX + barW / 2, statY + barH + 8);
+      g.fillText(`£${prov.gdpContribution}`, startX + barW + gap + barW / 2, statY + barH + 8);
+      g.fillText(`${prov.satisfaction}%`, startX + (barW + gap) * 2 + barW / 2, statY + barH + 8);
+    }
+    g.textAlign = 'left';
+  }
+
+  /** Province inspector panel: shows detailed stats for the selected province. */
+  private drawProvincePanel(): void {
+    const show = this.provinceViewActive && this.selectedProvinceId !== null;
+    if (!show) {
+      this.provincePanel.classList.add('hidden');
+      return;
+    }
+    this.provincePanel.classList.remove('hidden');
+
+    const prov = this.region.computeProvinces().find((p) => p.id === this.selectedProvinceId);
+    if (!prov) {
+      this.provincePanel.classList.add('hidden');
+      return;
+    }
+
+    // Throttle rebuild: 1 per 60 frames unless selection changed
+    if (
+      this.lastProvincePanelId === prov.id &&
+      this.frame - this.lastProvincePanelBuildFrame < 60
+    ) return;
+    this.lastProvincePanelId = prov.id;
+    this.lastProvincePanelBuildFrame = this.frame;
+
+    const faction = this.region.faction(prov.factionId);
+    const factionName = faction?.name ?? 'Unknown';
+    const color = faction?.color ?? '#aaa';
+    const isPlayer = prov.factionId === this.region.playerFactionId;
+
+    const buildings = prov.keyBuildings.length > 0
+      ? prov.keyBuildings.slice(0, 6).join(', ')
+      : 'none';
+    const satBar = `<div style="background:rgba(255,255,255,0.1);height:6px;border-radius:3px;overflow:hidden;margin:2px 0">` +
+      `<div style="width:${Math.max(0, Math.min(100, prov.satisfaction))}%;height:100%;background:${prov.satisfaction >= 70 ? '#7ab4d4' : prov.satisfaction >= 40 ? '#c2a14d' : '#c26a6a'}"></div></div>`;
+
+    this.provincePanel.innerHTML =
+      `<p class="insp-name" style="color:${color}">${prov.name}</p>` +
+      `<p class="insp-skills">${isPlayer ? 'YOUR PROVINCE' : factionName.toUpperCase()}</p>` +
+      `<p>Population: <b>${prov.totalPop.toLocaleString()}</b></p>` +
+      `<p>GDP/mo: <b>${formatCurrency(prov.gdpContribution)}</b></p>` +
+      `<p>Satisfaction: <b>${prov.satisfaction}%</b>${satBar}</p>` +
+      `<p>Garrison: <b>${prov.militaryStrength}</b></p>` +
+      `<p class="insp-skills">BUILDINGS</p>` +
+      `<p style="font-size:0.85em;color:#a8b4c4">${buildings}</p>` +
+      `<p><button class="mini" id="prov-panel-close">✕ close</button></p>`;
+
+    this.provincePanel.querySelector<HTMLButtonElement>('#prov-panel-close')?.addEventListener('click', () => {
+      this.selectedProvinceId = null;
+      this.provincePanel.classList.add('hidden');
+    });
   }
 
   /** Subtle per-frame water shimmer to suggest flow and life (map-space overlay). */
@@ -1921,6 +2085,9 @@ export class RegionView {
       this.claimLandMode = !this.claimLandMode;
       this.lastStatePanelBuildFrame = -999; // force rebuild
     });
+    this.statePanel.querySelector<HTMLButtonElement>('#province-view-toggle')?.addEventListener('click', () => {
+      this.toggleProvinceView();
+    });
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-sanction-btn')) {
       btn.onclick = () => r.sanctionAccordDefector(Number(btn.dataset.rival));
     }
@@ -1929,6 +2096,13 @@ export class RegionView {
   /** Diplomacy section (GDD §5.4): the rival ledger, treaties, and verbs. */
   private diplomacyHtml(): string {
     const r = this.region;
+    // Province view toggle (always available when state is proclaimed)
+    const provinceToggleHtml = r.stateProclaimed
+      ? `<p class="insp-skills">MAP OVERLAYS</p>` +
+        `<p><button id="province-view-toggle" class="mini" style="${this.provinceViewActive ? 'background:#7ab4d4;color:#000' : ''}" ` +
+        `title="Toggle Province View (P): shows province names, population and GDP on the map">` +
+        `${this.provinceViewActive ? '✓ PROVINCE VIEW ON' : 'Province View (P)'}</button></p>`
+      : '';
     // Territorial expansion section
     const claimLandHtml = r.stateProclaimed
       ? `<p class="insp-skills">TERRITORIAL EXPANSION</p>` +
@@ -1937,7 +2111,7 @@ export class RegionView {
         `${this.claimLandMode ? '✓ CLAIM LAND MODE' : 'Claim Unclaimed Land'}</button></p>`
       : '';
 
-    if (r.rivals.length === 0) return claimLandHtml;
+    if (r.rivals.length === 0) return provinceToggleHtml + claimLandHtml;
     const short: Record<TreatyKind, string> = {
       non_aggression: 'pact: NAP', trade_agreement: 'pact: trade', defensive_pact: 'pact: defense',
       climate_accord: 'pact: climate',
@@ -2036,7 +2210,7 @@ export class RegionView {
     const world = wars || pacts ? `<p class="insp-skills">WORLD AFFAIRS</p>` + wars + pacts : '';
     const boom = r.day < r.warBoomUntil ? `<p class="insp-skills">WAR ABROAD — export prices booming</p>` : '';
     const exports = r.exportEarningsLastMonth > 0 ? `<p>exports ` + formatCurrency(Math.floor(r.exportEarningsLastMonth)) + `/mo</p>` : '';
-    return `<p class="insp-skills">DIPLOMACY (relations −100..+100)</p>` + this.warHtml() + boom + exports + rows + world;
+    return provinceToggleHtml + claimLandHtml + `<p class="insp-skills">DIPLOMACY (relations −100..+100)</p>` + this.warHtml() + boom + exports + rows + world;
   }
 
   /** The war room (GDD §7): score, support, mobilization, and the peace table. */

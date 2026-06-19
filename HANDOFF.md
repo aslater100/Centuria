@@ -1,6 +1,6 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-19 · **Tests:** 243 passing · **Version:** v1.0.1
+**Last updated:** 2026-06-19 · **Tests:** 261 passing · **Version:** v1.0.1
 
 ## The game: a standalone 4X campaign
 
@@ -86,7 +86,7 @@ npx vitest run --exclude '**/.claude/**'   # 243 tests
 npm run sim:macro  # nation-tier monetary harness — keep "ON TARGET"
 ```
 
-## Recent completions (PRs #218–#226)
+## Recent completions (PRs #218–#230)
 
 - ✓ **#218** — Fix labor_law grievance test: measurement window and strike masking
 - ✓ **#219** — Tech tree rebuilt as visual DAG: SVG edges, node state coloring, click-to-research
@@ -97,6 +97,8 @@ npm run sim:macro  # nation-tier monetary harness — keep "ON TARGET"
 - ✓ **#224** — Route budget slider wired: live readout update without panel rebuild; 4 new budget tests
 - ✓ **#225** — Phase 3 polish: dynamic panel sizing (Issue #14), treasury milestone events (Issue #15), music volume reduced 0.5→0.4 (Issue #13)
 - ✓ **#226** — Rivals national identity (Issue #18): 11 named rival nations with unique flags/emblems, archetype-specific AI behavior, power comparison indicators; installer UI brightened (blue gradient, glowing title); package.json description updated
+- ✓ **#229** — Land purchase mechanics (Phase 1): unclaimed land claim (£25/cell, `claimCell`/`canClaimCell`), population-scaled settlement buyout (`buyLand`/`canBuyLand`/`settlementBuyoutCost`), Claim Land Mode toggle in Diplomacy tab; 22 new tests (251 total)
+- ✓ **#230** — Province View (Phase 2): `Province` interface + `computeProvinces()` in region.ts; `drawProvinceOverlay()` canvas layer (faction-colored name labels, pop/GDP/satisfaction stat bars, selection ring); `drawProvincePanel()` inspector DOM panel; click-to-select province; P key shortcut; Province View toggle in Diplomacy tab; 10 new tests (261 total)
 
 ## UI Architecture Notes (updated 2026-06-19)
 
@@ -152,12 +154,14 @@ delta = min(12, -6 + 14 × budget)   // 0 = −6/mo; 1.0 = +8/mo; 1.5 = +15/mo
 - ✓ **UI integration** — "Claim Land Mode" toggle in Diplomacy tab; click-to-claim map UX
 - ✓ **Tests** — 22 comprehensive tests (all passing); 251/251 overall
 
-### Phase 2 — World View / Province Layer (flagged for Sonnet/Opus: procedural generation + large refactor)
-- **Continental map** — Procedural province borders, capitals, trade lanes visible at nation tier
-- **Province system** — Territory hexes cluster into provinces with governors/capitals
-- **Inter-provincial routes** — Rail/road networks connect provincial centers; trade flow visualization
-- **Military deployment UI** — Move units between provinces on nation map
-- **Prerequisite research** — Requires understanding of hexagons, procedural clustering, layer rendering
+### Phase 2 ✓ (PR #230 — Province View)
+- ✓ **Province data model** — `Province` interface + `computeProvinces()` in `region.ts`; one province per settlement, keyed by settlement id
+- ✓ **Canvas overlay** — `drawProvinceOverlay()`: faction-colored name labels with shadow, compact pop/GDP/satisfaction stat bars, selection ring for clicked province
+- ✓ **Province inspector panel** — `drawProvincePanel()`: DOM panel with name, faction, population, GDP, satisfaction bar, garrison, buildings list; close button
+- ✓ **Click-to-select** — Province View intercepts settlement clicks to set `selectedProvinceId` instead of opening settlement inspector
+- ✓ **P key shortcut** — Toggle province view from anywhere (`main.ts`)
+- ✓ **Diplomacy tab toggle** — "Province View (P)" button in State → Diplomacy section with active indicator
+- ✓ **Tests** — 10 tests in `tests/province.test.ts`; 261/261 overall
 
 ### Phase 3 — Advanced Diplomacy UI
 - **Treaty editor** — Visual multi-item basket for offer/counter composition
@@ -177,14 +181,7 @@ delta = min(12, -6 + 14 × budget)   // 0 = −6/mo; 1.0 = +8/mo; 1.5 = +15/mo
 
 ## Flagged for Sonnet/Opus (complexity beyond Haiku scope)
 
-- **Phase 2: World view / province layer** — This is a large architectural feature requiring:
-  - Procedural hexagonal/polygonal province generation from settlement clusters
-  - New render layer (province overlay) on top of existing region map
-  - Camera/zoom logic to switch between settlement view and province view
-  - Data model: Province entities tracking governor, capital, trade routes, military units
-  - UI: Province inspector panel (like settlement panel), diplomatic actions per province
-  - Testing: Procedural clustering determinism, zone connectivity, border settlement handling
-  - **Recommended model:** Sonnet or Opus (significant refactor + procedural generation expertise)
+- **Phase 3: Advanced Diplomacy UI** — Treaty editor (multi-item basket), trade bloc negotiation, espionage/sabotage system. Significant UI and sim work. **Recommended model:** Sonnet or Opus.
 
 ## Known weak areas
 
