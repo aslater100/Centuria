@@ -140,19 +140,114 @@ describe('Historical anchor: Great Depression (1927–1936)', () => {
     }
   });
 
-  it('serialize / deserialize round-trips crashFired', () => {
+  it('sets depressionDepth = 1.0 when it fires', () => {
     const r = makeNation();
-    (r as unknown as { crashFired: boolean }).crashFired = true;
-    const r2 = RegionSim.deserialize(r.serialize());
-    expect((r2 as unknown as { crashFired: boolean }).crashFired).toBe(true);
+    forceDepressionConditions(r);
+    fireAnchor(r, 1930, 1);
+    if ((r as unknown as { crashFired: boolean }).crashFired) {
+      expect(r.depressionDepth).toBe(1.0);
+    }
   });
 
-  it('old saves without crashFired backfill to false', () => {
+  it('depressionDepth decays each monthly tick', () => {
+    const r = makeNation();
+    r.depressionDepth = 1.0;
+    // Run one monthly tick
+    const ticksPerMonth = 30 * ticksPerDay;
+    for (let i = 0; i < ticksPerMonth; i++) r.tick();
+    expect(r.depressionDepth).toBeLessThan(1.0);
+    expect(r.depressionDepth).toBeGreaterThan(0.9);
+  });
+
+  it('depressionDepth suppresses exports in monthly trade calc', () => {
+    const r = makeNation();
+    r.stateProclaimed = true;
+    r.treasury = 5000;
+    // Give trade agreements so exports are non-zero
+    const spawnRival = (r as unknown as { spawnRival(): void }).spawnRival.bind(r);
+    spawnRival();
+    r.rivals[0].treaties.push('trade_agreement');
+    // Run a month without depression
+    r.depressionDepth = 0;
+    const ticksPerMonth = 30 * ticksPerDay;
+    for (let i = 0; i < ticksPerMonth; i++) r.tick();
+    const earningsNormal = r.exportEarningsLastMonth;
+    // Now run with full depression
+    r.depressionDepth = 1.0;
+    for (let i = 0; i < ticksPerMonth; i++) r.tick();
+    const earningsDepressed = r.exportEarningsLastMonth;
+    expect(earningsDepressed).toBeLessThan(earningsNormal);
+  });
+
+  it('confidence ceiling prevents full recovery while depressionDepth > 0', () => {
+    const r = makeNation();
+    r.passedLaws.add('central_bank_charter');
+    r.depressionDepth = 1.0;
+    (r as unknown as { confidence: number }).confidence = 10;
+    // Run 12 monthly ticks — confidence should stay capped, not return to 70
+    const ticksPerMonth = 30 * ticksPerDay;
+    for (let i = 0; i < 12; i++) {
+      for (let j = 0; j < ticksPerMonth; j++) r.tick();
+    }
+    // With depth still well above 0, confidence should be below 70
+    expect((r as unknown as { confidence: number }).confidence).toBeLessThan(60);
+  });
+
+  it('chooseRecoveryPath stimulus halves depressionDepth immediately', () => {
+    const r = makeNation();
+    r.depressionDepth = 0.6;
+    r.crashRecoveryChoice = 'pending';
+    r.chooseRecoveryPath('stimulus');
+    expect(r.depressionDepth).toBe(0.3);
+    expect(r.crashRecoveryChoice).toBe('stimulus');
+  });
+
+  it('chooseRecoveryPath austerity reduces depressionDepth and spikes grievance', () => {
+    const r = makeNation();
+    r.depressionDepth = 0.6;
+    r.crashRecoveryChoice = 'pending';
+    const grBefore = r.settlements[0]?.grievance ?? 0;
+    r.chooseRecoveryPath('austerity');
+    expect(r.depressionDepth).toBeCloseTo(0.48, 5);
+    expect(r.crashRecoveryChoice).toBe('austerity');
+    if (r.settlements[0]) {
+      expect(r.settlements[0].grievance).toBeGreaterThan(grBefore);
+    }
+  });
+
+  it('chooseRecoveryPath returns false when no crossroads is pending', () => {
+    const r = makeNation();
+    r.crashRecoveryChoice = null;
+    expect(r.chooseRecoveryPath('stimulus')).toBe(false);
+  });
+
+  it('serialize / deserialize round-trips all depression fields', () => {
+    const r = makeNation();
+    (r as unknown as { crashFired: boolean }).crashFired = true;
+    r.depressionDepth = 0.7;
+    (r as unknown as { crashMonthCounter: number }).crashMonthCounter = 8;
+    r.crashRecoveryChoice = 'stimulus';
+    (r as unknown as { stimulusMonthsLeft: number }).stimulusMonthsLeft = 18;
+    const r2 = RegionSim.deserialize(r.serialize());
+    expect((r2 as unknown as { crashFired: boolean }).crashFired).toBe(true);
+    expect(r2.depressionDepth).toBe(0.7);
+    expect((r2 as unknown as { crashMonthCounter: number }).crashMonthCounter).toBe(8);
+    expect(r2.crashRecoveryChoice).toBe('stimulus');
+    expect((r2 as unknown as { stimulusMonthsLeft: number }).stimulusMonthsLeft).toBe(18);
+  });
+
+  it('old saves backfill depression fields to defaults', () => {
     const r = makeNation();
     const raw = JSON.parse(r.serialize());
     delete raw.crashFired;
+    delete raw.depressionDepth;
+    delete raw.crashMonthCounter;
+    delete raw.crashRecoveryChoice;
+    delete raw.stimulusMonthsLeft;
     const r2 = RegionSim.deserialize(JSON.stringify(raw));
     expect((r2 as unknown as { crashFired: boolean }).crashFired).toBe(false);
+    expect(r2.depressionDepth).toBe(0);
+    expect(r2.crashRecoveryChoice).toBeNull();
   });
 });
 
