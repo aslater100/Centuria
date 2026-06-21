@@ -3,10 +3,10 @@
  * operating altitude after the flip (GDD §2.5). Painterly backdrop, town
  * markers, routes, expedition wagons; DOM panel for the selected settlement.
  */
-import type { Settlement, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, DepressionMeasure, TownFocus, WagePolicy, Route, SectorId, ArmyUnitType, TechNode, Province } from '../sim/region';
+import type { Settlement, Scout, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, DepressionMeasure, TownFocus, WagePolicy, Route, SectorId, ArmyUnitType, TechNode, Province } from '../sim/region';
 import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES, BRANCH_YEAR, UNIT_TYPES, ESPIONAGE_OPS, BLOC_RELATIONS_FLOOR, DEPRESSION_MEASURES } from '../sim/region';
 import type { EspionageOp } from '../sim/region';
-import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS, MINUTES_PER_DAY } from '../sim/defs';
+import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS } from '../sim/defs';
 import type { CurrencySymbol } from '../sim/defs';
 import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
 import { REGION_N } from '../sim/worldgen';
@@ -424,11 +424,13 @@ export class RegionView {
     this.clampCamera();
   }
 
-  /** Zoom to a specific scale and center the viewport on a logical coordinate. */
-  centerOn(regionX: number, regionY: number, zoom: number): void {
+  /** Center the viewport on a logical coordinate; optionally set zoom level. */
+  centerOn(regionX: number, regionY: number, zoom?: number): void {
     const W = this.canvas.width;
     const H = this.canvas.height;
-    this.camScale = Math.max(RegionView.MIN_SCALE, Math.min(RegionView.MAX_SCALE, zoom));
+    if (zoom !== undefined) {
+      this.camScale = Math.max(RegionView.MIN_SCALE, Math.min(RegionView.MAX_SCALE, zoom));
+    }
     const p = this.toPx(regionX, regionY);
     this.camX = W / 2 - p.px * this.camScale;
     this.camY = H / 2 - p.py * this.camScale;
@@ -983,31 +985,6 @@ export class RegionView {
   /** Lighting state for atmospheric rendering. Day/night cycle disabled — always daytime. */
   private atmosphere(): { night: number; golden: number; season: number } {
     return { night: 0, golden: 0, season: this.region.seasonIndex };
-  }
-
-  /** Warm hearth-glow under each known settlement once dusk sets in — scaled by
-   *  population so cities blaze and hamlets flicker. Drawn in map-space. */
-  private drawCityLights(lit: { night: number }): void {
-    if (lit.night < 0.15) return;
-    const { g, region } = this;
-    g.globalCompositeOperation = 'lighter';
-    for (const t of region.settlements) {
-      if (!this.revealedAt(t.x, t.y)) continue;
-      const { px, py } = this.toPx(t.x, t.y);
-      if (!this.inView(px, py, 40)) continue;
-      const pop = region.popOf(t);
-      const radius = 10 + Math.min(26, Math.sqrt(pop) * 1.6);
-      const a = lit.night * Math.min(0.7, 0.28 + pop / 4000);
-      const grad = g.createRadialGradient(px, py, 0, px, py, radius);
-      grad.addColorStop(0, `rgba(255,214,140,${a})`);
-      grad.addColorStop(0.5, `rgba(240,170,90,${a * 0.45})`);
-      grad.addColorStop(1, 'rgba(240,170,90,0)');
-      g.fillStyle = grad;
-      g.beginPath();
-      g.arc(px, py, radius, 0, Math.PI * 2);
-      g.fill();
-    }
-    g.globalCompositeOperation = 'source-over';
   }
 
   /** Return cached province list; recomputed at most once per frame. */
@@ -4150,14 +4127,6 @@ export class RegionView {
       budgetHtml +
       `<div class="thoughts">${rows || '<p class="insp-skills">no routes yet</p>'}</div>`
     );
-  }
-
-  /** Pan the map so the given region-coordinate (0–100) is at screen centre. */
-  centerOn(x: number, y: number): void {
-    const { px, py } = this.toPx(x, y);
-    this.camX = this.canvas.width / 2 - px * this.camScale;
-    this.camY = this.canvas.height / 2 - py * this.camScale;
-    this.clampCamera();
   }
 
   /** Phase A: Settlements list panel — all player towns with at-a-glance health

@@ -4894,7 +4894,7 @@ export class RegionSim {
     if (this.playerRegionalWars.has(factionId)) return { ok: false, reason: 'already at war' };
     this.playerRegionalWars.add(factionId);
     faction.aggressiveness = Math.min(100, faction.aggressiveness + 30);
-    this.addLog(`⚔ WAR DECLARED against ${faction.name}. Their settlements are now valid targets for annexation.`, 'danger');
+    this.addLog(`⚔ WAR DECLARED against ${faction.name}. Their settlements are now valid targets for annexation.`, 'bad');
     return { ok: true, reason: '' };
   }
 

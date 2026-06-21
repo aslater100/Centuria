@@ -61,7 +61,6 @@ window.addEventListener('keydown', () => { sfx.unlock(); music.unlock(); soundsc
 
 let region: RegionSim | null = bootSim();
 let regionView: RegionView | null = null;
-let windowManager: WindowManager | null = null;
 let paused = false;
 let speed = 1;
 let pauseMenuOpen = false;
@@ -99,7 +98,7 @@ function enterRegionMode(r: RegionSim): void {
   region = r;
   (window as any).region = r;
   regionView = new RegionView(canvas, r, root);
-  windowManager = new WindowManager(regionView.draggablePanels);
+  new WindowManager(regionView.draggablePanels);
   paused = false;
   updateUIState();
   titleScreen.hide();
