@@ -100,6 +100,7 @@ export class RegionView {
   /** Unit recruitment modal (GDD §7.1: military depth). */
   private recruitmentModal: HTMLElement;
   private frame = 0;
+  private techLayoutCache = new Map<string, { pos: Map<string, { x: number; y: number }>; width: number; height: number }>();
   // ---- Static-map cache. Terrain + territory fills are O(N²) and barely change,
   //      so render them once into an offscreen canvas (base coords) and blit it
   //      under the camera each frame. Rebuilt only when the signature changes,
@@ -4160,6 +4161,8 @@ export class RegionView {
     width: number;
     height: number;
   } {
+    const key = nodes.map((n) => n.id).sort().join(',');
+    if (this.techLayoutCache.has(key)) return this.techLayoutCache.get(key)!;
     const NODE_W = 124, NODE_H = 42, COL_PITCH = 168, ROW_PITCH = 56, PAD = 14;
     const byId = new Map(nodes.map((n) => [n.id, n]));
     const depthMemo = new Map<string, number>();
@@ -4200,11 +4203,13 @@ export class RegionView {
         y: PAD + rowOf.get(n.id)! * ROW_PITCH,
       });
     }
-    return {
+    const result = {
       pos,
       width: PAD * 2 + maxCol * COL_PITCH + NODE_W,
       height: PAD * 2 + Math.max(0, maxRows - 1) * ROW_PITCH + NODE_H,
     };
+    this.techLayoutCache.set(key, result);
+    return result;
   }
 
   /** Research panel: visual tech/civics tree with prerequisite lines, start/cancel. */

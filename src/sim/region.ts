@@ -2050,6 +2050,9 @@ export class RegionSim {
   ministers: MinisterAssignment[] = MINISTER_ROLES.map((r) => ({ role: r.id, title: r.title, notableId: null }));
   /** Active policy card id per slot (null = empty). Length matches govType.policySlots. */
   activePolicies: (string | null)[] = [];
+  private activePolicySet: Set<string> = new Set();
+  private sectorProdCache: Record<SectorId, number> | null = null;
+  private wageCache: Map<number, number> | null = null;
   // ---- Rival nations & diplomacy (GDD §5.4, §6.2–6.4) ----
   rivals: RivalNation[] = [];
   /** Named rival nations that have been used (to avoid duplicates). */
@@ -3727,6 +3730,7 @@ export class RegionSim {
     // Record the prior month's net treasury swing before this month's books move.
     this.treasuryDeltaMonth = this.treasury - this.prevMonthTreasury;
     this.prevMonthTreasury = this.treasury;
+    this.cacheSectorProductivity();
 
     // ponytail: cache policy/law checks that are constant across all settlements
     const hasHealthcare = this.passedLaws.has('healthcare_act');
@@ -3791,6 +3795,7 @@ export class RegionSim {
       }
     }
     for (const t of this.settlements) this.updateSectors(t); // Phase 1: labor follows the technology
+    this.wageCache = new Map(this.settlements.map((t) => [t.id, this.avgWageOf(t)]));
     this.tickRegionalEvents(); // Phase 4: disasters and windfalls
     this.updateRouteCargo();   // Phase 6: cargo labels follow sector surplus
     this.migrate();
@@ -3862,6 +3867,8 @@ export class RegionSim {
     const gdp = this.settlements.reduce((s, t) => s + SECTOR_IDS.reduce((ss, id) => ss + t.sectors[id].output, 0), 0);
     this.monthlyHistory.push({ gdp, treasury: this.treasury, inflation: this.inflationRate * 100, employment: 100 });
     if (this.monthlyHistory.length > 12) this.monthlyHistory.shift();
+    this.sectorProdCache = null;
+    this.wageCache = null;
   }
 
   /** Check all four victory paths; set winCondition on the first achieved.
@@ -4690,6 +4697,13 @@ export class RegionSim {
     return m;
   }
 
+  private cacheSectorProductivity(): void {
+    this.sectorProdCache = {} as Record<SectorId, number>;
+    for (const id of SECTOR_IDS) {
+      this.sectorProdCache[id] = this.sectorProductivity(id);
+    }
+  }
+
   /** Where this town's labor wants to be, given the technology and the land.
    *  The century's arc: plough → mill → counter → terminal. */
   private sectorTargetShares(t: Settlement): Record<SectorId, number> {
@@ -4731,7 +4745,7 @@ export class RegionSim {
       s.growth = s.share - before;
       const landTerm = id === 'agriculture' ? 0.6 + 0.4 * t.landQuality : 1;
       // Phase 2: civic works multiply what each hand produces
-      const perWorker = SECTOR_BASE_OUTPUT[id] * this.sectorProductivity(id) * landTerm * (1 + this.buildingBonus(t, id));
+      const perWorker = SECTOR_BASE_OUTPUT[id] * (this.sectorProdCache?.[id] ?? this.sectorProductivity(id)) * landTerm * (1 + this.buildingBonus(t, id));
       // Phase 4: active event modifiers (disasters reduce, windfalls boost)
       const eventMult = this.eventOutputMult(t, id);
       // Currency transition dents output until markets stabilize; the economic
@@ -4763,6 +4777,7 @@ export class RegionSim {
 
   /** Employment-weighted average wage — the migration signal. */
   avgWageOf(t: Settlement): number {
+    if (this.wageCache?.has(t.id)) return this.wageCache.get(t.id)!;
     return SECTOR_IDS.reduce((sum, id) => sum + t.sectors[id].share * t.sectors[id].wage, 0);
   }
 
@@ -6033,11 +6048,16 @@ export class RegionSim {
       this.activePolicies[slotIndex] = null;
       this.addLog('Policy slot cleared.', 'info');
     }
+    this.rebuildPolicySet();
     return true;
   }
 
+  private rebuildPolicySet(): void {
+    this.activePolicySet = new Set(this.activePolicies.filter((x): x is string => x !== null));
+  }
+
   policyActive(id: string): boolean {
-    return this.activePolicies.includes(id);
+    return this.activePolicySet.has(id);
   }
 
   private policyUpkeep(): number {
@@ -6229,6 +6249,7 @@ export class RegionSim {
     this.legitimacy = def.startingLegitimacy;
     this.nationProclaimed = true;
     this.activePolicies = new Array(def.policySlots.length).fill(null);
+    this.rebuildPolicySet();
     this.militiaLevel = Math.min(4, this.militiaLevel + def.militiaBonus);
     for (const m of this.ministers) {
       m.notableId = assignments[m.role] ?? null;
@@ -8396,6 +8417,7 @@ export class RegionSim {
       const govDef = GOV_TYPES.find((g) => g.id === d.govType);
       r.activePolicies = new Array(govDef?.policySlots.length ?? 0).fill(null);
     }
+    r.rebuildPolicySet();
     // pre-diplomacy saves carry no rivals: the world is still empty
     r.rivals = (d.rivals ?? []).map((rv: RivalNation) => ({ ...rv, borderSettled: rv.borderSettled ?? false }));
     r.usedNamedRivals = new Set(d.usedNamedRivals ?? []);
