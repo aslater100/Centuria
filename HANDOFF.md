@@ -194,9 +194,11 @@ delta = min(12, -6 + 14 × budget)   // 0 = −6/mo; 1.0 = +8/mo; 1.5 = +15/mo
 
 ---
 
-## Roadmap: Outstanding Features (Beyond Initial Scope)
+## Roadmap: Outstanding Features
 
-The four prioritized phases (1–4) are **complete and merged to main**. The following larger features remain unstarted and are recommended for Sonnet/Opus due to architectural complexity:
+Phases 1–7 are **complete and merged to main**. The following phases are ordered by GDD priority and architectural dependency. Items marked *(in sim)* exist partially in `region.ts` but need UI surfacing or completion. Recommended model per phase noted.
+
+> **Reading the GDD alongside this:** each phase below references the GDD section it implements. `GDD.md` is the design authority; this file is the implementation guide. When in doubt, the GDD wins on design intent.
 
 ### Phase 5 ✓ (Province-Level Governance) — COMPLETED
 - ✓ **`HexProvincePolicy` interface** — `taxMultiplier` (0.5–2.0), `investmentLevel` (0–2), `autonomyLevel` (0–2) per province
@@ -221,6 +223,146 @@ The four prioritized phases (1–4) are **complete and merged to main**. The fol
 - ✓ **`resolveProvinceBattle(provinceId)`** — simple power comparison (unit count × powerPerUnit × morale/100 × rival boost); winner drives loser out with attrition; logged as `BATTLE of <name>`
 - ✓ **`tickRivalArmyAI()`** — expansion-minded rivals (expansion ≥ 6) spawn small militia armies at player border provinces with 2.5%/month chance; max 2 rival armies per nation
 - ✓ **Army display** — province overlay shows `⚔N` count badges for player armies (blue) and rival armies (red) at each province
+
+---
+
+### Phase 8 — Notable System Depth (GDD §2.4) — *Opus scope*
+
+The sim tracks Notables but they are not yet fully wired as living actors across the full arc. This phase gives them the lifecycle and role depth the GDD describes.
+
+- **Notable lifecycle** — `age` field ticks yearly; death events fire probabilistically (age + health), generating heir/successor selection events; Notable children can be promoted when they come of age (~18 years)
+- **Dynasty tree** — `dynastyTree[]` structure on `RegionSim`; rendered in Century Report as a generational chart (`drawDynastyTree()`)
+- **Role depth** — `cabinet[]` entries (already exist) drive advisor forecast quality: high-skill ministers produce more accurate future-state projections; ideology-biased advice baked in (hawkish War minister undercounts occupation costs; loyalist Press Secretary downplays credibility gaps)
+- **Notable events** — advisor resignation (over a law they oppose), affair/scandal (approval hit), death in office (succession event chain), defection to rival faction (political capital cost)
+- **Founding Notables** — `foundColony()` mints 4–6 named Notables with 1919 post-WWI backstories; their names appear in early event text, creating the emotional through-line
+- **Test targets** — Notable lifecycle (birth/age/death), dynasty serialization, advisor forecast variance by skill level
+
+### Phase 9 — Full Government Type System (GDD §9) — *Opus scope*
+
+Currently the sim has partial regime coverage. This phase completes the 13-regime roster from GDD §9 and adds the policy-slot layer.
+
+- **Missing regime types** to add: Social Democracy, Constitutional Monarchy, Absolute Monarchy, Oligarchy/Plutocracy, Theocracy, Direct Democracy/Syndicalist Commune, Corporatocracy (partial), Fascist/Ultranationalist (period-gated 1925–1955)
+- **Per-regime mechanics** (GDD §9 table):
+  - *Command economy / one-party:* planning minigame — player sets output targets per sector; plan errors cause shortages; `reportedStats` vs `actualStats` diverge at high control (the sim shows you doctored numbers)
+  - *Propaganda / credibility gap:* `credibilityGap` accumulator grows when press control is high; gap > threshold + spark = legitimacy collapse cliff (not gradual decline)
+  - *Fascist:* `legitimacyDecayAtPeace` −5/yr; requires escalating external conflict; period-gated to 1925–1955 window
+  - *Theocracy:* doctrine-gated tech nodes (some science branches locked); `schismRisk` grows with modernization
+  - *Corporatocracy:* `shareholderPatience` is the war-support analog; short profitable wars excellent, long wars trigger hostile-takeover event
+- **Policy slots** (GDD §5.3 — deferred from MVP): `policySlots[]` per government type with category buckets (econ/social/security/diplomatic); researched policy cards socketed into slots, providing passive bonuses. UI: slot rack in Government panel
+- **Government transition event chains**: 3–8 step authored chains per regime pair (e.g. military junta → managed democratization; absolute monarchy → revolution). Each step is a decision with faction resistance, capital cost, possible violence, and international reaction. Store as `transitionChain[]` with step index
+- **Test targets** — all 13 regime types initialize correctly, legitimacy sources fire per type, transition chains run to completion, policy slots serialize
+
+### Phase 10 — Climate System Depth (GDD §8.2) — *Sonnet scope*
+
+Climate ledger exists (`emissions` tracking) but lacks the visible long-lag impact chain the GDD describes as the century's "slowest bad loop."
+
+- **CO₂ accumulation with lag** — global `atmosphericCO2` (ppm, starts ~295 in 1919); each nation contributes per energy mix and industrial output; warming follows cumulative emissions with a **~20-year delayed impact** (player actions today hurt in 2 decades). NPC nations emit too
+- **Ghost waterline** — render a faint blue coastal boundary on the hex map showing projected 2100 sea level; visible from ~2030. Quiet dread as persistent UI
+- **Sea-level rise** — coastal hexes flood incrementally from ~2040; flooding destroys buildings, displaces population, creates climate refugees
+- **Climate impact effects** — scaling with temperature rise: crop-yield volatility → failures; extreme-weather event frequency ↑ (storms, floods, droughts hitting infrastructure); habitability loss in coastal zones
+- **Adaptation actions** — `buildSeaWall(provinceId)` (10-year build, high cost, blocks flooding); `floodProofZoning(settlementId)` (cost + build time, partial protection); `managedRetreat(settlementId)` (brutal politically, necessary late-game in worst scenarios)
+- **Climate accords** — late-era diplomatic item (unlocks ~1990+): multi-nation treaty with emissions targets, verification mechanics, free-rider penalty (sanctions if defection detected), negotiated via the existing deal modal
+- **Geoengineering** (2050+) — `launchGeoengineering()`: fast/cheap/side-effect-roulette; unilateral; triggers diplomatic crisis (`geoengineeringProtest[]` from affected rivals); roll random side effects (crop disruption, monsoon shift)
+- **Test targets** — CO₂ accumulation rate, warming lag math, sea-level event triggers, accord serialization
+
+### Phase 11 — Era 7–8 & Speculative Branch (GDD §10) — *Opus scope*
+
+The game currently runs to 2100 but eras 7–8 (2010–2100) lack the full content, tech depth, and branching art the GDD specifies.
+
+- **Climate & Automation era (2010–2040)**:
+  - Renewables tech nodes: solar/wind parity, battery storage, grid-storage problem (intermittency), EV adoption curve
+  - AI/automation waves: `automationUnemployment` variable; service/manufacturing job losses create political pressure for universal benefits or redistribution; automation also raises productivity
+  - Carbon pricing civics: carbon tax (faction politics), cap-and-trade system, green industrial policy
+  - Stranded asset mechanics: coal/oil infrastructure loses value as transition accelerates; `strandedAssetLoss` event for nations that moved late
+- **Speculative branch (2040–2100)** — world-state-gated entry:
+  - *Solarpunk branch* (low CO₂ + stable democracy + high equality): fusion power tech, cooperative global institutions, post-scarcity social contract
+  - *Corporatocracy branch* (high inequality + tech dominance): arcologies, corporate charters replacing nation-states, subscription-tier citizenship
+  - *Drowned branch* (high CO₂ + late adaptation): sea walls failing, climate refugee crises, resource wars over arable land, habitability collapse
+  - Branch is determined by cumulative climate, economy, and regime choices — not a calendar flip
+- **2040+ art/audio** — backdrop kits and era palette for each branch (see GDD §3.2); procedural soundtrack shifts to branch-appropriate idiom (organic acoustic for solarpunk, industrial dark synth for dystopia)
+- **Test targets** — branch selection logic, speculative tech unlock gates, all three epilogue narrative paths
+
+### Phase 12 — Media & Misinformation System (GDD §8.3) — *Sonnet scope*
+
+The sim has no media system yet. This is the late-game political complexity layer.
+
+- **Media reach progression** — `mediaReach` variable per era: word-of-mouth (1919) → press (1925+) → radio (1930s+) → TV (1950s+) → internet (1995+) → algorithmic feeds (2015+). Each stage multiplies how fast opinion moves (early century is a glacier; late century is a flash flood)
+- **Press freedom axis** — extend existing liberty axis into a `pressFreedom` 0–100 variable:
+  - Free press: approval reflects true conditions; corruption surfaces as forced scandal events; legitimacy is sturdy (earned)
+  - Controlled press: player sets `propagandaNarrative` (buffers approval against bad news); `credibilityGap` accumulator grows monthly; gap > threshold + spark = legitimacy *collapse* (not decline)
+- **Misinformation era** (2015+) — algorithmic feed event fires when `internet` tech researched + year ≥ 2015: opinion distribution *spread* widens (polarization parameter rises), consensus laws cost +20–30% more political capital, populist ideology swings amplify
+- **Counters** (each with tradeoffs): `platformRegulation` (reduces polarization, angers tech factions), `publicMediaFunding` (buffers against credibility gap, costs treasury), `mediaLiteracyEducation` (15-year lag education investment, reduces long-run polarization)
+- **Test targets** — credibility gap accumulation/collapse, misinformation era trigger, press freedom effect on scandal event rate
+
+### Phase 13 — Population & Society Depth (GDD §5.5) — *Sonnet scope*
+
+The cohort matrix exists but several of the GDD's dynamic mechanisms are stub-level or absent.
+
+- **Demographic transition** — birth rate formula: starts ~35/1000 (1919), falls with `educationLevel` + urbanization + child survival; death rate falls with health spending + sanitation. The mid-century boom and 2050s aging crisis (pension burden on shrinking workforce) emerge from this without scripting
+- **Migration with appeal scores** — `appealScore(settlementId, class)` computed from wages, housing cost, services, safety, liberty-fit, discrimination; net migration flows down appeal gradient each tick; crises produce refugee *waves* (volume spike, not just trickle)
+- **Education pipeline lag** — school coverage today → skilled cohorts 15–25 years later; the `educationLag[]` ring buffer tracks cohort progress; UI: "projected skilled workforce 2045" visible in education screen
+- **Gini inequality index** — computed from wage distribution across class cohorts; feeds `unrestPressure` (inequality ↑ → unrest ↑, populist ideology drift toward extremes), crime, and policy political costs
+- **Full unrest ladder** — expand current strike/grievance system to the full 6-rung ladder: petitions (flavor) → strikes (sector output −%) → protests (crackdown/concede branch) → riots (infrastructure damage) → organized opposition (faction power ↑) → revolution (§9 failure mode). Each rung visible in event log with attribution ("Dockworkers, day 8 — over wage decline and rent")
+- **Opinion dynamics** — cohort ideology drifts toward (a) material experience (unemployed → anti-incumbent + extreme), (b) media exposure (Phase 12), (c) generational replacement (children imprint on the era they come of age in — 1968-analog and 2030s youthquakes emerge from this)
+- **Test targets** — demographic transition curve shape, Gini formula, unrest ladder progression, education pipeline delay
+
+### Phase 14 — Zoning, Infrastructure & City Services (GDD §5.1) — *Opus scope*
+
+The largest unimplemented GDD system. Province view exists but zoning/services/pollution are absent.
+
+- **Zoning system** — R/C/I/O zones with 3 density levels unlocked by era + demand; buildings grow from demand signals: residential demand = jobs + amenity − rent pressure; commercial = purchasing power; industrial = input access + freight capacity; office = tertiary workforce (era-gated)
+- **Land value propagation** — `landValueMap` per settlement (hex-resolution); propagates from amenity, transit access, coverage; depressed by pollution; sets rents, class sorting (who can afford to live where), property-tax yield, gentrification pressure
+- **Pollution diffusion** — per-building emission → local diffusion → global CO₂ ledger (hooks into Phase 10); health impact, land value drag, mood drag
+- **Utility system**:
+  - Power: generation → distribution → `brownoutRisk` (cuts industrial output 30% + mood if demand > capacity)
+  - Water/sewage: drives disease events if underfunded
+  - Waste: land value drag + ground pollution if uncollected
+- **Service coverage** — radius-based coverage per service building (clinics, schools, police, fire, parks); coverage maps feed health, crime, education, approval. Service buildings have era versions (1919 schoolhouse vs 2050 learning center with different throughput)
+- **Test targets** — zoning demand signals, land value gradient math, brownout trigger, service coverage radius computation
+
+### Phase 15 — Extended Economy & FX (GDD §5.2) — *Sonnet scope*
+
+Economy is the centerpiece system; this phase extends it toward the GDD's full-scope design.
+
+- **Expand goods from 18 → 44** — add intermediate tier: chemicals, components, electronics, pharmaceuticals, vehicles. Each has an input/output recipe and era unlock. Supply chain failures propagate (no chemicals → no pharmaceuticals → health crisis)
+- **Physical goods movement on routes** — goods travel on the transport network with real transit time and cost; `congestionTariff` (distance + route condition = implicit tax on goods movement). Price arbitrage traders: if price differential between two settlements > transport cost, a trade flow spawns to equalize
+- **FX and currency system** — exchange rate from trade balance + interest rate differential + confidence; `devalue()` action: boosts exports, raises import prices (inflation), diplomatic friction; `currencyPeg` option (fixed rate vs a reserve-currency rival — stability + loss of monetary independence)
+- **Monetary regimes** — gold standard (discipline + deflation risk), fiat (flexibility + inflation risk), currency union with an ally (bloc benefit + loss of independent rate)
+- **Test targets** — goods route transit time, price convergence via arbitrage, FX devaluation effect on trade balance and inflation
+
+### Phase 16 — Warfare System Depth (GDD §7) — *Opus scope*
+
+Provincial army movement exists (Phase 7). This phase replaces the simple power comparison with the GDD's full strategic warfare layer.
+
+- **Casus belli system** — `CB` types: border dispute, treaty violation, protection of co-ideologues, resource denial, fabricated (`fabricationCost` in reputation). CB quality sets `warSupport` at declaration: defensive war starts 85, land grab starts 40
+- **Three mobilization levels** — `mobilizationLevel`: Peacetime / Partial / Total; each unlocks a cost/benefit package constrained by regime type:
+  - Partial: selective draft, 15% manufacturing → armaments
+  - Total: mass conscription (workforce −10–25%), 40–60% conversion, rationing, war bonds
+- **Army Groups on fronts** — replace unit-count armies with `ArmyGroup` objects: manpower, equipment level (from industry), supply state, doctrine (tech tree), morale. `Front` objects between hostile territory with weekly resolution: `combatPower = manpower^0.6 × equipment × supply × doctrine × morale`. Sub-linear manpower exponent means quality and logistics beat raw mass
+- **Supply lines** — supply flows from industrial centers down rail/road/sea network to fronts; overextended fronts `supply ×0.5` and falling. Cutting supply (deep front moves, blockade, bombing in late eras) is a first-class strategy
+- **Occupation** — occupied provinces: partial output, garrison cost, `resistanceLevel` accumulating scaled by ideology distance + occupation policy (conciliatory ↔ brutal). Brutality is cheaper now, costlier forever — postwar integration penalties
+- **War support decay** — `warSupport` decays with casualties/population, rationing, defeats; rallies on victories + home-soil attacks. Low support → strikes, draft riots, coup risk — *how* it bites depends on regime type
+- **Full peace terms** — peace priced in `warScore` (front positions, occupied territory, blockade effects): annex province (15–25 each), reparations (10/tranche), DMZ (15), puppet (45), status quo (0). Overreach creates Grudge-9 revanchist rival
+- **Test targets** — mobilization cost formulas, front resolution ratio math, occupation resistance growth, war support decay curves
+
+### Phase 17 — Historical Scenarios & Alternate Starts (GDD §8.8, §6.1) — *Sonnet scope*
+
+- **Era starts** — begin in 1950 with a pre-built state (skip colony/state phases, start with an existing nation), or in 2000 as an information-age economy. `RegionSim.fromEraStart(era, opts)` constructor with authored starting conditions per era
+- **Historical scenario layer** — authored starting conditions with named nations, historical parallels, and scripted opening events. Scenarios reference real geographical/political templates without replicating copyrighted works. Each scenario has 1–3 authored "scenario goals" on top of the standard win conditions
+- **Regime-locked challenge starts** — player chooses a government type at campaign start (junta, theocracy, etc.) and is locked to it for the first 30 years; generates unique opening constraints and story beats
+- **Difficulty knobs in sandbox** — expose all tuning parameters: crisis frequency/severity, AI aggression, economic volatility, starting region harshness, historical-anchor toggles (fire on schedule vs emergent only)
+- **Test targets** — era start serializes cleanly, scenario goals wire to existing win-condition infrastructure
+
+### Phase 18 — Advisor System Depth (GDD §8.7) — *Sonnet scope*
+
+Cabinet portfolios exist (Phase 2 via PR #239). This phase gives advisors the forecast quality and personality depth the GDD describes.
+
+- **Skill-based forecast accuracy** — each cabinet Notable has a `skill` 0–100 value; advisor-generated forecasts (debt service cliff, confidence break, unrest threshold) add Gaussian noise scaled to `1 − skill/100`. A bad advisor gives plausible but wrong projections
+- **Ideology-biased advice** — hawkish War minister consistently underestimates occupation costs; loyalist Press Secretary downplays credibility gap; pro-labor Interior minister overstates strike risk. Bias is deterministic per advisor ideology axis, invisible to the player until they notice the pattern
+- **Advisor briefs** — dedicated `advisorBriefs[]` queue: each portfolio auto-generates a brief when a key variable crosses a warning threshold (Treasury: "debt service passes 20% of revenue within 3 years on current path"; Interior: "lower-class housing satisfaction below 30 in 4 settlements"; Science: "rivals outpacing your tech in 2 of 3 military branches"). Briefs surface in the event log with portfolio attribution
+- **Advisor loyalty & betrayal** — `loyalty` 0–100 per Notable; falls when player ignores their advice repeatedly or fires a colleague they like; at loyalty < 20 + trigger (major loss, scandal), advisor defects to opposition faction or leaks information (approval hit + credibility gap ↑)
+- **Portfolio-specific events** — Foreign Secretary: "envoy refused audience" (relations deterioration warning); Science Minister: "research bottleneck — need secondary schools in 3 more settlements"; Press Secretary: "credibility gap accelerating — recommend addressing [specific cause]"
+- **Test targets** — forecast noise variance by skill, loyalty decay formula, brief threshold triggers, betrayal event chain
 
 ## Completed in PR #226
 

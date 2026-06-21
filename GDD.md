@@ -1,7 +1,8 @@
 # CENTURIA — Game Design Document
-### A colony-to-nation deep-simulation builder, 1800–2100
+### A colony-to-nation deep-simulation builder, 1919–2100
 
-**Version 0.1 — Foundational GDD**
+**Version 1.1 — Updated to reflect implementation (2026-06-21)**  
+*(Original v0.1 written as foundational spec; this revision aligns the document with the shipped design: 1919 campaign start, 4X campaign as default, TownCore per-settler sim retired to Classic Colony mode.)*
 
 ---
 
@@ -14,7 +15,7 @@
 3. **SMOKE & SIGNAL** — the energy/information arc in two words: coal smoke in 1900, signal (radio → internet → AI) by 2100; also describes the art style's smoky, atmospheric backdrops.
 
 **Elevator pitch:**
-CENTURIA begins with twelve named settlers stepping off a wagon in 1900 and ends — two hundred years later — with you signing peace treaties as a great power in 2100. It is three games stacked into one continuous life: a RimWorld-intimate colony sim where losing one carpenter to fever is a tragedy; a Cities-Skylines-meets-Citystate political economy where you wire towns together with rail, tax brackets, and ideology; and a Civ-scale grand strategy of trade wars, world wars, and climate reckoning. The same valley plays utterly differently as a liberal democracy, a junta, or a corporate state. Rendered in deliberate 8-bit pixel art set against lush, era-evolving painterly backdrops — steam and soot giving way to neon, then to solar glass or drowned coastlines — CENTURIA spends its entire rendering budget on one thing: the deepest economic, political, and social simulation that fits in a sprite.
+CENTURIA begins with a founding colony stepping into a world still smoldering from the Great War — 1919, the year of broken empires and new possibilities — and ends with you signing peace treaties as a great power in 2100. It is three games stacked into one continuous arc: a colony-builder where you wire together towns with rail, tax brackets, and ideology; a political economy where currency crises, strikes, and elections reshape who governs; and a Civ-scale grand strategy of trade wars, world wars, and climate reckoning. The same valley plays utterly differently as a liberal democracy, a junta, or a corporate state. Rendered in deliberate 8-bit pixel art set against lush, era-evolving painterly backdrops — steam and soot giving way to neon, then to solar glass or drowned coastlines — CENTURIA spends its entire rendering budget on one thing: the deepest economic, political, and social simulation that fits in a sprite.
 
 ---
 
@@ -33,7 +34,9 @@ This is the load-bearing system. Every other system in this document attaches to
 | **Economy** | Physical goods, barter-ish, no currency | Currency, markets, taxation, sectors | Central bank, trade blocs, business cycles |
 | **Government** | Founder/Council (no formal type) | Provisional Charter (proto-government) | Full government types (constitutional moment) |
 | **Threats** | Raids, disease, famine, weather | Recessions, strikes, rival-state friction | Wars, depressions, revolutions, climate |
-| **Typical years** | 1900–1915 | 1910–1940 | 1930–2100 |
+| **Typical years** | 1919–1930 | 1928–1945 | 1940–2100 |
+
+> **Implementation note (v1.1):** The default 4X campaign boots in 1919 via `foundColony()` using cohort-level modeling from the first tick. The per-settler individual simulation (TownCore) is available as "Classic Colony" mode but is not the primary campaign. Rivals likewise start as single towns in 1919 and climb the same ladder.
 
 ### 2.2 Promotion rules (exact)
 
@@ -100,8 +103,8 @@ Each era swaps palettes, backdrop kits, and lighting; transitions blend over 2�
 
 | Era | Palette feel | Backdrop signature |
 |---|---|---|
-| 1900–18 | Sepia, soot browns, gaslight amber | Smokestacks, rail trestles, coal haze, oil lamps at night |
-| 1918–39 | Warmer brick reds, early electric white | Radio masts, art-deco rooflines, breadlines in busts |
+| *(pre-game)* 1900–18 | Sepia, soot browns, gaslight amber | Historical backdrop only — smokestacks, rail trestles, coal haze, oil lamps; visible as founding lore |
+| **1919–39** *(game start)* | Warmer brick reds, early electric white | Radio masts, art-deco rooflines, breadlines in busts, postwar reconstruction cranes |
 | 1939–45 | Desaturated olive/steel | Blackout nights, searchlights, factory glow, barrage balloons |
 | 1945–70 | Optimistic pastels, chrome cyan | Highways, suburbs, drive-ins, cooling towers, TV aerials |
 | 1970–91 | Smoggy ochre, sodium orange | Concrete blocks, traffic haze, oil refineries, first wind turbines |
@@ -133,14 +136,13 @@ The verbs evolve (assign → zone → legislate) but the loop shape is constant:
 
 ### 4.2 The full arc (one playthrough, ~35–60 hours)
 
-1. **1900–1908, survival:** 12 settlers, first winter, first raid, first death and funeral. You learn the people.
-2. **1908–1918, outgrowing the frontier:** Growing Pains penalties bite; you send an expedition to found town 2, then 3; rail link; **Incorporation** ceremony — your founders become a provisional government, the population becomes cohorts, your favorites become Notables.
-3. **1918–1939, the political economy:** currency, taxes, classes, lobbies, the first election (or your refusal to hold one). The 1929-analog crash stress-tests you. You expand to 3 states.
-4. **~1935, Proclamation:** the Constitutional Convention. You choose what this country *is*. Every system recolors.
-5. **1939–1945, the war era:** rival nations have matured in parallel; the great-power war arrives by invitation or aggression. Mobilization, rationing, fronts, peace terms.
-6. **1945–1990, the long boom and its bill:** suburbanization, energy choices, Cold-War-style bloc politics, oil shocks, maybe a regime change (chosen or suffered).
-7. **1990–2040, information and climate:** services/information economy, media and misinformation politics, automation unemployment, emissions bill coming due.
-8. **2040–2100, the reckoning:** fusion or collapse, sea walls or retreat, solarpunk or corporatocracy. The game ends 1 Jan 2100 with a **Century Report**: your timeline, your Notables' dynasty tree, your counters — and sandbox continues past it if you wish.
+1. **1919–1928, the founding decade:** You step into a world of broken empires. One colony, a founding settlement in the wreckage of the Great War. Build infrastructure, manage the sectoral economy, survive the shocks of an unstable postwar order. Found a second town, then a third.
+2. **1928–1939, the political economy:** Currency, taxes, classes, lobbies, the first election (or your refusal to hold one). The 1929-analog crash stress-tests your banking system and monetary policy. You expand to 3 states. **Incorporation** ceremony — your settlement becomes a formal state, the population shifts to cohorts, your most storied founders become Notables.
+3. **~1935, Proclamation:** The Constitutional Convention. You choose what this country *is*. Every system recolors.
+4. **1939–1945, the war era:** Rival nations have matured in parallel; the great-power war arrives by invitation or aggression. Mobilization, rationing, fronts, peace terms.
+5. **1945–1990, the long boom and its bill:** Suburbanization, energy choices, Cold-War-style bloc politics, oil shocks, maybe a regime change (chosen or suffered).
+6. **1990–2040, information and climate:** Services/information economy, media and misinformation politics, automation unemployment, emissions bill coming due.
+7. **2040–2100, the reckoning:** Fusion or collapse, sea walls or retreat, solarpunk or corporatocracy. The game ends 1 Jan 2100 with a **Century Report**: your timeline, your Notables' dynasty tree, your counters — and sandbox continues past it if you wish.
 
 ---
 
@@ -409,8 +411,8 @@ The brief's 8-era spine is adopted unchanged — it's correct. Per era: entry co
 
 | Era | Entry | Signature unlocks | Energy | The era's question |
 |---|---|---|---|---|
-| **1900–18 Industrial** | start | T: electrification, steel mills, rail networks, telegraph. C: town charter, public schooling, **Regional Charter** | **Coal** (only option; smog is the price of growth) | Survive, then outgrow the frontier |
-| **1918–39 Interwar** | date + electrification | T: automobiles, assembly line, radio, early aviation. C: mass suffrage, labor unions, central banking, **Statecraft** | Coal + early **oil** | Who gets the gains? (class politics arrives; the crash tests your bank system) |
+| *(pre-game backdrop)* **1900–18 Industrial** | — | Historical context: electrification, steel mills, rail, telegraph. The Great War consumed this era; its ruins are the player's 1919 starting world | **Coal** | — |
+| **1919–39 Interwar** *(game start)* | campaign start (1919) | T: automobiles, assembly line, radio, early aviation. C: mass suffrage, labor unions, central banking, **Regional Charter**, **Statecraft** | Coal + early **oil** | Who gets the gains from the postwar world? (class politics arrives; the crash tests your bank system) |
 | **1939–45 War economy** | tension-triggered window | T: radar, synthetics, rocketry, (atomic program — late, expensive, world-changing). C: total mobilization, rationing systems | Oil ascendant (fuel = strategy) | Can your system fight? |
 | **1945–70 Atomic boom** | postwar | T: nuclear power, highways, television, jet aviation, early computing. C: welfare state, suburban planning, international institutions | Oil/gas dominant + **nuclear** option (cheap, clean, dread events: meltdown risk small but era-defining if it fires) | Spend the boom: consumption, welfare, or empire? |
 | **1970–91 Shocks** | date + computing | T: microprocessors, telecom, industrial robotics. C: environmental regulation (demanded by your own smog), deregulation, monetarism | **Oil shock anchors**: price ×3 events; first renewables (expensive) | Stagflation: the first crisis your old tools make *worse* |
@@ -510,20 +512,25 @@ The signature designed cascade (from the brief, fully supported by the loops abo
 
 ## 13. MVP vs. Full Scope, and the Top Balance Risks
 
-### 13.1 MVP (a complete, shippable game — "the spine plus one deep system per tier")
+### 13.1 MVP (shipped — v1.0.1, as of 2026-06-21)
 
-- **The full three-tier ladder** — non-negotiable; it *is* the game. Both promotions, the simulation flip, Notables, all three zoom levels.
-- **Tier 1 complete:** ~30 settler jobs/buildings, needs/moods/health, raids/disease/weather.
-- **Economy:** 18 goods, markets, labor, public finance, credit-cycle macro; **no FX**, single currency world.
-- **Politics:** the universal chassis + **6 regimes** (liberal democracy, social democracy, absolute monarchy, junta, one-party state, technocracy), elections/coups/revolutions, factions, statute book (policy *slots* deferred).
-- **Diplomacy & war:** relations, 6 treaty types, the negotiation engine, fronts/mobilization/peace-terms warfare. **3–5 AI rivals**, 4 personality archetypes.
-- **Eras 1–6 (1900–2010)** with art/audio sets; climate ledger running but with impacts simplified to weather/yield events; **misinformation era and speculative branch deferred** — MVP ends at 2010 with the Century Report.
-- **UI:** the 12 screens, tooltips-with-formulas, overlays, century graphs.
-- **Modes:** Sandbox + Grand Strategy. No scenarios.
+The following is implemented and merged to `main` (368 passing tests):
+
+- **The full three-tier ladder** — colony → state → nation arc from `foundColony()`. Both promotions (Regional Charter, Constitutional Convention), all three zoom levels. Campaign starts 1919 in post-WWI context.
+- **4X campaign as default** — cohort-level model from the first tick. Per-settler individual simulation exists as "Classic Colony" mode but is not the primary campaign.
+- **Economy:** Sectoral economy (agriculture/industry/services/information), monetary policy, credit cycle with emergent business cycles, public finance (tax/spending/debt), trade income, naval trade. 18 goods, markets, labor markets.
+- **Historical anchors** — four scripted world-events (GDD §8.1): world-war window (1936–1948), oil shock (1970–1985), 2020-analog pandemic (2012–2027), Great Depression (1927–1936) with depth/response toolkit (QE, gold-standard exit, public works).
+- **Politics:** Government chassis (approval, legitimacy, liberty, corruption, political capital), factions, statute book, laws. Partial regime roster (further types in full scope).
+- **Diplomacy & war:** Relations ledger, 6 treaty types, negotiation engine, espionage (4 op types), trade blocs, sanctions, inter-provincial army movement, province-level battle resolution. 11 named AI rivals with personality archetypes.
+- **Province system:** Province interface, governance policies (tax/investment/autonomy), AI province governance, army deployment and movement.
+- **Cabinet:** 6 portfolios (Treasury, Interior, Foreign, War, Science, Press Secretary) with Notable assignment.
+- **Eras 1–6 (1919–2010)** with art/audio sets; climate ledger running with weather/yield events; era-branching cinematics, post-2100 epilogue scroll.
+- **UI:** Map (hex grid, fog of war, memory fog, atmosphere), dashboards, tech DAG, route network, province overlay, economy sparklines, minimap.
+- **Modes:** Sandbox + Grand Strategy. Historical scenarios deferred.
 
 ### 13.2 Full scope adds
 
-Eras 7–8 with the 2040+ branching endgame; climate adaptation/geoengineering/accords; FX & monetary regimes; all 13 regimes + bespoke transition chains; policy slots; 44-good economy with chemicals/electronics chains; espionage; misinformation systems; historical-scenario layer; dynasty depth for Notables; 7 rivals; modding tools & workshop; map/start variety; full audio arc.
+Eras 7–8 with the 2040+ branching endgame (solarpunk/corporatocracy/drowned); full climate depth (CO₂ ledger, sea-level rise, adaptation, geoengineering, accords); FX & monetary regimes; all 13 regime types with bespoke transition chains; policy slots; 44-good economy with chemicals/electronics chains; full misinformation/media system; historical-scenario layer; dynasty depth for Notables (aging, death, succession, dynasty tree); 7 rivals; modding tools & workshop; full audio arc for 2040+ branches. Full roadmap in `HANDOFF.md`.
 
 ### 13.3 Top balance risks (watch these from the first playable)
 

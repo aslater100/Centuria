@@ -1,17 +1,15 @@
 # CENTURIA
 
-A deep 4X civilization simulator spanning 1800–2100. Begin with twelve named
-settlers stepping off a wagon in 1800; end three centuries later as a great
-power signing peace treaties — Explore a procedural valley, Expand and grow into a mighty nation from a small city, eXploit resources through a
-dynamic sectoral economy, and eXterminate rivals through diplomacy and war.
+A deep 4X civilization simulator spanning 1919–2100. Found a colony in the
+wreckage of the Great War; end eight decades later as a great power signing
+peace treaties — Explore a procedural world, Expand from a single settlement
+into a mighty nation, eXploit resources through a dynamic sectoral economy,
+and eXterminate rivals through diplomacy and war.
 True to its roots in games like Victoria, all in hi-def pixel art over lush era-evolving backdrops.
 
 - **Design:** [GDD.md](GDD.md) — the full game design document.
-- **Milestones:** [01 Tier-1 colony](docs/specs/01-tier1-colony.md) ·
-  [02 raids, medicine & relationships](docs/specs/02-raids-medicine-relationships.md) ·
-  [03 the flip — town #2, cohorts & Notables](docs/specs/03-the-flip.md) ·
-  [04 State layer & procedural world](docs/specs/04-procedural-world.md) ·
-  [05 roads, bridges & the art pass](docs/specs/05-roads-and-art.md)
+- **Development guide:** [HANDOFF.md](HANDOFF.md) — architecture, completed phases, and roadmap.
+- **Early specs:** [docs/specs/](docs/specs/) — per-milestone implementation specs (historical reference).
 - **Design docs:** [transportation](docs/design/transportation.md)
 
 ## Download
@@ -38,62 +36,54 @@ npm run build    # production build
 
 ## Gameplay overview
 
-### Town Phase (1900–1915)
+### Colony Phase (1919–1930s)
 
-You start in Spring 1900 with 12 settlers, two cabins, a stockpile, and
-about three weeks of provisions. Build farm plots and a cookhouse before
-the wagon food runs out; mark trees for wood; get cabins up before winter.
-Raiders arrive from week two — your fighters meet them automatically while
-the rest hide indoors; palisades (with deliberate gaps) shape the
-battlefield. Keep a good medic: untreated wounds fester.
+You arrive in 1919 — the Great War is over, empires have collapsed, and the map has new borders. Your founding settlement is a single town in a procedurally generated valley. Manage its **sectoral economy** (agriculture, industry, commerce, services) as your population grows in cohorts. Research tech and civics nodes to unlock new buildings and capabilities. Build roads to expand, establish trade routes, and found a second and third town.
 
-- **Build menu** (left): place blueprints; settlers haul wood and build.
-  Shift-click to place repeatedly. *Chop Trees* marks trees for felling.
-- **Click a settler** for needs, mood, traits, thoughts, and current task;
-  **Work Priorities** opens the per-settler job table (click cells, 0–3).
-- **Controls:** **Space** pause · **1/2/5/10×** game speed · **WASD/arrows** pan · **Esc** deselect.
+**The 4X Map:** the game opens on a regional hex map with fog of war. Explore the surroundings, claim territory, and watch rival nations (also starting as single colonies in 1919) grow on the same map.
 
-### Regional Phase (1910–1940+)
+- **Controls:** **Space** pause · **1/2/5/10×** game speed · **WASD/arrows** pan · **Esc** close panel
+- **Keyboard shortcuts:** **S** settlements · **E** economy · **R** research · **N** route network · **P** province view
 
-At 20 settlers you can **found a second town** — the moment you do, the game flips: the population becomes cohort statistics on a region map, your most storied settlers become named **Notables** with roles, and the economy shifts to a currency-based system.
+### Regional/State Phase (1928–1940s)
 
-**The Regional Map opens:** manage multiple towns across a landscape. Each town has its own production and can trade with others. A second town requires treasury funds (you must build wealth first). Founding a third town and reaching 500 combined citizens lets you proclaim a **Charter** (if you also have a garrison and treasury reserves) — formal statehood.
+Found a second and third town and unlock **Regional Charter** — formal statehood. The population becomes cohort statistics (age/class/education), your most storied founders become named **Notables** with roles, and the economy shifts to a full currency-based system.
 
-**Sectoral Economy:** as towns grow, settlers specialize. A town's **sectors** (agriculture, industry, commerce, services, artisan) compete for labor. Your tech choices and zoning decisions determine which sectors thrive. Build a textile mill and your commerce sector grows; neglect it and workers drift to farming. This determines your tax base, trade goods, and citizen mood.
+**Sectoral Economy:** each settlement distributes labor across sectors. Tech choices, zoning, and policies determine which sectors thrive. This shapes your tax base, trade goods, and citizen mood.
 
-**Town Tiers & City Works:** each town has a tier (1–4) unlocked by population and economic development. Unlock the **Drafting Table** (Tier 2+) to zone residential, industrial, and commercial districts, manage services, and fine-tune local policy. Build roads and rail between towns to unlock trade and reduce isolation penalties.
+**Provinces:** each settlement is a province with its own tax policy, investment level, and autonomy setting. Deploy armies between provinces, manage local governance, and respond to province-level events.
 
-**Regional Factions & Politics:** rival settlements and factions appear on the map. You can negotiate trade deals, establish truces, or clash with rivals. Local **policies** (labor laws, tax brackets, subsidies) affect both your treasury and citizen ideology. Your choices accumulate as political capital that shapes your nation's future government type.
+**Regional Factions & Politics:** factions (workers, merchants, landowners, military) push demands. Pass laws, negotiate with factions, manage strikes and grievances. Rival settlements grow and form their own nations on the map.
 
-**Military & Garrison:** maintain a garrison to deter raids and rival aggression. Military readiness becomes a charter requirement and a defensive necessity as rivals grow stronger.
+**Historical Anchors:** the Great Depression fires 1927–1936 if your private leverage and confidence are fragile. Respond with stimulus, austerity, QE, public works, or gold-standard exit — each with lasting consequences.
 
-### Nation Phase (1930–2100)
+### Nation Phase (1940–2100)
 
-Reaching 9 towns, 6,000 citizens, and researching Statecraft unlocks the **Constitutional Convention** — a scripted event where you choose your government type (democracy, monarchy, junta, corporate state, etc.). Your chosen ideology and notable ministers shape your nation's laws, trade blocs, and diplomatic options.
+Reaching 3 states, 6,000 citizens, and researching Statecraft unlocks the **Constitutional Convention** — a scripted event where you choose your government type. Your chosen ideology and Notable ministers shape your nation's laws, trade blocs, and diplomatic options.
 
-At the nation tier, you manage provinces, sign treaties, wage wars, and steer a macroeconomy with interest rates and trade policies. The same valley plays utterly differently as a liberal democracy, a junta, or a corporate oligarchy.
+At the nation tier: manage provinces, sign treaties, run espionage operations, wage wars with inter-provincial army movement, and steer a macroeconomy with interest rates and monetary policy. The world-war window fires 1936–1948 if great-power tensions peak. The oil shock hits 1970–1985 if you haven't transitioned away from combustion.
 
 **Scope and timeline:**
-- **Years simulated:** 300 years (1800–2100); you begin in 1900 and the game ends 1 January 2100
-- **Era boundaries:** Industrial (1850), Modern (1920), Information (1980) — palettes and tech trees shift at each boundary  
+- **Years simulated:** 1919–2100 (~180 years); the game ends 1 January 2100 with a Century Report
+- **Era boundaries:** Interwar (1919 — game start), War Economy (1939), Atomic Boom (1945), Shocks (1970), Information (1991), Climate & Automation (2010), Speculative Branch (2040)
 - **Game pacing:** Real-time with pause; calendar accelerates per tier to keep decision rate constant. At 1× speed: ~1 hour per in-game year. Play at 1×–10× acceleration; pause anytime to manage crises, plan infrastructure, or just breathe
 
 ## Systems
 
 The simulation is built on a three-tier spine (Town → State → Nation), with each tier introducing new mechanical depth:
 
-| System | Town | State | Nation |
+| System | Colony (1919–1930s) | State (1928–1945) | Nation (1940–2100) |
 |--------|------|-------|--------|
-| **Scope** | One town, 12–150 settlers | Region, 3+ towns, cohort statistics | Continent, provinces, trade blocs |
-| **Population** | Individual agents, mood/skills/thoughts | Cohorts (age/class/education) + Notables | Cohorts + Notables as ministers/generals |
-| **Economy** | Barter-ish, no currency | Currency, markets, sectors, taxation | Central bank, trade agreements, business cycles |
+| **Scope** | One founding settlement, hex map, fog of war | Region, 3+ towns, provinces | Continent, provinces, trade blocs |
+| **Population** | Cohorts (age/class/education) from founding | Cohorts + Notables with roles | Cohorts + Notables as ministers/generals |
+| **Economy** | Sectors, barter-adjacent, proto-currency | Currency, markets, taxation, route trade | Central bank, monetary policy, business cycles, espionage |
 | **Government** | Founder/Council | Charter (proto-government) | Full government types (democracies, juntas, etc.) |
-| **Conflicts** | Raids, disease, famine | Recessions, strikes, rival friction | Wars, revolutions, climate crises |
-| **Key Progression** | Tech tree (farming→crafts→industry) | Civics (Regional Charter), town founding | Civics (Statecraft), Constitutional Convention |
+| **Conflicts** | Rival friction, historical anchors | Recessions, strikes, Depression (1927–36) | Wars, revolutions, oil shocks, pandemic, climate |
+| **Key Progression** | Tech + civics tree, road/rail expansion | Civics (Regional Charter), town founding | Civics (Statecraft), Constitutional Convention |
 
 **Sectoral Economy** — Each settlement has labor distributed across sectors (agriculture, industry, commerce, services, artisan). Population growth, tech choices, zoning, and policies steer which sectors dominate, shaping your economy and tax base.
 
-**Notables System** — Named individuals (carpenter, medic, guard captain) persist from the town phase through state and nation tiers. They age, gain experience, form relationships, develop ideology, and fill government roles. The founding carpenter's journey from town builder to agriculture minister can span three centuries (1800–2100), creating an emotional through-line across entire eras.
+**Notables System** — When your colony earns statehood, your most storied founders are promoted to named Notables. They age, form relationships, develop ideology, and fill government roles (mayors, ministers, generals, press barons). A Notable born in 1890 who helped build your first settlement can serve as agriculture minister in 1940 before dying in office — that continuity is the emotional through-line of the whole campaign.
 
 **Zoning & City Management** — Starting at Tier 2, unlock the Drafting Table to zone towns and manage services (schools, hospitals, markets). Zoning decisions shape population growth, sector specialization, and district culture.
 
