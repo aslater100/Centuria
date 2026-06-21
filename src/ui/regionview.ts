@@ -267,11 +267,14 @@ export class RegionView {
     this.provincePanel.remove();
   }
 
-  private toPx(x: number, y: number): { px: number; py: number } {
+  private toPx(rx: number, ry: number): { px: number; py: number } {
     const W = this.canvas.width;
     const H = this.canvas.height;
-    const m = 60; // margin
-    return { px: m + (x / 100) * (W - 2 * m), py: m + (y / 100) * (H - 2 * m) };
+    const { size, ox, oy } = hexLayoutParams(W, H, REGION_N, 60);
+    const col = Math.max(0, Math.min(REGION_N - 1, Math.floor((rx / 100) * REGION_N)));
+    const row = Math.max(0, Math.min(REGION_N - 1, Math.floor((ry / 100) * REGION_N)));
+    const { x: px, y: py } = hexCenter(col, row, size, ox, oy);
+    return { px, py };
   }
 
   /** Has the player explored or scouted the tile under this region coord
@@ -662,6 +665,11 @@ export class RegionView {
 
     // Expeditions: a wagon dot crawling to its site
     for (const e of region.expeditions) {
+      // Non-player expeditions are hidden in memory fog (same guard as scouts)
+      const fromS = region.settlement(e.fromId);
+      if (fromS && fromS.factionId !== region.playerFactionId) {
+        if (!this.region.isVisibleToFaction(Math.round(e.x), Math.round(e.y), region.playerFactionId)) continue;
+      }
       const { px, py } = this.toPx(e.x, e.y);
       const target = this.toPx(e.targetX, e.targetY);
       if (!this.inView(px, py, 48) && !this.inView(target.px, target.py, 48)) continue;
@@ -1693,9 +1701,11 @@ export class RegionView {
           }
         }
 
-        // Elevation-based lighting: NW-lit hillshade (approximated via row/col above)
-        const north = y > 0 ? map.at(x, y - 1).elevation : c.elevation;
-        const west  = x > 0 ? map.at(x - 1, y).elevation : c.elevation;
+        // Elevation-based lighting: NW-lit hillshade using hex-direction neighbors.
+        const [nwCol, nwRow] = hexNeighborDir(x, y, 4); // dir 4 = NW
+        const [wCol,  wRow]  = hexNeighborDir(x, y, 3); // dir 3 = W
+        const north = (nwRow >= 0 && nwCol >= 0 && nwCol < N) ? map.at(nwCol, nwRow).elevation : c.elevation;
+        const west  = (wCol  >= 0 && wRow  >= 0 && wCol  < N) ? map.at(wCol,  wRow).elevation  : c.elevation;
         const shade = (c.elevation - north + c.elevation - west) * 1.4;
         if (shade > 0.01) {
           g.fillStyle = `rgba(255,255,240,${Math.min(0.32, shade * 0.6)})`;
@@ -1705,6 +1715,17 @@ export class RegionView {
           fillHexPath(g, corners);
         }
 
+        // Texture details whose fillRects could bleed past the hex bounding box
+        // are drawn inside a hex clip region (save once per biome that needs it).
+        const needsClip = c.biome === 'forest' || c.biome === 'plains' || c.biome === 'hills';
+        if (needsClip) {
+          g.save();
+          g.beginPath();
+          g.moveTo(corners[0].x, corners[0].y);
+          for (let i = 1; i < 6; i++) g.lineTo(corners[i].x, corners[i].y);
+          g.closePath();
+          g.clip();
+        }
         // Forest canopy: layered blobs — dark trunks under lit crowns — so
         // woodland reads as foliage rather than a flat green block.
         if (c.biome === 'forest') {
@@ -1729,6 +1750,7 @@ export class RegionView {
           g.fillStyle = 'rgba(40,36,28,0.32)';
           g.fillRect(bx + bw * 0.5, by + bh * 0.45, Math.max(1, bw * 0.22), Math.max(1, bh * 0.22));
         }
+        if (needsClip) g.restore();
         // Mountain snow caps on highest peaks
         if (c.biome === 'mountains' && c.elevation > 0.82) {
           g.fillStyle = `rgba(230,230,240,${(c.elevation - 0.82) * 2.5})`;
@@ -1739,10 +1761,17 @@ export class RegionView {
           g.fillStyle = 'rgba(180,220,240,0.22)';
           fillHexPath(g, corners);
         }
-        // Marsh reeds texture
+        // Marsh reeds texture (clipped separately to allow full-height strips)
         if (c.biome === 'marsh' && (x * 5 + y * 7) % 11 < 3) {
+          g.save();
+          g.beginPath();
+          g.moveTo(corners[0].x, corners[0].y);
+          for (let i = 1; i < 6; i++) g.lineTo(corners[i].x, corners[i].y);
+          g.closePath();
+          g.clip();
           g.fillStyle = 'rgba(60,80,30,0.4)';
           g.fillRect(bx + bw * 0.3, by, Math.max(1, bw * 0.2), bh);
+          g.restore();
         }
       }
     }
