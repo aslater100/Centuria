@@ -8,7 +8,7 @@
  * every other system spends against.
  */
 
-import { hexNeighbors, hexDistance } from './hex';
+import { hexNeighbors, hexDistance, offsetToCube } from './hex';
 
 export const REGION_N = 256; // region is REGION_N × REGION_N cells over 0..100 coords
 // Higher resolution = a larger, more detailed continent that fits more towns
@@ -429,12 +429,22 @@ export class RegionMap {
   travelDays(ax: number, ay: number, bx: number, by: number): number {
     const dist = hexDistance(ax, ay, bx, by);
     const steps = Math.max(1, dist);
+    // Lerp in cube coordinates so diagonal steps step through actual hex neighbors.
+    const ca = offsetToCube(ax, ay);
+    const cb = offsetToCube(bx, by);
     let cost = 0;
     for (let i = 0; i <= steps; i++) {
-      const x = Math.round(ax + ((bx - ax) * i) / steps);
-      const y = Math.round(ay + ((by - ay) * i) / steps);
-      const c = this.at(x, y);
-      cost += this.isWater(x, y) ? 2.2 : 1 + c.roughness * 1.6;
+      const t = i / steps;
+      const fq = ca.q + (cb.q - ca.q) * t;
+      const fr = ca.r + (cb.r - ca.r) * t;
+      const fs = ca.s + (cb.s - ca.s) * t;
+      let rq = Math.round(fq), rr = Math.round(fr), rs = Math.round(fs);
+      const dq = Math.abs(rq - fq), dr = Math.abs(rr - fr), ds = Math.abs(rs - fs);
+      if (dq > dr && dq > ds) rq = -rr - rs;
+      else if (dr > ds) rr = -rq - rs;
+      const x = rq + (rr - (rr & 1)) / 2;
+      const y = rr;
+      cost += this.isWater(x, y) ? 2.2 : 1 + this.at(x, y).roughness * 1.6;
     }
     // Normalize cell-distance to the base grid so travel time tracks the logical
     // world, not the resolution.
