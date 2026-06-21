@@ -13,7 +13,7 @@
 ```typescript
 interface RegionSim {
   // Identity
-  year: number (1800–2100)
+  year: number (1919–2100)
   difficulty: 'easy' | 'normal' | 'hard'
   cityState: {
     name: string
