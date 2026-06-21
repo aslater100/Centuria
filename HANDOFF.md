@@ -1,6 +1,6 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-21 · **Tests:** 368 passing · **Version:** v1.0.1 · **Status:** Phases 1–7 complete + historical anchors + Depression anchor/depth/response toolkit + cabinet expansion
+**Last updated:** 2026-06-21 · **Tests:** 368 passing · **Version:** v1.0.1 · **Status:** Phases 1–7 complete + historical anchors + Depression anchor/depth/response toolkit + cabinet expansion + hex-grid migration + memory fog (rendering follow-ups open, see below)
 
 ## The game: a standalone 4X campaign
 
@@ -103,6 +103,33 @@ npx vitest run --exclude '**/.claude/**'   # 316 tests
 - ✓ **#238** — Historical anchors (GDD §1): three scripted world-events that rhyme with history without reciting it — **world-war window** (1936–1948: fires when rival tensions peak + an expansionist is in the mix; escalates the most hostile rival pair into open war, shakes player confidence); **oil shock** (1970–1985: fires when combustion_engine is researched but no renewables exist; treasury drain + inflation spike + currency hit + industry slump in player settlements); **2020-analog pandemic** (2012–2027: 4%/month roll; pushes a 60–120 day pandemic_wave onto all settlements, with severity halved if `antibiotics` is researched); each fires at most once, is fully serialized, and backfills `false` on old saves; 18 new tests (`tests/historical-anchors.test.ts`, 334 total)
 - ✓ **#239** — Great Depression anchor (GDD §8.1) + cabinet expansion (GDD §8.7): Depression moved to `tickHistoricalAnchors()` (1927–1936 window, `privateLeverage × policyRate > 0.12 && confidence < 55`); richer chain effects — confidence −40, leverage ×0.65, export collapse ×0.55, bank-failure treasury drain (~12% GDP), 150-day labor_shortage events on all player settlements, grievance +25 / satisfaction −15, legitimacy −12 for nation tier, two dramatic log entries (THE CRASH + DEPRESSION); cabinet expanded from 3 → 6 portfolios: Foreign Secretary (+5 envoy relations), Science Minister (+15% research rate), Press Secretary (−25% legitimacy decay); old saves with 3 ministers backfill remaining slots to null on deserialize
 - ✓ **#239 (follow-up)** — Depression depth + response toolkit: `depressionDepth` (0→1, set 1.0 on crash, decays ~5%/mo over ~30 months) drives multi-year export suppression (`× max(0.3, 1 − depth×0.55)`) and a confidence-recovery ceiling (`35 + 65×(1−depth)`). Month-12 **recovery crossroads** (`chooseRecoveryPath`): stimulus (halves depth, −£8/mo × 24) vs austerity (−20% depth, services cut, grievance spike). New **emergency measures** (`enactDepressionMeasure`, once each while a slump is active, GDD §8.1): **QE** (rate cut, depth ×0.80, +inflation, needs Central Bank), **Leave Gold Standard** (float + devalue, depth ×0.78, export surge via existing fxBoost), **Public Works** (treasury cost, depth ×0.82, grievance −12 / clears labor_shortage). Each measure adds a `depressionCeilingBonus` so the recovery cap lifts. UI: redesigned **Depression Response panel** in `nationHtml` → `depressionResponseHtml()` (depth meter bar, crossroads fork cards, measure cards with used/blocked states) with dedicated `.crisis-banner`/`.depth-meter`/`.dep-measure-btn` CSS. All 5 depression-depth fields + `depressionMeasuresUsed`/`depressionCeilingBonus` serialize with old-save backfill. 34 tests in `tests/depression-cabinet.test.ts` (368 total)
+- ✓ **#241** — Hex grid migration: square→pointy-top hexes (odd-r offset). New `src/sim/hex.ts` module: `hexNeighbors`, `hexCenter`, `hexCorners`, `hexLayoutParams`, `screenToHex`, `hexDistance`, `offsetToCube`. Updated: 6-dir neighbors + cube-distance A* in `worldgen.ts`; `canClaimCell` adjacency in `region.ts`; hex polygon rendering in `regionview.ts` (`drawTerrain`, `drawTerritories`, `drawFog`, `ensureWaterMask`, click hit-test). Tests: `hexNeighbors`/`hexDistance` in `tests/routes.test.ts`. Sim tests green (368) — but tests are sim-only, so the rendering layer shipped with known gaps:
+- ✓ **#242** — Three-tier memory fog: explored-but-not-visible cells now show a cool-grey wash (`drawMemoryFog`, live overlay outside map cache) instead of full-colour terrain. Live rivals hidden in grey areas via `isVisibleToFaction` guard added at `regionview.ts:600,642`. Player scouts always shown; AI scouts hidden when not in current sight.
+
+### ⚠️ Rendering follow-ups (correct before further map work)
+
+1. **CRITICAL — overlays still use `toPx`, terrain uses hex geometry.** Terrain/territory/fog moved
+   to `hexLayoutParams`+`hexCenter` (hex space with odd-row shift + √3/1.5 spacing), but
+   settlements (`regionview.ts:559`), routes (`cellToCoord→toPx`, lines 474–481/1373), scouts
+   (line 643), expeditions (lines 665–666), rival/province markers, selection hit-tests, and the
+   border vignette all still use linear `toPx`. Markers no longer register against the hex grid
+   (routes miss their towns; settlements drift ≥½ hex at large grid sizes).
+   Fix: unify on one hex-consistent projection — project cell paths via `hexCenter`; settlement
+   logical x,y via `coordToCell→hexCenter` (or redefine `toPx` to match the hex layout).
+2. **Fog no longer reliably hides rivals** — fog hexes (hex space) vs rival markers (`toPx`). Fixed
+   by #1. The `isVisibleToFaction` hide-guard uses logical coords (correct), but the drawn position
+   drifts, so a visible rival may draw over the wrong hex.
+3. **Expeditions not hidden in memory fog** — no `isVisibleToFaction` guard at lines 664–680; enemy
+   expeditions bleed through the grey wash. Add the same pattern used for scouts (line 642).
+4. **Terrain textures not clipped to the hex** — forest/plains/hills/marsh `fillRect`s bleed past
+   hex edges; add `g.save(); g.clip()` to the hex path (planned in PR #241 but not implemented).
+5. **Hillshade samples square N/W neighbors** — `drawTerrain` uses `map.at(x,y-1)` / `map.at(x-1,y)`;
+   switch to `hexNeighborDir` samples for NW/NE lighting (low severity).
+6. **`travelDays` interpolates in offset space** — uses `hexDistance` for step count but lerps in
+   offset coords; sample along a cube-coordinate lerp for accuracy (low severity, sim deterministic).
+7. **Memory fog refreshes weekly** — `isVisibleToFaction` rebuilds its cache every 7 days, so the
+   grey boundary lags unit movement. Acceptable for now; could rebuild on scout/settlement events.
+8. **Minimap left on square dots** — intentional per plan (1px dots); note the extra mapping.
 
 ## UI Architecture Notes (updated 2026-06-19)
 
