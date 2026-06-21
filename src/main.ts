@@ -1,6 +1,7 @@
 import './style.css';
 import { RegionSim } from './sim/region';
 import { RegionView } from './ui/regionview';
+import { WindowManager } from './ui/WindowManager';
 import { Sfx } from './ui/audio';
 import { Music } from './ui/music';
 import { Soundscape } from './ui/soundscape';
@@ -97,6 +98,7 @@ function enterRegionMode(r: RegionSim): void {
   region = r;
   (window as any).region = r;
   regionView = new RegionView(canvas, r, root);
+  new WindowManager(regionView.draggablePanels);
   paused = false;
   updateUIState();
   titleScreen.hide();
@@ -125,6 +127,7 @@ pauseMenu.onResume = () => {
   paused = false;
   updateUIState();
 };
+pauseMenu.onSave = () => { save(); };
 pauseMenu.onQuit = () => {
   pauseMenuOpen = false;
   showTitleScreen();
@@ -198,7 +201,7 @@ canvas.addEventListener('mousemove', (e) => {
     regionDrag.lastX = e.clientX;
     regionDrag.lastY = e.clientY;
     regionDrag.moved += Math.abs(dx) + Math.abs(dy);
-    void dx; void dy; // pan not yet implemented in RegionView
+    regionView.panBy(dx, dy);
   }
 });
 
