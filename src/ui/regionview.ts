@@ -2817,6 +2817,27 @@ export class RegionView {
         this.lastStatePanelBuildFrame = -999;
       };
     }
+    // Phase 12: Media & Press actions
+    this.statePanel.querySelector<HTMLButtonElement>('#media-censor')?.addEventListener('click', () => {
+      r.censorMedia();
+      this.lastStatePanelBuildFrame = -999;
+    });
+    this.statePanel.querySelector<HTMLButtonElement>('#media-liberalise')?.addEventListener('click', () => {
+      r.grantPressLicense();
+      this.lastStatePanelBuildFrame = -999;
+    });
+    this.statePanel.querySelector<HTMLButtonElement>('#media-platform-reg')?.addEventListener('click', () => {
+      r.enactPlatformRegulation();
+      this.lastStatePanelBuildFrame = -999;
+    });
+    this.statePanel.querySelector<HTMLButtonElement>('#media-public-media')?.addEventListener('click', () => {
+      r.fundPublicMedia();
+      this.lastStatePanelBuildFrame = -999;
+    });
+    this.statePanel.querySelector<HTMLButtonElement>('#media-literacy')?.addEventListener('click', () => {
+      r.investMediaLiteracy();
+      this.lastStatePanelBuildFrame = -999;
+    });
     // Phase 13: Protest response buttons
     this.statePanel.querySelector<HTMLButtonElement>('.unrest-crackdown-btn')?.addEventListener('click', () => {
       r.crackdownProtests();
@@ -3236,7 +3257,83 @@ export class RegionView {
       `<p class="insp-skills">FACTIONS (support bar)</p>` +
       factionBars +
       lawButtons +
-      enacted;
+      enacted +
+      this.mediaPressSectionHtml();
+  }
+
+  /** Media & Press sub-section within the Politics tab (GDD §8.3, Phase 12). */
+  mediaPressSectionHtml(): string {
+    const r = this.region;
+    const reachLabel: Record<string, string> = {
+      word_of_mouth: 'Word of Mouth',
+      press: 'Press',
+      radio: 'Radio',
+      television: 'Television',
+      internet: 'Internet',
+      algorithmic: 'Algorithmic',
+    };
+
+    const bar = (val: number, max: number, col: string) => {
+      const pct = Math.round((val / max) * 100);
+      const filled = Math.round(pct / 10);
+      const empty = 10 - filled;
+      return `<span style="color:${col}">${'█'.repeat(filled)}${'░'.repeat(empty)}</span> ${Math.round(val)}`;
+    };
+
+    const pfPct = Math.round(r.pressFreedom);
+    const pfCol = r.pressFreedom >= 65 ? '#4e9' : r.pressFreedom <= 35 ? '#e55' : '#ca4';
+    const cgPct = Math.round(r.credibilityGap);
+    const cgCol = cgPct >= 60 ? '#e55' : cgPct >= 30 ? '#ca4' : '#4e9';
+    const polPct = (r.polarization * 100).toFixed(0);
+
+    const canCensor = r.stateProclaimed && r.politicalCapital >= 15;
+    const canLiberalise = r.stateProclaimed && r.politicalCapital >= 15;
+    const canPlatformReg = !r.platformRegulationEnacted && r.has('digital_economy') && r.politicalCapital >= 20;
+    const canPublicMedia = !r.publicMediaFunded && r.stateProclaimed && r.politicalCapital >= 25;
+    const canMediaLiteracy = !r.mediaLiteracyInvested && r.treasury >= r.gdpLastMonth * 0.05;
+
+    const misEraLine = r.misinformationEra
+      ? `<p style="color:#e07a30;font-size:10px">Algorithmic misinformation era active</p>`
+      : '';
+    const criticalGap = r.credibilityGap > 60
+      ? `<p style="color:#e55;font-size:10px">&#9888; Credibility gap critical — legitimacy collapse risk</p>`
+      : '';
+
+    const countersHtml = r.misinformationEra ? (
+      `<p class="insp-skills" style="font-size:10px">COUNTER-MEASURES</p>` +
+      `<p>` +
+      `<button class="mini" id="media-platform-reg" ${canPlatformReg ? '' : 'disabled'} title="Reduces polarization growth 0.005/month. Requires Digital Economy tech (20 PC).">` +
+        `Platform Regulation${r.platformRegulationEnacted ? ' ✓' : ' [20 PC]'}` +
+      `</button> ` +
+      `<button class="mini" id="media-public-media" ${canPublicMedia ? '' : 'disabled'} title="Credibility gap decays 2x faster. 0.8% GDP/month upkeep (25 PC).">` +
+        `Public Media${r.publicMediaFunded ? ' ✓' : ' [25 PC]'}` +
+      `</button>` +
+      `</p>` +
+      `<p>` +
+      `<button class="mini" id="media-literacy" ${canMediaLiteracy ? '' : 'disabled'} title="Polarization -0.15 after 15-year lag. Costs 5% GDP upfront.">` +
+        `Media Literacy${r.mediaLiteracyInvested ? (r.mediaLiteracyApplied ? ' ✓' : ` (${r.mediaLiteracyYear + 15})`) : ' [5% GDP]'}` +
+      `</button>` +
+      `</p>`
+    ) : '';
+
+    return `<p class="insp-skills">MEDIA &amp; PRESS</p>` +
+      `<p style="font-size:10px">Media Reach: <b>${reachLabel[r.mediaReach] ?? r.mediaReach}</b> · Era: ${r.year}</p>` +
+      misEraLine +
+      `<div class="bar-row" title="Press Freedom: above 65 = free press, below 35 = controlled">` +
+        `<span style="width:80px;display:inline-block;font-size:10px">Press Freedom</span>` +
+        `<span style="font-size:10px">${bar(pfPct, 100, pfCol)}</span>` +
+      `</div>` +
+      `<p>` +
+        `<button class="mini" id="media-censor" ${canCensor ? '' : 'disabled'} title="−20 press freedom (15 PC). Merchants −10, Landowners +10.">Censor −20</button> ` +
+        `<button class="mini" id="media-liberalise" ${canLiberalise ? '' : 'disabled'} title="+20 press freedom (15 PC). Merchants +5.">Liberalise +20</button>` +
+      `</p>` +
+      `<div class="bar-row" title="Credibility Gap: high values risk a legitimacy collapse when a crisis hits">` +
+        `<span style="width:80px;display:inline-block;font-size:10px">Cred. Gap</span>` +
+        `<span style="font-size:10px">${bar(cgPct, 100, cgCol)}</span>` +
+      `</div>` +
+      criticalGap +
+      `<p style="font-size:10px">Polarization: <b>${polPct}%</b>${r.misinformationEra ? ` · Opinion vel: ×${r.opinionVelocity().toFixed(1)}` : ''}</p>` +
+      countersHtml;
   }
 
   /** Nation-tier header: legitimacy bar + minister roster + policy slots (GDD §2.2). */

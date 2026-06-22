@@ -468,6 +468,51 @@
       "era": 2032,
       "requiresState": true,
       "desc": "State-backed manufacturing of clean-energy hardware. Domestic industry output +20%; stranded-asset losses are absorbed by the treasury rather than borne by workers."
+    },
+    {
+      "id": "radio_broadcasting",
+      "name": "Radio Broadcasting",
+      "tree": "tech",
+      "cost": 8,
+      "prereqs": ["electrical_grid"],
+      "era": 1925,
+      "desc": "Mass radio networks spread news and propaganda to every household. Research rate +5%."
+    },
+    {
+      "id": "television",
+      "name": "Television",
+      "tree": "tech",
+      "cost": 10,
+      "prereqs": ["radio_broadcasting"],
+      "era": 1950,
+      "desc": "The TV set transforms political discourse and public opinion formation. Satisfaction +2."
+    },
+    {
+      "id": "digital_economy",
+      "name": "Digital Economy",
+      "tree": "tech",
+      "cost": 12,
+      "prereqs": ["internet"],
+      "era": 1995,
+      "desc": "E-commerce, social networks and digital platforms reshape how people buy, work and form opinions."
+    },
+    {
+      "id": "press_freedom_charter",
+      "name": "Press Freedom Charter",
+      "tree": "civics",
+      "cost": 6,
+      "prereqs": [],
+      "era": 1930,
+      "desc": "Constitutional protection for journalists and independent media. Legitimacy +5."
+    },
+    {
+      "id": "state_broadcasting",
+      "name": "State Broadcasting Service",
+      "tree": "civics",
+      "cost": 6,
+      "prereqs": ["radio_broadcasting"],
+      "era": 1935,
+      "desc": "Government-controlled media shapes the national narrative. Satisfaction +3."
     }
   ]
 }
