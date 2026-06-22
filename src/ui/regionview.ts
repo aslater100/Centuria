@@ -2938,10 +2938,8 @@ export class RegionView {
       const emblemHtml = rv.flagData ? `${rv.flagData.emblem}&nbsp;` : '';
       const archetypeData = RIVAL_ARCHETYPES[rv.archetype];
       const archetypeTooltip = `${archetypeData.name}: ${archetypeData.desc}`;
-      return `<div class="bar-row" title="${archetypeTooltip}\n\nAgenda: ${rv.agenda}\n\n${personalityInfo}">` +
-        `${flagHtml}<span style="width:70px;display:inline-block">${emblemHtml}<b>${rv.name}</b></span>` +
       // War minister estimates rival military strength (Phase 8 advisor forecast)
-      const trueRivalStrength = rv.pop; // abstract strength index: rival population is the base
+      const trueRivalStrength = rv.pop;
       const estStrength = Math.round(r.advisorForecast('War', trueRivalStrength));
       const defMin = r.ministerFor('defence');
       const defAdvisorName = defMin ? defMin.name : 'Defence HQ';
@@ -2949,8 +2947,8 @@ export class RegionView {
         ? `<p class="insp-skills" title="Your war minister's estimate of ${rv.name}'s military strength — accuracy depends on their skill.">` +
           `${defAdvisorName} estimates ${rv.name} strength: <b>${estStrength}</b></p>`
         : '';
-      return `<div class="bar-row" title="${RIVAL_ARCHETYPES[rv.archetype].name} — agenda: ${rv.agenda}. ${recentHistory}">` +
-        `<span style="width:80px;display:inline-block"><b>${rv.name}</b></span>` +
+      return `<div class="bar-row" title="${archetypeTooltip}\n\nAgenda: ${rv.agenda}\n\n${personalityInfo}">` +
+        `${flagHtml}<span style="width:70px;display:inline-block">${emblemHtml}<b>${rv.name}</b></span>` +
         `<div class="bar" style="flex:1"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div>` +
         `<span>${rel}</span></div>` +
         `<p class="insp-skills" title="${recentHistory}">${gov}${rv.borderSettled ? ' · border settled' : ''} · ${personalityInfo}${personalityInfo ? ' · ' : ''}${treaties}</p>` +

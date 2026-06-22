@@ -3686,7 +3686,7 @@ export class RegionSim {
       'A colonial administrator returned from overseas, seeking to build something lasting.',
     ];
     const extraFactions = ['landowners', 'workers', 'merchants'];
-    const extraCount = Math.max(0, 4 - count); // ensure at least 4 notables total
+    const extraCount = Math.max(0, 4 - region.notables.length); // ensure at least 4 notables total
     for (let i = 0; i < extraCount; i++) {
       const role = extraRoles[i % extraRoles.length];
       region.notables.push({
@@ -3716,7 +3716,8 @@ export class RegionSim {
     const mayor = region.notables.find((n) => n.role === 'Mayor' && n.alive);
     region.addLog(
       `The Great War has ended. Empires lie shattered. ${home.name} is founded, ${START_YEAR} — ` +
-      `a small claim in the wreckage, the first stone of a nation yet unnamed.`,
+      `a small claim in the wreckage, the first stone of a nation yet unnamed.` +
+      (mayor ? ` ${mayor.name} leads as Mayor.` : ''),
       'good',
     );
     return region;
