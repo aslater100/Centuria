@@ -133,6 +133,8 @@ export class RegionView {
   private cachedHexLayout: { size: number; ox: number; oy: number } | null = null;
   // Cached pixel-coord arrays for route paths — stable until canvas resize.
   private routePtsCache = new WeakMap<object, { px: number; py: number }[]>();
+  // Last HTML written to each panel, so setInnerHtml can skip no-op reflows.
+  private lastPanelHtml = new WeakMap<HTMLElement, string>();
   // Canvas dims from last frame — detects resize so caches above can be cleared.
   private prevCanvasW = 0;
   private prevCanvasH = 0;
@@ -317,6 +319,11 @@ export class RegionView {
   }
 
   private setInnerHtml(el: HTMLElement, html: string, scrollSelectors: string[] = ['']): void {
+    // Skip the rebuild entirely when the markup is byte-for-byte identical to
+    // last time: innerHTML assignment forces a layout + paint even for equal
+    // content, and panels rebuild on a timer far more often than they change.
+    if (this.lastPanelHtml.get(el) === html) return;
+    this.lastPanelHtml.set(el, html);
     const saved: { sel: string; top: number; left: number }[] = [];
     for (const sel of scrollSelectors) {
       const target = sel === '' ? el : el.querySelector<HTMLElement>(sel);

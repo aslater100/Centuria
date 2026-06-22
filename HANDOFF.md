@@ -375,6 +375,23 @@ Cabinet portfolios exist (Phase 2 via PR #239). This phase gives advisors the fo
 - **Haiku scope:** Unit tests, bug fixes, small feature additions (<500 LOC), content hooks (events/techs/civics)
 - **Opus scope:** Major architecture (Phases 5–7 above), cross-file refactors, large simulation features, integration testing
 
+## Next session — priority fixes
+
+- **⚠ Economy is badly unbalanced (HIGH PRIORITY, user-reported 2026-06-21).** By ~Year 12–13 the
+  treasury runs to **tens of millions** ($77M observed) while buildings/infrastructure still cost only
+  a few thousand (Ironworks $3,071, Harbor $4,606, rail $6,181). Money becomes meaningless mid-game —
+  there is no sink that scales with the economy, so costs are trivial against income. The whole
+  income/expense curve needs a rebalance pass:
+  - Treasury income (taxes, tech passive revenue, trade) grows roughly with population/GDP but
+    **building, route, militia, and upkeep costs are flat** — they don't scale with era or wealth.
+  - Likely fixes to evaluate: era/wealth-scaled construction & infrastructure costs; recurring upkeep
+    that scales with the network/settlement count; meaningful late-game money sinks; or damping
+    runaway tax/trade revenue. Tune via `docs/BALANCE_KNOBS.md` and the `defs.ts` cost constants;
+    validate with the headless long-run sim (`npm run sim`) so the treasury curve stays bounded
+    across 1919→2100.
+  - Acceptance: treasury should stay in a "decisions still hurt" band through the whole campaign,
+    not balloon into irrelevance by the second decade.
+
 ## Known weak areas
 
 - **Tech tree DAG layout** — `techTreeLayout()` uses barycenter heuristic; doesn't minimize crossings

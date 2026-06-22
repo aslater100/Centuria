@@ -2405,10 +2405,10 @@ export class RegionSim {
     const faction = this.faction(factionId);
     if (!faction) return null;
 
-    const population = faction.settlementIds.reduce((sum, id) => {
+    const population = Math.round(faction.settlementIds.reduce((sum, id) => {
       const s = this.settlement(id);
       return sum + (s ? this.popOf(s) : 0);
-    }, 0);
+    }, 0));
 
     // Calculate goal progress as percentage toward target year
     let goalProgress = 0;
