@@ -10,66 +10,32 @@
  * - Old-save backfill
  */
 import { describe, expect, it } from 'vitest';
-import { Simulation } from '../src/sim/sim';
 import { RegionSim, REGION_MINUTES_PER_TICK, DynastyNode } from '../src/sim/region';
 import { MINUTES_PER_DAY } from '../src/sim/defs';
 
 const ticksPerDay = MINUTES_PER_DAY / REGION_MINUTES_PER_TICK;
 
-function grow(sim: Simulation): void {
-  while (sim.settlers.length < 22) sim.spawnSettler(48, 50);
-  sim.stock.wood = 200;
-  sim.stock.meal = 200;
-}
-
 function runDays(r: RegionSim, days: number): void {
   for (let i = 0; i < days * ticksPerDay; i++) r.tick();
 }
 
-/** Create a colony via fromTown — the standard entry point in this codebase. */
+/** Create a fresh colony. */
 function flipped(seed: number): RegionSim {
-  const sim = new Simulation(seed);
-  grow(sim);
-  const r = RegionSim.fromTown(sim, 8, 80, 80);
-  runDays(r, 5); // let expedition land
-  return r;
+  return RegionSim.create(seed);
 }
 
-/** Bring a region to full nation tier for minister-related tests. */
-function nationTier(seed: number): RegionSim {
-  const r = flipped(seed);
-  // Boost to statehood
-  r.treasury = 50000;
-  for (const t of r.settlements) {
-    t.garrisonStrength = 10;
-    t.cohorts.bands[2] += 200;
-  }
-  // Charter via ceremony
-  for (let y = 0; y < 20 && !r.ceremonyPending; y++) {
-    r.treasury = Math.max(r.treasury, 20000);
-    runDays(r, 60);
-    for (const t of r.settlements) {
-      if (r.settlements.length + r.expeditions.length < 4 && r.canFoundTown(t.id).ok) {
-        r.foundTown(t.id);
-        break;
-      }
-    }
-  }
-  if (!r.stateProclaimed) {
-    if (!r.ceremonyPending) r.ceremonyPending = true;
-    r.completeIncorporation('Testonia', 'council');
-  }
-  // Nation proclamation
-  r.treasury = Math.max(r.treasury, 50000);
-  const totalGarrison = r.settlements.reduce((s, t) => s + (t.garrisonStrength || 0), 0);
-  if (totalGarrison < 15) {
-    for (const t of r.settlements) t.garrisonStrength = 6;
-  }
-  r.researched = ['statecraft', 'universal_suffrage', 'income_tax', 'free_press', 'labor_law', 'public_education', 'steam_power', 'common_law'];
-  for (const t of r.settlements) t.cohorts.bands[2] += 500;
-  if (r.canCallConvention()) {
-    const notable = r.notables.find((n) => n.alive);
-    r.proclaimNation('The Nation', 'democracy', { interior: notable?.id ?? null });
+/** Set up a nation-tier region for minister-related tests. */
+function nationReady(seed = 42): RegionSim {
+  const r = RegionSim.create(seed);
+  r.stateProclaimed = true;
+  r.nationProclaimed = true;
+  r.govType = 'democracy';
+  r.legitimacy = 60;
+  r.treasury = 500000;
+  // Fill minister slots with living notables
+  const alive = r.notables.filter(n => n.alive);
+  for (let i = 0; i < r.ministers.length && i < alive.length; i++) {
+    r.ministers[i].notableId = alive[i].id;
   }
   return r;
 }
@@ -90,12 +56,12 @@ describe('Phase 8 — Founding Notables', () => {
     }
   });
 
-  it('founding Notables have skill 40-75 and health 80-100', () => {
+  it('founding Notables have skill 30-100 and health 60-100', () => {
     const r = flipped(42);
     for (const n of r.notables) {
-      expect(n.skill).toBeGreaterThanOrEqual(30); // mintNotable uses 30+rng.int(50)
+      expect(n.skill).toBeGreaterThanOrEqual(30);
       expect(n.skill).toBeLessThanOrEqual(100);
-      expect(n.health).toBeGreaterThanOrEqual(60); // mintNotable uses 60+rng.int(40)
+      expect(n.health).toBeGreaterThanOrEqual(60);
       expect(n.health).toBeLessThanOrEqual(100);
     }
   });
@@ -107,7 +73,6 @@ describe('Phase 8 — Founding Notables', () => {
 
   it('founding Notables have backstory blurbs (at least some)', () => {
     const r = flipped(42);
-    // Most should have a backstory set from the founding
     const withBackstory = r.notables.filter((n) => n.backstory && n.backstory.length > 0);
     expect(withBackstory.length).toBeGreaterThan(0);
   });
@@ -182,22 +147,18 @@ describe('Phase 8 — Heir Birth', () => {
     if (!parent) return; // skip if no eligible parent in this seed
     const parentId = parent.id;
     // Run many months — 5% annual = ~0.4%/month, need enough time for P(at least one birth) to be high
-    // In 5 game-years (100% × (1 - (1-0.004)^60)) ≈ 21% — run 20 years for ~56%
     runDays(r, 1200); // 20 game-years
-    const children = r.notables.filter((n) => n.parentId === parentId);
-    // This is probabilistic; we check the parentId linkage mechanism works if any born
-    // At 5% annual over 20 years: P(at least 1 child) ≈ 64%. We run 40 years to get ~87%.
-    // Instead: set a forced child to verify the linkage mechanism
+    // This is probabilistic; verify the linkage mechanism works if any born
     const child = r.notables.find((n) => n.parentId !== undefined);
     if (child) {
       const parentNotable = r.notables.find((n) => n.id === child.parentId);
       expect(parentNotable).toBeDefined();
       expect(parentNotable!.children).toContain(child.id);
     }
-    // Even if no child born in this run (probabilistic), verify no exception occurred
-    // and that the Notable objects have the expected shape
+    // Even if no child born, verify the notable objects have the expected shape
     expect(r.notables[0].children).toBeDefined();
     expect(Array.isArray(r.notables[0].children)).toBe(true);
+    void parentId;
   });
 });
 
@@ -205,11 +166,10 @@ describe('Phase 8 — Heir Birth', () => {
 
 describe('Phase 8 — Successor Selection', () => {
   it('selectSuccessor fills a vacant minister slot with a living Notable', () => {
-    const r = nationTier(42);
-    if (!r.nationProclaimed) return; // skip if nation not reached
+    const r = nationReady(42);
+    if (!r.nationProclaimed) return;
     // Vacate the first minister slot
     r.ministers[0].notableId = null;
-    const countBefore = r.notables.filter((n) => n.alive).length;
     r.selectSuccessor(0);
     // Should now be filled
     expect(r.ministers[0].notableId).not.toBeNull();
@@ -221,7 +181,6 @@ describe('Phase 8 — Successor Selection', () => {
     const r = flipped(42);
     // Vacate a slot that doesn't exist yet (ministers is always defined)
     if (r.ministers.length === 0) {
-      // Create a dummy minister slot
       r.ministers.push({ role: 'interior', title: 'Interior Minister', notableId: null });
     }
     // Mark all notables as dead to force minting
@@ -275,9 +234,6 @@ describe('Phase 8 — advisorForecast()', () => {
     const n = r.notables.find((n) => n.alive)!;
     n.skill = 95;
     r.ministers[0].notableId = n.id;
-    // A single forecast from a 95-skill minister should be very close
-    // noiseScale = (1 - 95/100) * 1000 * 0.3 = 0.05 * 300 = 15
-    // gaussian roughly in [-25, 25] at 3σ, so result in [975, 1025]
     const forecast = r.advisorForecast('Interior', 1000);
     expect(forecast).toBeGreaterThan(900);
     expect(forecast).toBeLessThan(1100);
@@ -290,7 +246,6 @@ describe('Phase 8 — advisorForecast()', () => {
     nHigh.skill = 95;
     nLow.skill = 10;
 
-    // Measure variance over many forecasts
     const trueValue = 1000;
     const highForecasts: number[] = [];
     const lowForecasts: number[] = [];
@@ -338,7 +293,7 @@ describe('Phase 8 — advisorForecast()', () => {
 
 describe('Phase 8 — Loyalty & Defection', () => {
   it('minister loyalty decays over time when nationProclaimed', () => {
-    const r = nationTier(42);
+    const r = nationReady(42);
     if (!r.nationProclaimed) return;
     const minister = r.ministers.find((m) => m.notableId !== null);
     if (!minister) return;
@@ -352,7 +307,7 @@ describe('Phase 8 — Loyalty & Defection', () => {
   });
 
   it('defection fires when loyalty < 20 over time', () => {
-    const r = nationTier(42);
+    const r = nationReady(42);
     if (!r.nationProclaimed) return;
     const minister = r.ministers.find((m) => m.notableId !== null);
     if (!minister) return;
@@ -361,16 +316,12 @@ describe('Phase 8 — Loyalty & Defection', () => {
     // Force low loyalty
     notable.loyalty = 5;
     // Run many ticks — defection is 5% annual (~0.4%/month chance at loyalty < 20)
-    // Run 5 years worth of months
     for (let i = 0; i < 300 * ticksPerDay; i++) {
       r.tick();
-      // Check if defection log appeared
       if (r.log.some((l) => l.text.includes('defected'))) break;
     }
-    // Either defected or other events fired; check defection log at least once in long run
-    // This test is probabilistic; with 5 years at ~0.4%/month ≈ P(defect) ≈ 22%
-    // We loosen the expectation: just check the log entry format exists as code path
-    expect(true).toBe(true); // structural check — no exceptions thrown
+    // Structural check — no exceptions thrown
+    expect(true).toBe(true);
   });
 });
 
@@ -378,7 +329,7 @@ describe('Phase 8 — Loyalty & Defection', () => {
 
 describe('Phase 8 — Scandal', () => {
   it('scandal reduces legitimacy when a minister has 5+ years in role', () => {
-    const r = nationTier(42);
+    const r = nationReady(42);
     if (!r.nationProclaimed) return;
     const minister = r.ministers.find((m) => m.notableId !== null);
     if (!minister) return;
@@ -389,7 +340,6 @@ describe('Phase 8 — Scandal', () => {
     notable.yearEnteredRole = r.year - 6;
     const legitBefore = r.legitimacy;
 
-    // Fire many monthly ticks, watching for scandal
     for (let i = 0; i < 120 * ticksPerDay; i++) {
       r.tick();
       if (r.log.some((l) => l.text.toUpperCase().includes('SCANDAL'))) break;
@@ -397,7 +347,6 @@ describe('Phase 8 — Scandal', () => {
     if (r.log.some((l) => l.text.toUpperCase().includes('SCANDAL'))) {
       expect(r.legitimacy).toBeLessThanOrEqual(legitBefore);
     }
-    // Even without a scandal firing, test that the logic doesn't throw
     expect(true).toBe(true);
   });
 });
@@ -450,8 +399,6 @@ describe('Phase 8 — Dynasty Tree', () => {
 
   it('dynastyTree serializes correctly in save/load', () => {
     const r = flipped(42);
-    const sim = new Simulation(42);
-    grow(sim);
     // Add a parent-child pair
     const parent = r.notables[0];
     const childId = r.nextId++;
@@ -483,8 +430,6 @@ describe('Phase 8 — Dynasty Tree', () => {
 
 describe('Phase 8 — Old-save Backfill', () => {
   it('Notables without new Phase 8 fields get default values on deserialize', () => {
-    const sim = new Simulation(42);
-    grow(sim);
     const r = flipped(42);
     const json = r.serialize();
     const data = JSON.parse(json);
@@ -496,7 +441,7 @@ describe('Phase 8 — Old-save Backfill', () => {
       return rest;
     });
 
-    const r2 = RegionSim.deserialize(JSON.stringify(data), sim);
+    const r2 = RegionSim.deserialize(JSON.stringify(data));
     for (const n of r2.notables) {
       expect(typeof n.skill).toBe('number');
       expect(typeof n.health).toBe('number');
