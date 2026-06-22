@@ -649,7 +649,7 @@ export const GOV_TYPES: GovTypeDef[] = [
   },
 ];
 
-export type MinisterRoleId = 'interior' | 'treasury' | 'defence' | 'foreign' | 'science' | 'information';
+export type MinisterRoleId = 'interior' | 'treasury' | 'defence' | 'war' | 'press' | 'science' | 'foreign';
 
 export interface MinisterAssignment {
   role: MinisterRoleId;
@@ -661,9 +661,10 @@ export const MINISTER_ROLES: { id: MinisterRoleId; title: string; bonus: string 
   { id: 'interior', title: 'Interior Minister', bonus: 'services 15% more effective' },
   { id: 'treasury', title: 'Treasury Secretary', bonus: 'tax collection +10%' },
   { id: 'defence', title: 'Defence Minister', bonus: 'militia 20% stronger' },
-  { id: 'foreign', title: 'Foreign Secretary', bonus: 'envoy relations +5; treaty costs −15%' },
+  { id: 'war', title: 'War Minister', bonus: 'army effectiveness +15%' },
+  { id: 'press', title: 'Press Secretary', bonus: 'legitimacy decay −25% slower' },
   { id: 'science', title: 'Science Minister', bonus: 'research rate +15%' },
-  { id: 'information', title: 'Press Secretary', bonus: 'legitimacy decay −25% slower' },
+  { id: 'foreign', title: 'Foreign Secretary', bonus: 'envoy relations +5; treaty costs −15%' },
 ];
 
 // ---- Nation-tier: policy slots (GDD §5.3) ----
@@ -2127,6 +2128,15 @@ export class RegionSim {
   private activePolicySet: Set<string> = new Set();
   private sectorProdCache: Record<SectorId, number> | null = null;
   private wageCache: Map<number, number> | null = null;
+  // ---- Phase 18: Advisor System Depth (GDD §8.7) ----
+  /** Queue of advisor briefs from ministers (max 5, newest-first). */
+  advisorBriefs: { portfolio: string; message: string; day: number }[] = [];
+  /** Last day a brief was generated per portfolio (prevents spam). */
+  advisorBriefLastDay: Record<string, number> = {};
+  /** Last day the player took an action in each portfolio domain. */
+  lastActionDay: Record<string, number> = {};
+  /** True once the Science bottleneck event fires; cleared when player builds a school. */
+  researchBottleneckActive = false;
   // ---- Rival nations & diplomacy (GDD §5.4, §6.2–6.4) ----
   rivals: RivalNation[] = [];
   /** Named rival nations that have been used (to avoid duplicates). */
@@ -2923,6 +2933,8 @@ export class RegionSim {
     if (this.passedLaws.has('national_education_act')) mult *= 1.3;
     if (this.policyActive('research_grants')) mult *= 1.2;
     if (this.ministerFor('science')) mult *= 1.15;
+    // Phase 18: research bottleneck penalty (Science Minister event)
+    if (this.researchBottleneckActive) mult *= 0.9;
     // Phase 2: every university adds its laboratories to the effort
     for (const t of this.settlements) {
       for (const id of t.buildings) {
@@ -2989,6 +3001,7 @@ export class RegionSim {
     if (!this.availableToResearch().find((n) => n.id === id)) return false;
     this.activeResearch = id;
     this.researchProgress = 0;
+    this.recordPortfolioAction('science'); // Phase 18: science minister loyalty
     return true;
   }
 
@@ -4506,6 +4519,10 @@ export class RegionSim {
         'good',
       );
     }
+    // Phase 18: Advisor System Depth (GDD §8.7)
+    this.generateAdvisorBriefs();
+    this.tickAdvisorLoyalty();
+    this.tickAdvisorEvents();
   }
 
   // ---- local markets & trade (GDD §5.2, first slice) ----
@@ -4819,6 +4836,7 @@ export class RegionSim {
     this.treasury += amount;
     this.creditRating = this.computeCreditRating();
     this.addLog(`Issued ` + formatCurrency(Math.floor(amount)) + ` in bonds at ${(this.bondRate * 100).toFixed(1)}% (${this.creditRating}).`, 'info');
+    this.recordPortfolioAction('treasury'); // Phase 18: treasury minister loyalty
     return true;
   }
 
@@ -6483,7 +6501,7 @@ export class RegionSim {
       settlementId,
       bio: t ? [`Rose to ${role} of ${t.name}, ${this.year}.`] : [`Rose to ${role}, ${this.year}.`],
       alive: true,
-      skill: overrides?.skill ?? (30 + this.rng.int(50)),
+      skill: overrides?.skill ?? (30 + this.rng.int(70)),
       health: overrides?.health ?? (60 + this.rng.int(40)),
       children: [],
       loyalty: 80,
@@ -7306,6 +7324,16 @@ export class RegionSim {
       }
     }
 
+    // Record portfolio action based on law domain (for advisor loyalty tracking)
+    const domainToPortfolio: Record<string, MinisterRoleId> = {
+      economic: 'treasury',
+      social: 'interior',
+      security: 'defence',
+      information: 'press',
+    };
+    const portfolio = domainToPortfolio[(law as any).domain as string];
+    if (portfolio) this.recordPortfolioAction(portfolio);
+
     return true;
   }
 
@@ -7504,26 +7532,6 @@ export class RegionSim {
     this.addLog(`Parliament appoints ${chosen.name} as new ${portfolio.title}.`, 'info');
   }
 
-  /** Produce a skill-weighted forecast for a portfolio metric.
-   *  Skilled ministers give tighter estimates; vacancies give wide noise. */
-  advisorForecast(portfolioName: string, trueValue: number): number {
-    const roleMap: Record<string, MinisterRoleId> = {
-      Finance: 'treasury',
-      War: 'defence',
-      Interior: 'interior',
-    };
-    const roleId = roleMap[portfolioName];
-    const minister = roleId ? this.ministerFor(roleId) : null;
-    if (minister) {
-      const skill = minister.skill ?? 50;
-      const noiseScale = (1 - skill / 100) * Math.abs(trueValue) * 0.3;
-      const gaussian = (Math.random() + Math.random() + Math.random() - 1.5) * noiseScale;
-      return trueValue + gaussian;
-    }
-    // No minister: wide random noise
-    return trueValue * (0.7 + Math.random() * 0.6);
-  }
-
   /** Compile dynasty tree from notables that have parent/child relationships. */
   buildDynastyTree(): DynastyNode[] {
     return this.notables
@@ -7538,12 +7546,211 @@ export class RegionSim {
       }));
   }
 
+  // ---- Phase 18: Advisor System Depth (GDD §8.7) ----
+
+  /** Map a human-readable portfolio name to a MinisterRoleId (tolerant of aliases). */
+  private portfolioToRole(portfolioName: string): MinisterRoleId | null {
+    const norm = portfolioName.toLowerCase().replace(/\s+/g, '_');
+    const map: Record<string, MinisterRoleId> = {
+      treasury: 'treasury',
+      finance: 'treasury',
+      interior: 'interior',
+      defence: 'defence',
+      defense: 'defence',
+      war: 'war',
+      press: 'press',
+      science: 'science',
+      foreign: 'foreign',
+      foreign_affairs: 'foreign',
+    };
+    return map[norm] ?? null;
+  }
+
+  /**
+   * Skill-based forecast accuracy (GDD §8.7).
+   * High skill (80) → ±6% noise; Low skill (20) → ±24% noise; no minister → ±30–60%.
+   */
+  advisorForecast(portfolioName: string, trueValue: number): number {
+    const role = this.portfolioToRole(portfolioName);
+    const minister = role ? this.ministerFor(role) : null;
+
+    let noiseScale: number;
+    if (minister) {
+      const skill = minister.skill ?? 50;
+      noiseScale = (1 - skill / 100) * Math.abs(trueValue) * 0.3;
+    } else {
+      noiseScale = Math.abs(trueValue) * (0.30 + Math.random() * 0.30);
+    }
+    const gaussian = (Math.random() + Math.random() + Math.random() - 1.5) * noiseScale;
+    return trueValue + gaussian;
+  }
+
+  /**
+   * Ideology-biased forecast — applies portfolio-specific bias on top of skill noise (GDD §8.7).
+   * War minister underestimates cost; Press minister downplays gap; Interior overstates risk.
+   */
+  biasedForecast(portfolioName: string, trueValue: number, _metric: string): number {
+    const norm = portfolioName.toLowerCase();
+    let biased = trueValue;
+    if (norm === 'war') {
+      biased = trueValue * 0.75;
+    } else if (norm === 'press') {
+      biased = trueValue * 0.6;
+    } else if (norm === 'interior') {
+      biased = trueValue * 1.3;
+    }
+    return this.advisorForecast(portfolioName, biased);
+  }
+
+  private pushAdvisorBrief(portfolio: string, message: string): void {
+    const cooldown = 12 * 30;
+    const lastDay = this.advisorBriefLastDay[portfolio] ?? -Infinity;
+    if (this.day - lastDay < cooldown) return;
+    this.advisorBriefLastDay[portfolio] = this.day;
+    this.advisorBriefs.unshift({ portfolio, message, day: this.day });
+    if (this.advisorBriefs.length > 5) this.advisorBriefs.pop();
+  }
+
+  dismissAdvisorBriefs(): void {
+    this.advisorBriefs = [];
+  }
+
+  generateAdvisorBriefs(): void {
+    if (!this.nationProclaimed) return;
+    const year = this.year;
+
+    if (this.gdpLastMonth > 0 && this.nationalDebt > 0) {
+      const annualRevenue = this.gdpLastMonth * this.taxRate * 12;
+      const projectedDebtIn3 = this.nationalDebt * Math.pow(1 + this.bondRate, 3);
+      const projectedService = projectedDebtIn3 * this.bondRate;
+      if (annualRevenue > 0 && projectedService / annualRevenue > 0.20) {
+        this.pushAdvisorBrief(
+          'Treasury',
+          `Your Excellency — on the current path, debt service will consume 20% of revenue by ${year + 3}. Immediate fiscal action is advised.`,
+        );
+      }
+    }
+
+    const poorHousingSettlements = this.settlements.filter(
+      (t) => t.satisfaction < 30 && t.housing < this.popOf(t),
+    );
+    if (poorHousingSettlements.length >= 3) {
+      this.pushAdvisorBrief(
+        'Interior',
+        `Interior briefing: housing satisfaction has collapsed in ${poorHousingSettlements.length} settlements. Unrest is likely within the year.`,
+      );
+    }
+
+    if (this.rivals.length > 0) {
+      const militaryTechs = ['steel_industry', 'military_reform', 'computing'];
+      const playerHas = militaryTechs.filter((t) => this.has(t)).length;
+      const rivalAhead = this.rivals.some((rv) => {
+        const rvMilitary = (rv.weights?.expansion ?? 5) + (rv.weights?.risk ?? 5);
+        return rvMilitary > 12 && playerHas < 2;
+      });
+      if (rivalAhead) {
+        this.pushAdvisorBrief(
+          'Science',
+          `Science Ministry: rival nations are outpacing our military research in multiple fields. Recommend redirecting funding.`,
+        );
+      }
+    }
+
+    const hostileRival = this.rivals.find((rv) => rv.relations < -40);
+    if (hostileRival) {
+      this.pushAdvisorBrief(
+        'Foreign Affairs',
+        `Foreign Secretary: ${hostileRival.name} has become increasingly hostile. Recommend diplomatic engagement before tensions escalate.`,
+      );
+    }
+
+    if (this.legitimacy < 40 && (100 - this.legitimacy) > 60) {
+      this.pushAdvisorBrief(
+        'Press',
+        `Press Secretary: the credibility gap is widening. Public trust is eroding faster than our messaging can contain.`,
+      );
+    }
+  }
+
+  tickAdvisorLoyalty(): void {
+    if (!this.nationProclaimed) return;
+    const monthDays = 30;
+
+    for (const assignment of this.ministers) {
+      if (assignment.notableId === null) continue;
+      const notable = this.notables.find((n) => n.id === assignment.notableId && n.alive);
+      if (!notable) continue;
+
+      if (notable.loyalty === undefined) notable.loyalty = 100;
+      if (notable.monthsIgnored === undefined) notable.monthsIgnored = 0;
+
+      const lastAction = this.lastActionDay[assignment.role] ?? -Infinity;
+      const monthsSinceAction = (this.day - lastAction) / monthDays;
+
+      if (monthsSinceAction >= 3) {
+        notable.monthsIgnored = (notable.monthsIgnored ?? 0) + 1;
+        if (notable.monthsIgnored >= 3) {
+          notable.loyalty = Math.max(0, (notable.loyalty ?? 100) - 2);
+        }
+      } else {
+        notable.monthsIgnored = 0;
+      }
+
+      if ((notable.loyalty ?? 100) < 20 && this.rng.chance(0.03)) {
+        const faction = notable.factionAlignment ?? 'merchants';
+        const factionName = faction === 'workers' ? 'Labour' : faction === 'landowners' ? 'Conservative' : 'Liberal';
+        this.addLog(`${notable.name} has defected to the ${factionName} bloc after being sidelined.`, 'bad');
+        const oppFaction = this.factions.find((f) => f.id === faction);
+        if (oppFaction) oppFaction.power = Math.min(100, oppFaction.power + 10);
+        this.legitimacy = Math.max(0, this.legitimacy - 8);
+        assignment.notableId = null;
+      }
+    }
+  }
+
+  private tickAdvisorEvents(): void {
+    if (!this.nationProclaimed) return;
+
+    const coldRival = this.rivals.find((rv) => rv.relations < -30);
+    if (coldRival && this.rng.chance(0.05)) {
+      this.addLog(`FOREIGN SECRETARY: An envoy to ${coldRival.name} was refused audience. Relations are deteriorating.`, 'bad');
+      coldRival.relations = Math.max(-100, coldRival.relations - 5);
+    }
+
+    if (!this.researchBottleneckActive) {
+      const noSchool = this.settlements.filter((t) => !t.buildings.includes('schoolhouse'));
+      if (noSchool.length >= 3) {
+        this.researchBottleneckActive = true;
+        this.addLog(`SCIENCE MINISTRY: Our research pipeline is bottlenecked — secondary education is absent in ${noSchool.length} settlements. Recommend redirecting funding.`, 'bad');
+      }
+    } else {
+      const stillMissing = this.settlements.filter((t) => !t.buildings.includes('schoolhouse')).length;
+      if (stillMissing < 3) this.researchBottleneckActive = false;
+    }
+
+    if (this.legitimacy < 60 && (100 - this.legitimacy) > 40 && this.rng.chance(0.08)) {
+      this.addLog(`PRESS SECRETARY: The credibility gap is accelerating — recommend addressing fiscal transparency and public services.`, 'bad');
+    }
+  }
+
+  recordPortfolioAction(portfolio: MinisterRoleId): void {
+    this.lastActionDay[portfolio] = this.day;
+    const assignment = this.ministers.find((m) => m.role === portfolio);
+    if (assignment?.notableId !== null && assignment?.notableId !== undefined) {
+      const notable = this.notables.find((n) => n.id === assignment.notableId && n.alive);
+      if (notable) {
+        notable.monthsIgnored = 0;
+        notable.loyalty = Math.min(100, (notable.loyalty ?? 100) + 5);
+      }
+    }
+  }
+
   /** Monthly legitimacy tick (GDD §5.3). */
   private tickLegitimacy(): void {
     if (!this.nationProclaimed) return;
     // Press Freedom Act law slows decay by 30%; Information minister adds a further 25%
     const pressBonus = this.passedLaws.has('press_freedom_act') ? 0.7 : 1.0;
-    const infoBonus = this.ministerFor('information') ? 0.75 : 1.0;
+    const infoBonus = this.ministerFor('press') ? 0.75 : 1.0;
     const decayRate = 0.5 * pressBonus * infoBonus;
     this.legitimacy = Math.max(0, this.legitimacy - decayRate);
     if (this.govType === 'junta') {
@@ -8036,6 +8243,7 @@ export class RegionSim {
       this.noteHistory(rv, `Thaw in relations with ${this.stateName || 'the State'}, ${this.year}.`);
     }
     this.addLog(`An envoy rides for ${rv.name} with letters and samples of the valley's grain — relations warm (+${gain}).`, 'good');
+    this.recordPortfolioAction('foreign'); // Phase 18: foreign secretary loyalty
     return true;
   }
 
@@ -9630,6 +9838,10 @@ export class RegionSim {
       automationUnemployment: this.automationUnemployment,
       pressFreedom: this.pressFreedom,
       dynastyTree: this.buildDynastyTree(),
+      advisorBriefs: this.advisorBriefs,
+      advisorBriefLastDay: this.advisorBriefLastDay,
+      lastActionDay: this.lastActionDay,
+      researchBottleneckActive: this.researchBottleneckActive,
     });
   }
 
@@ -9823,6 +10035,11 @@ export class RegionSim {
     if (d.explorationMap) {
       r.exploredCount = r.explorationMap.reduce((sum, col) => sum + col.filter((v) => v !== 'fogged').length, 0);
     }
+    // Phase 18: Advisor System Depth — backfill with empty defaults for pre-Phase-18 saves
+    r.advisorBriefs = d.advisorBriefs ?? [];
+    r.advisorBriefLastDay = d.advisorBriefLastDay ?? {};
+    r.lastActionDay = d.lastActionDay ?? {};
+    r.researchBottleneckActive = d.researchBottleneckActive ?? false;
     // last: the constructor consumed a draw scheduling its event day
     r.rng.setState(d.rng);
     // restore the AI stream too (older saves predate it — derive from main seed)

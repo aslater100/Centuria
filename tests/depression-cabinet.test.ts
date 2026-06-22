@@ -375,15 +375,16 @@ describe('Depression emergency measures', () => {
 // ---- Cabinet expansion ----
 
 describe('Cabinet: 6 minister roles', () => {
-  it('MINISTER_ROLES has all six portfolios', () => {
+  it('MINISTER_ROLES has all seven portfolios', () => {
     const ids = MINISTER_ROLES.map((r) => r.id);
     expect(ids).toContain('interior');
     expect(ids).toContain('treasury');
     expect(ids).toContain('defence');
     expect(ids).toContain('foreign');
     expect(ids).toContain('science');
-    expect(ids).toContain('information');
-    expect(MINISTER_ROLES).toHaveLength(6);
+    expect(ids).toContain('press');
+    expect(ids).toContain('war');
+    expect(MINISTER_ROLES).toHaveLength(7);
   });
 
   it('science minister boosts researchRate()', () => {
@@ -398,13 +399,13 @@ describe('Cabinet: 6 minister roles', () => {
     expect(r.researchRate()).toBeGreaterThan(rateWithout);
   });
 
-  it('information minister reduces legitimacy decay', () => {
+  it('press minister reduces legitimacy decay', () => {
     const r = makeNation();
     r.proclaimNation('Test', 'democracy', {});
     r.legitimacy = 80;
     const notable = r.notables[0];
     if (notable) {
-      const m = r.ministers.find((x) => x.role === 'information');
+      const m = r.ministers.find((x) => x.role === 'press');
       if (m) m.notableId = notable.id;
     }
     const tick = r as unknown as { tickLegitimacy(): void };
@@ -414,7 +415,7 @@ describe('Cabinet: 6 minister roles', () => {
 
     // Reset without minister
     r.legitimacy = 80;
-    const m2 = r.ministers.find((x) => x.role === 'information');
+    const m2 = r.ministers.find((x) => x.role === 'press');
     if (m2) m2.notableId = null;
     tick.tickLegitimacy();
     const decayWithout = legBefore - r.legitimacy;
@@ -452,7 +453,7 @@ describe('Cabinet: 6 minister roles', () => {
     }
   });
 
-  it('old saves with 3 ministers backfill to 6 on deserialize', () => {
+  it('old saves with 3 ministers backfill to 7 on deserialize', () => {
     const r = makeNation();
     const raw = JSON.parse(r.serialize());
     // Simulate an old save with only 3 minister slots
@@ -462,9 +463,10 @@ describe('Cabinet: 6 minister roles', () => {
       { role: 'defence', title: 'Defence Minister', notableId: null },
     ];
     const r2 = RegionSim.deserialize(JSON.stringify(raw));
-    expect(r2.ministers).toHaveLength(6);
+    expect(r2.ministers).toHaveLength(7);
     expect(r2.ministers.find((m) => m.role === 'foreign')).toBeDefined();
     expect(r2.ministers.find((m) => m.role === 'science')).toBeDefined();
-    expect(r2.ministers.find((m) => m.role === 'information')).toBeDefined();
+    expect(r2.ministers.find((m) => m.role === 'press')).toBeDefined();
+    expect(r2.ministers.find((m) => m.role === 'war')).toBeDefined();
   });
 });
