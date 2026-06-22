@@ -735,7 +735,7 @@ body {
   cursor: not-allowed;
 }
 
-.state-panel { width: 190px; overflow-wrap: break-word; word-break: break-word; }
+.state-panel { width: 190px; overflow-wrap: break-word; word-break: break-word; max-height: calc(100vh - 72px); overflow-y: auto; overflow-x: hidden; }
 .state-panel p { margin: 4px 0; font-size: 12px; overflow-wrap: break-word; word-break: break-word; }
 .state-panel input[type='range'] { width: 100%; }
 
