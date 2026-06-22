@@ -446,7 +446,44 @@ HARD:
 
 ---
 
+---
+
+## Treasury Balance — Public-Sector Spending (added 2026-06-22)
+
+**Problem solved**: treasury ran away to hundreds of millions by mid-game because income
+(~13% of GDP) dwarfed spending (a flat per-head pittance). Fixed by a GDP-scaled public-sector
+wage bill (Wagner's law) in `monthlyEconomy()` (`src/sim/region.ts`).
+
+```
+publicSector = gdp × (BASE + SVC·servicesLevel·serviceCost + MIL·militiaLevel) × (1 + LIFT·devShare)
+  where devShare = (modernizationIndex + informationIndex) / 2   // 0 → 1
+
+BASE = 0.025   (tuning 0.015–0.04)   flat share of GDP the state always spends
+SVC  = 0.04    (tuning 0.03–0.06)    per services level (0–2)
+MIL  = 0.025   (tuning 0.02–0.04)    per militia level (0–2)
+LIFT = 0.15    (tuning 0.0–0.25)     ⚠ ≥0.35 tips the info-era budget into a DEATH-SPIRAL
+```
+
+Calibration rule: **`publicSector` at svc1/mil1 must stay below the default 10% tax take**
+(8.5% under a council's 0.85 collection penalty) or a nation without the income-tax civic goes
+insolvent → services auto-cut → satisfaction → emigration spiral. At the current knobs svc1/mil1 ≈
+9% (slim surplus); svc2/mil2 ≈ 15.5% (needs income-tax + a higher rate).
+
+Headless 1919→2029 (seed 1000, tax 10%, funded services): treasury **$568M → ~$40M** (≈0.5 months
+of GDP). Regression guard: `tests/economy-balance.test.ts`.
+
+**Flat headline costs** now scale with development via `flatCost(base) = round(base × devFactor)`:
+scout hire (£10), militia drill (£250). Vestigial flat policy bonuses are now GDP-shares:
+austerity 1.5% of GDP, protectionism 0.8% (were flat £4 / £3).
+
+**World/hex scale**: `REGION_N` 256 → 128 (hexes ~2× larger on screen). Settlement glyphs scale to
+hex size (`glyphScale = hexWidth / 16`): small town ≈ 1 hex → metropolis ≈ 2.25. Camera `MIN_SCALE`
+4 → 2 (zoom out further).
+
+---
+
 **Version History**:
 - 2026-06-17: Initial sliders (all at recommended baseline)
-- (Add updates as balance changes are made)
+- 2026-06-22: Added GDP-scaled public-sector spending (treasury balance), flat-cost dev scaling,
+  REGION_N 256→128 + hex-sized city glyphs, MIN_SCALE 4→2.
 

@@ -74,6 +74,11 @@ export class RegionView {
   private economyPanel: HTMLElement;
   economyOpen = false;
   private lastEconomyBuildFrame = -999;
+  /** Dedicated Central Bank window (B key); unlocked by the Central Banking civic
+   *  or the Central Bank Charter law. */
+  private centralBankPanel: HTMLElement;
+  centralBankOpen = false;
+  private lastCentralBankBuildFrame = -999;
   private economyTab: 'overview' | 'settlements' = 'overview';
   private ceremony: HTMLElement;
   private convention: HTMLElement;
@@ -159,7 +164,10 @@ export class RegionView {
   private camScale = 8;
   private camX = 0; // screen-px offset applied after scaling
   private camY = 0;
-  private static readonly MIN_SCALE = 4;
+  // MIN_SCALE 2 lets the player pull back far enough to take in most of the
+  // continent at once (whole-world overview still lives on the minimap);
+  // MAX_SCALE 20 zooms in until a single hex fills a good chunk of the screen.
+  private static readonly MIN_SCALE = 2;
   private static readonly MAX_SCALE = 20;
   // ---- Minimap (corner navigation aid) ----
   private minimap: Minimap;
@@ -191,6 +199,9 @@ export class RegionView {
     this.settlementListPanel = document.createElement('div');
     this.settlementListPanel.className = 'palette settlement-list-panel hidden';
     root.appendChild(this.settlementListPanel);
+    this.centralBankPanel = document.createElement('div');
+    this.centralBankPanel.className = 'palette central-bank-panel hidden';
+    root.appendChild(this.centralBankPanel);
     this.economyPanel = document.createElement('div');
     this.economyPanel.className = 'palette economy-panel hidden';
     root.appendChild(this.economyPanel);
@@ -271,6 +282,7 @@ export class RegionView {
       { id: 'region-routes', element: this.routeNetworkPanel, baseZ: 12 },
       { id: 'region-settlements', element: this.settlementListPanel, baseZ: 12 },
       { id: 'region-economy', element: this.economyPanel, baseZ: 12 },
+      { id: 'region-central-bank', element: this.centralBankPanel, baseZ: 12 },
       { id: 'region-rival', element: this.rivalPanel, baseZ: 20 },
       { id: 'region-province', element: this.provincePanel, baseZ: 20 },
     ];
@@ -283,6 +295,7 @@ export class RegionView {
     this.routeNetworkPanel.remove();
     this.settlementListPanel.remove();
     this.economyPanel.remove();
+    this.centralBankPanel.remove();
     this.ceremony.remove();
     this.convention.remove();
     this.policyModal.remove();
@@ -304,6 +317,37 @@ export class RegionView {
     const row = Math.max(0, Math.min(REGION_N - 1, Math.floor((ry / 100) * REGION_N)));
     const { x: px, y: py } = hexCenter(col, row, size, ox, oy);
     return { px, py };
+  }
+
+  /** Width of one hex in base/map units (constant across zoom). */
+  private hexWidth(): number {
+    const size = this.cachedHexLayout?.size
+      ?? hexLayoutParams(this.canvas.width, this.canvas.height, REGION_N, 60).size;
+    return Math.sqrt(3) * size;
+  }
+
+  /** Scale factor for per-settlement glyphs (sprites, labels, resource icons) so
+   *  the smallest settlement footprint fills roughly one hex and larger tiers
+   *  grow to span a few. The sprite art was authored ~16 base units wide for the
+   *  shack tier (→ ~1 hex) up to ~36 for the castle (→ a couple of hexes), so a
+   *  single factor keyed off hex width gives the "starts in one hex, grows into
+   *  more" progression for free. Constant across zoom (hex and glyph share map
+   *  space). */
+  private glyphScale(): number {
+    return this.hexWidth() / 16;
+  }
+
+  /** Run `body` with the canvas scaled around (px,py) by the glyph factor, so a
+   *  block of fixed-base-unit drawing tracks hex size. */
+  private withGlyphScale(px: number, py: number, body: () => void): void {
+    const s = this.glyphScale();
+    const g = this.g;
+    g.save();
+    g.translate(px, py);
+    g.scale(s, s);
+    g.translate(-px, -py);
+    body();
+    g.restore();
   }
 
   private getRoutePts(r: { path: { x: number; y: number }[] }): { px: number; py: number }[] {
@@ -352,10 +396,11 @@ export class RegionView {
     this.selectedId = null;
     this.selectedFactionId = null;
     // Convert the screen click into map-space (undo the camera) so hit-testing
-    // matches the transformed sprites. The 26px pick radius scales with zoom.
+    // matches the transformed sprites. Pick radius tracks hex size so it stays
+    // ~one hex around the settlement now that sprites are hex-scaled.
     const mx = (px - this.camX) / this.camScale;
     const my = (py - this.camY) / this.camScale;
-    const radius = 26;
+    const radius = Math.max(14, this.hexWidth());
 
     // Province view: clicking a settlement selects its province and opens the panel.
     if (this.provinceViewActive) {
@@ -486,7 +531,7 @@ export class RegionView {
   updateTooltip(screenX: number, screenY: number): void {
     const mx = (screenX - this.camX) / this.camScale;
     const my = (screenY - this.camY) / this.camScale;
-    const radius = 26;
+    const radius = Math.max(14, this.hexWidth());
     let hoveredId: number | null = null;
 
     for (const t of this.region.settlements) {
@@ -663,32 +708,37 @@ export class RegionView {
     // Settlements — tiered sprites: shack → cottage → house → town → manor → castle
     for (const t of ss) {
       const { px, py } = this.toPx(t.x, t.y);
-      if (!this.inView(px, py, 56)) continue; // off-screen: skip sprite + labels + icons
+      if (!this.inView(px, py, 80)) continue; // off-screen: skip sprite + labels + icons
       const pop = Math.round(region.popOf(t));
       const onRail = railSet.has(t.id);
-      if (onRail) {
-        const sx = px + 22;
-        g.fillStyle = '#7a3b2e';
-        g.fillRect(sx, py - 4, 10, 10);
-        g.fillStyle = '#3a2e26';
-        g.fillRect(sx - 1, py - 7, 12, 4);
-        g.fillStyle = '#969ca8';
-        g.fillRect(sx - 2, py + 7, 14, 2);
+      // The whole settlement glyph — sprite, depot, labels, raid marker — is
+      // scaled around its hex centre so it reads as ~1 hex when small and grows
+      // into a couple of hexes as the town does (see glyphScale()).
+      this.withGlyphScale(px, py, () => {
+        if (onRail) {
+          const sx = px + 22;
+          g.fillStyle = '#7a3b2e';
+          g.fillRect(sx, py - 4, 10, 10);
+          g.fillStyle = '#3a2e26';
+          g.fillRect(sx - 1, py - 7, 12, 4);
+          g.fillStyle = '#969ca8';
+          g.fillRect(sx - 2, py + 7, 14, 2);
+          g.fillStyle = '#e8d27a';
+          g.fillRect(sx + 4, py - 1, 2, 2);
+        }
+        this.drawTownTier(px, py, pop, this.selectedId === t.id);
         g.fillStyle = '#e8d27a';
-        g.fillRect(sx + 4, py - 1, 2, 2);
-      }
-      this.drawTownTier(px, py, pop, this.selectedId === t.id);
-      g.fillStyle = '#e8d27a';
-      g.font = '12px monospace';
-      g.textAlign = 'center';
-      g.fillText(t.name, px, py + 28);
-      g.fillStyle = '#9ab0c4';
-      g.font = '10px monospace';
-      g.fillText(`${pop}`, px, py + 40);
-      if (region.day - t.lastRaidDay < 5) {
-        g.fillStyle = '#e04444';
-        g.fillText('⚔', px + 22, py - 6);
-      }
+        g.font = '12px monospace';
+        g.textAlign = 'center';
+        g.fillText(t.name, px, py + 28);
+        g.fillStyle = '#9ab0c4';
+        g.font = '10px monospace';
+        g.fillText(`${pop}`, px, py + 40);
+        if (region.day - t.lastRaidDay < 5) {
+          g.fillStyle = '#e04444';
+          g.fillText('⚔', px + 22, py - 6);
+        }
+      });
     }
 
     // Phase 0: per-settlement food/wood/goods status icons.
@@ -705,38 +755,40 @@ export class RegionView {
         if (!this.revealedAt(s.x, s.y)) continue; // hidden until discovered
         if (!this.region.isVisibleToFaction(Math.round(s.x), Math.round(s.y), region.playerFactionId)) continue;
         const { px, py } = this.toPx(s.x, s.y);
-        if (!this.inView(px, py, 24)) continue;
+        if (!this.inView(px, py, 40)) continue;
         const selected = this.selectedFactionId === faction.id;
-        // Selection halo
-        if (selected) {
-          g.strokeStyle = '#fff';
-          g.lineWidth = 2;
+        this.withGlyphScale(px, py, () => {
+          // Selection halo
+          if (selected) {
+            g.strokeStyle = '#fff';
+            g.lineWidth = 2;
+            g.beginPath();
+            g.arc(px, py, 14, 0, Math.PI * 2);
+            g.stroke();
+          }
+          // Diamond marker (slightly larger: 9px for clickability)
+          g.fillStyle = isVassal ? '#8fc26a' : color;
           g.beginPath();
-          g.arc(px, py, 14, 0, Math.PI * 2);
+          g.moveTo(px, py - 9);
+          g.lineTo(px + 7, py);
+          g.lineTo(px, py + 9);
+          g.lineTo(px - 7, py);
+          g.closePath();
+          g.fill();
+          g.strokeStyle = 'rgba(0,0,0,0.6)';
+          g.lineWidth = 1;
           g.stroke();
-        }
-        // Diamond marker (slightly larger: 9px for clickability)
-        g.fillStyle = isVassal ? '#8fc26a' : color;
-        g.beginPath();
-        g.moveTo(px, py - 9);
-        g.lineTo(px + 7, py);
-        g.lineTo(px, py + 9);
-        g.lineTo(px - 7, py);
-        g.closePath();
-        g.fill();
-        g.strokeStyle = 'rgba(0,0,0,0.6)';
-        g.lineWidth = 1;
-        g.stroke();
-        if (isVassal) {
-          g.fillStyle = '#fff';
-          g.font = 'bold 8px monospace';
+          if (isVassal) {
+            g.fillStyle = '#fff';
+            g.font = 'bold 8px monospace';
+            g.textAlign = 'center';
+            g.fillText('V', px, py + 3);
+          }
+          g.fillStyle = '#ddd';
+          g.font = '9px monospace';
           g.textAlign = 'center';
-          g.fillText('V', px, py + 3);
-        }
-        g.fillStyle = '#ddd';
-        g.font = '9px monospace';
-        g.textAlign = 'center';
-        g.fillText(faction.name.slice(0, 3), px, py + 21);
+          g.fillText(faction.name.slice(0, 3), px, py + 21);
+        });
       }
     }
 
@@ -961,6 +1013,7 @@ export class RegionView {
     this.drawRouteNetworkPanel();
     this.drawSettlementListPanel();
     this.drawEconomyPanel();
+    this.drawCentralBankPanel();
     this.drawCeremony();
     this.drawConvention();
     this.drawCenturyReport();
@@ -1529,25 +1582,29 @@ export class RegionView {
     };
     for (const t of region.settlements) {
       const { px, py } = this.toPx(t.x, t.y);
-      if (!this.inView(px, py, 56)) continue;
+      if (!this.inView(px, py, 80)) continue;
       const rs = region.getSettlementResourceStatus(t);
       const cells: [string, string][] = [['F', rs.food], ['W', rs.wood], ['G', rs.goods]];
-      const bw = 7;
-      const gap = 3;
-      const total = cells.length * bw + (cells.length - 1) * gap;
-      let bx = Math.round(px - total / 2);
-      const by = Math.round(py + 46);
-      for (const [label, st] of cells) {
-        g.fillStyle = 'rgba(10,12,18,0.75)';
-        g.fillRect(bx - 1, by - 1, bw + 2, bw + 2);
-        g.fillStyle = statusColor[st] ?? '#888';
-        g.fillRect(bx, by, bw, bw);
-        g.fillStyle = '#0a0c12';
-        g.font = '7px monospace';
-        g.textAlign = 'center';
-        g.fillText(label, bx + bw / 2, by + bw - 1);
-        bx += bw + gap;
-      }
+      // Scaled with the settlement glyph so the F/W/G chips tuck just beneath the
+      // town instead of floating hexes away.
+      this.withGlyphScale(px, py, () => {
+        const bw = 7;
+        const gap = 3;
+        const total = cells.length * bw + (cells.length - 1) * gap;
+        let bx = Math.round(px - total / 2);
+        const by = Math.round(py + 46);
+        for (const [label, st] of cells) {
+          g.fillStyle = 'rgba(10,12,18,0.75)';
+          g.fillRect(bx - 1, by - 1, bw + 2, bw + 2);
+          g.fillStyle = statusColor[st] ?? '#888';
+          g.fillRect(bx, by, bw, bw);
+          g.fillStyle = '#0a0c12';
+          g.font = '7px monospace';
+          g.textAlign = 'center';
+          g.fillText(label, bx + bw / 2, by + bw - 1);
+          bx += bw + gap;
+        }
+      });
     }
     g.textAlign = 'left';
   }
@@ -2443,7 +2500,9 @@ export class RegionView {
     // Only built post-statehood — these read nation-tier state the pre-State
     // region doesn't have, and the sub-tab isn't shown until then anyway.
     const creditBody = preState ? '' :
-      this.monetaryHtml() +
+      (r.hasCentralBank()
+        ? `<p class="insp-skills">CENTRAL BANK</p><p style="font-size:10px;color:#9be3b6">Monetary policy, bonds, FX and the discount window live in the dedicated <b>Central Bank</b> window — open it with <b>B</b> or the B:bank button above.</p>`
+        : '') +
       this.lendersHtml() +
       `<p class="insp-skills">${r.maglevUnlocked()
         ? 'THE FLOATING FREIGHT — maglev guideways from any town panel'
@@ -2491,6 +2550,9 @@ export class RegionView {
       `<button class="mini" id="routenet-toggle" title="Route network (R)">${this.routeNetworkOpen ? '▲' : '▼'} R:routes</button> ` +
       `<button class="mini" id="settlements-toggle" title="Settlement list (S)">${this.settlementListOpen ? '▲' : '▼'} S:towns</button> ` +
       `<button class="mini" id="economy-toggle" title="Economy panel (E)">${this.economyOpen ? '▲' : '▼'} E:econ</button>` +
+      (r.hasCentralBank()
+        ? ` <button class="mini" id="centralbank-toggle" title="Central Bank — monetary policy, bonds, FX (B)" style="background:#2d4a3a;color:#9be3b6">${this.centralBankOpen ? '▲' : '▼'} B:bank</button>`
+        : '') +
       `</p>` +
       tabStrip +
       // Pre-statehood the lone Finance section is always shown (no tabs to hide
@@ -2510,37 +2572,8 @@ export class RegionView {
       const taxVal = this.statePanel.querySelector<HTMLElement>('#tax-val');
       if (taxVal) taxVal.textContent = `${Math.round(r.taxRate * 100)}%`;
     };
-    const rateSlider = this.statePanel.querySelector<HTMLInputElement>('#rate-slider');
-    if (rateSlider) {
-      rateSlider.oninput = (e) => {
-        r.policyRate = Number((e.target as HTMLInputElement).value) / 100;
-        const rateVal = this.statePanel.querySelector<HTMLElement>('#rate-val');
-        if (rateVal) rateVal.textContent = `${Math.round(r.policyRate * 100)}%`;
-      };
-    }
-    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.cb-regime-btn')) {
-      btn.onclick = () => r.setMonetaryRegime(btn.dataset.regime as MonetaryRegime);
-    }
-    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.cb-bond-btn')) {
-      btn.onclick = () => r.issueBonds(Number(btn.dataset.amount));
-    }
-    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.cb-cur-announce')) {
-      btn.onclick = () => r.announceCurrencyChange(btn.dataset.sym as CurrencySymbol);
-    }
-    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.cb-cur-switch')) {
-      btn.onclick = () => {
-        const sym = btn.dataset.sym as CurrencySymbol;
-        // A switch made under duress reads as necessity; one made in calm
-        // waters reads as caprice — and markets price each accordingly.
-        const cause = r.confidence < 30 ? 'crisis' : 'strategic';
-        const verdict = cause === 'crisis'
-          ? 'Markets are already in crisis — they will understand this move.'
-          : 'Markets see no reason for this. Expect heavy capital flight and years of friction.';
-        if (confirm(`Switch the currency standard to ${sym}?\n\n${verdict}\n\nAnnounced switches (${ANNOUNCE_LEAD_DAYS}+ days notice) and deep treasury reserves soften the blow.`)) {
-          r.changeCurrency(sym, cause);
-        }
-      };
-    }
+    // Monetary controls (policy rate, regime, bonds, currency, discount window)
+    // now live in the dedicated Central Bank window — see wireCentralBankPanel().
     this.statePanel.querySelector<HTMLButtonElement>('#svc-up')!.onclick = () => {
       r.servicesLevel = Math.min(2, r.servicesLevel + 1); forceRebuild();
     };
@@ -2565,6 +2598,9 @@ export class RegionView {
     this.statePanel.querySelector<HTMLButtonElement>('#economy-toggle')!.onclick = () => {
       this.economyOpen = !this.economyOpen; forceRebuild();
     };
+    this.statePanel.querySelector<HTMLButtonElement>('#centralbank-toggle')?.addEventListener('click', () => {
+      this.centralBankOpen = !this.centralBankOpen; forceRebuild();
+    });
     this.statePanel.querySelector<HTMLButtonElement>('#convention-btn')?.addEventListener('click', () => {
       this.conventionOpen = true;
     });
@@ -2592,22 +2628,7 @@ export class RegionView {
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.loan-repay-btn')) {
       btn.onclick = () => this.showRepayDialog(Number(btn.dataset.loan));
     }
-    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.cb-dw-draw')) {
-      btn.onclick = () => {
-        const amt = Number(btn.dataset.amount);
-        const result = r.borrowFromCentralBank(amt);
-        if (!result.ok) alert(result.reason);
-        else this.refreshPanel();
-      };
-    }
-    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.cb-dw-repay')) {
-      btn.onclick = () => {
-        const amt = Number(btn.dataset.amount);
-        const result = r.repayCentralBank(amt);
-        if (!result.ok) alert(result.reason);
-        else this.refreshPanel();
-      };
-    }
+    // Discount-window wiring moved to wireCentralBankPanel().
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-break-btn')) {
       btn.onclick = () => r.breakTreaty(Number(btn.dataset.rival), btn.dataset.kind as TreatyKind);
     }
@@ -3490,7 +3511,7 @@ export class RegionView {
   /** Central bank dashboard (GDD §5.1): policy rate, credit cycle, FX, bonds. */
   private monetaryHtml(): string {
     const r = this.region;
-    if (!r.passedLaws.has('central_bank_charter')) return '';
+    if (!r.hasCentralBank()) return '';
     const annualGDP = Math.max(1, r.gdpLastMonth * 12);
     const debtPct = Math.round(r.nationalDebt / annualGDP * 100);
     const leverPct = (r.privateLeverage * r.policyRate * 100).toFixed(0); // debt service %
@@ -3551,7 +3572,7 @@ export class RegionView {
   /** Central Bank discount window: short-term borrowing at the policy rate. */
   private discountWindowHtml(): string {
     const r = this.region;
-    if (!r.passedLaws.has('central_bank_charter')) return '';
+    if (!r.hasCentralBank()) return '';
     const maxDraw = Math.max(0, r.treasury * 0.5 - r.centralBankLoan);
     const cbCol = r.centralBankLoan > r.treasury * 0.3 ? '#e55' : '#4e9';
     return `<p class="insp-skills" title="The discount window lets you borrow short-term from your own central bank at the policy rate. Interest compounds monthly. Outstanding balance is capped at 50% of current treasury.">` +
@@ -3574,14 +3595,14 @@ export class RegionView {
     if (!r.stateProclaimed) return '';
     const hasMarket = r.settlements.some((s) => s.buildings.some((b) => b.includes('market')));
     const hasBank = r.settlements.some((s) => s.buildings.some((b) => b.includes('bank')));
-    const hasCbCharter = r.passedLaws.has('central_bank_charter');
+    const hasCbCharter = r.hasCentralBank();
     if (!hasMarket && !hasBank && !hasCbCharter) return '';
 
     let html = `<p class="insp-skills">LENDERS</p>`;
 
     // Show available lenders
     if (r.lenders.length > 0) {
-      const rateNote = r.passedLaws.has('central_bank_charter')
+      const rateNote = r.hasCentralBank()
         ? ` <span style="color:#888;font-size:9px">(policy ${(r.policyRate * 100).toFixed(0)}% + spread)</span>`
         : '';
       html += `<div style="font-size:11px;margin:4px 0">Available lenders:${rateNote}</div>`;
@@ -3624,28 +3645,36 @@ export class RegionView {
     if (this.frame - this.lastTopBarFrame < 8) return;
     this.lastTopBarFrame = this.frame;
     const r = this.region;
-    const year = Math.floor(r.minute / (60 * 24 * 365));
-    const dayOfYear = Math.floor((r.minute / (60 * 24)) % 365);
-    const month = Math.floor(dayOfYear / 30) + 1;
-    const day = Math.floor(dayOfYear % 30) + 1;
+    // Calendar runs on the actual in-game era (1919→…), not a raw offset.
+    const year = r.year;
+    const month = r.monthName;
+    const day = r.monthDay;
 
     const selected = r.settlements.find((s) => s.id === this.selectedId);
-    const pop = selected ? Math.floor(selected.cohorts.bands.reduce((a, b) => a + b, 0)) : 0;
+    const selPop = selected ? Math.floor(selected.cohorts.bands.reduce((a, b) => a + b, 0)) : 0;
+    const nationPop = r.playerPop();
 
     const totalFood = r.totalFood;
     const totalWood = r.totalWood;
+
+    // Overall happiness: pop-weighted satisfaction across the player's settlements.
+    const happy = Math.round(r.avgSatisfaction());
+    const happyCol = happy >= 60 ? '#6ad48a' : happy >= 40 ? '#d4b85a' : '#d46a6a';
 
     const treasury = formatCurrency(r.treasury);
     const w = window as any;
     const speed = w.gameSpeed || 1;
     const paused = w.gamePaused ? '⏸ PAUSED' : '';
     const speedLabel = speed === 1 ? '1×' : speed === 3 ? '3×' : speed === 8 ? '8×' : `${speed}×`;
+    // Population cell shows the whole nation; if a settlement is selected, its
+    // share is appended in parentheses so both numbers are visible at a glance.
+    const popLabel = selected ? `${nationPop} (${selPop})` : `${nationPop}`;
     this.topBar.innerHTML = `
-      <div class="tb-item tb-date">Year ${year}</div>
-      <div class="tb-item tb-time">Month ${month}, Day ${day}</div>
+      <div class="tb-item tb-date">${month} ${day}, ${year}</div>
       <div class="tb-item tb-treasury">${treasury}</div>
       <div class="tb-item tb-resources">🌾 ${Math.floor(totalFood)} | 🪵 ${Math.floor(totalWood)}</div>
-      ${selected ? `<div class="tb-item tb-population">👥 ${pop}</div>` : ''}
+      <div class="tb-item tb-population" title="Total population of your settlements${selected ? ' (selected settlement in parentheses)' : ''}">👥 ${popLabel}</div>
+      <div class="tb-item tb-happiness" title="Overall happiness — population-weighted satisfaction across your settlements"><span style="color:${happyCol}">☺ ${happy}%</span></div>
       <div class="tb-item tb-speed" style="margin-left: auto;">${paused} ${speedLabel}</div>
     `;
   }
@@ -3886,7 +3915,7 @@ export class RegionView {
       `<p>garrison <b>${g}</b>/${cap} militia</p>` +
       `<button class="mini" id="militia-btn" ${can.ok ? '' : 'disabled'} ` +
       `title="${can.ok ? `Arm and drill ${RegionSim.MILITIA_ADD} more militia` : can.reason}">` +
-      `drill militia (+${RegionSim.MILITIA_ADD}, ${formatCurrency(RegionSim.MILITIA_COST)})</button>` +
+      `drill militia (+${RegionSim.MILITIA_ADD}, ${formatCurrency(r.militiaCost())})</button>` +
       (can.ok ? '' : ` <span class="insp-skills">${can.reason}</span>`)
     );
   }
@@ -4326,6 +4355,88 @@ export class RegionView {
     if (taxDown) taxDown.onclick = () => { r.taxRate = Math.max(0, r.taxRate - 0.02); refresh(); };
   }
 
+  /** Dedicated Central Bank window (B): the monetary controls the player expects
+   *  the moment they research Central Banking — policy rate, credit cycle, FX
+   *  regime, sovereign bonds, the discount window, and the currency standard. */
+  private drawCentralBankPanel(): void {
+    const r = this.region;
+    if (!this.centralBankOpen || !r.hasCentralBank()) {
+      this.centralBankPanel.classList.add('hidden');
+      return;
+    }
+    this.centralBankPanel.classList.remove('hidden');
+    if (this.frame - this.lastCentralBankBuildFrame < 60) return;
+    this.lastCentralBankBuildFrame = this.frame;
+    this.setInnerHtml(this.centralBankPanel, this.centralBankPanelHtml());
+    this.wireCentralBankPanel();
+  }
+
+  private wireCentralBankPanel(): void {
+    const r = this.region;
+    const p = this.centralBankPanel;
+    const refresh = () => { this.lastCentralBankBuildFrame = -999; };
+    for (const b of p.querySelectorAll<HTMLButtonElement>('.cb-close')) {
+      b.onclick = () => { this.centralBankOpen = false; };
+    }
+    const rateSlider = p.querySelector<HTMLInputElement>('#rate-slider');
+    if (rateSlider) {
+      rateSlider.oninput = (e) => {
+        r.policyRate = Number((e.target as HTMLInputElement).value) / 100;
+        const rateVal = p.querySelector<HTMLElement>('#rate-val');
+        if (rateVal) rateVal.textContent = `${Math.round(r.policyRate * 100)}%`;
+      };
+    }
+    for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-regime-btn')) {
+      btn.onclick = () => { r.setMonetaryRegime(btn.dataset.regime as MonetaryRegime); refresh(); };
+    }
+    for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-bond-btn')) {
+      btn.onclick = () => { r.issueBonds(Number(btn.dataset.amount)); refresh(); };
+    }
+    for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-cur-announce')) {
+      btn.onclick = () => { r.announceCurrencyChange(btn.dataset.sym as CurrencySymbol); refresh(); };
+    }
+    for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-cur-switch')) {
+      btn.onclick = () => {
+        const sym = btn.dataset.sym as CurrencySymbol;
+        // A switch made under duress reads as necessity; one made in calm waters
+        // reads as caprice — and markets price each accordingly.
+        const cause = r.confidence < 30 ? 'crisis' : 'strategic';
+        const verdict = cause === 'crisis'
+          ? 'Markets are already in crisis — they will understand this move.'
+          : 'Markets see no reason for this. Expect heavy capital flight and years of friction.';
+        if (confirm(`Switch the currency standard to ${sym}?\n\n${verdict}\n\nAnnounced switches (${ANNOUNCE_LEAD_DAYS}+ days notice) and deep treasury reserves soften the blow.`)) {
+          r.changeCurrency(sym, cause); refresh();
+        }
+      };
+    }
+    for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-dw-draw')) {
+      btn.onclick = () => {
+        const result = r.borrowFromCentralBank(Number(btn.dataset.amount));
+        if (!result.ok) alert(result.reason); else refresh();
+      };
+    }
+    for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-dw-repay')) {
+      btn.onclick = () => {
+        const result = r.repayCentralBank(Number(btn.dataset.amount));
+        if (!result.ok) alert(result.reason); else refresh();
+      };
+    }
+  }
+
+  private centralBankPanelHtml(): string {
+    const r = this.region;
+    const established = r.has('central_banking') ? 'Central Banking civic' : 'Central Bank Charter';
+    const bondNote = !r.nationProclaimed
+      ? `<p class="insp-skills" style="color:#c9b27a">Sovereign bond issuance unlocks once you proclaim nationhood.</p>`
+      : '';
+    return (
+      `<div class="pal-title">🏛 CENTRAL BANK [B] <button class="mini cb-close" title="close (B)">✕</button></div>` +
+      `<p style="font-size:10px;color:#9ab0c4;margin:2px 0 8px">Established via the ${established}. Set the policy rate to steer the credit cycle, manage the currency standard, and lean against boom and bust.</p>` +
+      this.monetaryHtml() +
+      bondNote
+    );
+  }
+
   private economyPanelHtml(): string {
     const r = this.region;
     const towns = r.settlements
@@ -4641,15 +4752,16 @@ export class RegionView {
     const r = this.region;
     if (t.factionId !== r.playerFactionId) return '';
     const active = r.scouts.filter((s) => s.factionId === r.playerFactionId).length;
-    const canAfford = r.treasury >= 10;
+    const scoutCost = r.scoutCost();
+    const canAfford = r.treasury >= scoutCost;
     const atCap = active >= 2;
     const disabled = !canAfford || atCap;
-    const reason = atCap ? '2 scouts already active' : !canAfford ? 'need £10' : '';
+    const reason = atCap ? '2 scouts already active' : !canAfford ? `need ${formatCurrency(scoutCost)}` : '';
     return (
       `<p class="insp-skills">EXPLORATION · ${active}/2 scouts active</p>` +
       `<p><button class="mini scout-btn" ${disabled ? 'disabled' : ''} ` +
       `title="${disabled ? reason : 'Hire a scout to explore the fog of war — active for 200 days'}">` +
-      `Hire Scout (£10)</button></p>`
+      `Hire Scout (${formatCurrency(scoutCost)})</button></p>`
     );
   }
 

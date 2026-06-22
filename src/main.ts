@@ -187,6 +187,9 @@ window.addEventListener('keydown', (e) => {
   if (regionView && !pauseMenuOpen) {
     if (e.key === 't' || e.key === 'T') { regionView.researchOpen = !regionView.researchOpen; e.preventDefault(); return; }
     if (e.key === 'p' || e.key === 'P') { regionView.toggleProvinceView(); e.preventDefault(); return; }
+    if ((e.key === 'b' || e.key === 'B') && region?.hasCentralBank()) {
+      regionView.centralBankOpen = !regionView.centralBankOpen; e.preventDefault(); return;
+    }
   }
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key));

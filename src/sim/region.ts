@@ -2110,7 +2110,15 @@ export class RegionSim {
   /** Day the aerosols were injected; used to phase the cooling. */
   geoDeployDay = -1;
   // ---- Monetary system (GDD §5.1): central bank, credit cycle, FX ----
-  /** Annual policy rate (1–15%); player-adjustable once central_bank_charter enacted. */
+  /** True once the nation runs a central bank — reached either by researching the
+   *  Central Banking civic (the tech the player expects to "unlock the bank") or by
+   *  enacting the Central Bank Charter law at nation tier. Either path lights up the
+   *  policy rate, credit cycle, FX regime, and discount window. (Sovereign bond
+   *  issuance stays gated on full nationhood inside issueBonds.) */
+  hasCentralBank(): boolean {
+    return this.has('central_banking') || this.passedLaws.has('central_bank_charter');
+  }
+  /** Annual policy rate (1–15%); player-adjustable once a central bank exists. */
   policyRate = NEUTRAL_RATE;
   /** Private sector credit as fraction of monthly GDP; grows at low rates. */
   privateLeverage = 0.0;
@@ -2283,6 +2291,29 @@ export class RegionSim {
       this.settlements.reduce((s, t) => s + this.popOf(t), 0) +
       this.expeditions.reduce((s, e) => s + e.pop, 0),
     );
+  }
+
+  /** Population of the player's own settlements only (excludes rivals/expeditions). */
+  playerPop(): number {
+    return Math.round(
+      this.settlements
+        .filter((t) => t.factionId === this.playerFactionId)
+        .reduce((s, t) => s + this.popOf(t), 0),
+    );
+  }
+
+  /** Pop-weighted average satisfaction across the player's settlements (0–100).
+   *  This is the nation's overall "happiness" — big cities count for more. */
+  avgSatisfaction(): number {
+    let pop = 0;
+    let weighted = 0;
+    for (const t of this.settlements) {
+      if (t.factionId !== this.playerFactionId) continue;
+      const p = this.popOf(t);
+      pop += p;
+      weighted += p * t.satisfaction;
+    }
+    return pop > 0 ? weighted / pop : 0;
   }
 
   popOf(t: Settlement): number {
@@ -2824,6 +2855,14 @@ export class RegionSim {
     const baseRate = this.settlements.length * 0.5 + this.totalPop() * 0.004;
     const ratio = baseRate / TUNING.researchBaseRate;
     return Math.max(1, ratio ** TUNING.researchScaleExp);
+  }
+
+  /** Scale a flat, headline player cost (scout hire, militia drill, town
+   *  founding) by the development level so it keeps pace with the economy and
+   *  stays a real outlay deep into the campaign instead of rounding to nothing.
+   *  Floors at the authored value (devFactor ≥ 1). */
+  flatCost(base: number): number {
+    return Math.round(base * this.devFactor());
   }
 
   /** What a civic work actually costs to raise here and now (Baumol-scaled). */
@@ -3855,7 +3894,7 @@ export class RegionSim {
     this.updateRivalAI(); // staggered AI updates for rivals (GDD §6.2)
     this.updateScouts(); // update faction scouts: movement, spawning, expiry (GDD §6.2)
     this.tickClimate(); // the ledger runs from the first decade (GDD §8.2)
-    if (this.passedLaws.has('central_bank_charter')) this.tickMonetary();
+    if (this.hasCentralBank()) this.tickMonetary();
     this.tickHistoricalAnchors(); // scripted world-events that rhyme with history (GDD §1)
     this.updateLoans(); // process loan interest and check for defaults
     if (this.stateProclaimed) this.collectVassalTribute();
@@ -4243,7 +4282,7 @@ export class RegionSim {
     // The neon century (era 8 dystopia branch): the economy roars — at a price paid in grievance
     if (this.eraBranch === 'dystopia') gdp *= 1.08;
     // Credit cycle (GDD §5.1): boom raises GDP, confidence collapse contracts it
-    if (this.passedLaws.has('central_bank_charter')) {
+    if (this.hasCentralBank()) {
       const boom = Math.max(0, (this.confidence - 50) * 0.002);
       const bust = this.confidence < 30 ? (30 - this.confidence) * 0.004 : 0;
       const inflDrag = Math.max(0, (this.inflationRate - 0.08) * 2.0);
@@ -4254,14 +4293,33 @@ export class RegionSim {
     const treasuryMult = this.ministerFor('treasury') ? 1.1 : 1;
     const revenue = gdp * this.taxRate * collection * treasuryMult;
     const pop = this.totalPop();
+    // Wagner's law (GDD §5.2): the cost of running a developed state is a share of
+    // GDP that climbs with the services and defense the player funds — public
+    // salaries and procurement are priced at prevailing wages, so the bill tracks
+    // the economy instead of staying a flat per-head pittance. A gentle development
+    // lift nudges the late-century share up (welfare state, complex bureaucracy) to
+    // lean against the productivity boom without tipping the budget into a deficit
+    // spiral. This is the dominant sink that keeps the treasury honest: at the
+    // default tax (10%) and funded services/militia the budget runs a slim surplus,
+    // so cranking services or a standing army (or cutting taxes) stays a real
+    // fiscal decision rather than a treasury that balloons past the point where
+    // anything costs anything.
+    // svc1/mil1 lands at ~9% of GDP — below the default 10% tax take (8.5% under a
+    // council's collection penalty), so a nation funded at the defaults runs a slim
+    // surplus, while svc2/mil2 (~15.5%) demands the income-tax civic and a higher
+    // rate. The development lift is deliberately gentle: a steeper one tips the
+    // information-era budget into a deficit spiral once productivity (and the
+    // GDP-share bill) booms.
+    const devShare = (this.modernizationIndex() + this.informationIndex()) / 2; // 0 → 1
+    const publicSector =
+      gdp * (0.025 + 0.04 * this.servicesLevel * serviceCost + 0.025 * this.militiaLevel) * (1 + devShare * 0.15);
     const spending =
-      pop * 0.05 * this.servicesLevel * serviceCost +
-      pop * 0.03 * this.militiaLevel +
+      publicSector +
       this.settlements.length * 5 + // administration
       this.buildingUpkeep() + // Phase 2: the civic works keep their lights on
       this.policyServiceUpkeep() + // Phase 5: generous city services cost the treasury
       this.policyUpkeep() + // active policy running costs
-      (this.passedLaws.has('welfare_benefits') ? pop * 0.01 : 0) + // welfare relief payments
+      (this.passedLaws.has('welfare_benefits') ? this.gdpLastMonth * 0.02 : 0) + // welfare relief payments
       (warMob ? pop * warMob.upkeepPerPop : 0) + // …and the drain runs concurrently (GDD §7.2)
       (this.playerWar?.blockade ? pop * BLOCKADE_UPKEEP_PER_POP : 0); // coal and crews for the gunboats
     // Income Tax (civic research): a progressive levy adds 3% of GDP on top
@@ -4272,19 +4330,22 @@ export class RegionSim {
     const estateLevyBonus = this.estateTaxActive ? this.totalPop() * 0.1 : 0;
     // Progressive Taxation law: graduated bands yield 2% extra of GDP
     const progressiveTaxBonus = this.passedLaws.has('progressive_tax') ? this.gdpLastMonth * 0.02 : 0;
-    // Protectionism policy: tariff wall adds flat £3/month
-    const protectionismBonus = this.policyActive('protectionism') ? 3 : 0;
-    // Austerity policy: belt-tightening adds a flat £4/month (paid in satisfaction elsewhere)
-    const austerityBonus = this.policyActive('austerity') ? 4 : 0;
+    // Protectionism policy: a tariff wall raises ~0.8% of GDP (scales with the
+    // economy rather than the vestigial flat £3 from the pre-GDP-budget era)
+    const protectionismBonus = this.policyActive('protectionism') ? this.gdpLastMonth * 0.008 : 0;
+    // Austerity policy: belt-tightening trims ~1.5% of GDP off the budget (paid in
+    // satisfaction elsewhere); GDP-scaled so it stays meaningful against the
+    // GDP-scaled public-sector bill
+    const austerityBonus = this.policyActive('austerity') ? this.gdpLastMonth * 0.015 : 0;
     // Central Bank Charter: treasury earns interest at the policy rate
-    const bankInterest = this.passedLaws.has('central_bank_charter') ? this.treasury * (this.policyRate / 12) : 0;
+    const bankInterest = this.hasCentralBank() ? this.treasury * (this.policyRate / 12) : 0;
     // Carbon Levy law: the smoke pays 1% of GDP into the treasury
     const carbonLevyBonus = this.passedLaws.has('carbon_levy') ? this.gdpLastMonth * 0.01 : 0;
     // Trade agreements (GDD §5.4): export earnings per signed rival, scaled to
     // GDP and the rival's commerce appetite. Foreign wars make buyers pay more.
     // FX boost (GDD §5.1): a devalued currency makes exports cheaper for buyers.
     const warBoom = this.day < this.warBoomUntil ? 1.5 : 1;
-    const fxBoost = this.passedLaws.has('central_bank_charter') ? 1 / Math.max(0.5, this.exchangeRate) : 1;
+    const fxBoost = this.hasCentralBank() ? 1 / Math.max(0.5, this.exchangeRate) : 1;
     this.exportEarningsLastMonth = this.rivals.reduce(
       (s, rv) =>
         rv.treaties.includes('trade_agreement')
@@ -4868,15 +4929,22 @@ export class RegionSim {
     return true;
   }
 
+  static readonly SCOUT_BASE_COST = 10;
+  /** Scout hire cost at the current development level. */
+  scoutCost(): number {
+    return this.flatCost(RegionSim.SCOUT_BASE_COST);
+  }
+
   /** Hire a scout from one of the player's towns to explore the fog of war.
-   *  Available pre-state; costs £10 from the treasury. Max 2 active scouts. */
+   *  Available pre-state; base £10, scaled by development. Max 2 active scouts. */
   sendPlayerScout(townId: number): { ok: boolean; reason: string } {
     const t = this.settlement(townId);
     if (!t || t.factionId !== this.playerFactionId) return { ok: false, reason: 'not your town' };
     const active = this.scouts.filter((s) => s.factionId === this.playerFactionId).length;
     if (active >= 2) return { ok: false, reason: 'already 2 scouts in the field' };
-    if (this.treasury < 10) return { ok: false, reason: 'need £10' };
-    this.treasury -= 10;
+    const cost = this.scoutCost();
+    if (this.treasury < cost) return { ok: false, reason: `need ${formatCurrency(cost)}` };
+    this.treasury -= cost;
     const SCOUT_NAMES = ['Fox', 'Wren', 'Ash', 'Bram', 'Rook', 'Jade', 'Cole', 'Fern'];
     const playerScoutCount = this.scouts.filter((s) => s.factionId === this.playerFactionId).length;
     const scoutName = SCOUT_NAMES[playerScoutCount % SCOUT_NAMES.length];
@@ -5746,11 +5814,16 @@ export class RegionSim {
   static readonly MILITIA_COST = 250;
   static readonly MILITIA_ADD = 2;
 
+  /** Militia drill cost at the current development level. */
+  militiaCost(): number {
+    return this.flatCost(RegionSim.MILITIA_COST);
+  }
+
   canRecruitMilitia(townId: number): { ok: boolean; reason: string } {
     const t = this.settlement(townId);
     if (!t) return { ok: false, reason: 'no settlement' };
-    if (this.treasury < RegionSim.MILITIA_COST) {
-      return { ok: false, reason: `needs ${formatCurrency(RegionSim.MILITIA_COST)} (have ${formatCurrency(Math.floor(this.treasury))})` };
+    if (this.treasury < this.militiaCost()) {
+      return { ok: false, reason: `needs ${formatCurrency(this.militiaCost())} (have ${formatCurrency(Math.floor(this.treasury))})` };
     }
     if (this.popOf(t) < 12) return { ok: false, reason: 'too few people to muster a militia' };
     if ((t.garrisonStrength || 0) >= this.garrisonCap(t)) {
@@ -5766,7 +5839,7 @@ export class RegionSim {
     const check = this.canRecruitMilitia(townId);
     const t = this.settlement(townId);
     if (!check.ok || !t) return false;
-    this.treasury -= RegionSim.MILITIA_COST;
+    this.treasury -= this.militiaCost();
     t.garrisonStrength = Math.min(this.garrisonCap(t), (t.garrisonStrength || 0) + RegionSim.MILITIA_ADD);
     this.addLog(`${t.name} drills fresh militia — garrison now ${Math.round(t.garrisonStrength)}.`, 'info');
     return true;
@@ -8812,7 +8885,7 @@ export class RegionSim {
    * Available once the central_bank_charter is enacted; limited to half of treasury.
    */
   borrowFromCentralBank(amount: number): { ok: boolean; reason?: string } {
-    if (!this.passedLaws.has('central_bank_charter')) {
+    if (!this.hasCentralBank()) {
       return { ok: false, reason: 'Central bank not established' };
     }
     if (amount <= 0) return { ok: false, reason: 'Amount must be positive' };

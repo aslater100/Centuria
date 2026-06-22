@@ -10,10 +10,12 @@
 
 import { hexNeighbors, hexDistance, offsetToCube } from './hex';
 
-export const REGION_N = 256; // region is REGION_N × REGION_N cells over 0..100 coords
-// Higher resolution = a larger, more detailed continent that fits more towns
-// (spacing is cell-based). Map-gen is O(N²) but one-time (~160ms for 256x256); the strategic
-// map renders from a static cache, so this is ~free per frame. See regionview.ts.
+export const REGION_N = 128; // region is REGION_N × REGION_N cells over 0..100 coords
+// Hex size on screen is inversely proportional to REGION_N. At 128 each hex is
+// ~2× the size it was at 256, so a founding settlement reads as a single hex and
+// the painterly terrain — not the city sprites — fills the frame. Still a roomy
+// 16k-cell continent. Map-gen is O(N²) but one-time; the strategic map renders
+// from a static cache, so grid size is ~free per frame. See regionview.ts.
 
 /** The grid resolution everything was originally tuned against. */
 const BASE_REGION_N = 64;
