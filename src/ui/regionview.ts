@@ -1065,6 +1065,8 @@ export class RegionView {
     for (const t of r.settlements) s += `;${t.id},${t.factionId},${Math.round(t.x)},${Math.round(t.y)}`;
     // Fog-of-war frontier: use the pre-tracked counter instead of scanning 10 000 tiles.
     s += `|fog${r.exploredCount}`;
+    // Ghost waterline: rebuild cache when sea-rise warning fires (adds blue coastal overlay).
+    s += `|rise${r.seaRiseAnnounced ? 1 : 0}`;
     return s;
   }
 
@@ -1994,6 +1996,36 @@ export class RegionView {
         }
       }
     }
+    // Ghost waterline (GDD §8.2): a faint blue overlay on low-elevation coastal
+    // land cells showing the projected 2100 flood zone.  Appears once the
+    // sea-rise warning fires (warmingC ≥ 1.2°C) — "quiet dread as persistent UI."
+    const showWaterline = this.region.seaRiseAnnounced || this.region.year >= 2030;
+    if (showWaterline) {
+      for (let y = 0; y < N; y++) {
+        for (let x = 0; x < N; x++) {
+          const c = map.at(x, y);
+          if (RegionView.WATER_BIOMES.has(c.biome)) continue;
+          if (c.elevation > 0.18) continue; // only low-lying coastal land
+          if (!hexNeighbors(x, y).some(([nc, nr]) => nc >= 0 && nr >= 0 && nc < N && nr < N
+              && RegionView.WATER_BIOMES.has(map.at(nc, nr).biome))) continue;
+          const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
+          const corners = hexCorners(cx, cy, size);
+          g.fillStyle = 'rgba(30,110,220,0.22)';
+          fillHexPath(g, corners);
+          // Dashed blue border to mark the flood-zone edge
+          g.strokeStyle = 'rgba(60,140,255,0.55)';
+          g.lineWidth = 1;
+          g.setLineDash([3, 3]);
+          g.beginPath();
+          g.moveTo(corners[5].x, corners[5].y);
+          for (let i = 0; i < 6; i++) g.lineTo(corners[i].x, corners[i].y);
+          g.closePath();
+          g.stroke();
+          g.setLineDash([]);
+        }
+      }
+    }
+
     // Contour lines: draw shared hex edge when elevation crosses 0.2/0.4/0.6/0.8.
     // Check only directions 0/1/2 (E, SE, SW) so each edge is drawn once.
     g.strokeStyle = 'rgba(0,0,0,0.12)';
@@ -3767,6 +3799,10 @@ export class RegionView {
     }
     const sw = this.panel.querySelector<HTMLButtonElement>('#seawall-btn');
     if (sw) sw.onclick = () => { this.region.buildSeaWall(t.id); this.refreshPanel(); };
+    const fp = this.panel.querySelector<HTMLButtonElement>('#floodproof-btn');
+    if (fp) fp.onclick = () => { this.region.buildFloodProof(t.id); this.refreshPanel(); };
+    const mr = this.panel.querySelector<HTMLButtonElement>('#retreat-btn');
+    if (mr) mr.onclick = () => { this.region.doManagedRetreat(t.id); this.refreshPanel(); };
     const mil = this.panel.querySelector<HTMLButtonElement>('#militia-btn');
     if (mil) mil.onclick = () => { this.region.recruitMilitia(t.id); this.refreshPanel(); };
     for (const cb of this.panel.querySelectorAll<HTMLButtonElement>('.city-build-btn')) {
@@ -4715,6 +4751,16 @@ export class RegionView {
         ? `<p><button class="mini" id="seawall-btn" ${r.treasury >= r.seaWallCost(t) ? '' : 'disabled'} ` +
           `title="Granite and pumps against the rising sea (GDD §8.2) — tidal flooding never touches a walled town">` +
           `sea wall ` + formatCurrency(r.seaWallCost(t)) + `</button></p>`
+        : '') +
+      (r.canFloodProof(t.id)
+        ? `<p><button class="mini" id="floodproof-btn" ${r.treasury >= r.floodProofCost(t) ? '' : 'disabled'} ` +
+          `title="Raised thresholds and emergency pumps — halves tidal damage at lower cost than a full sea wall">` +
+          `flood-proof ` + formatCurrency(r.floodProofCost(t)) + `</button></p>`
+        : t.floodProofed && !t.seaWall ? `<p class="insp-skills">flood-proofed (partial protection)</p>` : '') +
+      (r.canManagedRetreat(t.id)
+        ? `<p><button class="mini danger" id="retreat-btn" ${r.treasury >= r.managedRetreatCost(t) ? '' : 'disabled'} ` +
+          `title="Relocate this settlement inland permanently — brutal short-term, eliminates all flood risk">` +
+          `managed retreat ` + formatCurrency(r.managedRetreatCost(t)) + `</button></p>`
         : '') +
       this.garrisonHtml(t) +
       this.scoutHtml(t) +
