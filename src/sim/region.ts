@@ -72,6 +72,9 @@ export interface Settlement {
   prices: MarketPrices; // local market, £/unit (GDD §5.2 first slice)
   /** Adaptation works (GDD §8.2): a raised coastal town shrugs off the rising sea. */
   seaWall?: boolean;
+  /** Partial flood-proofing: raised thresholds, emergency pumps, floodgates.
+   *  Costs half a sea wall; cuts tidal damage by 50% but doesn't eliminate it. */
+  floodProofed?: boolean;
   /** Per-town growth/event log: last 12 entries, newest first. */
   recentEvents: { day: number; text: string; kind: 'good' | 'bad' | 'info' }[];
   // ---- Phase 0: Regional Gameplay Expansion ----
@@ -2234,8 +2237,9 @@ export class RegionSim {
   /** Armies stationed at or marching between provinces. */
   provincialArmies: ProvincialArmy[] = [];
   private nextArmyId = 1;
-  private seaRiseAnnounced = false;
+  seaRiseAnnounced = false;
   private lastTidalLogDay = -999;
+  private lastExtremeWeatherDay = -999;
   private droughtAnnounced = false;
   private railAnnounced = false;
   private highwayAnnounced = false;
@@ -3026,9 +3030,10 @@ export class RegionSim {
       let hit = false;
       for (const t of this.settlements) {
         if (!t.site.coastal || t.seaWall || this.popOf(t) < 1) continue;
-        t.food *= Math.max(0.7, 1 - 0.05 * severity);
-        this.removePop(t, this.popOf(t) * 0.0015 * severity);
-        t.satisfaction = Math.max(0, t.satisfaction - 2 * severity);
+        const damageScale = t.floodProofed ? 0.5 : 1.0;
+        t.food *= Math.max(0.7, 1 - 0.05 * severity * damageScale);
+        this.removePop(t, this.popOf(t) * 0.0015 * severity * damageScale);
+        t.satisfaction = Math.max(0, t.satisfaction - 2 * severity * damageScale);
         hit = true;
       }
       if (hit && this.day - this.lastTidalLogDay > 300) {
@@ -3037,6 +3042,28 @@ export class RegionSim {
           'King tides take the low streets again — unwalled coastal towns pump out cellars and count who left.',
           'bad',
         );
+      }
+    }
+    // Extreme weather amplification: warming > 1.5°C makes storms and droughts
+    // more frequent (GDD §8.2: "extreme-weather frequency ↑ with temperature rise").
+    // Monthly probability: ~4% at +2°C, ~8% at +2.5°C.
+    if (this.warmingC >= 1.5 && this.stateProclaimed) {
+      const extraChance = (this.warmingC - 1.5) * 0.08;
+      if (this.rng.next() < extraChance && this.day - this.lastExtremeWeatherDay > 60) {
+        const playerTowns = this.settlements.filter((t) => t.factionId === this.playerFactionId);
+        const target = playerTowns[this.rng.int(playerTowns.length)];
+        if (target && !target.activeEvents.some((e) => e.kind === 'drought' || e.kind === 'flood')) {
+          const isDrought = this.rng.next() < 0.55;
+          const kind: RegionalEventKind = isDrought ? 'drought' : 'flood';
+          target.activeEvents.push({ kind, untilDay: this.day + 50, severity: 0.8 });
+          this.lastExtremeWeatherDay = this.day;
+          this.addLog(
+            isDrought
+              ? `Climate volatility: prolonged drought scorches the fields around ${target.name} (+${this.warmingC.toFixed(1)}°C warming effect).`
+              : `Climate volatility: storm surge overwhelms drainage at ${target.name} — farmland underwater.`,
+            'bad',
+          );
+        }
       }
     }
     // Era branching: early path (1990) if oil barons beaten, otherwise standard (2040)
@@ -3186,6 +3213,68 @@ export class RegionSim {
     this.addLog(
       `The sea wall at ${t.name} tops out — ` + formatCurrency(cost) + ` of granite and pumps between the town and the tide.`,
       'good',
+    );
+    return true;
+  }
+
+  /** Cost of partial flood-proofing (cheaper than a sea wall, only partial coverage). */
+  floodProofCost(t: Settlement): number {
+    return Math.round(80 + this.popOf(t) * 0.15);
+  }
+
+  canFloodProof(townId: number): boolean {
+    const t = this.settlement(townId);
+    if (!t || !t.site.coastal || t.seaWall || t.floodProofed) return false;
+    return this.stateProclaimed && this.year >= 2020;
+  }
+
+  /** Flood-proof a coastal settlement: raised thresholds, pumps, floodgates.
+   *  Cuts tidal damage by 50% — cheaper and faster than a sea wall. */
+  buildFloodProof(townId: number): boolean {
+    const t = this.settlement(townId);
+    if (!t || !this.canFloodProof(townId)) return false;
+    const cost = this.floodProofCost(t);
+    if (this.treasury < cost) return false;
+    this.treasury -= cost;
+    t.floodProofed = true;
+    this.addLog(
+      `Flood barriers and raised thresholds installed at ${t.name} — ` +
+      `tidal damage halved. ${formatCurrency(cost)} between the streets and the sea.`,
+      'good',
+    );
+    return true;
+  }
+
+  /** Cost of managed retreat: high and politically brutal, permanent relief. */
+  managedRetreatCost(t: Settlement): number {
+    return Math.round(180 + this.popOf(t) * 0.25);
+  }
+
+  canManagedRetreat(townId: number): boolean {
+    const t = this.settlement(townId);
+    if (!t || !t.site.coastal) return false;
+    return this.stateProclaimed && this.year >= 2025;
+  }
+
+  /** Relocate a coastal settlement inland: permanently ends flooding, but the
+   *  political and social damage is severe — satisfaction craters for years
+   *  (GDD §8.2: "politically brutal, necessary late-game in worst scenarios"). */
+  doManagedRetreat(townId: number): boolean {
+    const t = this.settlement(townId);
+    if (!t || !this.canManagedRetreat(townId)) return false;
+    const cost = this.managedRetreatCost(t);
+    if (this.treasury < cost) return false;
+    this.treasury -= cost;
+    t.site = { ...t.site, coastal: false };
+    t.floodProofed = false;
+    t.seaWall = false;
+    t.satisfaction = Math.max(0, t.satisfaction - 30);
+    t.grievance = Math.min(100, t.grievance + 25);
+    this.addLog(
+      `MANAGED RETREAT: ${t.name} withdraws from the waterline at ${formatCurrency(cost)}. ` +
+      `The old harbour district is sealed and abandoned. ` +
+      `Relief will outlast the grief, but grief comes first.`,
+      'bad',
     );
     return true;
   }
@@ -8509,6 +8598,7 @@ export class RegionSim {
       centuryReport: this.centuryReport,
       seaRiseAnnounced: this.seaRiseAnnounced,
       lastTidalLogDay: this.lastTidalLogDay,
+      lastExtremeWeatherDay: this.lastExtremeWeatherDay,
       accordCompliance: this.accordCompliance,
       geoDeployed: this.geoDeployed,
       geoDeployDay: this.geoDeployDay,
@@ -8672,6 +8762,7 @@ export class RegionSim {
     r.centuryReport = d.centuryReport ?? null;
     r.seaRiseAnnounced = d.seaRiseAnnounced ?? false;
     r.lastTidalLogDay = d.lastTidalLogDay ?? -999;
+    r.lastExtremeWeatherDay = d.lastExtremeWeatherDay ?? -999;
     r.accordCompliance = d.accordCompliance ?? {};
     r.geoDeployed = d.geoDeployed ?? false;
     r.geoDeployDay = d.geoDeployDay ?? -1;
