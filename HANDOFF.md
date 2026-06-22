@@ -97,7 +97,7 @@ npx tsc --noEmit
 npx vitest run --exclude '**/.claude/**'   # 368 tests
 ```
 
-## Recent completions (PRs #218–#244)
+## Recent completions (PRs #218–#249)
 
 - ✓ **#218** — Fix labor_law grievance test: measurement window and strike masking
 - ✓ **#219** — Tech tree rebuilt as visual DAG: SVG edges, node state coloring, click-to-research
@@ -124,6 +124,7 @@ npx vitest run --exclude '**/.claude/**'   # 368 tests
   4. Forest, plains, hills, and marsh terrain textures wrapped in `g.save/g.clip/g.restore` so `fillRect` details cannot bleed past hex edges; marsh reeds get their own clip block.
   5. Hillshade now samples hex-direction NW (`hexNeighborDir` dir 4) and W (dir 3) instead of square-grid `at(x,y-1)` / `at(x-1,y)`, removing the row-parity inconsistency on odd rows.
   6. `travelDays` (worldgen.ts) now lerps in cube coordinates (`offsetToCube` → lerp → round → convert back) so each sampled step lands on an actual hex neighbor.
+- ✓ **#249** — Economy rebalance + HUD/zoom/hex-scale/central-bank UX pass: real calendar (year/month/day in top bar), `playerPop()` + `avgSatisfaction()` in HUD, `MIN_SCALE` 4→2, `REGION_N` 256→128 + `glyphScale()`/`withGlyphScale()` hex-sized city sprites, `hasCentralBank()` + dedicated Central Bank window (B key), GDP-scaled public-sector spending (Wagner's law, `publicSector ≈ 9% GDP`), `flatCost()`/`devFactor()` for militia/scout costs, flat policy bonuses made GDP-scaled; 7 new tests (375 total)
 
 ### Remaining low-priority rendering notes
 
