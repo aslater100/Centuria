@@ -2323,6 +2323,29 @@ export class RegionSim {
   /** Armies stationed at or marching between provinces. */
   provincialArmies: ProvincialArmy[] = [];
   private nextArmyId = 1;
+  // ---- Phase 12: Media & Misinformation System (GDD §8.3) ----
+  /** Current media reach tier — transitions over the century as technology advances. */
+  mediaReach: 'word_of_mouth' | 'press' | 'radio' | 'television' | 'internet' | 'algorithmic' = 'word_of_mouth';
+  /** Press freedom index 0–100. Above 65: free press. Below 35: controlled press. */
+  pressFreedom = 60;
+  /** Propaganda narrative strength 0–1; only effective when pressFreedom < 50. */
+  propagandaNarrative = 0;
+  /** Credibility gap accumulator 0–100; high values risk legitimacy collapse. */
+  credibilityGap = 0;
+  /** Polarization 0–1; grows in the algorithmic era. */
+  polarization = 0;
+  /** True once internet tech + year >= 2015; never cleared. */
+  misinformationEra = false;
+  /** True once platform regulation has been enacted. */
+  platformRegulationEnacted = false;
+  /** True once public media has been funded. */
+  publicMediaFunded = false;
+  /** True once media literacy investment has been made. */
+  mediaLiteracyInvested = false;
+  /** Year media literacy investment was made (for 15-year lag). −1 if not invested. */
+  mediaLiteracyYear = -1;
+  /** True once the polarization reduction from media literacy has been applied. */
+  mediaLiteracyApplied = false;
   seaRiseAnnounced = false;
   private lastTidalLogDay = -999;
   private lastExtremeWeatherDay = -999;
@@ -2357,8 +2380,6 @@ export class RegionSim {
   youthquake2030Fired = false;
   /** Automation unemployment fraction (0–1); rises post-2010 with information-sector dominance. */
   automationUnemployment = 0;
-  /** Press freedom 0–100; defaults to 60 if Phase 12 (media system) not present. */
-  pressFreedom = 60;
 
   constructor(rng: Rng, minute: number, map: RegionMap, weather: Weather) {
     this.rng = rng;
@@ -4315,6 +4336,7 @@ export class RegionSim {
     this.checkStrandedAssets(); // Phase 11: fossil write-downs as clean energy arrives
     if (this.hasCentralBank()) this.tickMonetary();
     this.tickHistoricalAnchors(); // scripted world-events that rhyme with history (GDD §1)
+    this.tickMedia(); // Phase 12: media reach, press freedom, misinformation era
     this.updateLoans(); // process loan interest and check for defaults
     if (this.stateProclaimed) this.collectVassalTribute();
     this.checkProclamationGate();
@@ -4748,7 +4770,8 @@ export class RegionSim {
       this.policyUpkeep() + // active policy running costs
       (this.passedLaws.has('welfare_benefits') ? this.gdpLastMonth * 0.02 : 0) + // welfare relief payments
       (warMob ? pop * warMob.upkeepPerPop : 0) + // …and the drain runs concurrently (GDD §7.2)
-      (this.playerWar?.blockade ? pop * BLOCKADE_UPKEEP_PER_POP : 0); // coal and crews for the gunboats
+      (this.playerWar?.blockade ? pop * BLOCKADE_UPKEEP_PER_POP : 0) + // coal and crews for the gunboats
+      (this.publicMediaFunded ? gdp * 0.008 : 0); // Phase 12: public media upkeep (0.8% GDP/month)
     // Income Tax (civic research): a progressive levy adds 3% of GDP on top
     const incomeTaxBonus = this.has('income_tax') ? this.gdpLastMonth * 0.03 : 0;
     // Central Banking (civic research): a national reserve adds a further 1% of GDP
@@ -9659,6 +9682,273 @@ export class RegionSim {
     }
   }
 
+  // ---- Phase 12: Media & Misinformation System (GDD §8.3) ----
+
+  /**
+   * Update `mediaReach` based on current year and researched technologies.
+   * Called during the monthly tick. Transitions are one-way (no regression).
+   */
+  updateMediaReach(): void {
+    const y = this.year;
+    switch (this.mediaReach) {
+      case 'word_of_mouth':
+        if (y >= 1925) this.mediaReach = 'press';
+        break;
+      case 'press':
+        if (y >= 1935 && this.has('radio_broadcasting')) this.mediaReach = 'radio';
+        break;
+      case 'radio':
+        if (y >= 1950 && this.has('television')) this.mediaReach = 'television';
+        break;
+      case 'television':
+        if (y >= 1995 && this.has('digital_economy')) this.mediaReach = 'internet';
+        break;
+      case 'internet':
+        if (y >= 2015 && this.misinformationEra) this.mediaReach = 'algorithmic';
+        break;
+      // 'algorithmic' is the terminal stage
+    }
+  }
+
+  /**
+   * Opinion velocity multiplier for the current media reach stage.
+   * Applied to ideology drift events and grievance accumulation from political shocks.
+   */
+  opinionVelocity(): number {
+    switch (this.mediaReach) {
+      case 'word_of_mouth': return 0.2;
+      case 'press':         return 0.5;
+      case 'radio':         return 0.8;
+      case 'television':    return 1.0;
+      case 'internet':      return 1.5;
+      case 'algorithmic':   return 2.5;
+    }
+  }
+
+  /**
+   * The full monthly media tick — called from monthlyUpdate().
+   * Updates media reach, press freedom effects, credibility gap, and misinformation era.
+   */
+  private tickMedia(): void {
+    // 1. Check for misinformation era trigger (once only)
+    if (!this.misinformationEra && this.year >= 2015 && this.has('digital_economy')) {
+      this.misinformationEra = true;
+      this.addLog(
+        'ALGORITHMIC MISINFORMATION ERA: Social media algorithms optimise for outrage. ' +
+        'Polarization accelerates. Counter-measures are available in the State panel.',
+        'bad',
+      );
+    }
+
+    // 2. Advance media reach
+    this.updateMediaReach();
+
+    // 3. Press freedom mechanics
+    if (this.pressFreedom > 50) {
+      // Free press: credibility gap decays 1/month
+      const decayRate = this.publicMediaFunded ? 2 : 1;
+      this.credibilityGap = Math.max(0, this.credibilityGap - decayRate);
+
+      // Corruption scandal: 0.5% chance/month if corruption would be high.
+      // (Corruption is proxied by low legitimacy + high grievance in existing model.)
+      const avgGrievance = this.settlements.length > 0
+        ? this.settlements.reduce((s, t) => s + t.grievance, 0) / this.settlements.length
+        : 0;
+      if (avgGrievance > 40 && this.rng.chance(0.005)) {
+        this.legitimacy = Math.max(0, this.legitimacy - 5);
+        this.addLog('PRESS SCANDAL: Investigative reporting exposes government malfeasance. Legitimacy −5.', 'bad');
+      }
+    } else if (this.pressFreedom < 35) {
+      // Controlled press: credibility gap grows monthly
+      const growth = 1.5 * this.propagandaNarrative * (1 - this.pressFreedom / 100);
+      this.credibilityGap = Math.min(100, this.credibilityGap + growth);
+    }
+
+    // 4. Credibility gap spark events → legitimacy cliff drop
+    if (this.credibilityGap >= 80) {
+      let sparkFired = false;
+      // Check spark conditions: year disaster, treasury negative, war loss, or high grievance
+      const hasDisasterEvent = this.settlements.some(t =>
+        t.activeEvents.some(ev => ['drought', 'flood', 'plague', 'earthquake', 'pandemic_wave', 'wildfire', 'cholera_outbreak'].includes(ev.kind))
+      );
+      const avgGrievance = this.settlements.length > 0
+        ? this.settlements.reduce((s, t) => s + t.grievance, 0) / this.settlements.length
+        : 0;
+      const hasSpark =
+        hasDisasterEvent ||
+        this.treasury < 0 ||
+        (this.playerWar !== null && this.playerWar.occupied > 0) ||
+        avgGrievance > 70;
+      if (hasSpark) {
+        this.legitimacy = Math.max(0, this.legitimacy - 30);
+        this.credibilityGap = Math.max(0, this.credibilityGap - 20); // partial reset
+        sparkFired = true;
+        this.addLog(
+          'LEGITIMACY COLLAPSE: Years of propaganda meet a real crisis. ' +
+          'The credibility gap has exploded — legitimacy plummets −30.',
+          'bad',
+        );
+      }
+      void sparkFired; // suppress unused-variable lint
+    }
+
+    // 5. Misinformation era ongoing effects
+    if (this.misinformationEra) {
+      // Polarization grows monthly
+      let polGrowth = 0.01;
+      if (this.platformRegulationEnacted) polGrowth -= 0.005;
+      this.polarization = Math.min(1.0, this.polarization + polGrowth);
+
+      // Media literacy 15-year lag: reduce polarization permanently after 15 years
+      if (this.mediaLiteracyInvested && !this.mediaLiteracyApplied && this.mediaLiteracyYear >= 0) {
+        if (this.year >= this.mediaLiteracyYear + 15) {
+          this.polarization = Math.max(0, this.polarization - 0.15);
+          this.mediaLiteracyApplied = true;
+          this.addLog(
+            'MEDIA LITERACY DIVIDEND: A generation raised with critical thinking skills. ' +
+            'Polarization permanently reduced by 0.15.',
+            'good',
+          );
+        }
+      }
+
+      // Public media funding: credibility gap decays 2× faster (already handled above in free press block)
+      // (the publicMediaFunded check above in the pressFreedom > 50 block handles the 2× rate)
+
+      // Populist ideology swings amplify (applied via opinionVelocity multiplier in event handlers)
+    }
+
+    // 6. Effective approval: propaganda buffers approval for controlled press
+    // (this is a display-only effect in the UI — not a separate field on region)
+  }
+
+  /** Compute effective approval, buffered by propaganda when press is controlled. */
+  get effectiveApproval(): number {
+    const base = this.avgSatisfaction();
+    if (this.pressFreedom < 35) {
+      return Math.min(95, base + this.propagandaNarrative * 25);
+    }
+    return base;
+  }
+
+  // ---- Phase 12: Player actions ----
+
+  /**
+   * Set press freedom level (0–100). Requires State tier.
+   * Used directly; civic actions grantPressLicense / censorMedia call this.
+   */
+  setPressFreedom(value: number): { ok: boolean; reason?: string } {
+    if (!this.stateProclaimed) return { ok: false, reason: 'Requires State tier' };
+    this.pressFreedom = Math.max(0, Math.min(100, value));
+    return { ok: true };
+  }
+
+  /**
+   * Set propaganda narrative strength (0–1). Only effective when pressFreedom < 50.
+   */
+  setPropagandaNarrative(value: number): void {
+    this.propagandaNarrative = Math.max(0, Math.min(1, value));
+  }
+
+  /**
+   * Civic action: liberalise press (+20 pressFreedom). Costs political capital.
+   * Faction effects: merchants +5 power, military −5 power.
+   */
+  grantPressLicense(): { ok: boolean; reason?: string } {
+    if (!this.stateProclaimed) return { ok: false, reason: 'Requires State tier' };
+    const cost = 15;
+    if (this.politicalCapital < cost) return { ok: false, reason: `Requires ${cost} political capital` };
+    this.politicalCapital -= cost;
+    this.pressFreedom = Math.min(100, this.pressFreedom + 20);
+    // Faction effects
+    const merchants = this.factions.find((f) => f.id === 'merchants');
+    const landowners = this.factions.find((f) => f.id === 'landowners');
+    if (merchants) merchants.power = Math.min(100, merchants.power + 5);
+    if (landowners) landowners.power = Math.max(0, landowners.power - 5);
+    this.addLog(`PRESS LIBERALISED: Press freedom +20 (now ${Math.round(this.pressFreedom)}). Merchants gain influence.`, 'good');
+    return { ok: true };
+  }
+
+  /**
+   * Civic action: censor media (−20 pressFreedom). Costs political capital.
+   * Faction effects: merchants −10, military/landowners +10.
+   */
+  censorMedia(): { ok: boolean; reason?: string } {
+    if (!this.stateProclaimed) return { ok: false, reason: 'Requires State tier' };
+    const cost = 15;
+    if (this.politicalCapital < cost) return { ok: false, reason: `Requires ${cost} political capital` };
+    this.politicalCapital -= cost;
+    this.pressFreedom = Math.max(0, this.pressFreedom - 20);
+    // Faction effects
+    const merchants = this.factions.find((f) => f.id === 'merchants');
+    const landowners = this.factions.find((f) => f.id === 'landowners');
+    if (merchants) merchants.power = Math.max(0, merchants.power - 10);
+    if (landowners) landowners.power = Math.min(100, landowners.power + 10);
+    this.addLog(`MEDIA CENSORED: Press freedom −20 (now ${Math.round(this.pressFreedom)}). State tightens its grip.`, 'bad');
+    return { ok: true };
+  }
+
+  /**
+   * Enact platform regulation — reduces polarization growth by 0.005/month.
+   * Requires digital_economy tech. One-time, permanent.
+   */
+  enactPlatformRegulation(): { ok: boolean; reason?: string } {
+    if (this.platformRegulationEnacted) return { ok: false, reason: 'Already enacted' };
+    if (!this.has('digital_economy')) return { ok: false, reason: 'Requires Digital Economy tech' };
+    const cost = 20;
+    if (this.politicalCapital < cost) return { ok: false, reason: `Requires ${cost} political capital` };
+    this.politicalCapital -= cost;
+    this.platformRegulationEnacted = true;
+    // Angers tech-leaning merchants
+    const merchants = this.factions.find((f) => f.id === 'merchants');
+    if (merchants) merchants.power = Math.max(0, merchants.power - 8);
+    this.addLog(
+      'PLATFORM REGULATION: Algorithmic amplification is capped. Polarization growth slows by 0.005/month.',
+      'good',
+    );
+    return { ok: true };
+  }
+
+  /**
+   * Fund public media — credibility gap decays 2× faster.
+   * Requires State tier. Costs 0.8% GDP/month (handled in monthlyEconomy).
+   * One-time, permanent.
+   */
+  fundPublicMedia(): { ok: boolean; reason?: string } {
+    if (this.publicMediaFunded) return { ok: false, reason: 'Already funded' };
+    if (!this.stateProclaimed) return { ok: false, reason: 'Requires State tier' };
+    const cost = 25;
+    if (this.politicalCapital < cost) return { ok: false, reason: `Requires ${cost} political capital` };
+    this.politicalCapital -= cost;
+    this.publicMediaFunded = true;
+    this.addLog(
+      'PUBLIC MEDIA FUNDED: An independent broadcaster serves the public interest. ' +
+      'Credibility gap decays 2× faster.',
+      'good',
+    );
+    return { ok: true };
+  }
+
+  /**
+   * Invest in media literacy — after a 15-year lag, reduces polarization by 0.15 permanently.
+   * Costs 5% of GDP upfront. One-time.
+   */
+  investMediaLiteracy(): { ok: boolean; reason?: string } {
+    if (this.mediaLiteracyInvested) return { ok: false, reason: 'Already invested' };
+    const gdp = this.gdpLastMonth > 0 ? this.gdpLastMonth : 1;
+    const cost = gdp * 0.05;
+    if (this.treasury < cost) return { ok: false, reason: `Requires ${Math.round(cost)} treasury funds` };
+    this.treasury -= cost;
+    this.mediaLiteracyInvested = true;
+    this.mediaLiteracyYear = this.year;
+    this.addLog(
+      `MEDIA LITERACY INVESTMENT: Critical thinking programmes enter the curriculum. ` +
+      `Polarization will fall by 0.15 in 15 years (${this.year + 15}).`,
+      'good',
+    );
+    return { ok: true };
+  }
+
   // ---- save & load (region tier) ----
   /**
    * Snapshot the region as JSON. The map and weather are seed-derived and
@@ -9797,6 +10087,18 @@ export class RegionSim {
       strandedAssetLoss: this.strandedAssetLoss,
       speculativeBranch: this.speculativeBranch,
       ubsActive: this.ubsActive,
+      // Phase 12: Media & Misinformation System
+      mediaReach: this.mediaReach,
+      pressFreedom: this.pressFreedom,
+      propagandaNarrative: this.propagandaNarrative,
+      credibilityGap: this.credibilityGap,
+      polarization: this.polarization,
+      misinformationEra: this.misinformationEra,
+      platformRegulationEnacted: this.platformRegulationEnacted,
+      publicMediaFunded: this.publicMediaFunded,
+      mediaLiteracyInvested: this.mediaLiteracyInvested,
+      mediaLiteracyYear: this.mediaLiteracyYear,
+      mediaLiteracyApplied: this.mediaLiteracyApplied,
       // Phase 13: Population & Society Depth
       demographicPhase: this.demographicPhase,
       agingCrisisActive: this.agingCrisisActive,
@@ -9809,7 +10111,6 @@ export class RegionSim {
       youthquake1968Fired: this.youthquake1968Fired,
       youthquake2030Fired: this.youthquake2030Fired,
       automationUnemployment: this.automationUnemployment,
-      pressFreedom: this.pressFreedom,
       dynastyTree: this.buildDynastyTree(),
     });
   }
@@ -10031,6 +10332,18 @@ export class RegionSim {
     r.sanctions = d.sanctions ?? [];
     r.provincialArmies = d.provincialArmies ?? [];
     r.nextArmyId = d.nextArmyId ?? 1;
+    // Phase 12: Media & Misinformation System (old-save backfill)
+    r.mediaReach = d.mediaReach ?? 'word_of_mouth';
+    r.pressFreedom = d.pressFreedom ?? 60;
+    r.propagandaNarrative = d.propagandaNarrative ?? 0;
+    r.credibilityGap = d.credibilityGap ?? 0;
+    r.polarization = d.polarization ?? 0;
+    r.misinformationEra = d.misinformationEra ?? false;
+    r.platformRegulationEnacted = d.platformRegulationEnacted ?? false;
+    r.publicMediaFunded = d.publicMediaFunded ?? false;
+    r.mediaLiteracyInvested = d.mediaLiteracyInvested ?? false;
+    r.mediaLiteracyYear = d.mediaLiteracyYear ?? -1;
+    r.mediaLiteracyApplied = d.mediaLiteracyApplied ?? false;
     // Phase 13: Population & Society Depth (backfill defaults for older saves)
     r.demographicPhase = d.demographicPhase ?? 'pre_transition';
     r.agingCrisisActive = d.agingCrisisActive ?? false;
@@ -10043,7 +10356,6 @@ export class RegionSim {
     r.youthquake1968Fired = d.youthquake1968Fired ?? false;
     r.youthquake2030Fired = d.youthquake2030Fired ?? false;
     r.automationUnemployment = d.automationUnemployment ?? 0;
-    r.pressFreedom = d.pressFreedom ?? 60;
     // Recompute cached perf fields after full restore.
     r.activeRailRoutes = r.routes.filter((rt) => rt.kind === 'rail' && rt.condition > 50).length;
     let tf = 0, tw = 0, mg = 0;
