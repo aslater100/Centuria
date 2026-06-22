@@ -1,6 +1,18 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-21 · **Tests:** 368 passing · **Version:** v1.0.1 · **Status:** Phases 1–7 complete + historical anchors + Depression anchor/depth/response toolkit + cabinet expansion + hex-grid migration + memory fog + rendering layer fully unified on hex geometry (PR #244)
+**Last updated:** 2026-06-22 · **Tests:** 375 passing · **Version:** v1.0.1 · **Status:** Phases 1–7 complete + historical anchors + Depression toolkit + cabinet expansion + hex-grid migration + memory fog + rendering unified on hex geometry + **economy rebalance + HUD/zoom/hex-scale/central-bank UX pass (this session)**
+
+## This session (2026-06-22) — UX & economy pass
+
+User-reported fixes, all shipped on this branch:
+
+1. **Calendar shows the real era** — top bar reads `October 3, 1935` (model's own `year`/`monthName`/`monthDay`), not a raw `Year 16` offset. The old HUD also used an inconsistent 365-day calc; now it matches the sim's 60-day year.
+2. **Total population in the HUD** — `r.playerPop()` (whole nation) always shown; a selected settlement's share appears in parentheses.
+3. **Overall happiness in the HUD** — new `r.avgSatisfaction()` (pop-weighted, player settlements), colour-coded `☺ %`.
+4. **Zoom out further** — `RegionView.MIN_SCALE` 4 → 2.
+5. **Bigger hexes, hex-sized cities** — `REGION_N` 256 → 128 (hexes ~2× larger on screen, still 16k cells). Settlement glyphs (sprite + depot + labels + resource chips) now scale to hex size via `glyphScale()`/`withGlyphScale()`: a small town ≈ 1 hex, a metropolis grows to ~2.25. Pick/hover radius tracks hex width.
+6. **Dedicated Central Bank window (B)** — researching the **Central Banking** civic (or enacting the charter) now lights up `hasCentralBank()`, which gates a real **Central Bank panel** (policy rate, regime, bonds, discount window, currency) instead of burying it in Finance→Credit. The monetary controls + wiring moved there; the Credit sub-tab points to it.
+7. **Economy rebalance** — see "Next session — priority fixes" below.
 
 ## The game: a standalone 4X campaign
 
@@ -377,20 +389,22 @@ Cabinet portfolios exist (Phase 2 via PR #239). This phase gives advisors the fo
 
 ## Next session — priority fixes
 
-- **⚠ Economy is badly unbalanced (HIGH PRIORITY, user-reported 2026-06-21).** By ~Year 12–13 the
-  treasury runs to **tens of millions** ($77M observed) while buildings/infrastructure still cost only
-  a few thousand (Ironworks $3,071, Harbor $4,606, rail $6,181). Money becomes meaningless mid-game —
-  there is no sink that scales with the economy, so costs are trivial against income. The whole
-  income/expense curve needs a rebalance pass:
-  - Treasury income (taxes, tech passive revenue, trade) grows roughly with population/GDP but
-    **building, route, militia, and upkeep costs are flat** — they don't scale with era or wealth.
-  - Likely fixes to evaluate: era/wealth-scaled construction & infrastructure costs; recurring upkeep
-    that scales with the network/settlement count; meaningful late-game money sinks; or damping
-    runaway tax/trade revenue. Tune via `docs/BALANCE_KNOBS.md` and the `defs.ts` cost constants;
-    validate with the headless long-run sim (`npm run sim`) so the treasury curve stays bounded
-    across 1919→2100.
-  - Acceptance: treasury should stay in a "decisions still hurt" band through the whole campaign,
-    not balloon into irrelevance by the second decade.
+- **✓ Economy rebalanced (was HIGH PRIORITY, addressed 2026-06-22).** The runaway treasury is fixed by
+  giving the state a **GDP-scaled public-sector wage bill** (Wagner's law) in `monthlyEconomy`:
+  `publicSector = gdp × (0.025 + 0.04·svc + 0.025·mil) × (1 + devShare×0.15)` where
+  `devShare = (modernizationIndex + informationIndex)/2`. At the defaults (tax 10%, funded
+  services/militia) this lands ~9% of GDP — just under the 10% tax take — so the budget runs a slim
+  surplus and the tax/service levers are real decisions again; svc2/mil2 (~15.5%) needs the income-tax
+  civic and a higher rate. Headless trace: 2029 treasury fell **$568M → ~$40M** (≈0.5 months of GDP,
+  was ~7 months and climbing); early/mid game now genuinely tight (a building is 1–30% of treasury
+  through ~1950). The `devShare` lift is deliberately gentle — a steeper one (≥0.35) tips the
+  information-era budget into a **deficit death-spiral** (services auto-cut → satisfaction → emigration);
+  0.15 verified safe across seeds. Flat headline costs (scout, militia drill) now scale via
+  `flatCost(base) = base × devFactor`; the vestigial flat policy bonuses (austerity, protectionism) are
+  now GDP-scaled. Regression guard: `tests/economy-balance.test.ts` ("treasury within a few months of
+  GDP across a century"). **Residual:** late-game (post-2000) buildings are still cheap *relative to*
+  treasury (~0.04%) because base build costs are small and devFactor (gpc^0.7) lags GDP growth; the fix
+  band there is more late-game megaprojects/sinks, not more income damping.
 
 ## Known weak areas
 

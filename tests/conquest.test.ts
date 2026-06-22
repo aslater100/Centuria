@@ -256,8 +256,8 @@ describe('Phase C: conquest & diplomacy', () => {
       (r as unknown as { treasury: number }).treasury = 1000;
       runDays(r, 30); // populate territory
 
-      // Try to claim a cell far from any player settlement
-      const can = r.canClaimCell(250, 250);
+      // Try to claim a cell far from any player settlement (in-bounds, but remote)
+      const can = r.canClaimCell(120, 120);
       expect(can.ok).toBe(false);
       expect(can.reason).toContain('adjacent');
     });
