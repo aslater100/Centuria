@@ -2715,8 +2715,8 @@ export class RegionSim {
   pressFreedom = 60;
   /** Propaganda narrative strength 0–1; only effective when pressFreedom < 50. */
   propagandaNarrative = 0;
-  /** Credibility gap accumulator 0–100; high values risk legitimacy collapse. */
-  credibilityGap = 0;
+  // `credibilityGap` (declared above for the Phase 9 government system) is the
+  // same accumulator the media system reads — high values risk legitimacy collapse.
   /** Polarization 0–1; grows in the algorithmic era. */
   polarization = 0;
   /** True once internet tech + year >= 2015; never cleared. */
