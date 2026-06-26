@@ -1,6 +1,39 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-26 · **Tests:** 834 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; performance-gated deep-expansion track underway (PRs #264, #265, #269, #272 merged; audio stems + ambience beds + wall-clock sim catch-up landed — see below)
+**Last updated:** 2026-06-26 · **Tests:** 842 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; deep-expansion underway (PRs #264, #265, #269, #272, #270 merged; live-slot asset generator + audio stems/ambience + wall-clock sim catch-up landed — asset *generation* blocked only by network egress)
+
+## Recent session (2026-06-26) — manifest-driven generator for the LIVE 4X slots (A1)
+
+Closed the gap where the asset pipeline couldn't target the slots the shipping
+game actually overrides. `scripts/hf-sprites.ts`'s catalog is for the **dropped**
+town engine (`public/sprites/`); the live `AssetRegistry` slots (`town-<tier>`,
+`backdrop-<era>`) and the audio manifest had **no generator**. Added:
+
+- **`src/data/assetCatalog.ts`** (type-checked, unit-tested, no network/fs):
+  `LIVE_ASSET_CATALOG` — the 6 town tiers (mirroring `townSpriteTier`) + 5
+  backdrop eras (mirroring `eraIdForYear`), each with a tuned prompt (backdrop
+  palettes echo `ERA_SKY` so generated art and the procedural fallback read as
+  the same era). Plus the pure `mergeManifestItems(existing, incoming)` (replace
+  by slot, preserve others, sort — diff-friendly manifest).
+- **`scripts/hf-assets.ts`** — thin CLI + HF I/O over the catalog: writes PNG
+  bytes straight to `public/assets/` (HF returns PNG the registry loads directly,
+  **so sprites/backdrops need no encoder**), sha256s them, and `mergeManifestItems`
+  into `asset_manifest.json`. `--dry-run` / `--slots` / `--category` / `--era`
+  filters; `npm run hf-assets`. Generated PNGs are **gitignored** (hybrid
+  distribution = Release packs, not git blobs); committed manifest stays empty →
+  procedural fallback. Verified: tsc clean, **829 tests** (8 new), dry-run +
+  all filters exercised offline, build green.
+
+**⛔ Generation is blocked by network egress, not the token.** The user supplied a
+valid `HF_TOKEN`, but this web env's egress policy **403s `huggingface.co`** (agent
+proxy `CONNECT tunnel failed, response 403`), and the HF MCP `dynamic_space`
+**invoke** path is disabled (`gradio=none`) — only discover/inspect work. So no
+assets can be generated *from here*. To actually generate: run
+`HF_TOKEN=… npm run hf-assets` **locally**, or re-provision the web env with a
+network policy that allowlists `huggingface.co`. The catalog/generator/manifest
+plumbing is all ready and dry-run-verified; only the egress step remains.
+*(Audio stem generation additionally needs an OGG encoder — `sharp`/`ffmpeg`
+absent here too.)*
 
 ## Recent session (2026-06-26) — wall-clock-budgeted sim catch-up (Track D)
 
