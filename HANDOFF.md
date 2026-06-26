@@ -5,9 +5,10 @@
 ## Recent session (2026-06-26) — deep-expansion foundation (PRs #264, #265 merged)
 
 Kickoff of the **"1GB" deep-expansion roadmap**: a performance-gated two-track effort —
-simulation depth + an AI-generated asset pipeline toward a ~1GB production build. Full plan
-lives at `~/.claude/plans/develop-a-deep-plan-optimized-creek.md`. Two foundation PRs merged
-to `main`, each verified (tsc clean, **805 tests**, vite build green):
+simulation depth + an AI-generated asset pipeline toward a ~1GB production build. The full
+roadmap is the **"Deep-Expansion Roadmap"** section below (folded into this doc so it persists
+across sessions). Two foundation PRs merged to `main`, each verified (tsc clean, **805 tests**,
+vite build green):
 
 - **#264 — dynamic audio tension + 4X perf guard + restored headless.**
   - `RegionSim.tensionScalar()` (region.ts, just after the `dateLabel` getter) returns a 0–1
@@ -52,6 +53,113 @@ are the real gaps.
 - New `src/ui/audio/audioRegistry.ts` + `audio_manifest.json` mirror `AssetRegistry`. **Bulk generation
   needs `HF_TOKEN`** (unset in the web env) **+ an encoder** (`sharp`/`ffmpeg` not installed) — provision
   those first. Every render/sim change stays gated by `scripts/bench-region.ts`.
+
+## Deep-Expansion Roadmap — "The 1GB Simulation"
+
+The forward plan: make Centuria a *much larger* game (~1 GB) — AAA-scale depth **and** production
+value — while it stays smooth (60 fps, no stutter) at every stage. Size can only come from real
+assets (the game is ~2.9 MB of code + 100 KB JSON with **zero binary assets** today; all art is
+procedural Canvas 2D, all audio procedural WebAudio). Per GDD §3.1 the byte/beauty budget lives in
+the atmosphere layer; the crisp foreground stays cheap.
+
+**Locked decisions (user):** (1) one roadmap covering **both** simulation depth and audio-visual
+production; (2) **AI-generated asset pipeline** (extend `scripts/hf-sprites.ts`); (3) **hybrid
+distribution** — bundle core + early-era assets, stream later eras / 2040+ branches; (4) build a
+**vertical slice** first; (5) **60 fps at all stages is a hard per-phase gate**, not a cleanup pass.
+
+**Ground-truth (verified in code):** override seam was dormant → now wired (#265); `tension` was
+hardcoded 0 → now wired (#264); `npm run sim` was broken → restored (#264); **Phase 15 (FX) &
+Phase 16 (Warfare, ~80%) are genuinely landed — extend, don't rebuild**; Phase 14 (zoning/
+city-services) and the 5 parallax backdrop bands are the real gaps. `serialize()` is a flat
+field-dump with `?? default` backfill — **every new field must serialize + backfill** or tests/old
+saves break.
+
+### Track A — Asset pipeline ("the 1 GB engine")
+- **Byte budget (Standard ≈ 1 GB):** the GB comes from audio (music stems ~0.4 GB OGG / ~4 GB FLAC,
+  ambience ~256 MB, voice ~144 MB), cinematics-as-still-sequences (~375 MB via the existing
+  `drawCinematic()`), parallax backdrops (~248 MB), Notable portraits (layered → ~300 MB), and
+  building/unit/terrain/UI sprite sheets (~300 MB). **Image assets alone reach ~1 GB** — not solely
+  dependent on hard-to-generate audio/video; FLAC stems are genuine quality, not bitrate padding.
+- **Generation:** make `hf-sprites.ts`'s `CATALOG` a *loader* over `src/data/asset_manifest.json` +
+  `audio_manifest.json` (slot, category, era, prompt, sha256); keep its `generateSprite()` + 503
+  retry + `--dry-run`; add `--category/--era` filters and `scripts/hf-audio.ts`. `gen/post.ts`
+  quantizes to era palettes (also the art-coherence guard) + OGG/Opus encode.
+- **Integration:** `src/ui/assets/registry.ts` `AssetRegistry` is **shipped** (live override seam,
+  procedural fallback). Next: `src/ui/audio/audioRegistry.ts` + `musicPlayer.ts` (no file-audio
+  loader exists today) sitting beside procedural `Music` behind a common `IMusicEngine`, crossfading
+  by the now-wired `tension`; `portraitSystem.ts` composites face layers per Notable.
+- **Distribution (hybrid):** git stays code-only (`.gitignore` the generated `public/audio`,
+  `public/backdrops`, `public/sprites/*.png`); asset packs = versioned zips as **GitHub Release
+  assets** (≤2 GB/file, the channel `electron-updater` already uses); thin installer (~150–250 MB,
+  eras 1–2) + on-demand era packs SHA-256-verified into `userData/packs`; lazy-by-era + prefetch.
+
+### Track B — Simulation depth (extend real code; don't rebuild)
+- **Economy (§5.2):** `INTERMEDIATE_GOODS` → full ~44-good set + supply-shock cascades
+  (`supplyChainHealth`); physical goods on routes (transit × congestion); emergent `exchangeRate`;
+  credit-rating coupon compounding. (`region.ts` `monthlyEconomy`, `economy.ts`, `defs.ts`)
+- **Military (§7, on Phase-16 base):** `Front` model (contact lines, weekly `combatPower` ratio);
+  war-support decay/rally (regime-modulated); casualty→cohort scar; peace via the deal engine +
+  revanchism. (`region.ts` warfare ~10739–11005)
+- **AI (§6.3):** personality → build/research priorities; discoverable agendas via `intel`;
+  situation-based `DealVerdict` valuation; rival regime change via `TRANSITION_CHAINS`;
+  tier-asymmetry guardrails by `AI_DIFFICULTY`.
+- **Map (§6.2):** basin-partition worldgen (6–8 basins, resource skew); climate ghost-waterline live
+  overlay (not in the static cache). `REGION_N=128` default; bigger sizes a stress-tested knob.
+- **UI/UX (§11):** decompose-every-number tooltips; Century Graph screen; era UI skins; advisor
+  briefs surfaced; **`drawBackdrop(era,branch,weather,stats)`** 5-band compositor w/ live-stats skyline.
+- **Features:** Phase 14 zoning/city-services (per-settlement grid maps — land value, pollution
+  diffusion, services, brownouts, R/C/I/O demand, in a new `zoning-system.ts`); Phase 10 climate
+  depth (20-yr lag, sea-rise flooding, adaptation, accords).
+
+### Track C — Engineering foundations
+- **Modularize `region.ts` as free functions, NOT subclasses:** `src/sim/systems/*` exporting
+  `fn(r: RegionSim, …)`; `tick()` becomes a dispatcher; state + `serialize()` stay on `RegionSim`.
+  Free functions preserve RNG-consumption order (the determinism constraint, #236) where class
+  refactors wouldn't. One leaf subsystem per PR, each guarded by a fixed-seed byte-identical
+  `serialize()` diff. Phase-14 maps: coarse quantized typed arrays; migrate save off `localStorage`
+  to filesystem/IndexedDB (it's near the cap already).
+
+### Track D — Performance & smoothness (hard, per-phase gate)
+- **Frame contract:** render ≤16.7 ms/frame; **budget the sim catch-up by wall-clock (~8 ms), not
+  the 64-iteration count** (`main.ts:274`) so a heavy late tick can't stutter — let the calendar lag
+  at 8× instead. Era/asset transitions ≤1 dropped frame (async + prefetched).
+- **The guard:** `scripts/bench-region.ts` (shipped) — boots `RegionSim` at early/mid/late, reports
+  mean + worst-case ms/tick vs the 16.7 ms / 64-tick budget. **The old `bench-scale`/`bench-agents`
+  measure the dropped town engine — `bench-region` is the 4X guard.** Every perf-sensitive PR must
+  show no "DROPS".
+- **Render:** keep the static `mapCache`; composite backdrop bands once per era/stat-band change to
+  an offscreen canvas (blit + parallax-offset per frame); pre-render Phase-14 heatmaps offscreen.
+  **WebGL only if `bench-region` proves Canvas 2D can't hold 60 fps** — and then one overlay canvas,
+  not an engine swap.
+- **Asset I/O / memory:** `createImageBitmap` + `decodeAudioData` (async, off the render path);
+  LRU-evict to keep only current+adjacent era resident (≤~1.5 GB working set); quality tiers cap disk+RAM.
+
+### Phased roadmap (each shippable; balance- AND perf-gated) — **bold = the literal gigabyte**
+`A0` wire seams + perf guard **(done — #264/#265)** → `A1` pipeline generalization (manifests,
+`hf-audio`, audio/music registries) → `A2` distribution & packs (+ save → filesystem) →
+**`B1-art` parallax backdrops + era UI skins** → **`B2-audio` music stems + ambience + voice** →
+`C1` `region.ts` modularization → `D1-econ` 44-good economy + FX → `D2-mil` warfare Front model →
+`D3-ai` rival agency → `E1` climate depth → `E2` zoning/city-services → `F1` UI/UX + cinematics +
+quality tiers. Tracks A (assets/UI) and B (sim core) run in parallel (disjoint files).
+
+### Top risks (stress-tested)
+1. **Art-direction coherence at AI volume** → palette quantization in `gen/post.ts`, pinned per-era
+   style, hand-authored hero assets, human review gate per pack.
+2. **HF generation at volume** (rate limits, hours) → idempotent/resumable/batched; HF Spaces or
+   local-diffusion fallback; confirm **model access + asset licensing** (`HF_TOKEN` unset + no
+   `sharp`/`ffmpeg` in the web env — provision first).
+3. **Audio quality** → AudioGen for ambience/loops; manifest accepts hand-authored stems; procedural floor.
+4. **Late-game fps** → Track D in full + `bench-region` gate at every phase.
+5. **Phase-14 save bloat** → quantized maps + filesystem save + a save-size regression test.
+6. **Determinism in modularization** → free-function extraction + byte-identical `serialize()` diff per PR.
+
+### Next increment (integration seams mapped) — `B1-art` + audio, code-only, procedural fallback
+- `drawBackdrop()`: insert in `regionview.ts` `draw()` **before** the `g.drawImage(this.mapCache,0,0)`
+  blit (~line 646, inside the camera transform → world-space); composite offscreen keyed by
+  era/season/stat-band; blit + parallax-offset per frame.
+- Sample-stem music: attach in `Music.update()` beside the synth on the same `master` gain;
+  `eraForYear()` picks the era; crossfade by `intensity` (already tension-driven).
+- Ambience beds: attach in `Soundscape.update()` after `ensure()`. All fall back to procedural.
 
 ## Overnight session (2026-06-22) — Phases 8–17 shipped
 
