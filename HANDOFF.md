@@ -51,9 +51,10 @@ vite build green):
     `music.update` + `soundscape.update` in `main.ts`. **The `tension` input was previously
     hardcoded to `0`**, so the audio engine's dynamic mixing was dead. Pure read (no RNG) —
     save/load determinism preserved.
-  - **`scripts/bench-region.ts`** — the perf guard the shipping 4X game lacked. The existing
-    `bench-scale.ts`/`bench-agents.ts` measure the **dropped town engine** (`Simulation`/
-    `AgentStore`/`FlowField`), NOT `RegionSim`. This benches `RegionSim.tick()` at
+  - **`scripts/bench-region.ts`** — the perf guard the shipping 4X game lacked. (The old
+    `bench-scale.ts`/`bench-agents.ts` benched the **dropped town engine** — `Simulation`/
+    `AgentStore`/`FlowField` — not `RegionSim`; both were removed in the backdrop PR since the
+    modules they imported no longer exist.) This benches `RegionSim.tick()` at
     early-colony / mid-nation / late-nation against the 16.7ms / 64-tick frame budget, reporting
     mean **and worst-case** ms/tick. Baseline: mean ~0.003–0.007ms (64-tick frame ~0.2–0.4ms),
     worst single tick ~10–12ms (the monthly/yearly spike — the stutter to watch). **This is the
@@ -159,8 +160,8 @@ saves break.
   the 64-iteration count** (`main.ts:274`) so a heavy late tick can't stutter — let the calendar lag
   at 8× instead. Era/asset transitions ≤1 dropped frame (async + prefetched).
 - **The guard:** `scripts/bench-region.ts` (shipped) — boots `RegionSim` at early/mid/late, reports
-  mean + worst-case ms/tick vs the 16.7 ms / 64-tick budget. **The old `bench-scale`/`bench-agents`
-  measure the dropped town engine — `bench-region` is the 4X guard.** Every perf-sensitive PR must
+  mean + worst-case ms/tick vs the 16.7 ms / 64-tick budget. **`bench-region` is the 4X guard**
+  (the old town-engine `bench-scale`/`bench-agents` were removed). Every perf-sensitive PR must
   show no "DROPS".
 - **Render:** keep the static `mapCache`; composite backdrop bands once per era/stat-band change to
   an offscreen canvas (blit + parallax-offset per frame); pre-render Phase-14 heatmaps offscreen.
@@ -303,13 +304,13 @@ npm install
 npm run dev        # http://localhost:5173/  (index.html → src/main.ts) ← the 4X game
 npm run build      # tsc + vite build (must pass)
 npx tsc --noEmit
-npx vitest run --exclude '**/.claude/**'   # 805 tests
+npx vitest run --exclude '**/.claude/**'   # 815 tests
 npx tsx scripts/bench-region.ts            # 60fps perf gate (early/mid/late) — must show no "DROPS"
 npm run sim                                # headless long-run balance harness (restored)
 ```
 
-> Note: `scripts/bench-scale.ts` / `bench-agents.ts` bench the **dropped town engine**, not the
-> shipping 4X campaign — use `scripts/bench-region.ts` for the `RegionSim` perf gate.
+> Note: `scripts/bench-region.ts` is the only perf bench — it gates the `RegionSim` 4X campaign.
+> The old town-engine benches (`bench-scale.ts` / `bench-agents.ts`) were removed.
 
 ## Recent completions (PRs #218–#256)
 
