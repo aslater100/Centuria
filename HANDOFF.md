@@ -1,6 +1,57 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-22 · **Tests:** 448+ passing · **Version:** v1.0.1 · **Status:** Phases 1–17 complete (overnight session: Phases 8–9, 11–17 shipped as draft PRs #251–256)
+**Last updated:** 2026-06-26 · **Tests:** 805 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; performance-gated deep-expansion track underway (PRs #264, #265 merged — see next section)
+
+## Recent session (2026-06-26) — deep-expansion foundation (PRs #264, #265 merged)
+
+Kickoff of the **"1GB" deep-expansion roadmap**: a performance-gated two-track effort —
+simulation depth + an AI-generated asset pipeline toward a ~1GB production build. Full plan
+lives at `~/.claude/plans/develop-a-deep-plan-optimized-creek.md`. Two foundation PRs merged
+to `main`, each verified (tsc clean, **805 tests**, vite build green):
+
+- **#264 — dynamic audio tension + 4X perf guard + restored headless.**
+  - `RegionSim.tensionScalar()` (region.ts, just after the `dateLabel` getter) returns a 0–1
+    scalar from `playerWar.support` / `maxGrievance` / `depressionDepth`, now fed to
+    `music.update` + `soundscape.update` in `main.ts`. **The `tension` input was previously
+    hardcoded to `0`**, so the audio engine's dynamic mixing was dead. Pure read (no RNG) —
+    save/load determinism preserved.
+  - **`scripts/bench-region.ts`** — the perf guard the shipping 4X game lacked. The existing
+    `bench-scale.ts`/`bench-agents.ts` measure the **dropped town engine** (`Simulation`/
+    `AgentStore`/`FlowField`), NOT `RegionSim`. This benches `RegionSim.tick()` at
+    early-colony / mid-nation / late-nation against the 16.7ms / 64-tick frame budget, reporting
+    mean **and worst-case** ms/tick. Baseline: mean ~0.003–0.007ms (64-tick frame ~0.2–0.4ms),
+    worst single tick ~10–12ms (the monthly/yearly spike — the stutter to watch). **This is the
+    60fps-at-all-stages gate; run it on every perf-sensitive change.**
+  - **`src/sim/headless.ts`** restored — `npm run sim` pointed at a missing file. Long-run
+    balance harness: ticks to a target year, reports treasury/GDP, inflation, pop, satisfaction.
+
+- **#265 — live asset-override seam for the 4X map (`AssetRegistry`).**
+  - **The override seam was dormant:** `buildSprites()`/`applyOverrides()` (`spriteOverrides.ts`)
+    were only used by `sprites-preview.ts`, never by the live `RegionView` (which drew its own
+    procedural glyphs). Now `src/ui/assets/registry.ts` `AssetRegistry` loads PNG/WebP listed in
+    `public/assets/asset_manifest.json`, served by slot name with **procedural fallback**.
+  - `RegionView` builds the registry, loads the manifest on construction, and `drawTownTier`
+    draws a `town-<tier>` override when present (`townSpriteTier` / `TOWN_TIER_PX`), else the
+    existing procedural shack→castle art. **No manifest items (the shipped default) = byte-identical
+    behaviour**; generated/hand-made art slots in per population tier with zero code change. This
+    is the integration point the AI asset pipeline and modders both target.
+
+**Stale-doc corrections** (verified in code this session): the 4X boot path is
+`index.html → src/main.ts → new RegionView` (there is no `core.html`/`coreview.ts`); `npm run sim`
+is restored; the audio `tension` is wired; Phase 15 (FX) and Phase 16 (Warfare, ~80%) are genuinely
+landed — **extend, don't rebuild**; Phase 14 (zoning/city-services) and the 5 parallax backdrop bands
+are the real gaps.
+
+**Next session — asset pipeline (integration seams already mapped; code-only, procedural fallback):**
+- Parallax **`drawBackdrop()`**: insert in `regionview.ts` `draw()` just **before** the
+  `g.drawImage(this.mapCache, 0, 0)` blit (~line 646, inside the camera transform → world-space);
+  composite to an offscreen canvas keyed by era/season/stat-band, blit + parallax-offset per frame.
+- **Sample-stem music**: attach in `Music.update()` (`music.ts`) beside the procedural synth on the
+  same `master` gain; `eraForYear()` selects the era; crossfade by `intensity` (already tension-driven).
+- **Ambience beds**: attach in `Soundscape.update()` after `ensure()`; loop under the diegetic events.
+- New `src/ui/audio/audioRegistry.ts` + `audio_manifest.json` mirror `AssetRegistry`. **Bulk generation
+  needs `HF_TOKEN`** (unset in the web env) **+ an encoder** (`sharp`/`ffmpeg` not installed) — provision
+  those first. Every render/sim change stays gated by `scripts/bench-region.ts`.
 
 ## Overnight session (2026-06-22) — Phases 8–17 shipped
 
@@ -106,11 +157,16 @@ arc starting from one fogged founding settlement.
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173/core.html  ← the 4X game
+npm run dev        # http://localhost:5173/  (index.html → src/main.ts) ← the 4X game
 npm run build      # tsc + vite build (must pass)
 npx tsc --noEmit
-npx vitest run --exclude '**/.claude/**'   # 368 tests
+npx vitest run --exclude '**/.claude/**'   # 805 tests
+npx tsx scripts/bench-region.ts            # 60fps perf gate (early/mid/late) — must show no "DROPS"
+npm run sim                                # headless long-run balance harness (restored)
 ```
+
+> Note: `scripts/bench-scale.ts` / `bench-agents.ts` bench the **dropped town engine**, not the
+> shipping 4X campaign — use `scripts/bench-region.ts` for the `RegionSim` perf gate.
 
 ## Recent completions (PRs #218–#256)
 

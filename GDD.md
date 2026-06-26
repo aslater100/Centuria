@@ -96,6 +96,7 @@ The signature image is **simple readable sprites in front of deep atmospheric ba
 - **Background (atmosphere layer):** 5 parallax bands behind the play field — sky/celestial, far terrain, distant skyline, mid haze, near canopy — each allowed **full 64-color era palettes**, dithered gradients, animated weather, and painterly composition. The background is where the budget for beauty lives and where the century's storytelling happens: it shows what your *civilization* looks like while the foreground shows what your *decisions* look like.
 - **The contrast rule:** background may never contain a clickable object; foreground may never use background palettes. Players learn in minutes that crisp = interactive, lush = world.
 - **Dynamic backdrop composition:** the skyline band is procedurally assembled from your actual stats — industrial output adds smokestacks, finance sector adds towers, smog particle density maps to your pollution number, neon density to your service/consumer economy, cranes to construction rate. The backdrop is a live dashboard you read emotionally before you read it numerically.
+- **Implementation status (2026-06-26):** the foreground override seam is **live** — `AssetRegistry` (`src/ui/assets/registry.ts`) overlays real PNG/WebP art onto map sprites by slot name, with the procedural art as a guaranteed fallback. The 5 parallax background bands + per-era backdrop kits are the next build (the biggest art byte source); real art is produced via the AI-generated asset pipeline (HF) and slotted through the same registry.
 
 ### 3.2 Era visual evolution
 
@@ -119,6 +120,7 @@ Day/night cycle, seasons, and weather run at all tiers; at Nation tier the conti
 - **Soundtrack ages with the century:** 1900s = chiptune interpretations of ragtime and brass bands; interwar = chip-jazz; mid-century = chip arrangements with synth strings creeping in; 70s–90s = analog synth idioms; 2000s+ = layered electronica; 2040+ branches (organic/acoustic-hybrid for solarpunk, industrial dark synth for dystopia). The chip timbre never fully leaves — it's the franchise voice — but the instrumentation around it modernizes.
 - **Soundscape is diegetic data:** hammering, looms, train whistles → traffic drone, phone rings → notification chimes, drone hum. Unrest is audible (chanting under the music) before it's visible. Each government type tints the public-address layer (church bells under theocracy, patriotic loudspeakers under one-party rule).
 - **Dynamic mixing:** music intensity follows a tension scalar (war, crisis, unrest); paused game drops to ambient only, making pause a place to think.
+- **Implementation status (2026-06-26):** dynamic mixing is **wired** — `RegionSim.tensionScalar()` feeds a real war/unrest/crisis tension to the procedural engine every frame (previously stubbed to `0`). Real recorded/AI-generated music stems + ambience beds will layer over this through a sample-stem path that falls back to the procedural synth (next build).
 
 ---
 
@@ -512,9 +514,9 @@ The signature designed cascade (from the brief, fully supported by the loops abo
 
 ## 13. MVP vs. Full Scope, and the Top Balance Risks
 
-### 13.1 MVP (shipped — v1.0.1, as of 2026-06-21)
+### 13.1 MVP (shipped — v1.5.0, as of 2026-06-26)
 
-The following is implemented and merged to `main` (368 passing tests):
+The following is implemented and merged to `main` (805 passing tests):
 
 - **The full three-tier ladder** — colony → state → nation arc from `foundColony()`. Both promotions (Regional Charter, Constitutional Convention), all three zoom levels. Campaign starts 1919 in post-WWI context.
 - **4X campaign as default** — cohort-level model from the first tick. Per-settler individual simulation exists as "Classic Colony" mode but is not the primary campaign.
@@ -527,6 +529,7 @@ The following is implemented and merged to `main` (368 passing tests):
 - **Eras 1–6 (1919–2010)** with art/audio sets; climate ledger running with weather/yield events; era-branching cinematics, post-2100 epilogue scroll.
 - **UI:** Map (hex grid, fog of war, memory fog, atmosphere), dashboards, tech DAG, route network, province overlay, economy sparklines, minimap.
 - **Modes:** Sandbox + Grand Strategy. Historical scenarios deferred.
+- **Deep-expansion foundation (2026-06-26, PRs #264/#265):** dynamic audio mixing — `RegionSim.tensionScalar()` drives music/soundscape by war/unrest/crisis (§3.3); the **`AssetRegistry`** live art-override seam for the map (`src/ui/assets/registry.ts`, `public/assets/asset_manifest.json`) so real art/audio packs slot over procedural art with graceful fallback (§3.1); and a **performance gate** (`scripts/bench-region.ts`) holding 60fps from colony to nation. The AI-generated asset pipeline toward the full ~1GB production build layers on these seams.
 
 ### 13.2 Full scope adds
 
