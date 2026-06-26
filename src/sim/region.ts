@@ -256,6 +256,28 @@ export const OIL_EMBARGO_DAYS = 180;
  *  supply solver carries the fraction through; the industry drag scales with it. */
 export const OIL_EMBARGO_CUT = 0.6;
 
+/** Graded extraction proxy (D1-econ): an extracting sector's raw-availability
+ *  level grades off how its current output compares to its own trailing norm, so
+ *  an *ordinary* contraction — a recession, a disaster, a wartime dip, not just a
+ *  total shutdown — partly starves the chain downstream.
+ *
+ *  - `SECTOR_NORM_ALPHA`: EWMA weight for the per-sector output norm (~0.02 ≈ a
+ *    4-year trailing average over monthly ticks). The norm chases output, so a
+ *    drag fires on the *transition* into a downturn and heals as the norm catches
+ *    up to the new lower level — it bites the shock, not the steady state.
+ *  - `RAW_SHORTAGE_DEADBAND`: output within this fraction of norm still reads as
+ *    fully available (level 1) — ordinary month-to-month wobble doesn't bite, so
+ *    healthy play stays (very nearly) byte-identical.
+ *  - `RAW_SHORTAGE_FLOOR` / `RAW_SHORTAGE_MIN_LEVEL`: at/below this output ratio
+ *    the graded proxy bottoms out at MIN_LEVEL (not 0 — a *partial* contraction
+ *    can't fully cut a raw; only literal zero output does, via the collapse path).
+ *    Bounding the floor above 0, plus the 1-month lag and SUPPLY_SHOCK_MAX_DRAG,
+ *    keeps the output→raws→drag→output feedback gentle and non-divergent. */
+export const SECTOR_NORM_ALPHA = 0.02;
+export const RAW_SHORTAGE_DEADBAND = 0.9;
+export const RAW_SHORTAGE_FLOOR = 0.5;
+export const RAW_SHORTAGE_MIN_LEVEL = 0.35;
+
 // ---- Phase 1: Sectoral economy (GDD §5.2: the century's structural transformation) ----
 
 /** The four sectors every settlement's labor splits across. In 1900 the
@@ -2798,6 +2820,11 @@ export class RegionSim {
   // ---- Phase 15: Extended Economy & FX (GDD §5.2) ----
   /** Current stock of each intermediate good (units). */
   intermediateGoodStocks: Record<string, number> = {};
+  /** Trailing EWMA of each extracting sector's total output, the "recent norm"
+   *  the graded raw proxy measures contractions against (see `sectorRawLevel`).
+   *  Seeded lazily from the first observed output; serialized so the norm — and
+   *  therefore the shock baseline — survives save/load. 0 = not yet warmed. */
+  sectorOutputNorm: { industry: number; agriculture: number } = { industry: 0, agriculture: 0 };
   /** Transient raw-material embargoes: raw id → `{ until, cut }`. While
    *  `day < until` the raw runs at level `1 − cut` in the (graded) supply solver
    *  (`cut` 1 = total cut, 0.6 = a 60% reduction), so a *partial* shortage
@@ -5915,6 +5942,10 @@ export class RegionSim {
    *  stock ledger and the random secondary effects (disease risk, research penalty). */
   tickIntermediateGoods(): void {
     const currentYear = this.year;
+    // Advance the per-sector output norms first so the graded raw proxy measures
+    // this month against an up-to-date trailing average — and so the norm warms
+    // through the pre-1920 years before any good unlocks.
+    this.advanceSectorOutputNorms();
     // Drop embargoes whose window has elapsed, so the chain heals on its own and
     // the save ledger stays tidy (a stale entry would still read available, but
     // pruning keeps `rawEmbargoes` to what's actually live).
@@ -6005,14 +6036,38 @@ export class RegionSim {
   }
 
   /** Availability level [0,1] contributed by an extracting sector — the proxy for
-   *  "is there enough mining/farming capacity to keep the raws flowing." Binary for
-   *  now: 1 while the sector produces anything, 0 only on a total shutdown (deep
-   *  depression / wartime collapse), exactly as the pre-graded proxy. Graded raw
-   *  availability (a recent-norm ratio, so ordinary contractions partly starve the
-   *  chain) layers on here without touching its callers. */
+   *  "is there enough mining/farming capacity to keep the raws flowing." Total
+   *  shutdown (output 0) cuts the chain's root outright, as before; otherwise the
+   *  level grades off how current output compares to the sector's trailing norm
+   *  (`sectorOutputNorm`). At or above norm (steady/growing play) it's a full 1.0,
+   *  so the chain stays byte-clean; a contraction below the deadband grades it down
+   *  toward `RAW_SHORTAGE_MIN_LEVEL`, so an ordinary recession/disaster partly
+   *  starves the chain and the bounded industry drag bites — not just embargoes or
+   *  a literal collapse. Pure read (the norm is advanced in `tickIntermediateGoods`,
+   *  not here), so the UI snapshot can call it freely. */
   private sectorRawLevel(sector: 'industry' | 'agriculture'): number {
     const output = this.settlements.reduce((s, t) => s + t.sectors[sector].output, 0);
-    return output > 0 ? 1 : 0;
+    if (output <= 0) return 0; // total collapse — the chain's root is cut (as before)
+    const norm = this.sectorOutputNorm[sector];
+    if (norm <= 0) return 1; // norm not warmed yet (fresh/early game) — no fabricated shock
+    const ratio = output / norm;
+    if (ratio >= RAW_SHORTAGE_DEADBAND) return 1;
+    if (ratio <= RAW_SHORTAGE_FLOOR) return RAW_SHORTAGE_MIN_LEVEL;
+    // Linear from full (at the deadband) down to MIN_LEVEL (at the floor).
+    const t = (ratio - RAW_SHORTAGE_FLOOR) / (RAW_SHORTAGE_DEADBAND - RAW_SHORTAGE_FLOOR);
+    return RAW_SHORTAGE_MIN_LEVEL + t * (1 - RAW_SHORTAGE_MIN_LEVEL);
+  }
+
+  /** Advance each extracting sector's trailing output norm one month (EWMA). Seeds
+   *  from the first non-zero output so the norm starts at parity (ratio 1, no
+   *  phantom shock), then chases output at `SECTOR_NORM_ALPHA`. Called once per
+   *  monthly supply tick; isolated here so `sectorRawLevel` stays a pure read. */
+  private advanceSectorOutputNorms(): void {
+    for (const sector of ['industry', 'agriculture'] as const) {
+      const output = this.settlements.reduce((s, t) => s + t.sectors[sector].output, 0);
+      const norm = this.sectorOutputNorm[sector];
+      this.sectorOutputNorm[sector] = norm <= 0 ? output : norm + (output - norm) * SECTOR_NORM_ALPHA;
+    }
   }
 
   /** Returns the current supply chain health (0–1). */
@@ -12290,6 +12345,7 @@ export class RegionSim {
       difficultySettings: this.difficultySettings ?? { ...DEFAULT_DIFFICULTY_SETTINGS },
       // Phase 15: Extended Economy & FX
       intermediateGoodStocks: this.intermediateGoodStocks,
+      sectorOutputNorm: this.sectorOutputNorm,
       rawEmbargoes: this.rawEmbargoes,
       supplyChainHealth: this.supplyChainHealth,
       tradeFlows: this.tradeFlows,
@@ -12591,6 +12647,12 @@ export class RegionSim {
     };
     // Phase 15: Extended Economy & FX (pre-Phase15 saves default to safe values)
     r.intermediateGoodStocks = d.intermediateGoodStocks ?? {};
+    // Trailing output norms for the graded raw proxy. Pre-graded saves lack them;
+    // backfill to 0 (unwarmed) so the norm re-seeds from live output, parity-clean.
+    r.sectorOutputNorm = {
+      industry: d.sectorOutputNorm?.industry ?? 0,
+      agriculture: d.sectorOutputNorm?.agriculture ?? 0,
+    };
     // Embargoes gained a `cut` fraction when raw availability went graded. A
     // pre-graded save stored a bare `until` day (always a total cut) — migrate
     // each numeric entry to `{ until, cut: 1 }`; pass graded entries through.
