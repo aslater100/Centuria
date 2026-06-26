@@ -17,7 +17,7 @@ import { hexNeighbors } from './hex';
 import { Weather } from './weather';
 import type { Lender, Loan } from './economy';
 import { createInitialLenders } from './lenders';
-import { resolveSupplyChain } from './supply';
+import { resolveSupplyChainGraded, SUPPLY_FULL_EPS } from './supply';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -248,6 +248,13 @@ export const SUPPLY_SHOCK_MAX_DRAG = 0.15;
  *  1973 embargo's span — long enough to register across several monthly supply
  *  ticks so the cascade and the industry drag are felt, not a one-frame blip. */
 export const OIL_EMBARGO_DAYS = 180;
+
+/** How deeply the oil-shock anchor cuts the `oil` raw, 0..1 (1 = total). The 1973
+ *  embargo wasn't a full shut-off — OPEC trimmed output and prices quadrupled — so
+ *  the cascade is a *partial* cut: oil (and `fuel` and the fuel-burning finals
+ *  downstream) run at `1 − OIL_EMBARGO_CUT` for the window, not zero. The graded
+ *  supply solver carries the fraction through; the industry drag scales with it. */
+export const OIL_EMBARGO_CUT = 0.6;
 
 // ---- Phase 1: Sectoral economy (GDD §5.2: the century's structural transformation) ----
 
@@ -2791,12 +2798,15 @@ export class RegionSim {
   // ---- Phase 15: Extended Economy & FX (GDD §5.2) ----
   /** Current stock of each intermediate good (units). */
   intermediateGoodStocks: Record<string, number> = {};
-  /** Transient raw-material embargoes: raw id → the sim day the embargo lifts.
-   *  While `day < until` the raw reads unavailable in the supply solver, so the
-   *  shortage cascades downstream (the GDD §5.4 promise that a supply shock "isn't
-   *  a popup"). The oil-shock anchor writes `oil` here; a war or canal-closure
-   *  event could reuse it. Expired entries are pruned in tickIntermediateGoods. */
-  rawEmbargoes: Record<string, number> = {};
+  /** Transient raw-material embargoes: raw id → `{ until, cut }`. While
+   *  `day < until` the raw runs at level `1 − cut` in the (graded) supply solver
+   *  (`cut` 1 = total cut, 0.6 = a 60% reduction), so a *partial* shortage
+   *  cascades downstream proportionally — the GDD §5.4 promise that a supply shock
+   *  "isn't a popup." The oil-shock anchor writes `oil` here; a war or
+   *  canal-closure event could reuse it. Expired entries are pruned in
+   *  tickIntermediateGoods. Pre-graded saves stored a bare `until` number; those
+   *  migrate to `{ until, cut: 1 }` on load (see `deserialize`). */
+  rawEmbargoes: Record<string, { until: number; cut: number }> = {};
   /** 0–1 weighted average input availability across all active intermediate goods. */
   supplyChainHealth = 1.0;
   /** Active inter-settlement goods flows for price arbitrage. */
@@ -5909,7 +5919,7 @@ export class RegionSim {
     // the save ledger stays tidy (a stale entry would still read available, but
     // pruning keeps `rawEmbargoes` to what's actually live).
     for (const raw of Object.keys(this.rawEmbargoes)) {
-      if (this.day >= this.rawEmbargoes[raw]) delete this.rawEmbargoes[raw];
+      if (this.day >= this.rawEmbargoes[raw].until) delete this.rawEmbargoes[raw];
     }
     const availableGoods = INTERMEDIATE_GOODS.filter(g => currentYear >= g.eraUnlock);
     if (availableGoods.length === 0) {
@@ -5919,16 +5929,20 @@ export class RegionSim {
       return;
     }
 
-    const result = resolveSupplyChain(INTERMEDIATE_GOODS, currentYear, (id) => this.rawSupplyAvailable(id));
+    const result = resolveSupplyChainGraded(INTERMEDIATE_GOODS, currentYear, (id) => this.rawSupplyLevel(id));
 
-    // Stock ledger: supplied goods produce baseOutput and draw down one unit of
-    // each held input; disrupted goods produce nothing (key seeded to 0).
+    // Stock ledger: each good produces baseOutput × its supply level and draws
+    // that fraction of each held input. At level 1 (healthy play) this is
+    // +baseOutput and −1 per input — byte-identical to the old binary ledger; a
+    // partial level (graded embargo) accrues and consumes proportionally; level 0
+    // produces nothing (key seeded to 0, as before).
     for (const good of availableGoods) {
-      if (result.supplied.has(good.id)) {
-        this.intermediateGoodStocks[good.id] = (this.intermediateGoodStocks[good.id] ?? 0) + good.baseOutput;
+      const level = result.levels.get(good.id) ?? 0;
+      if (level >= SUPPLY_FULL_EPS) {
+        this.intermediateGoodStocks[good.id] = (this.intermediateGoodStocks[good.id] ?? 0) + good.baseOutput * level;
         for (const inputId of good.inputs) {
           if (this.intermediateGoodStocks[inputId] !== undefined) {
-            this.intermediateGoodStocks[inputId] = Math.max(0, this.intermediateGoodStocks[inputId] - 1);
+            this.intermediateGoodStocks[inputId] = Math.max(0, this.intermediateGoodStocks[inputId] - level);
           }
         }
       } else if (this.intermediateGoodStocks[good.id] === undefined) {
@@ -5936,8 +5950,13 @@ export class RegionSim {
       }
     }
 
-    const pharmaceuticalsDisrupted = result.disrupted.has('pharmaceuticals');
-    this._electronicsDisrupted = result.disrupted.has('electronics');
+    // Shortfalls (1 − level) drive the random secondary effects, scaled by how
+    // deep the cut is. A full cut → shortfall 1 → the exact pre-graded draw
+    // (chance 0.15 / 0.3); healthy play → shortfall 0 → no draw at all, so the RNG
+    // stream is byte-identical in every all-or-nothing scenario.
+    const pharmaShortfall = 1 - (result.levels.get('pharmaceuticals') ?? 1);
+    const electronicsShortfall = 1 - (result.levels.get('electronics') ?? 1);
+    this._electronicsDisrupted = electronicsShortfall > SUPPLY_FULL_EPS;
     this.supplyChainHealth = result.health;
     // Cache the industry-output drag now, while health and `year` are the same
     // month (updateSectors reads it next month). Computing it later — at the next
@@ -5947,9 +5966,9 @@ export class RegionSim {
     this.supplyShockMult = this.supplyShockOutputMult();
 
     // Secondary effects
-    if (pharmaceuticalsDisrupted && this.settlements.length > 0) {
+    if (pharmaShortfall > SUPPLY_FULL_EPS && this.settlements.length > 0) {
       // Health risk: increased disease probability (push a plague event to a random settlement)
-      if (this.rng.chance(0.15)) {
+      if (this.rng.chance(0.15 * pharmaShortfall)) {
         const target = this.settlements[this.rng.int(this.settlements.length)];
         if (target && !target.activeEvents.some(e => e.kind === 'plague')) {
           target.activeEvents.push({ kind: 'plague', untilDay: this.day + 30, severity: 0.5 });
@@ -5958,32 +5977,42 @@ export class RegionSim {
       }
     }
 
-    if (this._electronicsDisrupted && this.rng.chance(0.3)) {
+    if (electronicsShortfall > SUPPLY_FULL_EPS && this.rng.chance(0.3 * electronicsShortfall)) {
       this.addLog('Electronics supply chain disrupted — research slows.', 'bad');
     }
   }
 
-  /** Whether a raw material is flowing this period. An active embargo cuts it
-   *  outright (the oil-shock anchor, a future blockade); otherwise it's available
-   *  if held in stock, else proxied from the sector that extracts it — extractive
-   *  raws (coal/iron/wood/oil/…) from industry, agricultural raws (grain/livestock)
-   *  from agriculture. So in healthy play every raw flows, and only a *sector*
-   *  collapse or an explicit embargo cuts the chain at its root. The supply solver
-   *  only ever queries this for raws; intermediate inputs resolve through the graph
-   *  (the cascade). Pure read — the same predicate the live UI snapshot uses. */
-  private rawSupplyAvailable(inputId: string): boolean {
-    const embargoUntil = this.rawEmbargoes[inputId];
-    if (embargoUntil !== undefined && this.day < embargoUntil) return false;
+  /** How freely a raw material flows this period, 0..1 (1 = no constraint). An
+   *  active embargo runs it at `1 − cut` (the oil-shock anchor, a future blockade);
+   *  otherwise it's full if held in stock, else proxied from the sector that
+   *  extracts it — extractive raws (coal/iron/wood/oil/…) off industry,
+   *  agricultural raws (grain/livestock) off agriculture (see `sectorRawLevel`).
+   *  The graded solver only ever queries this for raws; intermediate inputs resolve
+   *  through the graph (the cascade). Pure read — the same source the live UI
+   *  snapshot uses. In healthy play every raw returns exactly 1.0, so the chain is
+   *  byte-identical; only an embargo or a strained extracting sector grades it down. */
+  private rawSupplyLevel(inputId: string): number {
+    const embargo = this.rawEmbargoes[inputId];
+    if (embargo !== undefined && this.day < embargo.until) {
+      return Math.max(0, 1 - embargo.cut);
+    }
     if (this.intermediateGoodStocks[inputId] !== undefined) {
-      return this.intermediateGoodStocks[inputId] > 0;
+      return this.intermediateGoodStocks[inputId] > 0 ? 1 : 0;
     }
-    if (EXTRACTIVE_RAWS.has(inputId)) {
-      return this.settlements.reduce((s, t) => s + t.sectors.industry.output, 0) > 0;
-    }
-    if (AGRICULTURAL_RAWS.has(inputId)) {
-      return this.settlements.reduce((s, t) => s + t.sectors.agriculture.output, 0) > 0;
-    }
-    return false;
+    if (EXTRACTIVE_RAWS.has(inputId)) return this.sectorRawLevel('industry');
+    if (AGRICULTURAL_RAWS.has(inputId)) return this.sectorRawLevel('agriculture');
+    return 0;
+  }
+
+  /** Availability level [0,1] contributed by an extracting sector — the proxy for
+   *  "is there enough mining/farming capacity to keep the raws flowing." Binary for
+   *  now: 1 while the sector produces anything, 0 only on a total shutdown (deep
+   *  depression / wartime collapse), exactly as the pre-graded proxy. Graded raw
+   *  availability (a recent-norm ratio, so ordinary contractions partly starve the
+   *  chain) layers on here without touching its callers. */
+  private sectorRawLevel(sector: 'industry' | 'agriculture'): number {
+    const output = this.settlements.reduce((s, t) => s + t.sectors[sector].output, 0);
+    return output > 0 ? 1 : 0;
   }
 
   /** Returns the current supply chain health (0–1). */
@@ -6003,13 +6032,14 @@ export class RegionSim {
     active: string[];
     disrupted: Set<string>;
     supplied: Set<string>;
-    embargoes: Array<{ raw: string; daysLeft: number }>;
+    levels: Map<string, number>;
+    embargoes: Array<{ raw: string; daysLeft: number; cut: number }>;
   } {
-    const res = resolveSupplyChain(INTERMEDIATE_GOODS, this.year, (id) => this.rawSupplyAvailable(id));
-    const embargoes: Array<{ raw: string; daysLeft: number }> = [];
+    const res = resolveSupplyChainGraded(INTERMEDIATE_GOODS, this.year, (id) => this.rawSupplyLevel(id));
+    const embargoes: Array<{ raw: string; daysLeft: number; cut: number }> = [];
     for (const raw of Object.keys(this.rawEmbargoes)) {
-      const daysLeft = this.rawEmbargoes[raw] - this.day;
-      if (daysLeft > 0) embargoes.push({ raw, daysLeft });
+      const daysLeft = this.rawEmbargoes[raw].until - this.day;
+      if (daysLeft > 0) embargoes.push({ raw, daysLeft, cut: this.rawEmbargoes[raw].cut });
     }
     embargoes.sort((a, b) => a.raw.localeCompare(b.raw));
     return {
@@ -6019,6 +6049,7 @@ export class RegionSim {
       active: res.active,
       disrupted: res.disrupted,
       supplied: res.supplied,
+      levels: res.levels,
       embargoes,
     };
   }
@@ -6029,7 +6060,7 @@ export class RegionSim {
    *  window — that dip is the era boundary, not a shortage. Baselining the drag
    *  against it keeps healthy play unperturbed. Pure read; no RNG/state mutation. */
   private supplyChainBaselineHealth(): number {
-    return resolveSupplyChain(INTERMEDIATE_GOODS, this.year, () => true).health;
+    return resolveSupplyChainGraded(INTERMEDIATE_GOODS, this.year, () => 1).health;
   }
 
   /** How far actual supply health has fallen *below* the era-structural baseline,
@@ -6348,7 +6379,7 @@ export class RegionSim {
         // cut cascades oil → fuel → trucking/plastics and the supply-chain drag
         // bites for the window — the shock is a fuel price the economy keeps
         // paying, not just a one-off popup (GDD §5.4).
-        this.rawEmbargoes['oil'] = this.day + OIL_EMBARGO_DAYS;
+        this.rawEmbargoes['oil'] = { until: this.day + OIL_EMBARGO_DAYS, cut: OIL_EMBARGO_CUT };
         // Economic hit: treasury drain + inflation spike + currency devaluation
         const gdp = this.settlements.reduce(
           (s, t) => s + SECTOR_IDS.reduce((ss, id) => ss + t.sectors[id].output, 0), 0,
@@ -12560,7 +12591,17 @@ export class RegionSim {
     };
     // Phase 15: Extended Economy & FX (pre-Phase15 saves default to safe values)
     r.intermediateGoodStocks = d.intermediateGoodStocks ?? {};
-    r.rawEmbargoes = d.rawEmbargoes ?? {};
+    // Embargoes gained a `cut` fraction when raw availability went graded. A
+    // pre-graded save stored a bare `until` day (always a total cut) — migrate
+    // each numeric entry to `{ until, cut: 1 }`; pass graded entries through.
+    r.rawEmbargoes = {};
+    const savedEmbargoes = d.rawEmbargoes ?? {};
+    for (const raw of Object.keys(savedEmbargoes)) {
+      const v = savedEmbargoes[raw];
+      r.rawEmbargoes[raw] = typeof v === 'number'
+        ? { until: v, cut: 1 }
+        : { until: v.until, cut: v.cut ?? 1 };
+    }
     r.supplyChainHealth = d.supplyChainHealth ?? 1.0;
     r.tradeFlows = d.tradeFlows ?? [];
     r.currencyRegime = d.currencyRegime ?? 'fiat';
