@@ -5,10 +5,12 @@ import { WindowManager } from './ui/WindowManager';
 import { Sfx } from './ui/audio';
 import { Music } from './ui/music';
 import { Soundscape } from './ui/soundscape';
+import { AudioRegistry } from './ui/audio/audioRegistry';
 import { DesignScreen } from './ui/designscreen';
 import { TitleScreen } from './ui/titlescreen';
 import { PauseMenu } from './ui/pausemenu';
 import { TICKS_PER_SECOND } from './sim/defs';
+import { runCatchUp } from './ui/simLoop';
 import type { ScenarioSelection } from './ui/titlescreen';
 
 const root = document.getElementById('app')!;
@@ -57,6 +59,11 @@ window.addEventListener('resize', resize);
 const sfx = new Sfx();
 const music = new Music();
 const soundscape = new Soundscape();
+// Manifest-driven recorded stems / ambience beds (procedural fallback when none
+// are present). Music and soundscape each own a registry bound to their own
+// AudioContext — decoded AudioBuffers cannot cross contexts.
+music.setStems(new AudioRegistry());
+soundscape.setAmbience(new AudioRegistry());
 window.addEventListener('mousedown', () => { sfx.unlock(); music.unlock(); soundscape.unlock(); }, { once: true });
 window.addEventListener('keydown', () => { sfx.unlock(); music.unlock(); soundscape.unlock(); }, { once: true });
 
@@ -270,11 +277,19 @@ function loop(now: number): void {
 
   if (!paused && region && regionView) {
     acc += dt * TICKS_PER_SECOND * speed;
-    let guard = 0;
-    while (acc >= 1 && guard++ < 64) {
-      if (!regionView.ceremonyOpen) region.tick();
-      acc -= 1;
-    }
+    // Budget the sim catch-up by wall-clock, not a fixed iteration count: a heavy
+    // late-game tick (the monthly/yearly spike) can't blow the 16.7 ms frame — we
+    // tick until ~8 ms is spent, then let the calendar lag a frame instead of
+    // stuttering. The hard tick ceiling backstops a cheap-tick flood.
+    const r = region;
+    const rv = regionView;
+    const res = runCatchUp(
+      acc,
+      () => { if (!rv.ceremonyOpen) r.tick(); },
+      () => performance.now(),
+      { budgetMs: 8, maxTicks: 240, maxBacklog: 240 },
+    );
+    acc = res.acc;
   }
 
   if (region && regionView) {
