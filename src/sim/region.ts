@@ -19,6 +19,7 @@ import type { Lender, Loan } from './economy';
 import { createInitialLenders } from './lenders';
 import { resolveSupplyChainGraded, SUPPLY_FULL_EPS } from './supply';
 import { tickPollution } from './systems/pollution';
+import { tickServiceCoverage } from './systems/services';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -1257,6 +1258,19 @@ export interface DealCounter {
 /** £ → diplomatic points: the chancery's exchange rate. */
 export const GOLD_PER_POINT = 8;
 export const DEAL_COUNTER_DAYS = 90;
+
+/** Appetite bonus (diplomatic points) an *embattled* rival — `rivalSituation > 0`,
+ *  i.e. fighting a foreign war — gains for treaties that shore it up: it fears a
+ *  second front and needs income and allies, so it signs protection and trade more
+ *  readily. ADDITIVE (not multiplicative), so the lift applies even to a treaty the
+ *  rival's temperament normally dislikes (a negative base appetite), and exactly 0
+ *  at peace (`rivalSituation` 0) → the deal verdict is byte-identical in all current
+ *  play and every existing diplomacy test (none of which sets a foreign war). */
+export const SITUATION_TREATY_BONUS: Partial<Record<TreatyKind, number>> = {
+  defensive_pact: 4,
+  non_aggression: 3,
+  trade_agreement: 2,
+};
 
 // ---- Monetary system constants (GDD §5.1) ----
 /** Credit-neutral policy rate; below this leverage builds, above it contracts. */
@@ -5236,7 +5250,7 @@ export class RegionSim {
     this.tickRegionalEvents(); // Phase 4: disasters and windfalls
     tickPollution(this);       // Phase 14: pollution diffusion (systems/pollution.ts)
     this.tickUtilities();      // Phase 14: power/water/waste utilities
-    this.tickServiceCoverage(); // Phase 14: service coverage effects
+    tickServiceCoverage(this); // Phase 14: service coverage effects (systems/services.ts)
     // Phase 14: update land value for each player settlement
     for (const t of this.settlements) {
       if (t.factionId === this.playerFactionId) {
@@ -7580,28 +7594,6 @@ export class RegionSim {
   }
 
   /** Update service coverage monthly for all player settlements. */
-  private tickServiceCoverage(): void {
-    for (const t of this.settlements) {
-      if (t.factionId !== this.playerFactionId) continue;
-      const sc = this.computeServiceCoverage(t.id);
-      t.serviceCoverage = sc;
-      // Side effects: low health (< 0.3) raises expected death pressure — tracked via satisfaction
-      // (actual demographic effect via mortality is handled in monthlyUpdate cohorts)
-      if (sc.health < 0.3) {
-        // Represent death pressure via grievance (1 per month)
-        t.grievance = Math.min(100, (t.grievance ?? 0) + 0.5);
-      }
-      // Low education (< 0.2): satisfaction -2 per month
-      if (sc.education < 0.2) {
-        t.satisfaction = Math.max(0, t.satisfaction - 2);
-      }
-      // Low safety (< 0.3): grievance +1 per month
-      if (sc.safety < 0.3) {
-        t.grievance = Math.min(100, (t.grievance ?? 0) + 1);
-      }
-    }
-  }
-
   // ---- Phase 4: Regional Events ----
 
   /** Fire and expire settlement-level events monthly. */
@@ -9845,6 +9837,16 @@ export class RegionSim {
 
   // ---- the bargaining table (GDD §6.3): baskets, valuation, counter-offers ----
 
+  /** How embattled a rival is, 0..1 (GDD §6.3). Currently: 1 while it is fighting
+   *  a foreign war, else 0. An embattled power fears a second front and needs income
+   *  and allies, so it comes to the player's table more readily (see
+   *  `SITUATION_TREATY_BONUS`). Pure read off the already-serialized `foreignWars`
+   *  ledger — no RNG, no mutation — and 0 in peacetime, so deal valuation is
+   *  unchanged in all current play. Surfacing it lets the UI flag a keen partner. */
+  rivalSituation(rv: RivalNation): number {
+    return this.foreignWars.some((w) => w.a === rv.id || w.b === rv.id) ? 1 : 0;
+  }
+
   /** What signing this treaty is worth *to the rival*, in diplomatic points —
    *  positive is appetite, negative is a concession it wants paying for. */
   treatyAppetite(rv: RivalNation, kind: TreatyKind): number {
@@ -9886,6 +9888,9 @@ export class RegionSim {
         if (rv.archetype === 'hegemon') appetite -= 2;
         break;
     }
+    // An embattled rival (fighting a foreign war) is keener on protection and
+    // income. Additive bonus, 0 at peace → byte-identical in all current play.
+    appetite += (SITUATION_TREATY_BONUS[kind] ?? 0) * this.rivalSituation(rv);
     return appetite;
   }
 

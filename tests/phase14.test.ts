@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { RegionSim } from '../src/sim/region';
 import { tickPollution } from '../src/sim/systems/pollution';
+import { tickServiceCoverage } from '../src/sim/systems/services';
 import { MINUTES_PER_DAY } from '../src/sim/defs';
 import { REGION_MINUTES_PER_TICK } from '../src/sim/region';
 
@@ -419,8 +420,7 @@ describe('Phase 14: Service Coverage', () => {
     const sc = r.computeServiceCoverage(t.id);
     if (sc.health < 0.3) {
       t.grievance = 10;
-      const priv = r as unknown as { tickServiceCoverage(): void };
-      priv.tickServiceCoverage();
+      tickServiceCoverage(r);
       expect(t.grievance).toBeGreaterThan(10);
     } else {
       // coverage >= 0.3, no effect expected
@@ -436,8 +436,7 @@ describe('Phase 14: Service Coverage', () => {
     const sc = r.computeServiceCoverage(t.id);
     if (sc.education < 0.2) {
       t.satisfaction = 70;
-      const priv = r as unknown as { tickServiceCoverage(): void };
-      priv.tickServiceCoverage();
+      tickServiceCoverage(r);
       expect(t.satisfaction).toBeLessThan(70);
     } else {
       // Education is already >= 0.2 at base; skip
@@ -453,8 +452,7 @@ describe('Phase 14: Service Coverage', () => {
     const sc = r.computeServiceCoverage(t.id);
     if (sc.safety < 0.3) {
       t.grievance = 5;
-      const priv = r as unknown as { tickServiceCoverage(): void };
-      priv.tickServiceCoverage();
+      tickServiceCoverage(r);
       expect(t.grievance).toBeGreaterThan(5);
     } else {
       expect(sc.safety).toBeGreaterThanOrEqual(0.3);
