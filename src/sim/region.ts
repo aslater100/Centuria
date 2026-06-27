@@ -353,6 +353,26 @@ export function defaultSectors(): Sectors {
   return s;
 }
 
+/** Phase-14 city-service fields (GDD §11), defaulted. Applied SYMMETRICALLY in
+ *  serialize() and deserialize() so a save round-trips losslessly: the runtime
+ *  settlement-founding sites predate these fields and never set them, so without
+ *  a shared normalization serialize would omit (undefined → dropped by JSON)
+ *  exactly what deserialize fabricates, and a reloaded save would never byte-match
+ *  the in-memory one. Behaviourally inert — the readers already use these same
+ *  defaults via `?? `, so making the fields explicit changes no gameplay value. */
+export function cityServiceFields(s: Partial<Settlement>) {
+  return {
+    zoningMix: s.zoningMix ?? { residential: 0.5, commercial: 0.2, industrial: 0.2, office: 0.1 },
+    landValue: s.landValue ?? 30,
+    pollutionLevel: s.pollutionLevel ?? 0,
+    powerCapacity: s.powerCapacity ?? 0,
+    powerDemand: s.powerDemand ?? 0,
+    waterCoverage: s.waterCoverage ?? 0.5,
+    wasteCoverage: s.wasteCoverage ?? 0.3,
+    serviceCoverage: s.serviceCoverage ?? { health: 0.3, education: 0.2, safety: 0.2 },
+  };
+}
+
 // ---- Phase 2: civic works & development focus (deep management for managed cities) ----
 
 /** A regional-tier building: raised with treasury money in a city the player
@@ -2549,6 +2569,14 @@ export class RegionSim {
    *  from the main `rng` so AI choices never perturb the colony's own stochastic
    *  outcomes (events, washouts, raids) — preserving cross-feature determinism. */
   aiRng: Rng;
+  /** Third deterministic stream for incidental stochastic detail that must stay
+   *  apart from the colony and AI draws — notable health decay, loan ids.
+   *  Previously these used `Math.random()`, which made the serialized save
+   *  non-reproducible for a fixed seed (the determinism harness caught a notable's
+   *  health diverging between two same-seed runs); routing them through a
+   *  dedicated seeded stream restores byte-level determinism without shifting the
+   *  main or AI streams (so every existing seed-dependent outcome is unchanged). */
+  auxRng: Rng;
   minute: number;
   map: RegionMap;
   weather: Weather;
@@ -2948,6 +2976,8 @@ export class RegionSim {
     // Derive the AI stream deterministically from the main seed so it stays
     // reproducible without sharing draws with the colony simulation.
     this.aiRng = new Rng((rng.getState() ^ 0x9e3779b9) >>> 0);
+    // A third stream (distinct mix constant) for incidental detail — see auxRng.
+    this.auxRng = new Rng((rng.getState() ^ 0x85ebca6b) >>> 0);
     this.minute = minute;
     this.map = map;
     this.weather = weather;
@@ -7993,8 +8023,10 @@ export class RegionSim {
       if (!n.alive) continue;
       n.age += 1 / 12;
 
-      // Health degrades monthly (scaled from annual rates)
-      const healthDecay = (Math.random() * 2 + (n.age > 70 ? 3 : 0)) / 12;
+      // Health degrades monthly (scaled from annual rates). Seeded (auxRng), not
+      // Math.random — a notable's health is serialized, so a non-deterministic
+      // draw made the save non-reproducible for a fixed seed.
+      const healthDecay = (this.auxRng.next() * 2 + (n.age > 70 ? 3 : 0)) / 12;
       n.health = Math.max(0, (n.health ?? 80) - healthDecay);
 
       // Death risk blended from age-based mortality and health
@@ -12222,10 +12254,14 @@ export class RegionSim {
       mapSeed: this.map.seed,
       rng: this.rng.getState(),
       aiRng: this.aiRng.getState(),
+      auxRng: this.auxRng.getState(),
       minute: this.minute,
       settlements: this.settlements.map(s => ({
         ...s,
         factionStrengths: Object.fromEntries(s.factionStrengths),
+        // Normalize the Phase-14 fields the runtime founding sites never set, so a
+        // save byte-matches the form deserialize() restores (lossless round-trip).
+        ...cityServiceFields(s),
       })),
       notables: this.notables,
       expeditions: this.expeditions,
@@ -12394,6 +12430,14 @@ export class RegionSim {
       sectorOutputNorm: this.sectorOutputNorm,
       rawEmbargoes: this.rawEmbargoes,
       supplyChainHealth: this.supplyChainHealth,
+      // The two one-month-lagged supply-shock caches: set in tickIntermediateGoods
+      // and read the NEXT month (supplyShockMult by updateSectors, the disrupted
+      // flag by the research multiplier) before being recomputed. Persisting them
+      // keeps a save reloaded mid-shock byte-identical on the next tick; old saves
+      // backfill to the no-shock defaults (1 / false), the same values healthy play
+      // always holds, so the format gain is inert outside an active shock.
+      supplyShockMult: this.supplyShockMult,
+      electronicsDisrupted: this._electronicsDisrupted,
       tradeFlows: this.tradeFlows,
       currencyRegime: this.currencyRegime,
       currencyUnionPartnerId: this.currencyUnionPartnerId,
@@ -12434,22 +12478,21 @@ export class RegionSim {
       focus: s.focus ?? 'balanced',
       activeEvents: s.activeEvents ?? [],
       policies: s.policies ?? { ...DEFAULT_CITY_POLICIES },
-      // Phase 14: Zoning, Infrastructure & City Services
-      zoningMix: s.zoningMix ?? { residential: 0.5, commercial: 0.2, industrial: 0.2, office: 0.1 },
-      landValue: s.landValue ?? 30,
-      pollutionLevel: s.pollutionLevel ?? 0,
-      powerCapacity: s.powerCapacity ?? 0,
-      powerDemand: s.powerDemand ?? 0,
-      waterCoverage: s.waterCoverage ?? 0.5,
-      wasteCoverage: s.wasteCoverage ?? 0.3,
-      serviceCoverage: s.serviceCoverage ?? { health: 0.3, education: 0.2, safety: 0.2 },
+      // Phase 14: Zoning, Infrastructure & City Services — defaulted via the same
+      // helper serialize() uses, so old saves migrate AND the round-trip stays
+      // lossless (serialize emits these same normalized fields).
+      ...cityServiceFields(s),
     }));
+    // Spread `...n` FIRST, then backfill missing fields — preserving the original
+    // key order so a save round-trips byte-for-byte. (Defaults-before-spread would
+    // hoist skill/health/children/loyalty to the front, reordering a present
+    // notable's keys and breaking the lossless round-trip the harness checks.)
     r.notables = (d.notables ?? []).map((n: any) => ({
-      skill: 50,
-      health: 80,
-      children: [],
-      loyalty: 80,
       ...n,
+      skill: n.skill ?? 50,
+      health: n.health ?? 80,
+      children: n.children ?? [],
+      loyalty: n.loyalty ?? 80,
     }));
     r.expeditions = d.expeditions;
     r.routes = (d.routes as Route[]).map((rt) => ({ ...rt, cargoType: rt.cargoType ?? null, cargoPriority: rt.cargoPriority ?? null }));
@@ -12616,6 +12659,9 @@ export class RegionSim {
     r.rng.setState(d.rng);
     // restore the AI stream too (older saves predate it — derive from main seed)
     if (typeof d.aiRng === 'number') r.aiRng.setState(d.aiRng);
+    // restore the incidental stream too (older saves predate it — keep the
+    // constructor-derived seed, which is deterministic from the main seed)
+    if (typeof d.auxRng === 'number') r.auxRng.setState(d.auxRng);
     // restore epilogue events (post-2100 flavor)
     r.triggeredEpilogueEvents = new Set(d.triggeredEpilogueEvents ?? []);
     r.epilogueShown = d.epilogueShown ?? false;
@@ -12711,6 +12757,8 @@ export class RegionSim {
         : { until: v.until, cut: v.cut ?? 1 };
     }
     r.supplyChainHealth = d.supplyChainHealth ?? 1.0;
+    r.supplyShockMult = d.supplyShockMult ?? 1;            // no-shock default
+    r._electronicsDisrupted = d.electronicsDisrupted ?? false;
     r.tradeFlows = d.tradeFlows ?? [];
     r.currencyRegime = d.currencyRegime ?? 'fiat';
     r.currencyUnionPartnerId = d.currencyUnionPartnerId ?? undefined;
@@ -12765,7 +12813,7 @@ export class RegionSim {
 
     // Create and record the loan
     const loan: Loan = {
-      id: Math.random(),
+      id: this.auxRng.next(), // seeded, not Math.random — loan ids are serialized
       lenderId,
       principal: amount,
       borrowed: amount,
