@@ -1,6 +1,30 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-27 · **Tests:** 926 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; deep-expansion underway (PRs #264, #265, #269, #272, #270, #274, **#276 + #277 + #278 + #279 + #280 merged — supply-chain cascade + GDP drag + MVP-18 DAG + oil-shock-through-chain + Supply UI + graded raw availability**; save-size guard + live-slot asset generator + audio stems/ambience + wall-clock sim catch-up landed — asset *generation* blocked only by network egress). **This session: gave the supply shock its second half — COST-PUSH INFLATION. A real cascade below the era baseline now lifts the monetary inflation target (`supplyShockSeverity × SUPPLY_SHOCK_INFLATION`), so the 1973 oil shock is finally stagflation — output drag AND prices — not just a recession. Byte-identical in healthy play (severity 0), bounded, self-healing, a pure sink (inflation never feeds sector output). D1-econ "prices" leg.**
+**Last updated:** 2026-06-27 · **Tests:** 939 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; deep-expansion underway (#276–#280 + **#283 merged — cost-push inflation**; **PR #284 open — non-asset depth pass**). **Last session (#283, merged): the supply shock's COST-PUSH INFLATION (D1-econ prices leg).**
+
+> 🟢 **PR #284 (open, this session) — non-asset depth pass, 4 commits:**
+> 1. **D1-econ trade leg** — a supply shock now chokes *exports*
+>    (`exportEarningsLastMonth ×= 1 − severity·SUPPLY_SHOCK_EXPORT_DRAG`, 0.5). With
+>    the merged GDP drag + cost-push, all three legs (GDP, prices, trade) are wired.
+>    Byte-identical (severity 0 in healthy play).
+> 2. **Determinism + save-fidelity hardening (Track C guard).** A new full-state
+>    `serialize()` determinism harness (`tests/serialize-determinism.test.ts`) caught
+>    three latent defects, all fixed: (a) **5 `Math.random()` calls** made saves
+>    non-reproducible for a fixed seed — notable health decay + loan ids now use a new
+>    serialized **`auxRng`** (mirrors `aiRng`; main+AI streams stay byte-identical);
+>    (b) the one-month-lagged `supplyShockMult`/`_electronicsDisrupted` caches weren't
+>    serialized → a mid-shock reload dropped the drag, now persisted; (c) Phase-14
+>    city-service fields + notable defaults weren't round-trip-symmetric → a shared
+>    `cityServiceFields()` helper + spread-first notable backfill make a save lossless.
+> 3. **First C1 extraction** — `tickPollution` → `src/sim/systems/pollution.ts` as a
+>    free function `fn(r: RegionSim)` (the roadmap pattern; preserves RNG order),
+>    proven byte-identical by the harness. Establishes the `systems/` dir + convention.
+> 4. **Track D perf guard** — `bench-region` re-baselined off the obsolete "mean×64"
+>    model to the real wall-clock catch-up budget; hard gate is now the worst single
+>    tick (> 16.7 ms = stutter; currently ~10.6 ms, passes).
+>
+> **The determinism harness is the key unlock:** every future `region.ts` extraction
+> and every "byte-identical" claim now has a real PASS/FAIL gate, not a hand-wave.
 
 > ⚠️ **Untested-by-human balance change live on `main`:** PR #280's *Phase-2 graded
 > extraction proxy* (an ordinary contraction now drags industry via the chain) is
@@ -23,6 +47,71 @@
 > (parallax backdrops + era UI skins) and `B2-audio` (music stems + ambience + voice)
 > are the bold roadmap items and remain **un-started in earnest** — they need an env
 > with network egress + image/audio tooling to actually generate.
+
+## Recent session (2026-06-27 pm) — non-asset depth pass (PR #284): trade leg + the two guards + first extraction
+
+User brief: "finish the rest of the non-asset work." Ran a codebase-wide inventory
+workflow (8 readers — econ/military/AI/climate/zoning/modularization/UI/perf — +
+a synthesizer) to ground-truth the roadmap against the real code, then shipped the
+safest, highest-value byte-identical items from the resulting backlog (4 commits on
+PR #284; see the status block at the top of this file for the per-commit summary).
+
+**Ground-truth corrections the inventory surfaced (the handoff was stale):**
+- The **wall-clock sim catch-up budget is already in `main.ts`** (`runCatchUp`,
+  budgetMs≈8, not a 64-tick count) — the gap was the *bench guard* still using the
+  old "mean×64" verdict (now re-baselined).
+- **`drawBackdrop()` is already wired** into `regionview.ts draw()` (before the
+  mapCache blit) — not the gap the roadmap implied.
+- **Emergent FX already exists** (`computeExchangeRate` reads trade balance / rates /
+  confidence). The real gap is *two competing FX writers* (`tickMonetary` regime path
+  vs `tickFX`) — a consolidation, deferred (medium-risk).
+- **Phase-14 zoning is scalar state on `RegionSim`**, substantially implemented — NOT
+  greenfield; the `zoning-system.ts` grid-map vision is the unbuilt part.
+- The sim had **genuine non-determinism** (5 `Math.random()` sites) — now fixed.
+
+### Prioritized non-asset backlog (from the inventory synthesizer — pick up here)
+
+Order: byte-identical + low-risk + high-value first; deps noted. ✅ = shipped this PR.
+
+**Tier-0 guards (both ✅ this session — they gate everything else):**
+- ✅ Fixed-seed full-`serialize()` determinism harness (the byte-identical gate).
+- ✅ `bench-region` wall-clock + worst-tick gate.
+
+**Safe wave (byte-identical TRUE, low-risk — ship next):**
+1. ✅ **D1-econ trade leg** (supply shock → exports).
+2. ✅ **C1: extract `tickPollution`** → `systems/pollution.ts` (first leaf).
+3. **C1: extract `tickServiceCoverage`** → `systems/services.ts` (sole dep
+   `computeServiceCoverage` public, zero RNG — same recipe as #2, now de-risked).
+4. **D3-ai: situation-aware `DealVerdict`** — pure `rivalSituation(rv)∈[0,1]` from
+   data on the object (foreign war / sanctions / neighbour relations); scale pact
+   appetite `×(1+0.5·sit)`, trade `×(1−0.3·sit)`, gated `sit>0` → 0 in all current
+   play → byte-identical. **High value, render-of-AI depth.**
+5. **D3-ai: structured `AgendaKind`** (1:1 from archetype, serialized, intel-gated
+   reveal at `intel≥0.5`) — prereq for agenda-driven behaviour later.
+6. **D3-ai: tier-asymmetry guardrail** — route rival aggression `chance()` through a
+   new `AI_DIFFICULTY.rivalAggroMult` (normal=1.0 → byte-identical; easy/hard only).
+7. **D2-mil: regime-modulated war-support DECAY rate** (`WAR_SUPPORT_DECAY_MULT`, all
+   1.0 → no-op now); **Front stub** (`front?:{position}` from `w.score`, write-only);
+   **post-war `warScars` record** (pure bookkeeping). All TRUE/low-risk.
+8. **E1-climate: continuous crop-yield drag, zero below 1.5 °C** (TRUE — warmingC
+   stays <1.5 in the scored window). **UIUX: era skin via `data-era`**, decompose
+   tooltips (render-only, TRUE).
+
+**Tier-2 (needs re-baseline — own PRs):** revanchism CB + AI war-frequency shift;
+sea-wall overtopping / climate-refugee migration; brownout −30 % industrial output;
+live-stats skyline + Century Graph (new serialized field); **consolidate the two FX
+writers** (do after more of C1 lands so `region.ts` is calmer).
+
+**Tier-3 (large rewrites, last):** spatial military Front (full resolution rewrite,
+new RNG order — needs the Front stub first); physical-goods-on-routes → per-good
+prices → 44-good catalog (sequence in that order; the heart of making
+`intermediateGoodStocks` economically real); E2 R/C/I/O demand + land-value grid
+maps (trips the save-size guard by design); `drawBackdrop` parallax compositing.
+
+**Dependency rules:** the determinism harness (✅) precedes every "byteIdenticalSafe"
+claim; `bench-region` (✅) precedes large `region.ts` cost; **continue C1 leaf
+extractions before the big D1-econ goods/price/FX features** (they add hundreds of
+lines — land them in `systems/`, not the 14k-line monolith).
 
 ## Recent session (2026-06-27) — supply shock → cost-push inflation: the stagflation half (D1-econ)
 
