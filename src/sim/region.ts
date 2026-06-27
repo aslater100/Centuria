@@ -2921,7 +2921,11 @@ export class RegionSim {
   rawEmbargoes: Record<string, { until: number; cut: number }> = {};
   /** 0–1 weighted average input availability across all active intermediate goods. */
   supplyChainHealth = 1.0;
-  /** Active inter-settlement goods flows for price arbitrage. */
+  /** Active inter-settlement goods flows for price arbitrage. A flow is goods
+   *  physically in transit: it carries `pendingIncome` (the arbitrage profit) that
+   *  is realized only on ARRIVAL, after `transitDays` of travel — so congestion
+   *  (which sets the transit time) delays the payout, and a flow whose route is
+   *  severed mid-transit is lost. */
   tradeFlows: Array<{
     goodId: string;
     fromSettlementId: number;
@@ -2929,6 +2933,8 @@ export class RegionSim {
     volume: number;
     transitDays: number;
     congestionTariff: number;
+    /** Arbitrage profit (£) carried by this shipment, paid out on delivery. */
+    pendingIncome: number;
   }> = [];
   /** Currency regime for Phase 15 FX. Separate from monetary regime (peg/float/print). */
   currencyRegime: 'gold_standard' | 'fiat' | 'currency_union' = 'fiat';
@@ -6267,19 +6273,53 @@ export class RegionSim {
     return Math.max(0.05, Math.min(0.3, tariff));
   }
 
-  /** Tick price arbitrage between player settlements.
-   *  Where price differentials exceed congestion costs, spawn trade flows and collect tariff income. */
+  /** Tick price arbitrage between player settlements (GDD §5.2: physical goods on
+   *  routes, transit × congestion). Goods physically travel: a flow's arbitrage
+   *  profit is paid out only when the shipment ARRIVES (after `transitDays` of
+   *  travel, which congestion lengthens), and a flow whose route is severed
+   *  mid-transit is lost. Where a price differential exceeds congestion costs and
+   *  no shipment is already en route, a new flow is dispatched. */
   tickPriceArbitrage(): void {
-    // Decay old flows by half each month
+    // 1. Advance in-transit shipments. Deliver those that arrive (pay out their
+    //    pending income); strand those whose route has been severed.
+    const stillMoving: typeof this.tradeFlows = [];
+    let delivered = 0;
+    let stranded = 0;
     for (const flow of this.tradeFlows) {
-      flow.volume *= 0.5;
+      // A flow needs a live route the whole way; a SEVERED lane loses its cargo.
+      // (A merely-congested route still delivers — only a missing one strands, so
+      // test for the route's existence, not the clamped-max congestion tariff.)
+      const hasRoute = this.routes.some(
+        (rt) =>
+          (rt.a === flow.fromSettlementId && rt.b === flow.toSettlementId) ||
+          (rt.a === flow.toSettlementId && rt.b === flow.fromSettlementId),
+      );
+      if (!hasRoute) {
+        stranded++;
+        continue;
+      }
+      flow.transitDays -= DAYS_PER_MONTH;
+      if (flow.transitDays <= 0) {
+        delivered += flow.pendingIncome;
+      } else {
+        stillMoving.push(flow);
+      }
     }
-    this.tradeFlows = this.tradeFlows.filter(f => f.volume >= 0.5);
+    this.tradeFlows = stillMoving;
+    if (delivered > 0) {
+      this.treasury += delivered;
+      if (this.rng.chance(0.1)) {
+        this.addLog(`Goods arrive: shipments deliver ${formatCurrency(Math.round(delivered))} in arbitrage profit.`, 'good');
+      }
+    }
+    if (stranded > 0 && this.rng.chance(0.15)) {
+      this.addLog(`Goods stranded: a severed route loses ${stranded} shipment${stranded > 1 ? 's' : ''} in transit.`, 'bad');
+    }
 
+    // 2. Dispatch new shipments where a differential beats the congestion cost.
     const playerSettlements = this.settlements.filter(s => s.factionId === this.playerFactionId);
     if (playerSettlements.length < 2) return;
 
-    let arbitrageIncome = 0;
     const goodIds = INTERMEDIATE_GOODS
       .filter(g => this.year >= g.eraUnlock)
       .map(g => g.id);
@@ -6291,51 +6331,36 @@ export class RegionSim {
         const tariff = this.computeCongestionTariff(from.id, to.id);
         if (tariff >= 0.3) continue; // no route
 
-        // Proxy price differential from wage gap
+        // Proxy price differential from wage gap (per-good prices are a follow-on).
         const fromWage = this.avgWageOf(from);
         const toWage = this.avgWageOf(to);
         const priceDiff = Math.abs(fromWage - toWage);
         const threshold = tariff * 10;
+        if (priceDiff <= threshold) continue;
 
-        if (priceDiff > threshold) {
-          // Spawn trade flow
-          const volume = Math.min(10, priceDiff * 2);
-          const highWageSide = fromWage > toWage ? to : from;
-          const lowWageSide = fromWage > toWage ? from : to;
+        // Goods flow from the cheaper market to the dearer one (buy low, sell high).
+        const buySide = fromWage > toWage ? to : from;   // lower wage/price — source
+        const sellSide = fromWage > toWage ? from : to;  // higher wage/price — market
 
-          // Check if this flow already exists
-          const existing = this.tradeFlows.find(
-            f => f.fromSettlementId === lowWageSide.id && f.toSettlementId === highWageSide.id && goodIds.includes(f.goodId)
-          );
+        // Only one shipment per lane at a time — wait for it to arrive before the next.
+        const existing = this.tradeFlows.find(
+          f => f.fromSettlementId === buySide.id && f.toSettlementId === sellSide.id
+        );
+        if (existing) continue;
 
-          const goodId = goodIds.length > 0 ? goodIds[0] : 'components';
-          if (!existing) {
-            this.tradeFlows.push({
-              goodId,
-              fromSettlementId: lowWageSide.id,
-              toSettlementId: highWageSide.id,
-              volume,
-              transitDays: Math.round(tariff * 100),
-              congestionTariff: tariff,
-            });
-          }
-
-          // Income from tariff on flow volume
-          const income = volume * tariff * 5;
-          arbitrageIncome += income;
-
-          if (income >= 1 && this.rng.chance(0.1)) {
-            this.addLog(
-              `Arbitrage: goods flowing ${lowWageSide.name}→${highWageSide.name} (differential ${priceDiff.toFixed(1)}). Tariff income: ${formatCurrency(Math.round(income))}.`,
-              'good'
-            );
-          }
-        }
+        const volume = Math.min(10, priceDiff * 2);
+        this.tradeFlows.push({
+          goodId: goodIds.length > 0 ? goodIds[0] : 'components',
+          fromSettlementId: buySide.id,
+          toSettlementId: sellSide.id,
+          volume,
+          // Congestion sets the travel time (≥1 day so a shipment always spends a
+          // tick in transit); the profit lands when it arrives, not now.
+          transitDays: Math.max(1, Math.round(tariff * 100)),
+          congestionTariff: tariff,
+          pendingIncome: volume * tariff * 5,
+        });
       }
-    }
-
-    if (arbitrageIncome > 0) {
-      this.treasury += arbitrageIncome;
     }
   }
 
@@ -12768,7 +12793,9 @@ export class RegionSim {
     r.supplyChainHealth = d.supplyChainHealth ?? 1.0;
     r.supplyShockMult = d.supplyShockMult ?? 1;            // no-shock default
     r._electronicsDisrupted = d.electronicsDisrupted ?? false;
-    r.tradeFlows = d.tradeFlows ?? [];
+    // Pre-transit-pipeline flows carried no pendingIncome — backfill to 0 (they
+    // simply transit out without a payout); new flows round-trip unchanged.
+    r.tradeFlows = (d.tradeFlows ?? []).map((f: { pendingIncome?: number }) => ({ ...f, pendingIncome: f.pendingIncome ?? 0 }));
     r.currencyRegime = d.currencyRegime ?? 'fiat';
     r.currencyUnionPartnerId = d.currencyUnionPartnerId ?? undefined;
     r.fxBoost = d.fxBoost ?? 1.0;
