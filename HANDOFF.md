@@ -1,8 +1,8 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-27 · **Tests:** 950 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; deep-expansion underway (#283–#286 merged — cost-push, non-asset depth pass, C1 services + situation-aware deals, AI belligerence + intel-gated agenda; **PR #287 open — Tier-2 climate farm drag (A) + Tier-3 goods-on-routes first slice (B)**).
+**Last updated:** 2026-06-27 · **Tests:** 950 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; deep-expansion underway. **This session: 8 PRs merged (#283–#286, #288)** — cost-push inflation; non-asset depth pass (export-drag trade leg + serialize-determinism harness & 3 bug fixes + first C1 extraction + perf-guard re-baseline); C1 services extraction + situation-aware deals; AI difficulty belligerence + intel-gated agenda; **#288 = Tier-2 climate farm drag (A) + Tier-3 goods-on-routes first slice (B), both merged.**
 
-> 🌾⚠️ **PR #287 — two intentional BALANCE changes (user picked A+B), unverified-by-human:**
+> 🌾⚠️ **#288 — two intentional BALANCE changes (user picked A+B), UNVERIFIED-BY-HUMAN (unit + headless only):**
 > **A — agriculture climate drag:** warming past +1.5°C trims the agriculture *sector's*
 > GDP (`agriClimateMult`, ≤30%, distinct from the older +0.8°C subsistence-food drag).
 > Non-divergent (≤14% of the ag sector at the observed ~3.8°C; warming is a pure sink).
