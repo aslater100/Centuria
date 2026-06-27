@@ -243,6 +243,20 @@ export const INTERMEDIATE_GOODS: IntermediateGood[] = [
  *  so healthy play is byte-identical and only a genuine raw collapse bites. */
 export const SUPPLY_SHOCK_MAX_DRAG = 0.15;
 
+/** Cost-push inflation gain from a supply-chain shock (GDD §5.2). A shortage is
+ *  not only fewer goods made (the `SUPPLY_SHOCK_MAX_DRAG` output bite) — it is
+ *  also dearer goods: the 1973 oil embargo quadrupled prices, and *that* half of
+ *  the shock was missing. The monthly inflation target gains
+ *  `supplyShockSeverity × SUPPLY_SHOCK_INFLATION`, so a partial oil embargo
+ *  (severity ≈ 0.15) lifts the target ~4.5pp — a few points of stagflation that
+ *  heal as the chain does, capped by the 0.50 inflation ceiling. Exactly 0 in
+ *  healthy play (severity is 0 whenever raws flow), so the inflation path — and
+ *  the whole monetary RNG stream — stays byte-identical there; only a genuine
+ *  cascade below the era-structural baseline pushes prices. Bounded and a pure
+ *  sink (inflation feeds confidence/GDP, never sector output → the raw proxy),
+ *  so it can't reinforce the shortage that caused it. */
+export const SUPPLY_SHOCK_INFLATION = 0.30;
+
 /** How long (sim days) the 1970s oil-shock anchor embargoes the `oil` raw,
  *  cutting `fuel` and the fuel-burning finals downstream. ~6 months — the real
  *  1973 embargo's span — long enough to register across several monthly supply
@@ -5816,10 +5830,18 @@ export class RegionSim {
     const dLeverage = (NEUTRAL_RATE - this.policyRate) * 0.5 * (1 - this.privateLeverage / 5.0);
     this.privateLeverage = Math.max(0, this.privateLeverage + dLeverage);
 
-    // 2. Inflation: credit expansion + money printing
+    // 2. Inflation: credit expansion + money printing + supply-chain cost-push
     const leverageInflation = Math.max(0, dLeverage) * 0.08;
     const printInflation = this.monetaryRegime === 'print' ? 0.010 : 0;
-    const inflTarget = 0.02 + leverageInflation + printInflation;
+    // Cost-push (GDD §5.2): a real supply-chain shock makes goods dearer, not just
+    // scarcer — the stagflation half of the 1973 oil embargo (output already drags
+    // via supplyShockMult). `supplyShockSeverity()` reads last month's cached
+    // supplyChainHealth (tickIntermediateGoods runs later in the tick), a natural
+    // one-month price lag, and is a pure no-RNG read. It is exactly 0 whenever raws
+    // flow, so in all healthy play this term is +0 and the monetary stream is
+    // byte-identical; only a genuine cascade below the era baseline lifts the target.
+    const supplyPush = this.supplyShockSeverity() * SUPPLY_SHOCK_INFLATION;
+    const inflTarget = 0.02 + leverageInflation + printInflation + supplyPush;
     this.inflationRate += (inflTarget - this.inflationRate) * 0.15;
     this.inflationRate = Math.max(0, Math.min(0.50, this.inflationRate));
 

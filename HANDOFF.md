@@ -1,6 +1,6 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-26 · **Tests:** 906 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; deep-expansion underway (PRs #264, #265, #269, #272, #270, #274, **#276 + #277 + #278 + #279 + #280 merged — supply-chain cascade + GDP drag + MVP-18 DAG + oil-shock-through-chain + Supply UI + graded raw availability**; save-size guard + live-slot asset generator + audio stems/ambience + wall-clock sim catch-up landed — asset *generation* blocked only by network egress). **This session: made raw availability GRADED — a fractional supply solver + a partial oil shock, then an extraction proxy that grades off a trailing output norm so ordinary recessions bite the chain, not just embargoes/total collapse (D1-econ, PR #280 MERGED).**
+**Last updated:** 2026-06-27 · **Tests:** 926 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; deep-expansion underway (PRs #264, #265, #269, #272, #270, #274, **#276 + #277 + #278 + #279 + #280 merged — supply-chain cascade + GDP drag + MVP-18 DAG + oil-shock-through-chain + Supply UI + graded raw availability**; save-size guard + live-slot asset generator + audio stems/ambience + wall-clock sim catch-up landed — asset *generation* blocked only by network egress). **This session: gave the supply shock its second half — COST-PUSH INFLATION. A real cascade below the era baseline now lifts the monetary inflation target (`supplyShockSeverity × SUPPLY_SHOCK_INFLATION`), so the 1973 oil shock is finally stagflation — output drag AND prices — not just a recession. Byte-identical in healthy play (severity 0), bounded, self-healing, a pure sink (inflation never feeds sector output). D1-econ "prices" leg.**
 
 > ⚠️ **Untested-by-human balance change live on `main`:** PR #280's *Phase-2 graded
 > extraction proxy* (an ordinary contraction now drags industry via the chain) is
@@ -23,6 +23,48 @@
 > (parallax backdrops + era UI skins) and `B2-audio` (music stems + ambience + voice)
 > are the bold roadmap items and remain **un-started in earnest** — they need an env
 > with network egress + image/audio tooling to actually generate.
+
+## Recent session (2026-06-27) — supply shock → cost-push inflation: the stagflation half (D1-econ)
+
+The graded supply chain could *drag output* (`supplyShockMult`, ≤15% industry bite) and
+trigger two secondary effects, but a shortage's other half — **dearer goods** — was
+missing. The 1973 oil shock cut production and exports yet never touched prices; it read as
+a plain recession, not the stagflation it was. This session wires the **"prices" leg** of
+the handoff's D1-econ next step ("make goods read into the economy — GDP, prices, or trade").
+
+- **The mechanic.** `tickMonetary()`'s inflation target gains a cost-push term:
+  `inflTarget += supplyShockSeverity() × SUPPLY_SHOCK_INFLATION` (gain **0.30**, in
+  `region.ts` beside `SUPPLY_SHOCK_MAX_DRAG`). `supplyShockSeverity()` is the *same* signal
+  the output drag reads — how far supply health has fallen **below the era-structural
+  baseline** — so it is **exactly 0 in all healthy play** (raws flowing → actual == baseline).
+  The term is therefore +0 there and the whole monetary RNG stream stays byte-identical;
+  only a genuine cascade lifts prices. No new serialized field, no new RNG (severity is a
+  pure no-RNG read), one-month price lag (tickMonetary runs before tickIntermediateGoods in
+  the tick, reading last month's cached `supplyChainHealth`).
+- **Calibration.** Partial oil embargo (`OIL_EMBARGO_CUT` 0.6) → severity 0.15 → +4.5pp to
+  the target → inflation peaks ~4.5–4.8% over the window (from a 2% base); a total cut →
+  severity 0.25 → ~6.7%. Hard-capped by the existing 0.50 inflation ceiling. **Bounded and a
+  pure sink:** inflation feeds confidence/GDP but never sector output → the raw proxy, so it
+  *cannot* reinforce the shortage that caused it (verified: `currencyEfficiency`/
+  `economyOutputMult` don't read inflation). Non-divergent by construction.
+- **Verified end-to-end.** Unit suite `tests/supply-cost-push.test.ts` (6: inert-in-healthy,
+  push-vs-control, severity·gain closed form, scales-with-severity, 0.50-cap, heals). Real
+  tick-loop probe (seed 42, forced 1974 oil embargo): inflation 2.00% → **4.50%** peak →
+  mean-reverts to 2.01% by 1994 as the chain heals; GDP 19.6k → 39.6k and pop 2.0k → 4.6k
+  grow straight through — **no spiral**. 8-seed × 181y headless: all finite, all end at 2.0%
+  inflation (fully healed). **906 → 926 tests**, tsc clean, build green.
+- **UI.** Supply tab headline now reads both halves of a shock: `industry −X% · prices +Y.Ypp`
+  (the price line gated on `hasCentralBank()`, since that's what realizes the push).
+
+**Next on the economy (D1-econ):** two legs of "GDP, prices, trade" remain. **Trade** is the
+natural next one — a shortage should also choke *exports* (a nation short on fuel/components
+has less to sell), and the oil embargo already cuts export earnings via the depression path
+but not via the supply chain; route `supplyShockSeverity()` into `exportEarningsLastMonth` in
+`monthlyEconomy` the same byte-identical way (severity 0 → ×1). Or deepen **GDP**: today the
+chain only *drags* industry on a shock — nothing reads the *positive* breadth of a healthy
+goods mix into output. Or the bigger items: physical goods on routes, per-good prices, the
+full ~44-good set (current is the 16-good MVP-18 tier). Or pick up `C1` (region.ts is 14k
+lines; `supply.ts` is the free-function template).
 
 ## Recent session (2026-06-26) — graded raw availability: ordinary shortages bite (D1-econ)
 
