@@ -19,6 +19,7 @@ import type { Lender, Loan } from './economy';
 import { createInitialLenders } from './lenders';
 import { resolveSupplyChainGraded, SUPPLY_FULL_EPS } from './supply';
 import { tickPollution } from './systems/pollution';
+import { tickServiceCoverage } from './systems/services';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -5236,7 +5237,7 @@ export class RegionSim {
     this.tickRegionalEvents(); // Phase 4: disasters and windfalls
     tickPollution(this);       // Phase 14: pollution diffusion (systems/pollution.ts)
     this.tickUtilities();      // Phase 14: power/water/waste utilities
-    this.tickServiceCoverage(); // Phase 14: service coverage effects
+    tickServiceCoverage(this); // Phase 14: service coverage effects (systems/services.ts)
     // Phase 14: update land value for each player settlement
     for (const t of this.settlements) {
       if (t.factionId === this.playerFactionId) {
@@ -7580,28 +7581,6 @@ export class RegionSim {
   }
 
   /** Update service coverage monthly for all player settlements. */
-  private tickServiceCoverage(): void {
-    for (const t of this.settlements) {
-      if (t.factionId !== this.playerFactionId) continue;
-      const sc = this.computeServiceCoverage(t.id);
-      t.serviceCoverage = sc;
-      // Side effects: low health (< 0.3) raises expected death pressure — tracked via satisfaction
-      // (actual demographic effect via mortality is handled in monthlyUpdate cohorts)
-      if (sc.health < 0.3) {
-        // Represent death pressure via grievance (1 per month)
-        t.grievance = Math.min(100, (t.grievance ?? 0) + 0.5);
-      }
-      // Low education (< 0.2): satisfaction -2 per month
-      if (sc.education < 0.2) {
-        t.satisfaction = Math.max(0, t.satisfaction - 2);
-      }
-      // Low safety (< 0.3): grievance +1 per month
-      if (sc.safety < 0.3) {
-        t.grievance = Math.min(100, (t.grievance ?? 0) + 1);
-      }
-    }
-  }
-
   // ---- Phase 4: Regional Events ----
 
   /** Fire and expire settlement-level events monthly. */
