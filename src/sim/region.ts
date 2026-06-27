@@ -2383,6 +2383,20 @@ export const CENTURY_YEAR = 2100;
 export const GEOENGINEER_COOLING = 0.4;
 /** How long the aerosols stay effective: 2 years × 60 days/year. */
 export const GEOENGINEER_DURATION_DAYS = 120;
+
+/** Farm-economy climate drag (GDD §8.2). The agriculture SECTOR's £/month output
+ *  erodes once realized warming passes `AGRI_CLIMATE_THRESHOLD`°C — heat stress,
+ *  shifting growing seasons, water stress on cash crops drag the farm economy's
+ *  contribution to GDP. This is DISTINCT from the older subsistence-food drag in
+ *  `dailyUpdate` (which scales `t.food` production past +0.8°C) — different
+ *  variable, so no double-count: one is the cash-crop economy, the other the
+ *  granary. Linear above the threshold, capped at `AGRI_CLIMATE_MAX_DRAG` so a
+ *  warm late-century trims agricultural GDP without zeroing it; exactly 1.0 below
+ *  the threshold. A pure sink (warming is driven by emissions, never by farm
+ *  output), so the loop is non-divergent. */
+export const AGRI_CLIMATE_THRESHOLD = 1.5; // °C above 1900 before the farm economy bites
+export const AGRI_CLIMATE_SLOPE = 0.06;    // sector-output drag per °C above the threshold
+export const AGRI_CLIMATE_MAX_DRAG = 0.30; // cap: agricultural GDP down at most 30%
 /** Accord compliance: below this fraction the signatory is a free-rider. */
 export const ACCORD_DEFECT_THRESHOLD = 0.35;
 /** Maximum world-emissions cut from fully compliant accord coverage. */
@@ -6760,7 +6774,9 @@ export class RegionSim {
       // A genuine supply-chain shock (raws collapse → cascade) drags manufacturing.
       // 1.0 in healthy play (era-baselined), so output stays byte-identical there.
       const supplyMult = id === 'industry' ? this.supplyShockMult : 1;
-      s.output = workers * s.share * perWorker * strike * loyalty * eventMult * svcMult * taxMult * fxMult * supplyMult;
+      // A hotter century erodes the farm economy past +1.5°C (GDD §8.2); 1.0 below.
+      const climateMult = id === 'agriculture' ? this.agriClimateMult() : 1;
+      s.output = workers * s.share * perWorker * strike * loyalty * eventMult * svcMult * taxMult * fxMult * supplyMult * climateMult;
       // Phase 5: wage policy adjusts the migration signal without affecting output
       const wagePolicyMult = t.policies.wagePolicy === 'low' ? 0.85 : t.policies.wagePolicy === 'high' ? 1.20 : 1.0;
       s.wage = perWorker * strike * loyalty * eventMult * svcMult * wagePolicyMult * fxMult;
@@ -13067,6 +13083,16 @@ export class RegionSim {
    *  more from each hand; planning trades a slice of output for stability. */
   economyOutputMult(): number {
     return this.economicSystem === 'laissez-faire' ? 1.10 : this.economicSystem === 'planned' ? 0.92 : 1;
+  }
+
+  /** Farm-economy output multiplier from realized warming (GDD §8.2). The
+   *  agriculture sector's £/month output erodes linearly past
+   *  `AGRI_CLIMATE_THRESHOLD`°C, capped at `AGRI_CLIMATE_MAX_DRAG`; exactly 1.0
+   *  below the threshold. Distinct from the subsistence-food drag in dailyUpdate
+   *  (a different variable — the granary, not the cash-crop economy). Pure read,
+   *  no RNG, and a sink (warming is emissions-driven), so it can't diverge. */
+  agriClimateMult(): number {
+    return 1 - Math.min(AGRI_CLIMATE_MAX_DRAG, Math.max(0, this.warmingC - AGRI_CLIMATE_THRESHOLD) * AGRI_CLIMATE_SLOPE);
   }
 
   /**
