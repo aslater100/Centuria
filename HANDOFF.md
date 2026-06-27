@@ -1,6 +1,52 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-26 · **Tests:** 906 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; deep-expansion underway (PRs #264, #265, #269, #272, #270, #274, **#276 + #277 + #278 + #279 + #280 merged — supply-chain cascade + GDP drag + MVP-18 DAG + oil-shock-through-chain + Supply UI + graded raw availability**; save-size guard + live-slot asset generator + audio stems/ambience + wall-clock sim catch-up landed — asset *generation* blocked only by network egress). **This session: made raw availability GRADED — a fractional supply solver + a partial oil shock, then an extraction proxy that grades off a trailing output norm so ordinary recessions bite the chain, not just embargoes/total collapse (D1-econ, PR #280 MERGED).**
+**Last updated:** 2026-06-27 · **Tests:** 937 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; deep-expansion underway. **Latest arc — a SPATIAL 4X redesign (Civ/Age-of-Wonders, but "keep the 4X clear" is the north star):** design doc `docs/design/spatial-4x-redesign.md`; **Phase A (click-to-found) MERGED (PR #289)**; **Phase B (place buildings on hexes) committed on the working branch, not yet pushed/PR'd.** Also this arc: graded raw availability (PR #280), the `asset-generator` agent + `gen:local` local-AI image tool (PRs #281/#282), and visual-polish Phase 1 — sprite armies + shaded towns (PR #287).
+
+## Recent session (2026-06-27) — spatial 4X: design + Phase A (merged) + Phase B (committed)
+
+The user wants Centuria to become a **Civ/Age-of-Wonders spatial city game** — found
+towns by clicking, place buildings/districts/wonders on hexes — **while staying a
+clear 4X** ("4X clarity is most important"). Plan: `docs/design/spatial-4x-redesign.md`
+(district-scale like Civ-6, NOT SimCity; macro empire view stays dominant). A big
+find: the hex grid (`hex.ts`), per-tile terrain, founding+min-spacing rule, and
+**faction territory + borders all already exist** — so we *extend*, not rebuild.
+
+- **Phase A — click-to-found (MERGED, PR #289).** The "Found Town" button now arms a
+  placement mode: legal sites highlight (green pulsing hexes — settleable land,
+  ≥ `MIN_SETTLEMENT_SPACING`, in reach), a click sends the expedition there. New
+  `canFoundAt` / `foundTownAt`; `launchExpedition` refactored to share
+  `launchExpeditionTo` (RNG-order identical → determinism holds). `tests/found-at.test.ts`.
+- **Phase B — place buildings on hexes (COMMITTED on the branch, needs push + PR).**
+  `Settlement.placedBuildings: {id,cell}[]` + `CityConstruction.cell?`. The build
+  button arms placement (amber legal-hex highlight in the `CITY_WORK_RADIUS=2` ring);
+  a click breaks ground there; buildings render as small sector-tinted shaded icons
+  on their hex (`drawPlacedBuildings`) — this also folds in the "town art is weak"
+  request (towns now have a footprint of buildings around the centre).
+  **Economy byte-identical:** `buildings[]` stays the source for `buildingBonus`;
+  `placedBuildings` is render/interaction-only. Old saves migrate (`ensurePlacements`,
+  deterministic auto-site). `tests/placement.test.ts` (8). **937 tests.**
+
+**Next:** push Phase B + open its PR. Then **Phase C** (tile yields + building
+adjacency feed the economy at the `buildingBonus` seam — the real "exploit" layer;
+re-baseline economy suites), then **Phase D** (districts + wonders). Keep playtesting
+that the **4X reads clearly** at each step. Open decisions still in the design doc §9.
+
+## Earlier this session (2026-06-26/27) — assets tooling + visual polish Phase 1
+
+- **`gen:local` — a free, local AI image generator** (`scripts/gen-local.ts`,
+  `scripts/png.ts`): drives a LOCAL Stable Diffusion server (AUTOMATIC1111 *or*
+  ComfyUI on 127.0.0.1 — not egress-blocked, runs on the user's GPU, no token).
+  `--init` diagnostics, `--max-dim` for low-VRAM (the user runs a 4 GB GTX 970 →
+  ComfyUI via Stability Matrix worked; cu126 build, `native` Maxwell support).
+  The user generated all 11 slots but **AI sprites look bad for tiny top-down town
+  icons** — verdict: **AI is the wrong tool for crisp foreground sprites/UI**; the
+  win is procedural rendering + the spatial layer (hence the redesign above).
+- **`asset-generator` subagent** (`.claude/agents/asset-generator.md`, gitignore
+  exception added) — operator playbook for the override seam.
+- **Visual polish Phase 1 (MERGED, PR #287):** armies render as animated pawn-sprite
+  squads (reusing the orphaned `sprites.ts` pawns via new `buildPawnSprites()`)
+  instead of `⚔N`; `drawTownTier` rewritten with shaded boxes / lit windows / roof
+  detail / chimney smoke; muted-text contrast fixed in `style.css`.
 
 > ⚠️ **Untested-by-human balance change live on `main`:** PR #280's *Phase-2 graded
 > extraction proxy* (an ordinary contraction now drags industry via the chain) is
