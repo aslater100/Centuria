@@ -2998,6 +2998,9 @@ export class RegionView {
       const emblemHtml = rv.flagData ? `${rv.flagData.emblem}&nbsp;` : '';
       const archetypeData = RIVAL_ARCHETYPES[rv.archetype];
       const archetypeTooltip = `${archetypeData.name}: ${archetypeData.desc}`;
+      // Their true agenda is only legible once you have penetrated them (intel ≥ 0.5);
+      // until then espionage is the way to read what they are really after (GDD §5.5).
+      const agendaShown = r.intelOf(rv.id) >= 0.5 ? rv.agenda : 'unknown — gather intelligence to read it';
       // War minister estimates rival military strength (Phase 8 advisor forecast)
       const trueRivalStrength = rv.pop;
       const estStrength = Math.round(r.advisorForecast('War', trueRivalStrength));
@@ -3007,7 +3010,7 @@ export class RegionView {
         ? `<p class="insp-skills" title="Your war minister's estimate of ${rv.name}'s military strength — accuracy depends on their skill.">` +
           `${defAdvisorName} estimates ${rv.name} strength: <b>${estStrength}</b></p>`
         : '';
-      return `<div class="bar-row" title="${archetypeTooltip}\n\nAgenda: ${rv.agenda}\n\n${personalityInfo}">` +
+      return `<div class="bar-row" title="${archetypeTooltip}\n\nAgenda: ${agendaShown}\n\n${personalityInfo}">` +
         `${flagHtml}<span style="width:70px;display:inline-block">${emblemHtml}<b>${rv.name}</b></span>` +
         `<div class="bar" style="flex:1"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div>` +
         `<span>${rel}</span></div>` +
