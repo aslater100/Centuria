@@ -1,6 +1,19 @@
 # Handoff — Centuria Development Guide
 
-**Last updated:** 2026-06-27 · **Tests:** 946 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; deep-expansion underway (#276–#280 + **#283 (cost-push) + #284 (non-asset depth pass) + #285 (C1 services extraction + situation-aware deals) merged**; **PR #286 open — AI difficulty belligerence + intel-gated agenda**).
+**Last updated:** 2026-06-27 · **Tests:** 950 passing · **Version:** v1.5.0 · **Status:** Phases 1–18 complete; deep-expansion underway (#283–#286 merged — cost-push, non-asset depth pass, C1 services + situation-aware deals, AI belligerence + intel-gated agenda; **PR #287 open — Tier-2 climate farm drag (A) + Tier-3 goods-on-routes first slice (B)**).
+
+> 🌾⚠️ **PR #287 — two intentional BALANCE changes (user picked A+B), unverified-by-human:**
+> **A — agriculture climate drag:** warming past +1.5°C trims the agriculture *sector's*
+> GDP (`agriClimateMult`, ≤30%, distinct from the older +0.8°C subsistence-food drag).
+> Non-divergent (≤14% of the ag sector at the observed ~3.8°C; warming is a pure sink).
+> Dials: `AGRI_CLIMATE_THRESHOLD`/`_SLOPE`/`_MAX_DRAG`. **WANTS a late-game playtest.**
+> **B — physical goods on routes (first slice):** trade flows now *deliver* — arbitrage
+> profit (`pendingIncome`, serialized) pays out on ARRIVAL after `transitDays` of travel,
+> a severed route strands the cargo, and a long-standing inverted buy/sell direction bug
+> is fixed. Macro-neutral (arbitrage is minor; headless unchanged). **Follow-on:** per-good
+> prices (still a wage-gap proxy) and per-settlement goods stocks (the big rock — currently
+> `intermediateGoodStocks` is one nation-wide pool, so goods can't truly move *between*
+> settlements yet).
 
 > 🟢 **PR #284 (open, this session) — non-asset depth pass, 4 commits:**
 > 1. **D1-econ trade leg** — a supply shock now chokes *exports*
