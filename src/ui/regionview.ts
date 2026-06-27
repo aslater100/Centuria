@@ -3569,9 +3569,11 @@ export class RegionView {
     if (!rv) return '';
     const v = r.evaluateDeal(rv, this.currentBasket());
     const ledger = `they value it ${v.get.toFixed(1)} pts against ${v.cost.toFixed(1)} asked`;
-    if (v.accept) return `✓ Their envoy nods — ${ledger}. They would sign.`;
-    if (v.counter) return `± Close: ${ledger}. They would counter, asking ` + formatCurrency(v.counter.goldToThem - this.dealGoldToThem) + ` more.`;
-    return `✗ ${ledger}. They would walk — "${v.reason}."`;
+    // §6.3: flag an embattled rival (fighting a foreign war) — keener on protection/trade.
+    const embattled = r.rivalSituation(rv) > 0 ? ' ⚔ At war abroad — keener to deal.' : '';
+    if (v.accept) return `✓ Their envoy nods — ${ledger}. They would sign.${embattled}`;
+    if (v.counter) return `± Close: ${ledger}. They would counter, asking ` + formatCurrency(v.counter.goldToThem - this.dealGoldToThem) + ` more.${embattled}`;
+    return `✗ ${ledger}. They would walk — "${v.reason}."${embattled}`;
   }
 
   /** Forecast relations impact after deal (GDD §6.3 advanced UI). */

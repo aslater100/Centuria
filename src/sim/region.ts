@@ -1259,6 +1259,19 @@ export interface DealCounter {
 export const GOLD_PER_POINT = 8;
 export const DEAL_COUNTER_DAYS = 90;
 
+/** Appetite bonus (diplomatic points) an *embattled* rival — `rivalSituation > 0`,
+ *  i.e. fighting a foreign war — gains for treaties that shore it up: it fears a
+ *  second front and needs income and allies, so it signs protection and trade more
+ *  readily. ADDITIVE (not multiplicative), so the lift applies even to a treaty the
+ *  rival's temperament normally dislikes (a negative base appetite), and exactly 0
+ *  at peace (`rivalSituation` 0) → the deal verdict is byte-identical in all current
+ *  play and every existing diplomacy test (none of which sets a foreign war). */
+export const SITUATION_TREATY_BONUS: Partial<Record<TreatyKind, number>> = {
+  defensive_pact: 4,
+  non_aggression: 3,
+  trade_agreement: 2,
+};
+
 // ---- Monetary system constants (GDD §5.1) ----
 /** Credit-neutral policy rate; below this leverage builds, above it contracts. */
 const NEUTRAL_RATE = 0.05;
@@ -9824,6 +9837,16 @@ export class RegionSim {
 
   // ---- the bargaining table (GDD §6.3): baskets, valuation, counter-offers ----
 
+  /** How embattled a rival is, 0..1 (GDD §6.3). Currently: 1 while it is fighting
+   *  a foreign war, else 0. An embattled power fears a second front and needs income
+   *  and allies, so it comes to the player's table more readily (see
+   *  `SITUATION_TREATY_BONUS`). Pure read off the already-serialized `foreignWars`
+   *  ledger — no RNG, no mutation — and 0 in peacetime, so deal valuation is
+   *  unchanged in all current play. Surfacing it lets the UI flag a keen partner. */
+  rivalSituation(rv: RivalNation): number {
+    return this.foreignWars.some((w) => w.a === rv.id || w.b === rv.id) ? 1 : 0;
+  }
+
   /** What signing this treaty is worth *to the rival*, in diplomatic points —
    *  positive is appetite, negative is a concession it wants paying for. */
   treatyAppetite(rv: RivalNation, kind: TreatyKind): number {
@@ -9865,6 +9888,9 @@ export class RegionSim {
         if (rv.archetype === 'hegemon') appetite -= 2;
         break;
     }
+    // An embattled rival (fighting a foreign war) is keener on protection and
+    // income. Additive bonus, 0 at peace → byte-identical in all current play.
+    appetite += (SITUATION_TREATY_BONUS[kind] ?? 0) * this.rivalSituation(rv);
     return appetite;
   }
 
