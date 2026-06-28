@@ -45,6 +45,103 @@ function intermediateIds(): ReadonlySet<string> {
 }
 
 /**
+ * PR-3 slice 3 — per-good local PRICES & the local-goods scarcity macro signal.
+ *
+ * Slice 2 made each town produce a good only up to a LOCAL input gate, so a
+ * specialised town strands cross-sector goods — but nothing read that into the
+ * economy (macro-neutral). Slice 3 closes the loop two ways:
+ *
+ *  - a per-town per-good PRICE (`localGoodPrice`) that rises as a town's stock of a
+ *    good falls below its local demand, so ARBITRAGE (systems/arbitrage.ts) ships
+ *    each good from where it's cheap (abundant) to where it's dear (short) — a
+ *    deprived town pulls the shipment it needs, where slice 1's wage-gap proxy
+ *    shipped a fixed good in the wrong-priced direction;
+ *  - a nation-wide LOCAL-GOODS SCARCITY index (`r.localGoodsScarcity`, cached each
+ *    month from the per-town production GATES) that feeds the cost-push inflation +
+ *    industry-output drag in region.ts. Driving the macro index off the GATE (not
+ *    off stock magnitudes) keeps it the PURE slice-2-divergence signal: it is
+ *    exactly 0 whenever every gate is 1 (single-town / self-sufficient play, in a
+ *    boom OR a raw shock alike), so that play stays byte-identical and the index
+ *    never double-counts the raw cascade (which already drives `supplyShockSeverity`
+ *    through `level`); it is positive only when specialisation strands a good.
+ *
+ * Only TRACKED goods are priced — a raw is never in `goodStocks`, so no raw
+ * magnitude can couple into the economy here (the load-bearing invariant slice 2's
+ * review flagged for this slice). */
+
+/** Price elevation at full local scarcity: an empty-but-demanded good costs
+ *  (1 + GAIN)× its base, a well-stocked good its base. 1.0 → the price doubles when
+ *  a town is fully starved. (Lives here, not region.ts — only the goods system
+ *  shapes prices; the MACRO dials `LOCAL_GOODS_INFLATION`/`LOCAL_GOODS_OUTPUT_DRAG`
+ *  live in region.ts beside the other goods→economy coupling constants.) */
+const LOCAL_GOODS_PRICE_GAIN = 1.0;
+
+/** Base £-value of one unit of a good, by refinement depth: 1 + the count of its
+ *  INTERMEDIATE inputs (raw-fed goods like lumber/steel are cheap, deeply-processed
+ *  finals like vehicles/luxury_goods dear). Catalog-derived + memoised, so it needs
+ *  no serialized state; it weights a good's local price so arbitrage prefers the
+ *  dearer good when two goods have a similar scarcity gap. */
+let _basePrice: Map<string, number> | null = null;
+function goodBasePrice(goodId: string): number {
+  if (_basePrice === null) {
+    const inter = intermediateIds();
+    _basePrice = new Map(
+      INTERMEDIATE_GOODS.map((g) => [g.id, 1 + g.inputs.filter((i) => inter.has(i)).length]),
+    );
+  }
+  return _basePrice.get(goodId) ?? 1;
+}
+
+/** Town t's share (0..1) of a producing sector's nation-wide output — the same
+ *  weight `distributeGoodProduction` splits a good's output by. 0 when the sector
+ *  makes nothing anywhere. */
+function sectorShare(r: RegionSim, t: Settlement, sector: 'industry' | 'agriculture'): number {
+  let total = 0;
+  for (const s of r.settlements) total += Math.max(0, s.sectors?.[sector]?.output ?? 0);
+  if (total <= 0) return 0;
+  return Math.max(0, t.sectors?.[sector]?.output ?? 0) / total;
+}
+
+/** Local monthly DEMAND for an intermediate good g in town t: the units of g drawn
+ *  as an INPUT by the goods t produces — its full-supply consumption appetite (what
+ *  the town WANTS, independent of whether it's met). For each unlocked good c that
+ *  lists g among its inputs, t's share of c's output draws ~`share(t, sectorOf(c))`
+ *  units of g (slice 2's per-input `need` at level 1). Raws are never demanded here
+ *  (only tracked goods are priced); a good no local town consumes has demand 0. */
+export function localGoodDemand(r: RegionSim, t: Settlement, goodId: string): number {
+  if (!intermediateIds().has(goodId)) return 0;
+  const year = r.year;
+  let demand = 0;
+  for (const c of INTERMEDIATE_GOODS) {
+    if (year < c.eraUnlock) continue;
+    if (!c.inputs.includes(goodId)) continue;
+    demand += sectorShare(r, t, goodProducingSector(c.id));
+  }
+  return demand;
+}
+
+/** Local scarcity of a good in a town, 0..1: how far its stock falls short of its
+ *  local demand. 0 when the town holds at least its demand (a producer, or shipped
+ *  in); 1 when it consumes the good but holds none. 0 for an un-demanded good. */
+function stockScarcity(stock: number, demand: number): number {
+  if (demand <= 0) return 0;
+  const s = 1 - stock / demand;
+  return s <= 0 ? 0 : s >= 1 ? 1 : s;
+}
+
+/** Per-town local PRICE of an intermediate good (£/unit): basePrice × (1 + scarcity
+ *  × GAIN). A town flush with the good (a producer, or one shipped a surplus) prices
+ *  it at base; a town that consumes it but holds none prices it at base × (1 + GAIN).
+ *  Pure read off `goodStocks` (never a raw), so it can't couple a raw magnitude into
+ *  the economy. Used by arbitrage to ship goods from cheap (abundant) to dear
+ *  (short) towns. */
+export function localGoodPrice(r: RegionSim, t: Settlement, goodId: string): number {
+  const demand = localGoodDemand(r, t, goodId);
+  const stock = t.goodStocks?.[goodId] ?? 0;
+  return goodBasePrice(goodId) * (1 + stockScarcity(stock, demand) * LOCAL_GOODS_PRICE_GAIN);
+}
+
+/**
  * PR-3 slice 2 — distribute one good's monthly output across the towns that make
  * it, gated by each town's LOCAL holdings of the good's INTERMEDIATE inputs.
  *
@@ -67,7 +164,11 @@ function intermediateIds(): ReadonlySet<string> {
  * intended new behaviour, relieved when textiles are shipped in (the gate reads the
  * town's current stock, which includes arrived cargo).
  */
-function distributeGoodProduction(r: RegionSim, good: IntermediateGood, level: number): void {
+function distributeGoodProduction(
+  r: RegionSim,
+  good: IntermediateGood,
+  level: number,
+): { potential: number; lost: number } {
   const sector = goodProducingSector(good.id);
   const ts = r.settlements;
   const weightOf = (t: Settlement): number => Math.max(0, t.sectors?.[sector]?.output ?? 0);
@@ -93,8 +194,17 @@ function distributeGoodProduction(r: RegionSim, good: IntermediateGood, level: n
     if (cap !== undefined) producers.push({ t: cap, share: 1 });
   }
 
+  // Track the output a local input shortage cost the nation this month — the pure
+  // slice-2-divergence signal the macro index (`r.localGoodsScarcity`) reads. A
+  // town's full-supply output is `baseOutput × need`; the gate trims it, and the
+  // shortfall (1 − gate) is what specialisation stranded (single-town / self-
+  // sufficient nations keep every gate at 1, so `lost` is 0 → the index is 0).
+  let potential = 0;
+  let lost = 0;
   for (const { t, share } of producers) {
     const need = level * share; // units of EACH intermediate input this town's share needs
+    const full = good.baseOutput * need; // output at gate 1 (the full sector-weighted share)
+    potential += full;
     // Liebig's law, local: the share runs only as far as its scarcest held input.
     let gate = 1;
     for (const i of interInputs) {
@@ -103,6 +213,7 @@ function distributeGoodProduction(r: RegionSim, good: IntermediateGood, level: n
       if (frac < gate) gate = frac;
       if (gate <= 0) break;
     }
+    lost += full * (1 - gate);
     if (gate <= 0) continue; // town lacks an input entirely — makes none of this good
     const produced = good.baseOutput * need * gate; // = baseOutput × level × share × gate
     if (produced > 0) r.addGoodStock(t, good.id, produced);
@@ -111,6 +222,7 @@ function distributeGoodProduction(r: RegionSim, good: IntermediateGood, level: n
     const drawn = need * gate;
     for (const i of interInputs) r.shipGoodFrom(t, i, drawn);
   }
+  return { potential, lost };
 }
 
 /** Process all intermediate goods that are unlocked in the current year.
@@ -136,6 +248,7 @@ export function tickIntermediateGoods(r: RegionSim): void {
     r.supplyChainHealth = 1.0;
     r._electronicsDisrupted = false;
     r.supplyShockMult = 1; // no goods, no shock (defensive — already 1.0 here)
+    r.localGoodsScarcity = 0; // no goods, no local shortage
     return;
   }
 
@@ -153,11 +266,25 @@ export function tickIntermediateGoods(r: RegionSim): void {
   // (sector-weighted share × local-input gate); a good no town could make still gets
   // a 0 entry so it stays present in the ledger (the no-op `seedGoodStock` once any
   // town tracks it — i.e. always, in healthy play).
+  let lostTotal = 0;
+  let potentialTotal = 0;
   for (const good of availableGoods) {
     const level = result.levels.get(good.id) ?? 0;
-    if (level >= SUPPLY_FULL_EPS) distributeGoodProduction(r, good, level);
+    if (level >= SUPPLY_FULL_EPS) {
+      const acc = distributeGoodProduction(r, good, level);
+      potentialTotal += acc.potential;
+      lostTotal += acc.lost;
+    }
     r.seedGoodStock(good.id);
   }
+  // PR-3 slice 3 — the nation-wide local-goods scarcity index: the fraction of this
+  // month's intended manufactured output that a LOCAL input shortage cost (the
+  // per-town gates above). 0 when every town made its full share (single-town /
+  // self-sufficient play — byte-identical), positive only where specialisation
+  // stranded a cross-sector good. Read next month by the cost-push + industry drag
+  // (region.ts). Bounded [0,1]; a pure gate ratio, so it never reads a stock
+  // magnitude or a raw level (no double-count with the raw cascade's severity).
+  r.localGoodsScarcity = potentialTotal > 0 ? lostTotal / potentialTotal : 0;
 
   // Shortfalls (1 − level) drive the random secondary effects, scaled by how
   // deep the cut is. A full cut → shortfall 1 → the exact pre-graded draw

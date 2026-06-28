@@ -16,7 +16,14 @@
  */
 import type { RegionSim } from '../region';
 import { INTERMEDIATE_GOODS } from '../region';
+import { localGoodPrice } from './goods';
 import { DAYS_PER_MONTH, formatCurrency } from '../defs';
+
+/** PR-3 slice 3 — profit scale for a price-driven shipment: pendingIncome =
+ *  cargo × priceGap × (1 − tariff) × this. Keeps arbitrage a minor treasury trickle
+ *  (the gap is O(£1/unit), cargo ≤ the volume cap), in the spirit of the old
+ *  wage-gap proxy's `volume × tariff × 5`. */
+const ARBITRAGE_PROFIT_SCALE = 5;
 
 /** Compute a congestion tariff for a goods route between two settlements.
  *  tariff = routeDistance × (1 + (1 − routeCondition/100) × 0.5), clamped 0.05–0.3. */
@@ -81,13 +88,22 @@ export function tickPriceArbitrage(r: RegionSim): void {
     r.addLog(`Goods stranded: a severed route loses ${stranded} shipment${stranded > 1 ? 's' : ''} in transit.`, 'bad');
   }
 
-  // 2. Dispatch new shipments where a differential beats the congestion cost.
+  // 2. Dispatch new shipments where a PER-GOOD price gap beats the congestion cost.
+  //    PR-3 slice 3 drops the wage-gap proxy: each good is now priced per town from
+  //    its local stock vs. demand (`localGoodPrice`, in systems/goods.ts), so a town
+  //    short on a good prices it dear and a town flush with it prices it cheap. For
+  //    each lane we ship the good with the largest profitable gap, from the cheap
+  //    (abundant) town to the dear (short) one — so a deprived town pulls exactly the
+  //    good it needs, where the proxy shipped `goodIds[0]` regardless. In balanced /
+  //    self-sufficient play every town holds what it consumes → every price is base →
+  //    no gap → no shipment (arbitrage idles until a real shortage opens a spread).
   const playerSettlements = r.settlements.filter(s => s.factionId === r.playerFactionId);
   if (playerSettlements.length < 2) return;
 
   const goodIds = INTERMEDIATE_GOODS
     .filter(g => r.year >= g.eraUnlock)
     .map(g => g.id);
+  if (goodIds.length === 0) return; // no goods unlocked yet → nothing to price/ship
 
   for (let i = 0; i < playerSettlements.length; i++) {
     for (let j = i + 1; j < playerSettlements.length; j++) {
@@ -96,43 +112,49 @@ export function tickPriceArbitrage(r: RegionSim): void {
       const tariff = computeCongestionTariff(r, from.id, to.id);
       if (tariff >= 0.3) continue; // no route
 
-      // Proxy price differential from wage gap (per-good prices are a follow-on).
-      const fromWage = r.avgWageOf(from);
-      const toWage = r.avgWageOf(to);
-      const priceDiff = Math.abs(fromWage - toWage);
-      const threshold = tariff * 10;
-      if (priceDiff <= threshold) continue;
+      // Find the good with the largest price gap the cheaper town can actually
+      // supply (it must hold stock to ship). The cheaper town is the source, the
+      // dearer the market — buy low, sell high.
+      let best: { goodId: string; source: typeof from; market: typeof from; gap: number } | null = null;
+      for (const goodId of goodIds) {
+        const priceFrom = localGoodPrice(r, from, goodId);
+        const priceTo = localGoodPrice(r, to, goodId);
+        if (priceFrom === priceTo) continue;
+        const source = priceFrom < priceTo ? from : to; // lower price — abundant
+        const market = priceFrom < priceTo ? to : from; // higher price — short
+        if ((source.goodStocks?.[goodId] ?? 0) <= 0) continue; // can't ship what it lacks
+        const gap = Math.abs(priceFrom - priceTo);
+        if (best === null || gap > best.gap) best = { goodId, source, market, gap };
+      }
+      if (best === null) continue;
+      // The per-unit gap must clear the per-unit congestion friction, or the trip
+      // doesn't pay. (tariff ∈ [0.05, 0.3]; a cross-sector shortage opens a gap of
+      // ~£1/unit, so a real shortage clears this and balanced play does not.)
+      if (best.gap <= tariff) continue;
 
-      // Goods flow from the cheaper market to the dearer one (buy low, sell high).
-      const buySide = fromWage > toWage ? to : from;   // lower wage/price — source
-      const sellSide = fromWage > toWage ? from : to;  // higher wage/price — market
-
-      // Only one shipment per lane at a time — wait for it to arrive before the next.
+      // Only one shipment per directed lane at a time — wait for it to arrive.
       const existing = r.tradeFlows.find(
-        f => f.fromSettlementId === buySide.id && f.toSettlementId === sellSide.id
+        f => f.fromSettlementId === best!.source.id && f.toSettlementId === best!.market.id
       );
       if (existing) continue;
 
-      const volume = Math.min(10, priceDiff * 2);
-      const goodId = goodIds.length > 0 ? goodIds[0] : 'components';
-      // Move the real units the source town can spare (≤ volume) out of its ledger
-      // now; they ride with the shipment and land at the destination on arrival.
-      // The dispatch decision, transit time and pendingIncome are unchanged — the
-      // cargo is purely additive bookkeeping, so the macro economy stays neutral
-      // (nothing reads intermediate-stock magnitudes; the solver proxies raws off
-      // sector output) while goods physically relocate between town warehouses —
-      // the substrate the later per-town supply solve consumes.
-      const cargo = r.shipGoodFrom(buySide, goodId, volume);
+      const volume = Math.min(10, best.gap * 5); // gap O(£1) → up to ~5–10 units
+      // Move the real units the source town can spare (≤ volume) out of its ledger;
+      // they ride to the dear market and relieve its shortage on arrival (its local
+      // price falls as stock lands → the gate that gated its production reopens).
+      const cargo = r.shipGoodFrom(best.source, best.goodId, volume);
+      if (cargo <= 0) continue; // nothing actually moved (defensive)
       r.tradeFlows.push({
-        goodId,
-        fromSettlementId: buySide.id,
-        toSettlementId: sellSide.id,
+        goodId: best.goodId,
+        fromSettlementId: best.source.id,
+        toSettlementId: best.market.id,
         volume,
         // Congestion sets the travel time (≥1 day so a shipment always spends a
         // tick in transit); the profit lands when it arrives, not now.
         transitDays: Math.max(1, Math.round(tariff * 100)),
         congestionTariff: tariff,
-        pendingIncome: volume * tariff * 5,
+        // Profit is the realised spread on the units shipped, eroded by congestion.
+        pendingIncome: cargo * best.gap * (1 - tariff) * ARBITRAGE_PROFIT_SCALE,
         cargo,
       });
     }

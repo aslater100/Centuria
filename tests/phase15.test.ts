@@ -407,6 +407,25 @@ describe('tickPriceArbitrage()', () => {
     }];
   };
 
+  // PR-3 slice 3: dispatch is now PRICE-driven, not wage-driven. A price gap opens
+  // when the SOURCE town holds a surplus of goods the MARKET town consumes but
+  // lacks: both produce industry goods (so both DEMAND industry-good inputs), but
+  // only the source holds stock, so its prices sit at base (cheap) while the
+  // market's rise (dear). Goods then flow source → market. The year is forced past
+  // the 1930 unlocks so steel/components/tools are all priceable.
+  const PRICED_YEAR = 1935;
+  const seedAllGoods = (t: Settlement, qty: number) => {
+    t.goodStocks = {};
+    for (const g of INTERMEDIATE_GOODS) t.goodStocks[g.id] = qty;
+  };
+  const openPriceGap = (r: RegionSim, source: Settlement, market: Settlement, seed = 1000) => {
+    Object.defineProperty(r, 'year', { get: () => PRICED_YEAR, configurable: true });
+    source.sectors.industry.output = 100;
+    market.sectors.industry.output = 100;
+    seedAllGoods(source, seed); // source is flush → every good priced at base (cheap)
+    market.goodStocks = {};     // market holds nothing → dear on every good it consumes
+  };
+
   it('advances in-transit shipments and pays out arbitrage profit on arrival', () => {
     const r = twoTownSim(42);
     const [from, to] = r.settlements;
@@ -438,13 +457,10 @@ describe('tickPriceArbitrage()', () => {
     const r = twoTownSim(42);
     const [from, to] = r.settlements;
     routeBetween(r, from.id, to.id);
-    for (const id of ['industry', 'agriculture', 'services', 'information'] as const) {
-      from.sectors[id].wage = 50;
-      to.sectors[id].wage = 5;
-    }
+    openPriceGap(r, to, from); // `to` is the flush source, `from` the short market
     const before = r.treasury;
     tickPriceArbitrage(r);
-    // A shipment is dispatched from the low-wage town to the high-wage one…
+    // A shipment is dispatched from the cheap (abundant) town to the dear (short) one…
     const flow = r.tradeFlows.find(f => f.fromSettlementId === to.id && f.toSettlementId === from.id);
     expect(flow).toBeDefined();
     expect(flow!.pendingIncome).toBeGreaterThan(0);
@@ -456,29 +472,14 @@ describe('tickPriceArbitrage()', () => {
 
   // --- Physical cargo: trade flows now relocate real units between town ledgers ---
   // (the source town is debited on dispatch, the destination credited on arrival,
-  // and a severed route destroys the cargo). The dispatch decision and pendingIncome
-  // are unchanged, so the macro economy stays neutral; only per-town stocks move.
-  const forceDispatchWages = (from: Settlement, to: Settlement) => {
-    for (const id of ['industry', 'agriculture', 'services', 'information'] as const) {
-      from.sectors[id].wage = 50;
-      to.sectors[id].wage = 5;
-    }
-  };
-  // Seed a town with plenty of every good that could be dispatched (goodIds[0], or
-  // the 'components' fallback when nothing is unlocked yet), so it can ship in full.
-  const seedAllGoods = (t: Settlement, qty: number) => {
-    t.goodStocks = {};
-    for (const g of INTERMEDIATE_GOODS) t.goodStocks[g.id] = qty;
-    t.goodStocks['components'] = qty;
-  };
-
+  // and a severed route destroys the cargo). The shipped good is the one with the
+  // largest price gap the source can supply — a deprived town pulls what it needs.
   it('dispatch debits the source town of the shipped good (cargo ≤ volume)', () => {
     const r = twoTownSim(42);
     const [from, to] = r.settlements;
     routeBetween(r, from.id, to.id);
-    forceDispatchWages(from, to); // buySide (source) is the low-wage town: `to`
     const seed = 1000;
-    seedAllGoods(to, seed);
+    openPriceGap(r, to, from, seed); // source (cheap) is `to`, market (dear) is `from`
     tickPriceArbitrage(r);
     const flow = r.tradeFlows.find(f => f.fromSettlementId === to.id && f.toSettlementId === from.id);
     expect(flow).toBeDefined();
@@ -488,17 +489,21 @@ describe('tickPriceArbitrage()', () => {
     expect(to.goodStocks![flow!.goodId]).toBeCloseTo(seed - flow!.cargo, 5);
   });
 
-  it('a source town holding none of the good ships zero cargo (profit flow still dispatches)', () => {
+  it('dispatches nothing when no town holds a surplus to ship (no price gap to exploit)', () => {
+    // Price-driven dispatch needs a CHEAP (well-stocked) source to sell to a DEAR
+    // (short) market. With every town empty, each consumed good is equally dear
+    // everywhere → no gap → no shipment (where the old wage-gap proxy would have
+    // sent a profit-only flow carrying zero cargo).
     const r = twoTownSim(42);
     const [from, to] = r.settlements;
     routeBetween(r, from.id, to.id);
-    forceDispatchWages(from, to);
-    to.goodStocks = {}; // source holds nothing
+    Object.defineProperty(r, 'year', { get: () => PRICED_YEAR, configurable: true });
+    from.sectors.industry.output = 100;
+    to.sectors.industry.output = 100;
+    from.goodStocks = {};
+    to.goodStocks = {};
     tickPriceArbitrage(r);
-    const flow = r.tradeFlows.find(f => f.fromSettlementId === to.id && f.toSettlementId === from.id);
-    expect(flow).toBeDefined();
-    expect(flow!.cargo).toBe(0);
-    expect(flow!.pendingIncome).toBeGreaterThan(0); // dispatch & profit are independent of physical stock
+    expect(r.tradeFlows).toHaveLength(0);
   });
 
   it('arrival credits the destination town with the shipment cargo', () => {
@@ -518,9 +523,8 @@ describe('tickPriceArbitrage()', () => {
     const r = twoTownSim(42);
     const [from, to] = r.settlements;
     routeBetween(r, from.id, to.id);
-    forceDispatchWages(from, to);
     const seed = 1000;
-    seedAllGoods(to, seed);
+    openPriceGap(r, to, from, seed); // source (cheap) is `to`, market (dear) is `from`
     tickPriceArbitrage(r); // dispatch debits the source; the flow is now in transit
     const flow = r.tradeFlows.find(f => f.fromSettlementId === to.id && f.toSettlementId === from.id);
     expect(flow).toBeDefined();
