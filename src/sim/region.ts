@@ -306,6 +306,31 @@ export const SUPPLY_SHOCK_INFLATION = 0.30;
  *  proxy, so it can't deepen the shortage that caused it. */
 export const SUPPLY_SHOCK_EXPORT_DRAG = 0.5;
 
+/** PR-3 slice 3 — the LOCAL-goods cost-push gain. The *raw-cascade* shock above
+ *  (`SUPPLY_SHOCK_INFLATION`) only fires when raws collapse below the era baseline;
+ *  this is the *second* price channel, driven by the per-town goods ledger slice 2
+ *  built. A nation-wide local-goods scarcity index `localGoodsScarcity` ∈ [0,1]
+ *  (demand-weighted: how short each town is of the manufactured goods it actually
+ *  consumes) lifts the monthly inflation target by `localGoodsScarcity ×
+ *  LOCAL_GOODS_INFLATION`. EXACTLY 0 in single-town / self-sufficient play (every
+ *  town holds what it makes → every local gate is 1 → scarcity 0), so that play is
+ *  byte-identical; positive only once SPECIALIZATION strands a cross-sector good in
+ *  a multi-town nation (slice 2's intended divergence) — the first time local stock
+ *  reaches GDP/inflation. Bounded (the index is ≤1 and the 0.50 inflation ceiling +
+ *  0.15 smoothing cap the climb) and a pure sink (inflation feeds confidence/GDP,
+ *  never sector output → the raw proxy), so it can't reinforce the shortage. */
+export const LOCAL_GOODS_INFLATION = 0.08;
+
+/** PR-3 slice 3 — the LOCAL-goods industry-output drag, the *output* half of the
+ *  same coupling (`LOCAL_GOODS_INFLATION` is the price half). A nation that can't
+ *  put manufactured goods where they're needed makes less: industry output is
+ *  multiplied by `1 − localGoodsScarcity × LOCAL_GOODS_OUTPUT_DRAG`. Small and
+ *  bounded — like `SUPPLY_SHOCK_MAX_DRAG` it never zeroes industry, so it can't
+ *  itself starve the raw proxy and spiral (a positive output stays positive, and
+ *  the trailing output norm follows it so the raw level mean-reverts to ~1). 0 in
+ *  single-town/self-sufficient play (scarcity 0) → ×1 → byte-identical there. */
+export const LOCAL_GOODS_OUTPUT_DRAG = 0.10;
+
 /** How long (sim days) the 1970s oil-shock anchor embargoes the `oil` raw,
  *  cutting `fuel` and the fuel-burning finals downstream. ~6 months — the real
  *  1973 embargo's span — long enough to register across several monthly supply
@@ -2723,6 +2748,16 @@ export class RegionSim {
    *  defaults to 1.0 until the next monthly tick re-derives it. Public so the
    *  extracted goods system (systems/goods.ts) can cache it each month. */
   supplyShockMult = 1;
+  /** PR-3 slice 3 — nation-wide LOCAL-goods scarcity index, 0..1 (0 = every town
+   *  holds the manufactured goods it consumes). Set by `tickIntermediateGoods` each
+   *  month (after the per-town production solve, so it reads this month's stocks) and
+   *  read the FOLLOWING month by `tickMonetary` (cost-push) and `updateSectors`
+   *  (industry drag) — the same one-month lag as `supplyShockMult`. Persisted so a
+   *  save reloaded mid-shortage keeps the coupling on the next tick; old saves
+   *  backfill to 0 (the value healthy/single-town play always holds, so the format
+   *  gain is inert there). Public so the goods system (systems/goods.ts) can cache
+   *  it. */
+  localGoodsScarcity = 0;
   // ---- Phase 18: Advisor System Depth (GDD §8.7) ----
   /** Queue of advisor briefs from ministers (max 5, newest-first). */
   advisorBriefs: { portfolio: string; message: string; day: number }[] = [];
@@ -6054,7 +6089,15 @@ export class RegionSim {
     // flow, so in all healthy play this term is +0 and the monetary stream is
     // byte-identical; only a genuine cascade below the era baseline lifts the target.
     const supplyPush = this.supplyShockSeverity() * SUPPLY_SHOCK_INFLATION;
-    const inflTarget = 0.02 + leverageInflation + printInflation + supplyPush;
+    // PR-3 slice 3 — the LOCAL-goods cost-push: when specialisation strands a
+    // cross-sector good (slice 2's per-town gate), the goods that can't reach the
+    // towns that need them are dearer there. `localGoodsScarcity` (cached last month
+    // from the production gates) is 0 in single-town / self-sufficient play — and 0
+    // under a *raw* shock too, since it's a pure gate ratio, never a stock or raw
+    // magnitude — so this term is +0 there (byte-identical, no double-count with
+    // `supplyPush`); it lifts the target only when local distribution actually fails.
+    const localGoodsPush = this.localGoodsScarcity * LOCAL_GOODS_INFLATION;
+    const inflTarget = 0.02 + leverageInflation + printInflation + supplyPush + localGoodsPush;
     this.inflationRate += (inflTarget - this.inflationRate) * 0.15;
     this.inflationRate = Math.max(0, Math.min(0.50, this.inflationRate));
 
@@ -6883,7 +6926,14 @@ export class RegionSim {
       const fxMult = this.currencyEfficiency() * this.economyOutputMult();
       // A genuine supply-chain shock (raws collapse → cascade) drags manufacturing.
       // 1.0 in healthy play (era-baselined), so output stays byte-identical there.
-      const supplyMult = id === 'industry' ? this.supplyShockMult : 1;
+      // PR-3 slice 3 — the LOCAL-goods drag rides the same industry channel: a
+      // nation that can't put manufactured goods where they're needed makes less.
+      // `localGoodsScarcity` is 0 in single-town / self-sufficient play (and under a
+      // raw shock — it's a pure gate ratio), so this is ×1 there (byte-identical);
+      // bounded so it never zeroes industry (no raw-proxy spiral).
+      const supplyMult = id === 'industry'
+        ? this.supplyShockMult * (1 - this.localGoodsScarcity * LOCAL_GOODS_OUTPUT_DRAG)
+        : 1;
       // A hotter century erodes the farm economy past +1.5°C (GDD §8.2); 1.0 below.
       const climateMult = id === 'agriculture' ? this.agriClimateMult() : 1;
       s.output = workers * s.share * perWorker * strike * loyalty * eventMult * svcMult * taxMult * fxMult * supplyMult * climateMult;
@@ -12636,6 +12686,10 @@ export class RegionSim {
       // backfill to the no-shock defaults (1 / false), the same values healthy play
       // always holds, so the format gain is inert outside an active shock.
       supplyShockMult: this.supplyShockMult,
+      // PR-3 slice 3: the local-goods scarcity index — a third one-month-lagged
+      // cache set in tickIntermediateGoods and read next month by the cost-push +
+      // industry drag. Backfills to 0 (healthy/single-town value) for old saves.
+      localGoodsScarcity: this.localGoodsScarcity,
       electronicsDisrupted: this._electronicsDisrupted,
       tradeFlows: this.tradeFlows,
       currencyRegime: this.currencyRegime,
@@ -12961,6 +13015,7 @@ export class RegionSim {
     }
     r.supplyChainHealth = d.supplyChainHealth ?? 1.0;
     r.supplyShockMult = d.supplyShockMult ?? 1;            // no-shock default
+    r.localGoodsScarcity = d.localGoodsScarcity ?? 0;      // no-shortage default
     r._electronicsDisrupted = d.electronicsDisrupted ?? false;
     // Pre-transit-pipeline flows carried no pendingIncome — backfill to 0 (they
     // simply transit out without a payout); pre-cargo flows carried no physical
