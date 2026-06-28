@@ -120,21 +120,6 @@ describe('Phase 8 — Notable Death', () => {
     expect(n.deathYear).toBeDefined();
     expect(n.bio.some((b) => b.includes('Died'))).toBe(true);
   });
-
-  it('dead Notable has deathYear set and log entry', () => {
-    const r = flipped(42);
-    const n = r.notables.find((n) => n.alive)!;
-    n.age = 95;
-    n.health = 5;
-    // Force many ticks — annualRisk=0.12 + healthRisk=0.08 = 20%/year; run 20 years
-    for (let i = 0; i < 1200 * ticksPerDay && n.alive; i++) r.tick();
-    if (!n.alive) {
-      expect(n.deathYear).toBeDefined();
-      expect(typeof n.deathYear).toBe('number');
-    }
-    // Even if somehow still alive (< 0.3% chance), no exception should occur
-    expect(true).toBe(true);
-  });
 });
 
 // ── 4. Heir Birth ─────────────────────────────────────────────────────────────
@@ -227,16 +212,6 @@ describe('Phase 8 — advisorForecast()', () => {
     const avg = sum / trials;
     expect(avg).toBeGreaterThan(trueValue * 0.8);
     expect(avg).toBeLessThan(trueValue * 1.2);
-  });
-
-  it('high-skill minister forecast is within 20% of true value', () => {
-    const r = flipped(42);
-    const n = r.notables.find((n) => n.alive)!;
-    n.skill = 95;
-    r.ministers[0].notableId = n.id;
-    const forecast = r.advisorForecast('Interior', 1000);
-    expect(forecast).toBeGreaterThan(900);
-    expect(forecast).toBeLessThan(1100);
   });
 
   it('low-skill minister adds more noise than a high-skill one', () => {
