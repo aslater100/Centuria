@@ -15,8 +15,7 @@ import { RegionMap, REGION_N, CELL_SCALE } from './worldgen';
 import type { TownSite } from './worldgen';
 import { hexNeighbors, hexDistance } from './hex';
 import { Weather } from './weather';
-import type { Lender, Loan } from './economy';
-import { createInitialLenders } from './lenders';
+import { createInitialLenders, type Lender, type Loan } from './lenders';
 import { resolveSupplyChainGraded } from './supply';
 import { tickPollution } from './systems/pollution';
 import { tickServiceCoverage } from './systems/services';
@@ -451,6 +450,11 @@ export interface RegionalBuildingDef {
   satisfaction?: number; // flat satisfaction-target bonus
   sight?: number;        // survey radius bonus for this town
   coastal_only?: boolean; // if true, only buildable in coastal settlements
+  // Spatial-4X Phase D — Wonders: one-per-EMPIRE placements with a global effect.
+  unique?: boolean;                 // empire-wide cap of one (not per-city)
+  empireBonus?: number;             // sector output add applied to EVERY town of the owner
+  empireSector?: SectorId | 'all';  // which sector empireBonus feeds
+  prestige?: number;                // prestige granted to the owner on completion
   desc: string;
 }
 
@@ -850,7 +854,7 @@ export interface GovTypeDef {
   allowedLeanings: string[];
   /** Earliest year this regime can emerge. */
   minYear?: number;
-  /** After this year cannot be newly adopted. */
+  /** After this year the regime can no longer be newly adopted (historical window). */
   maxYear?: number;
   /** Multiplier on monthly legitimacy decay. */
   legitimacyDecayModifier: number;
@@ -2494,6 +2498,8 @@ export interface CenturyReport {
   warmingC: number;
   techs: number;
   laws: number;
+  wonders: number;   // Spatial-4X Phase D — player-owned Wonders at century's end
+  prestige: number;  // accrued Wonder prestige
   legitimacy: number;
   grades: { stewardship: string; prosperity: string; liberty: string; standing: string };
   verdict: string;
@@ -2758,6 +2764,13 @@ export class RegionSim {
    *  gain is inert there). Public so the goods system (systems/goods.ts) can cache
    *  it. */
   localGoodsScarcity = 0;
+  /** Spatial-4X Phase D — Wonders. Maps a built wonder's id to the factionId
+   *  that owns it (one per empire); a `unique` building cannot be raised again
+   *  anywhere once it appears here. Empty in a fresh game / pre-Phase-D save. */
+  wonderOwner: Record<string, number> = {};
+  /** Player prestige — accrued from completing Wonders, surfaced in the Century
+   *  Report. Telemetry in slice 1 (no victory path yet). */
+  prestige = 0;
   // ---- Phase 18: Advisor System Depth (GDD §8.7) ----
   /** Queue of advisor briefs from ministers (max 5, newest-first). */
   advisorBriefs: { portfolio: string; message: string; day: number }[] = [];
@@ -4194,10 +4207,12 @@ export class RegionSim {
       dystopia: 'in neon and rain, prosperous and watched',
       drowned: 'behind the walls that held — and beside the streets that did not',
     };
+    const wonders = Object.values(this.wonderOwner).filter((f) => f === this.playerFactionId).length;
     const verdict =
       `A century after twelve settlers stepped off a wagon, ${pop.toLocaleString()} people live here ` +
       `${this.eraBranch ? branchLine[this.eraBranch] : 'on the old frontier'}. ` +
       `The air carries ${Math.round(this.co2ppm)} ppm and +${this.warmingC.toFixed(1)}°C of the century's heat. ` +
+      (wonders > 0 ? `${wonders} wonder${wonders === 1 ? '' : 's'} of the age stand to your name. ` : '') +
       `History's grades: stewardship ${stewardship}, prosperity ${prosperity}, liberty ${liberty}, standing ${standing}.`;
     this.centuryReport = {
       branch: this.eraBranch,
@@ -4209,6 +4224,8 @@ export class RegionSim {
       warmingC: Math.round(this.warmingC * 10) / 10,
       techs: this.researched.size,
       laws: this.passedLaws.size,
+      wonders,
+      prestige: Math.round(this.prestige),
       legitimacy: Math.round(this.legitimacy),
       grades: { stewardship, prosperity, liberty, standing },
       verdict,
@@ -7454,6 +7471,9 @@ export class RegionSim {
     }
     if (def.coastal_only && !t.site.coastal) return { ok: false, reason: 'coastal settlements only' };
     if (this.buildingCount(t, def.id) >= def.max) return { ok: false, reason: 'already built' };
+    if (def.unique && this.wonderOwner[def.id] !== undefined) {
+      return { ok: false, reason: 'this wonder already stands elsewhere' };
+    }
     const cost = this.cityBuildCost(def);
     if (this.treasury < cost) return { ok: false, reason: `needs ` + formatCurrency(cost) + `` };
     return { ok: true, reason: '' };
@@ -7835,6 +7855,25 @@ export class RegionSim {
     bonus += yields[sector] ?? 0;
     // Phase C: placed-building adjacency (building sited on matching terrain)
     bonus += this.placedBuildingTerrainBonus(t, sector);
+    // Phase D: empire-wide Wonder bonuses (one-per-empire global effects)
+    bonus += this.wonderBonus(t, sector);
+    return bonus;
+  }
+
+  /** Phase D — empire-wide output bonus this town gains from Wonders its faction
+   *  owns. A Wonder's effect applies to EVERY settlement of the owner (that is
+   *  what distinguishes it from a building), routed through `empireBonus` so the
+   *  per-building loop above never double-counts the host town. Returns 0 in a
+   *  game with no Wonders, so autoplay stays byte-identical to base. */
+  private wonderBonus(t: Settlement, sector: SectorId): number {
+    let bonus = 0;
+    for (const id in this.wonderOwner) {
+      if (this.wonderOwner[id] !== t.factionId) continue;
+      const def = REGION_BUILDINGS_MAP.get(id);
+      if (def?.empireBonus && (def.empireSector === sector || def.empireSector === 'all')) {
+        bonus += def.empireBonus;
+      }
+    }
     return bonus;
   }
 
@@ -8328,6 +8367,12 @@ export class RegionSim {
         if (cell >= 0) t.placedBuildings.push({ id: t.construction.id, cell });
         t.construction = null;
         if (def) {
+          // Phase D: a completed Wonder is claimed by its faction empire-wide
+          // (keyed on completion, so ownership holds even if the cell relocated).
+          if (def.unique) {
+            this.wonderOwner[def.id] = t.factionId;
+            if (t.factionId === this.playerFactionId) this.prestige += def.prestige ?? 0;
+          }
           this.addLog(`The ${def.name} opens at ${t.name}.`, 'good');
           this.townEvent(t, `The ${def.name} opens its doors.`, 'good');
         }
@@ -9469,11 +9514,12 @@ export class RegionSim {
     gov: GovType,
     assignments: Partial<Record<MinisterRoleId, number | null>>,
   ): void {
-    if (gov === 'fascist' && this.year > 1955) {
-      // Cannot establish a new fascist government after 1955
+    const def = GOV_TYPES.find((g) => g.id === gov)!;
+    if (def.maxYear !== undefined && this.year > def.maxYear) {
+      // This regime can no longer be newly adopted past its historical
+      // window (e.g. a fascist government after 1955).
       return;
     }
-    const def = GOV_TYPES.find((g) => g.id === gov)!;
     this.nationName = name;
     this.govType = gov;
     this.legitimacy = def.startingLegitimacy;
@@ -12805,6 +12851,8 @@ export class RegionSim {
       // cache set in tickIntermediateGoods and read next month by the cost-push +
       // industry drag. Backfills to 0 (healthy/single-town value) for old saves.
       localGoodsScarcity: this.localGoodsScarcity,
+      wonderOwner: this.wonderOwner,
+      prestige: this.prestige,
       electronicsDisrupted: this._electronicsDisrupted,
       tradeFlows: this.tradeFlows,
       currencyRegime: this.currencyRegime,
@@ -13131,6 +13179,8 @@ export class RegionSim {
     r.supplyChainHealth = d.supplyChainHealth ?? 1.0;
     r.supplyShockMult = d.supplyShockMult ?? 1;            // no-shock default
     r.localGoodsScarcity = d.localGoodsScarcity ?? 0;      // no-shortage default
+    r.wonderOwner = d.wonderOwner ?? {};                   // Phase D: no Wonders default
+    r.prestige = d.prestige ?? 0;
     r._electronicsDisrupted = d.electronicsDisrupted ?? false;
     // Pre-transit-pipeline flows carried no pendingIncome — backfill to 0 (they
     // simply transit out without a payout); pre-cargo flows carried no physical

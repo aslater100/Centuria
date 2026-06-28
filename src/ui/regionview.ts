@@ -1448,8 +1448,9 @@ export class RegionView {
     this.buildingValidCells = null;
   }
 
-  /** Per-frame highlight of legal building sites (amber, to read distinct from the
-   *  green founding highlight). */
+  /** Per-frame highlight of legal building sites. Amber for an ordinary building,
+   *  gold for a one-per-empire Wonder (Phase D) — both distinct from the green
+   *  town-founding highlight. */
   private drawBuildingPlacementOverlay(W: number, H: number): void {
     const cells = this.buildingValidCells;
     if (!this.buildingPlacement || !cells || cells.size === 0) return;
@@ -1457,15 +1458,18 @@ export class RegionView {
     const N = REGION_N;
     const { size, ox, oy } = hexLayoutParams(W, H, N, 60);
     const pulse = 0.16 + 0.12 * Math.abs(Math.sin(this.frame / 18));
-    g.lineWidth = 1.5;
+    const wonder = REGION_BUILDINGS.find((b) => b.id === this.buildingPlacement!.defId)?.unique === true;
+    const fill = wonder ? `rgba(245,205,70,${pulse.toFixed(3)})` : `rgba(228,178,90,${pulse.toFixed(3)})`;
+    const stroke = wonder ? 'rgba(255,228,130,0.9)' : 'rgba(240,200,120,0.75)';
+    g.lineWidth = wonder ? 2 : 1.5;
     for (const key of cells) {
       const col = Math.floor(key / N), row = key % N;
       const { x: cx, y: cy } = hexCenter(col, row, size, ox, oy);
       if (cx < this.vb.l - size || cx > this.vb.r + size || cy < this.vb.t - size || cy > this.vb.b + size) continue;
       const corners = hexCorners(cx, cy, size);
-      g.fillStyle = `rgba(228,178,90,${pulse.toFixed(3)})`;
+      g.fillStyle = fill;
       fillHexPath(g, corners);
-      g.strokeStyle = 'rgba(240,200,120,0.75)';
+      g.strokeStyle = stroke;
       strokeHexPath(g, corners);
     }
   }

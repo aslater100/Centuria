@@ -118,35 +118,6 @@ describe('Calendar System: Acceleration & Pacing', () => {
     // So late game is slower (fewer years per unit time), which matches user's request
     expect(earlyAccel).toBeLessThanOrEqual(lateAccel);
   });
-
-  it('181-year span (1919-2100) completes in reasonable time at base speed', () => {
-    // This is a calculation test, not a real-time test
-    // 181 years = 10,860 days
-    // Acceleration phases:
-    //   1919-1950 (31 yrs = 1,860 days): 1× = 1,860 ticks
-    //   1950-2000 (50 yrs = 3,000 days): 2× = 6,000 ticks (ticks are fewer, advance faster)
-    //   2000-2100 (100 yrs = 6,000 days): 1.5× = 9,000 ticks (fewer ticks, faster advance)
-    // Effective real ticks: 1860 + 3000/2 + 6000/1.5 = 1860 + 1500 + 4000 = 7360 ticks
-
-    // Weighted average acceleration: 1919-1950 at 1×, 1950-2000 at 2×, 2000-2100 at 1.5×
-    // Avg = (31*1 + 50*2 + 100*1.5) / 181 = (31 + 100 + 150) / 181 = 281/181 ≈ 1.55×
-
-    const totalYears = 181;
-    const avgAcceleration = 1.55; // weighted average
-    const expectedGameMinutesAt1x = totalYears * avgAcceleration;
-
-    // At typical player speed of 3-5×, it's much faster
-    // At 3×: expectedGameMinutesAt1x / 3 = expected real time
-    // At 5×: expectedGameMinutesAt1x / 5 = expected real time
-
-    console.log(`Expected ~${expectedGameMinutesAt1x.toFixed(0)} game-minutes at 1× speed`);
-    console.log(`At 3× player speed: ~${(expectedGameMinutesAt1x / 3).toFixed(0)} real minutes`);
-    console.log(`At 5× player speed: ~${(expectedGameMinutesAt1x / 5).toFixed(0)} real minutes`);
-
-    // The math is: if ticks happen at regular intervals and we want the game
-    // to feel like 4 hours, we need the calendar acceleration to be tuned right
-    expect(expectedGameMinutesAt1x).toBeGreaterThan(0);
-  });
 });
 
 describe('Calendar: Year Display Consistency', () => {

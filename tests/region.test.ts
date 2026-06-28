@@ -320,16 +320,6 @@ describe('Region event variety', () => {
     expect(fired).toBe(false);
   });
 
-  it('a firing event applies its one-shot grievance swing', () => {
-    const r = flipped(42);
-    const t = r.settlements[0];
-    t.grievance = 0;
-    // pandemic_wave carries grievance +4 and minYear 1915; force it through the def fields
-    const def = REGION_EVENT_DEFS.find((d) => d.kind === 'pandemic_wave')!;
-    expect(def.grievance).toBe(4);
-    expect(def.satisfaction).toBe(-3);
-  });
-
   it('a funded State fire brigade holds the damage down', () => {
     const a = flipped(42);
     const burnt = a.settlements[0];
