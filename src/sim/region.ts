@@ -641,6 +641,16 @@ const DISTRICT_DEFS_MAP = new Map(DISTRICT_DEFS.map((d) => [d.id, d]));
 // Spatial-4X Phase D slice 1b — per-update chance a rich, era-ready rival faction
 // bids for an unclaimed Wonder (scaled by the difficulty techMult). aiRng-gated.
 const RIVAL_WONDER_CHANCE = 0.1;
+// Spatial-4X — per-update chance a rival faction DEVELOPS one of its towns: raises
+// an era-ready building on its best-fitting hex, or zones a district on an
+// established same-sector cluster (scaled by techMult, aiRng-gated). This is what
+// finally makes the AI PLAY SPATIALLY — before it, rivals owned land but never
+// built on it, so every spatial bonus (terrain-match, district adjacency/zones)
+// was dormant in autoplay and the headless balance suite tested a different game
+// than a human plays. Development spends only the SURPLUS above the famine reserve
+// (see RIVAL_RESERVE_MONTHS) so it can never starve emergency grain. Intentional
+// headless re-baseline — rivals are now genuine spatial builders.
+const RIVAL_BUILD_CHANCE = 0.5;
 // Fraction of a rival's own town output collected into its faction treasury each
 // month (the rival analogue of the player's tax take). Tuned so a developing
 // rival accrues enough to expand, advance, and fund full-price Wonders without
@@ -665,6 +675,13 @@ const RIVAL_TECH_CAP = 30;
 // ever touching the buffer the rival needs to feed its people. Plus a tiny flat
 // per-settlement admin charge mirroring the player's `settlements.length * 5`.
 const RIVAL_RESERVE_MONTHS = 1.5; // months of output kept untouched (famine relief, expansion, Wonders)
+// Floor (months of output) below which a rival will NOT spend on spatial
+// development. Far lower than the state-cost reserve because the state cost holds
+// the hoard near 1.5 months, so a development gate set there would never see any
+// surplus and the AI would never build. 0.5 months still dwarfs the actual famine
+// draw — emergency grain runs ~pop·0.45/mo ≈ ~0.01 months of output — so building
+// down to this floor leaves a ~50× grain buffer and cannot trigger a death spiral.
+const RIVAL_DEV_RESERVE_MONTHS = 0.5;
 const RIVAL_SURPLUS_SKIM = 0.25; // monthly fraction of the above-reserve surplus the state spends down
 const RIVAL_ADMIN_PER_TOWN = 5; // gold/settlement/month — mirrors the player's `settlements.length * 5`
 const REGION_EVENT_DEFS_MAP = new Map(REGION_EVENT_DEFS.map((d) => [d.kind, d]));
@@ -7801,6 +7818,30 @@ export class RegionSim {
     return best;
   }
 
+  /** Spatial-4X — deterministically choose the legal worked-ring cell that
+   *  MAXIMIZES `scoreFn` (the spatial output bonus a building/district would earn
+   *  there, via the placement previews). This is the AI's spatial brain: feed it a
+   *  building's `placementPreview().total` and it sites on terrain-matching,
+   *  same-sector-clustered, district-adjacent hexes instead of just the nearest
+   *  free one. No RNG — the main stream is untouched. Ties fall back to the
+   *  `autoPlaceCell` heuristic (nearest the centre, then lowest index) so a flat
+   *  tie reproduces the old behaviour exactly. Returns -1 if the ring is full. */
+  private bestPlacementCell(t: Settlement, scoreFn: (cell: number) => number): number {
+    const cells = this.buildablePlacementCells(t.id);
+    if (cells.length === 0) return -1;
+    const c = this.map.coordToCell(t.x, t.y);
+    let best = -1, bestScore = -Infinity, bestTie = Infinity;
+    for (const cell of cells) {
+      const score = scoreFn(cell);
+      const col = Math.floor(cell / REGION_N), row = cell % REGION_N;
+      const tie = hexDistance(c.x, c.y, col, row) * 1000 + col * REGION_N + row;
+      if (score > bestScore + 1e-9 || (score > bestScore - 1e-9 && tie < bestTie)) {
+        bestScore = score; best = cell; bestTie = tie;
+      }
+    }
+    return best;
+  }
+
   /** Reconcile `placedBuildings` with `buildings`: auto-site any building that has
    *  no placement yet (old saves, AI direct grants). Deterministic; render-only. */
   ensurePlacements(t: Settlement): void {
@@ -8349,8 +8390,15 @@ export class RegionSim {
   /** The world-year a Wonder's prereq tech becomes historically available — the
    *  era gate a rival uses in lieu of the player's researched-node set. */
   private wonderEraYear(def: RegionalBuildingDef): number {
-    if (!def.prereq) return START_YEAR;
-    return TECH_TREE.find((n) => n.id === def.prereq)?.era ?? START_YEAR;
+    return this.prereqEraYear(def.prereq);
+  }
+
+  /** The world-year a prereq tech becomes historically available (its TECH_TREE
+   *  `era`), or START_YEAR when there is no prereq. The era gate a rival uses for
+   *  any prereq-locked building/district in lieu of the player's researched set. */
+  private prereqEraYear(prereq?: string): number {
+    if (!prereq) return START_YEAR;
+    return TECH_TREE.find((n) => n.id === prereq)?.era ?? START_YEAR;
   }
 
   /** Flat satisfaction bonus from civic works (waterworks, hospital…). */
@@ -14145,13 +14193,14 @@ export class RegionSim {
     const periodMonths = faction.updateFrequency / 30;
     faction.treasury += Math.round(rivalOutput * RIVAL_TAX_RATE * periodMonths);
 
-    // Wagner-style state-cost sink. Rivals lack the player's policy/services/
-    // welfare/central-bank machinery, so without a recurring drain they bank
-    // nearly the whole tax take and balloon. The sink spends down only the
-    // surplus above a prudent, output-scaled reserve (and stands down below it),
-    // so it caps the hoard without ever starving the famine buffer. Cadence-
-    // scaled like the tax; the treasury can never go negative.
-    faction.treasury = Math.max(0, faction.treasury - this.rivalStateCost(faction, rivalOutput, periodMonths));
+    // Spatial-4X — develop a town: raise a building on its best hex, or zone a
+    // district on an established cluster. This is what makes the AI actually PLAY
+    // SPATIALLY. It runs BEFORE the state-cost skim so it spends the fresh tax
+    // surplus (the skim would otherwise hold the treasury down at the reserve,
+    // leaving nothing to build with); it is itself reserve-gated, so neither sink
+    // ever touches the famine buffer. aiRng-gated → the main RNG stream is
+    // untouched (intentional headless re-baseline).
+    this.maybeDevelopRivalTown(faction, knobs, rivalOutput);
 
     // Phase D slice 1b — Wonder build-race. A rich, era-ready rival may break
     // ground on an unclaimed Wonder, reusing the player's construction pipeline
@@ -14159,6 +14208,15 @@ export class RegionSim {
     // grants that empire the same realm-wide bonus. aiRng-gated → the main RNG
     // stream is untouched (this is an intentional headless re-baseline).
     this.maybeBuildRivalWonder(faction, knobs);
+
+    // Wagner-style state-cost sink. Rivals lack the player's policy/services/
+    // welfare/central-bank machinery, so without a recurring drain they bank
+    // nearly the whole tax take and balloon. The sink spends down only the
+    // surplus above a prudent, output-scaled reserve (and stands down below it),
+    // so it caps the hoard without ever starving the famine buffer. Cadence-
+    // scaled like the tax; the treasury can never go negative. Runs last so it
+    // skims whatever development and the Wonder race leave above the reserve.
+    faction.treasury = Math.max(0, faction.treasury - this.rivalStateCost(faction, rivalOutput, periodMonths));
 
     // Check for goal conflicts with other factions (Phase 3a)
     this.checkFactionGoalConflicts(faction);
@@ -14216,6 +14274,96 @@ export class RegionSim {
       if (p > bestPop) { bestPop = p; best = s; }
     }
     return best;
+  }
+
+  /** Spatial-4X — a rival faction develops one of its towns this update: it raises
+   *  a building on its best-fitting hex, or (once a same-sector cluster exists)
+   *  zones a district to multiply it. This is the change that makes the AI actually
+   *  PLAY SPATIALLY — before it, rivals held land but never built on it, so the
+   *  terrain-match / district-adjacency / district-zone bonuses were all dormant in
+   *  autoplay. aiRng-gated (main stream untouched) and funded ONLY from the surplus
+   *  above the famine reserve, so it can never drain the buffer that feeds the
+   *  rival's people (the same discipline as `rivalStateCost`). Intentional
+   *  headless re-baseline. */
+  private maybeDevelopRivalTown(faction: RegionalFaction, knobs: typeof AI_DIFFICULTY[AiDifficulty], rivalOutput: number): void {
+    if (faction.settlementIds.length === 0) return;
+    if (!this.aiRng.chance(RIVAL_BUILD_CHANCE * knobs.techMult)) return;
+    // Only ever spend what sits ABOVE a famine floor — emergency grain is paid from
+    // this same purse, so development must never dip below it (the death-spiral
+    // lesson behind rivalStateCost). The floor is far below the state-cost reserve
+    // (which holds the hoard near 1.5mo, leaving no surplus a 1.5mo gate could see)
+    // yet still ~50× the actual grain draw, so it builds freely without risk.
+    const reserve = rivalOutput * RIVAL_DEV_RESERVE_MONTHS;
+    // Develop the LEAST-built idle town the faction holds (spreads growth across
+    // the realm), tie-broken by id — fully deterministic, no RNG.
+    let town: Settlement | null = null, fewest = Infinity;
+    for (const id of faction.settlementIds) {
+      const s = this.settlement(id);
+      if (!s || s.construction) continue; // one project at a time per town
+      const n = s.placedBuildings.length + s.placedDistricts.length;
+      if (n < fewest) { fewest = n; town = s; }
+    }
+    if (!town) return;
+    // Prefer zoning a district once a cluster exists to reward (a force-multiplier
+    // on an established quarter); otherwise raise the best-fitting building.
+    if (this.tryZoneRivalDistrict(faction, town, reserve)) return;
+    this.tryBuildRivalBuilding(faction, town, reserve);
+  }
+
+  /** Pick the era-ready, under-max, affordable building that best fits a rival
+   *  town's land (its flat bonus plus the town's terrain yield in that sector), then
+   *  break ground on the hex that MAXIMIZES the realized spatial bonus (terrain
+   *  match + same-sector clustering). Pays the player's real `cityBuildCost`, drawn
+   *  from the surplus above `reserve`. Returns true if a project was started. */
+  private tryBuildRivalBuilding(faction: RegionalFaction, t: Settlement, reserve: number): boolean {
+    const yields = this.tileYieldFor(t);
+    let pick: RegionalBuildingDef | null = null, pickScore = -Infinity;
+    for (const b of REGION_BUILDINGS) {
+      if (b.unique) continue; // Wonders go through the build-race path
+      if (this.buildingCount(t, b.id) >= b.max) continue;
+      if (b.coastal_only && !t.site.coastal) continue;
+      if (b.prereq && this.year < this.prereqEraYear(b.prereq)) continue;
+      if (faction.treasury - this.cityBuildCost(b) < reserve) continue; // surplus-only
+      const sectorYield = b.sector === 'all' ? 0 : (yields[b.sector] ?? 0);
+      const score = b.bonus + sectorYield; // fit the building to the town's terrain
+      if (score > pickScore) { pickScore = score; pick = b; }
+    }
+    if (!pick) return false;
+    const def = pick;
+    const cell = this.bestPlacementCell(t, (c) => this.placementPreview(t.id, c, def.id)?.total ?? -Infinity);
+    if (cell < 0) return false;
+    faction.treasury -= this.cityBuildCost(def);
+    t.construction = { id: def.id, doneDay: this.day + def.days, cell };
+    this.addLog(`${faction.name} breaks ground on a ${def.name} at ${t.name}.`, 'info');
+    return true;
+  }
+
+  /** Zone a district for a rival town when a same-sector building cluster already
+   *  exists to reward (so the zone's adjacency bonus actually fires). Picks the
+   *  district sitting on the largest cluster, sites it on the hex adjacent to the
+   *  most same-sector buildings, pays the player's real `districtCost` from the
+   *  surplus above `reserve`. Districts take effect on placement (no construction
+   *  slot). Returns true if a district was zoned. */
+  private tryZoneRivalDistrict(faction: RegionalFaction, t: Settlement, reserve: number): boolean {
+    let pick: DistrictDef | null = null, bestCluster = 1; // need ≥2 to bother
+    for (const d of DISTRICT_DEFS) {
+      if (this.districtCount(t, d.id) >= d.max) continue;
+      if (d.prereq && this.year < this.prereqEraYear(d.prereq)) continue;
+      if (faction.treasury - this.districtCost(d) < reserve) continue; // surplus-only
+      let cluster = 0;
+      for (const p of t.placedBuildings) {
+        if (REGION_BUILDINGS_MAP.get(p.id)?.sector === d.sector) cluster++;
+      }
+      if (cluster > bestCluster) { bestCluster = cluster; pick = d; }
+    }
+    if (!pick) return false;
+    const def = pick;
+    const cell = this.bestPlacementCell(t, (c) => this.districtPlacementPreview(t.id, c, def.id)?.total ?? -Infinity);
+    if (cell < 0) return false;
+    faction.treasury -= this.districtCost(def);
+    t.placedDistricts.push({ id: def.id, cell });
+    this.addLog(`${faction.name} zones a ${def.name} at ${t.name}.`, 'info');
+    return true;
   }
 
   /** Detect and escalate goal conflicts between factions (Phase 3a).
