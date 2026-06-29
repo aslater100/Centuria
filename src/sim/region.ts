@@ -641,6 +641,16 @@ const DISTRICT_DEFS_MAP = new Map(DISTRICT_DEFS.map((d) => [d.id, d]));
 // Spatial-4X Phase D slice 1b — per-update chance a rich, era-ready rival faction
 // bids for an unclaimed Wonder (scaled by the difficulty techMult). aiRng-gated.
 const RIVAL_WONDER_CHANCE = 0.1;
+// Spatial-4X — per-update chance a rival faction DEVELOPS one of its towns: raises
+// an era-ready building on its best-fitting hex, or zones a district on an
+// established same-sector cluster (scaled by techMult, aiRng-gated). This is what
+// finally makes the AI PLAY SPATIALLY — before it, rivals owned land but never
+// built on it, so every spatial bonus (terrain-match, district adjacency/zones)
+// was dormant in autoplay and the headless balance suite tested a different game
+// than a human plays. Development spends only the SURPLUS above the famine reserve
+// (see RIVAL_RESERVE_MONTHS) so it can never starve emergency grain. Intentional
+// headless re-baseline — rivals are now genuine spatial builders.
+const RIVAL_BUILD_CHANCE = 0.5;
 // Fraction of a rival's own town output collected into its faction treasury each
 // month (the rival analogue of the player's tax take). Tuned so a developing
 // rival accrues enough to expand, advance, and fund full-price Wonders without
@@ -665,6 +675,13 @@ const RIVAL_TECH_CAP = 30;
 // ever touching the buffer the rival needs to feed its people. Plus a tiny flat
 // per-settlement admin charge mirroring the player's `settlements.length * 5`.
 const RIVAL_RESERVE_MONTHS = 1.5; // months of output kept untouched (famine relief, expansion, Wonders)
+// Floor (months of output) below which a rival will NOT spend on spatial
+// development. Far lower than the state-cost reserve because the state cost holds
+// the hoard near 1.5 months, so a development gate set there would never see any
+// surplus and the AI would never build. 0.5 months still dwarfs the actual famine
+// draw — emergency grain runs ~pop·0.45/mo ≈ ~0.01 months of output — so building
+// down to this floor leaves a ~50× grain buffer and cannot trigger a death spiral.
+const RIVAL_DEV_RESERVE_MONTHS = 0.5;
 const RIVAL_SURPLUS_SKIM = 0.25; // monthly fraction of the above-reserve surplus the state spends down
 const RIVAL_ADMIN_PER_TOWN = 5; // gold/settlement/month — mirrors the player's `settlements.length * 5`
 const REGION_EVENT_DEFS_MAP = new Map(REGION_EVENT_DEFS.map((d) => [d.kind, d]));
@@ -2604,6 +2621,36 @@ export const ACCORD_DEFECT_THRESHOLD = 0.35;
 /** Maximum world-emissions cut from fully compliant accord coverage. */
 export const ACCORD_EMISSION_CUT = 0.28;
 
+// ---- Emergent world green transition (different timelines to 2100) ----
+// Before this, EVERY autoplay seed funnelled to the 'drowned' branch: the only
+// forces that bend the warming curve (green tech diffusion, carbon laws, climate
+// accords) are PLAYER-driven, and the autoplay player never even becomes a nation,
+// so the world ran a pure-fossil rail to proj ~5 °C every time. Now the rival WORLD
+// decarbonizes on its own initiative, at a rate that VARIES BY SEED with the rival
+// archetype mix — so the era branch (and the whole century's climate) diverges
+// across runs. Deterministic (archetypes are fixed at worldgen; no RNG, no new
+// serialized field) → the determinism/save-size gates stay green; it is an
+// intentional climate re-baseline.
+//
+// Per-archetype propensity to lead the clean-energy transition (GDD §6.3 flavour):
+// the commercial Trading Republic adopts what undercuts on cost; the Crusader
+// State makes it a mission; the Opportunist follows the money; the industrial
+// Hegemon and the isolationist Hermit Kingdom drag their feet.
+export const ARCHETYPE_GREEN_PROPENSITY: Record<RivalArchetype, number> = {
+  trading_republic: 1.0,
+  crusader_state: 0.9,
+  opportunist: 0.5,
+  hegemon: 0.2,
+  hermit_kingdom: 0.1,
+};
+export const WORLD_GREEN_START_YEAR = 1972;  // the transition can begin as renewables become conceivable
+export const WORLD_GREEN_RAMP_YEARS = 38;    // years from the start to a full ramp (≈2010)
+export const WORLD_GREEN_MAX_CUT = 0.92;     // a fully-green world cuts this fraction of its emissions
+export const WORLD_GREEN_URGENCY_C = 1.6;    // warming (°C) at which crisis urgency maxes the transition rate
+export const WORLD_GREEN_BASE = 0.55;        // baseline transition rate before warming urgency adds the rest
+export const PLAYER_GREEN_DIFFUSION = 0.6;   // how much of the world's transition spills into a passive player's own emissions (GDD §5.6 proven-tech diffusion)
+export const DROWNED_GREEN_RELIEF = 1.5;     // °C of projection credit per unit worldGreenShare at the era verdict (a transitioning world's flat projection overstates 2100 warming)
+
 /** The endgame's three skies (GDD §3.2): chosen by your climate, economy,
  *  and regime outcomes — not the calendar. */
 export type EraBranch = 'solarpunk' | 'dystopia' | 'drowned';
@@ -4003,6 +4050,11 @@ export class RegionSim {
     if (this.has('ev_adoption')) intensity *= 0.85;
     if (this.passedLaws.has('carbon_pricing')) intensity *= 0.75;
     if (this.passedLaws.has('cap_trade_law')) intensity *= 0.65;
+    // Proven clean tech diffuses from a greening rival world even to a passive
+    // player (GDD §5.6) — so a green century pulls everyone's chimneys down a
+    // little, the inverse of "one green player can't solo-fix the sky". An active
+    // player still does far more via their own tech/laws above.
+    intensity *= 1 - this.worldGreenShare() * PLAYER_GREEN_DIFFUSION;
     return (this.totalPop() / 1000) * intensity * 0.04;
   }
 
@@ -4032,7 +4084,36 @@ export class RegionSim {
       }
       if (totalPop > 0) accordFactor = 1 - (coveredPop / totalPop) * ACCORD_EMISSION_CUT;
     }
-    return worldPop * 0.045 * ramp * decarb * diffusion * accordFactor;
+    // Emergent world green transition: the rival world decarbonizes on its own
+    // initiative at a seed-varying rate (see worldGreenShare) — the term that makes
+    // the climate timeline diverge across runs instead of always drowning.
+    const greenFactor = 1 - this.worldGreenShare() * WORLD_GREEN_MAX_CUT;
+    return worldPop * 0.045 * ramp * decarb * diffusion * accordFactor * greenFactor;
+  }
+
+  /** The mean clean-energy propensity of the current rival world, set by its
+   *  archetype mix (ARCHETYPE_GREEN_PROPENSITY). Fixed at worldgen, so it is the
+   *  deterministic, per-seed dial that makes one century's world greener than
+   *  another's. Defaults to a middling 0.4 when no rivals exist. */
+  private archetypeGreenShare(): number {
+    if (this.rivals.length === 0) return 0.4;
+    let sum = 0;
+    for (const rv of this.rivals) sum += ARCHETYPE_GREEN_PROPENSITY[rv.archetype] ?? 0.3;
+    return sum / this.rivals.length;
+  }
+
+  /** Fraction [0,1] of the rival world that has transitioned to clean energy by
+   *  now — the emergent decarbonization force in `worldEmissions`. It climbs from
+   *  `WORLD_GREEN_START_YEAR` toward the archetype-set ceiling over
+   *  `WORLD_GREEN_RAMP_YEARS`, accelerated by the visible climate crisis (warming
+   *  urgency). Pure arithmetic over already-deterministic state — no RNG, no new
+   *  serialized field — so two same-seed runs decarbonize identically, but
+   *  different seeds (different archetype draws) reach 2100 on different curves. */
+  private worldGreenShare(): number {
+    const ceiling = this.archetypeGreenShare();
+    const ramp = Math.max(0, Math.min(1, (this.year - WORLD_GREEN_START_YEAR) / WORLD_GREEN_RAMP_YEARS));
+    const urgency = Math.max(0, Math.min(1, this.warmingC / WORLD_GREEN_URGENCY_C));
+    return ceiling * ramp * (WORLD_GREEN_BASE + (1 - WORLD_GREEN_BASE) * urgency);
   }
 
   /** The thin blue ghost-line (GDD §8.2): where the ledger lands by 2100
@@ -4198,7 +4279,15 @@ export class RegionSim {
   /** Era 8 opens and the verdict is read (GDD §3.2): the sky you get was
    *  chosen by climate, regime, and how your people live — not the calendar. */
   private decideBranch(): void {
-    const proj = this.projectedWarming();
+    // `projectedWarming` extrapolates today's emission rate FLAT to 2100 — a fair
+    // estimate for a static world, but pessimistic when the rival world is actively
+    // bending its own curve (worldGreenShare): a transition already under way keeps
+    // deepening, so the realized 2100 warming lands below the flat projection. The
+    // verdict therefore credits the world's mitigation — which is what lets a green
+    // century (high archetype green-share) escape the Drowned sky even when the
+    // naive projection still reads high, and is why the era branch now DIVERGES
+    // across seeds instead of always drowning. A do-nothing world earns no credit.
+    const proj = Math.max(0, this.projectedWarming() - this.worldGreenShare() * DROWNED_GREEN_RELIEF);
     const pops = this.settlements.filter((t) => this.popOf(t) >= 1);
     const avgSat = pops.length > 0 ? pops.reduce((s, t) => s + t.satisfaction, 0) / pops.length : 50;
     const gov = GOV_TYPES.find((g) => g.id === this.govType);
@@ -7801,6 +7890,30 @@ export class RegionSim {
     return best;
   }
 
+  /** Spatial-4X — deterministically choose the legal worked-ring cell that
+   *  MAXIMIZES `scoreFn` (the spatial output bonus a building/district would earn
+   *  there, via the placement previews). This is the AI's spatial brain: feed it a
+   *  building's `placementPreview().total` and it sites on terrain-matching,
+   *  same-sector-clustered, district-adjacent hexes instead of just the nearest
+   *  free one. No RNG — the main stream is untouched. Ties fall back to the
+   *  `autoPlaceCell` heuristic (nearest the centre, then lowest index) so a flat
+   *  tie reproduces the old behaviour exactly. Returns -1 if the ring is full. */
+  private bestPlacementCell(t: Settlement, scoreFn: (cell: number) => number): number {
+    const cells = this.buildablePlacementCells(t.id);
+    if (cells.length === 0) return -1;
+    const c = this.map.coordToCell(t.x, t.y);
+    let best = -1, bestScore = -Infinity, bestTie = Infinity;
+    for (const cell of cells) {
+      const score = scoreFn(cell);
+      const col = Math.floor(cell / REGION_N), row = cell % REGION_N;
+      const tie = hexDistance(c.x, c.y, col, row) * 1000 + col * REGION_N + row;
+      if (score > bestScore + 1e-9 || (score > bestScore - 1e-9 && tie < bestTie)) {
+        bestScore = score; best = cell; bestTie = tie;
+      }
+    }
+    return best;
+  }
+
   /** Reconcile `placedBuildings` with `buildings`: auto-site any building that has
    *  no placement yet (old saves, AI direct grants). Deterministic; render-only. */
   ensurePlacements(t: Settlement): void {
@@ -8349,8 +8462,15 @@ export class RegionSim {
   /** The world-year a Wonder's prereq tech becomes historically available — the
    *  era gate a rival uses in lieu of the player's researched-node set. */
   private wonderEraYear(def: RegionalBuildingDef): number {
-    if (!def.prereq) return START_YEAR;
-    return TECH_TREE.find((n) => n.id === def.prereq)?.era ?? START_YEAR;
+    return this.prereqEraYear(def.prereq);
+  }
+
+  /** The world-year a prereq tech becomes historically available (its TECH_TREE
+   *  `era`), or START_YEAR when there is no prereq. The era gate a rival uses for
+   *  any prereq-locked building/district in lieu of the player's researched set. */
+  private prereqEraYear(prereq?: string): number {
+    if (!prereq) return START_YEAR;
+    return TECH_TREE.find((n) => n.id === prereq)?.era ?? START_YEAR;
   }
 
   /** Flat satisfaction bonus from civic works (waterworks, hospital…). */
@@ -14145,13 +14265,14 @@ export class RegionSim {
     const periodMonths = faction.updateFrequency / 30;
     faction.treasury += Math.round(rivalOutput * RIVAL_TAX_RATE * periodMonths);
 
-    // Wagner-style state-cost sink. Rivals lack the player's policy/services/
-    // welfare/central-bank machinery, so without a recurring drain they bank
-    // nearly the whole tax take and balloon. The sink spends down only the
-    // surplus above a prudent, output-scaled reserve (and stands down below it),
-    // so it caps the hoard without ever starving the famine buffer. Cadence-
-    // scaled like the tax; the treasury can never go negative.
-    faction.treasury = Math.max(0, faction.treasury - this.rivalStateCost(faction, rivalOutput, periodMonths));
+    // Spatial-4X — develop a town: raise a building on its best hex, or zone a
+    // district on an established cluster. This is what makes the AI actually PLAY
+    // SPATIALLY. It runs BEFORE the state-cost skim so it spends the fresh tax
+    // surplus (the skim would otherwise hold the treasury down at the reserve,
+    // leaving nothing to build with); it is itself reserve-gated, so neither sink
+    // ever touches the famine buffer. aiRng-gated → the main RNG stream is
+    // untouched (intentional headless re-baseline).
+    this.maybeDevelopRivalTown(faction, knobs, rivalOutput);
 
     // Phase D slice 1b — Wonder build-race. A rich, era-ready rival may break
     // ground on an unclaimed Wonder, reusing the player's construction pipeline
@@ -14159,6 +14280,15 @@ export class RegionSim {
     // grants that empire the same realm-wide bonus. aiRng-gated → the main RNG
     // stream is untouched (this is an intentional headless re-baseline).
     this.maybeBuildRivalWonder(faction, knobs);
+
+    // Wagner-style state-cost sink. Rivals lack the player's policy/services/
+    // welfare/central-bank machinery, so without a recurring drain they bank
+    // nearly the whole tax take and balloon. The sink spends down only the
+    // surplus above a prudent, output-scaled reserve (and stands down below it),
+    // so it caps the hoard without ever starving the famine buffer. Cadence-
+    // scaled like the tax; the treasury can never go negative. Runs last so it
+    // skims whatever development and the Wonder race leave above the reserve.
+    faction.treasury = Math.max(0, faction.treasury - this.rivalStateCost(faction, rivalOutput, periodMonths));
 
     // Check for goal conflicts with other factions (Phase 3a)
     this.checkFactionGoalConflicts(faction);
@@ -14216,6 +14346,96 @@ export class RegionSim {
       if (p > bestPop) { bestPop = p; best = s; }
     }
     return best;
+  }
+
+  /** Spatial-4X — a rival faction develops one of its towns this update: it raises
+   *  a building on its best-fitting hex, or (once a same-sector cluster exists)
+   *  zones a district to multiply it. This is the change that makes the AI actually
+   *  PLAY SPATIALLY — before it, rivals held land but never built on it, so the
+   *  terrain-match / district-adjacency / district-zone bonuses were all dormant in
+   *  autoplay. aiRng-gated (main stream untouched) and funded ONLY from the surplus
+   *  above the famine reserve, so it can never drain the buffer that feeds the
+   *  rival's people (the same discipline as `rivalStateCost`). Intentional
+   *  headless re-baseline. */
+  private maybeDevelopRivalTown(faction: RegionalFaction, knobs: typeof AI_DIFFICULTY[AiDifficulty], rivalOutput: number): void {
+    if (faction.settlementIds.length === 0) return;
+    if (!this.aiRng.chance(RIVAL_BUILD_CHANCE * knobs.techMult)) return;
+    // Only ever spend what sits ABOVE a famine floor — emergency grain is paid from
+    // this same purse, so development must never dip below it (the death-spiral
+    // lesson behind rivalStateCost). The floor is far below the state-cost reserve
+    // (which holds the hoard near 1.5mo, leaving no surplus a 1.5mo gate could see)
+    // yet still ~50× the actual grain draw, so it builds freely without risk.
+    const reserve = rivalOutput * RIVAL_DEV_RESERVE_MONTHS;
+    // Develop the LEAST-built idle town the faction holds (spreads growth across
+    // the realm), tie-broken by id — fully deterministic, no RNG.
+    let town: Settlement | null = null, fewest = Infinity;
+    for (const id of faction.settlementIds) {
+      const s = this.settlement(id);
+      if (!s || s.construction) continue; // one project at a time per town
+      const n = s.placedBuildings.length + s.placedDistricts.length;
+      if (n < fewest) { fewest = n; town = s; }
+    }
+    if (!town) return;
+    // Prefer zoning a district once a cluster exists to reward (a force-multiplier
+    // on an established quarter); otherwise raise the best-fitting building.
+    if (this.tryZoneRivalDistrict(faction, town, reserve)) return;
+    this.tryBuildRivalBuilding(faction, town, reserve);
+  }
+
+  /** Pick the era-ready, under-max, affordable building that best fits a rival
+   *  town's land (its flat bonus plus the town's terrain yield in that sector), then
+   *  break ground on the hex that MAXIMIZES the realized spatial bonus (terrain
+   *  match + same-sector clustering). Pays the player's real `cityBuildCost`, drawn
+   *  from the surplus above `reserve`. Returns true if a project was started. */
+  private tryBuildRivalBuilding(faction: RegionalFaction, t: Settlement, reserve: number): boolean {
+    const yields = this.tileYieldFor(t);
+    let pick: RegionalBuildingDef | null = null, pickScore = -Infinity;
+    for (const b of REGION_BUILDINGS) {
+      if (b.unique) continue; // Wonders go through the build-race path
+      if (this.buildingCount(t, b.id) >= b.max) continue;
+      if (b.coastal_only && !t.site.coastal) continue;
+      if (b.prereq && this.year < this.prereqEraYear(b.prereq)) continue;
+      if (faction.treasury - this.cityBuildCost(b) < reserve) continue; // surplus-only
+      const sectorYield = b.sector === 'all' ? 0 : (yields[b.sector] ?? 0);
+      const score = b.bonus + sectorYield; // fit the building to the town's terrain
+      if (score > pickScore) { pickScore = score; pick = b; }
+    }
+    if (!pick) return false;
+    const def = pick;
+    const cell = this.bestPlacementCell(t, (c) => this.placementPreview(t.id, c, def.id)?.total ?? -Infinity);
+    if (cell < 0) return false;
+    faction.treasury -= this.cityBuildCost(def);
+    t.construction = { id: def.id, doneDay: this.day + def.days, cell };
+    this.addLog(`${faction.name} breaks ground on a ${def.name} at ${t.name}.`, 'info');
+    return true;
+  }
+
+  /** Zone a district for a rival town when a same-sector building cluster already
+   *  exists to reward (so the zone's adjacency bonus actually fires). Picks the
+   *  district sitting on the largest cluster, sites it on the hex adjacent to the
+   *  most same-sector buildings, pays the player's real `districtCost` from the
+   *  surplus above `reserve`. Districts take effect on placement (no construction
+   *  slot). Returns true if a district was zoned. */
+  private tryZoneRivalDistrict(faction: RegionalFaction, t: Settlement, reserve: number): boolean {
+    let pick: DistrictDef | null = null, bestCluster = 1; // need ≥2 to bother
+    for (const d of DISTRICT_DEFS) {
+      if (this.districtCount(t, d.id) >= d.max) continue;
+      if (d.prereq && this.year < this.prereqEraYear(d.prereq)) continue;
+      if (faction.treasury - this.districtCost(d) < reserve) continue; // surplus-only
+      let cluster = 0;
+      for (const p of t.placedBuildings) {
+        if (REGION_BUILDINGS_MAP.get(p.id)?.sector === d.sector) cluster++;
+      }
+      if (cluster > bestCluster) { bestCluster = cluster; pick = d; }
+    }
+    if (!pick) return false;
+    const def = pick;
+    const cell = this.bestPlacementCell(t, (c) => this.districtPlacementPreview(t.id, c, def.id)?.total ?? -Infinity);
+    if (cell < 0) return false;
+    faction.treasury -= this.districtCost(def);
+    t.placedDistricts.push({ id: def.id, cell });
+    this.addLog(`${faction.name} zones a ${def.name} at ${t.name}.`, 'info');
+    return true;
   }
 
   /** Detect and escalate goal conflicts between factions (Phase 3a).
