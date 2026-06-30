@@ -36,6 +36,7 @@ import {
   tickWarSupport,
   abandonGhostTowns,
 } from './systems/military';
+import { tickHistoricalAnchors } from './systems/historical';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -3161,11 +3162,11 @@ export class RegionSim {
   /** Domestic currency value (1.0 = par; < 1.0 = devalued). */
   exchangeRate = 1.0;
   /** Prevents the 1929-analog crash from firing twice. */
-  private crashFired = false;
+  crashFired = false;
   /** 0→1 measure of depression severity; set to 1.0 when crash fires, decays ~5%/month. */
   depressionDepth = 0;
   /** Months since the crash fired — drives the recovery-crossroads timing. */
-  private crashMonthCounter = 0;
+  crashMonthCounter = 0;
   /** Player's chosen recovery path once the crossroads event fires. */
   crashRecoveryChoice: 'pending' | 'stimulus' | 'austerity' | null = null;
   /** Months of stimulus spending remaining (set to 24 on stimulus choice). */
@@ -3176,11 +3177,11 @@ export class RegionSim {
    *  Public for systems/monetary.ts (read by tickMonetary's depression ceiling). */
   depressionCeilingBonus = 0;
   /** Prevents the 1936–1948 world-war anchor from firing twice. */
-  private worldWarFired = false;
+  worldWarFired = false;
   /** Prevents the 1970s oil-shock anchor from firing twice. */
-  private oilShockFired = false;
+  oilShockFired = false;
   /** Prevents the 2020-analog pandemic anchor from firing twice. */
-  private pandemicFired = false;
+  pandemicFired = false;
   // ---- Lender system: NPC bankers and merchants offering loans ----
   lenders: Lender[] = [];
   /** Player's active loans from lenders. */
@@ -5737,7 +5738,7 @@ export class RegionSim {
     tickAutomation(this); // Phase 11: automation unemployment drift
     checkStrandedAssets(this); // Phase 11: fossil write-downs as clean energy arrives
     if (this.hasCentralBank()) tickMonetary(this);
-    this.tickHistoricalAnchors(); // scripted world-events that rhyme with history (GDD §1)
+    tickHistoricalAnchors(this); // scripted world-events that rhyme with history (systems/historical.ts, GDD §1)
     this.tickMedia(); // Phase 12: media reach, press freedom, misinformation era
     this.checkScenarioGoals();   // Phase 17: check active scenario goals monthly
     this.updateLoans(); // process loan interest and check for defaults
@@ -6723,173 +6724,6 @@ export class RegionSim {
   }
 
   // ---- Historical Anchors (GDD §1) ----
-
-  /** Scripted world-events that rhyme with history without reciting it.
-   *  Each fires at most once, gated on world-state conditions and era window. */
-  private tickHistoricalAnchors(): void {
-    // Phase 17: difficulty wiring — skip entirely or use only base probabilities
-    if (this.difficultySettings.historicalAnchors === 'off') return;
-    const anchorsEmergent = this.difficultySettings.historicalAnchors === 'emergent';
-
-    const y = this.year;
-
-    // 1. World-war window (GDD §1, 1936–1948): great-power tensions ignite.
-    // Fires when rival powers are hostile to each other AND an expansionist is in the mix.
-    // In 'emergent' mode, drop the year constraint so it can fire at any time.
-    const wwInWindow = anchorsEmergent ? this.rivals.length >= 2 : (y >= 1936 && y <= 1948 && this.rivals.length >= 2);
-    if (!this.worldWarFired && wwInWindow) {
-      // Find the most hostile pair among rivals
-      let worstRel = -35;
-      let warA = -1;
-      let warB = -1;
-      for (let i = 0; i < this.rivals.length; i++) {
-        for (let j = i + 1; j < this.rivals.length; j++) {
-          const rel = this.pairRelations(this.rivals[i].id, this.rivals[j].id);
-          if (rel < worstRel) {
-            worstRel = rel;
-            warA = this.rivals[i].id;
-            warB = this.rivals[j].id;
-          }
-        }
-      }
-      const hasExpansionist = this.rivals.some((rv) => rv.weights.expansion >= 6);
-      // Needs at least one hostile pair + an expansionist drive + era roll
-      if (warA >= 0 && hasExpansionist && this.rng.chance(0.08)) {
-        this.worldWarFired = true;
-        // Escalate the most hostile pair into open war if not already fighting
-        if (!this.warBetween(warA, warB)) this.startForeignWar(warA, warB);
-        // The wider world tenses: all rival-player relations drift more hostile
-        for (const rv of this.rivals) {
-          if (rv.relations > -10) rv.relations -= 8;
-        }
-        // Confidence takes a hit — war news shakes markets
-        this.confidence = Math.max(5, this.confidence - 12);
-        const aName = this.rival(warA)?.name ?? 'one power';
-        const bName = this.rival(warB)?.name ?? 'another';
-        this.addLog(
-          `THE CONFLAGRATION: ${aName} and ${bName} are no longer trading ultimatums — ` +
-          `they are trading artillery. The great powers are choosing sides. ` +
-          `Will you hold the line, or join the storm?`,
-          'bad',
-        );
-      }
-    }
-
-    // 2. Oil shock (1970s-equivalent): fossil dependency meets a supply embargo.
-    // Fires when combustion-engine tech is researched but no clean energy exists yet.
-    const oilInWindow = anchorsEmergent ? true : (y >= 1970 && y <= 1985);
-    if (!this.oilShockFired && oilInWindow) {
-      const hasFossil = this.has('combustion_engine');
-      const hasCleanEnergy = this.has('renewables') || this.has('fusion_power');
-      if (hasFossil && !hasCleanEnergy && this.rng.chance(0.06)) {
-        this.oilShockFired = true;
-        // Route the shock through the supply chain: embargo the `oil` raw so the
-        // cut cascades oil → fuel → trucking/plastics and the supply-chain drag
-        // bites for the window — the shock is a fuel price the economy keeps
-        // paying, not just a one-off popup (GDD §5.4).
-        this.rawEmbargoes['oil'] = { until: this.day + OIL_EMBARGO_DAYS, cut: OIL_EMBARGO_CUT };
-        // Economic hit: treasury drain + inflation spike + currency devaluation
-        const gdp = this.settlements.reduce(
-          (s, t) => s + SECTOR_IDS.reduce((ss, id) => ss + t.sectors[id].output, 0), 0,
-        );
-        const hit = Math.round(gdp * 0.14 + 150);
-        this.treasury -= hit;
-        this.inflationRate = Math.min(0.28, this.inflationRate + 0.07);
-        this.exchangeRate = Math.max(0.3, this.exchangeRate - 0.14);
-        this.confidence = Math.max(5, this.confidence - 18);
-        // Add a brief industry slump event to each player settlement
-        for (const t of this.settlements) {
-          if (t.factionId !== this.playerFactionId) continue;
-          if (!t.activeEvents.some((ev) => ev.kind === 'labor_shortage')) {
-            t.activeEvents.push({ kind: 'labor_shortage', untilDay: this.day + 90, severity: 1 });
-            t.satisfaction = Math.max(0, t.satisfaction - 5);
-            t.grievance = Math.min(100, t.grievance + 6);
-          }
-        }
-        this.addLog(
-          `OIL EMBARGO: Exporting nations choke the supply lines. Fuel prices triple overnight — ` +
-          `${formatCurrency(hit)} drained from reserves, inflation surges, industry stalls. ` +
-          `The answer is in the renewables labs.`,
-          'bad',
-        );
-      }
-    }
-
-    // 3. Great Depression analog (1927–1936): credit bubble meets a confidence
-    // collapse. Fires once when leverage is stretched and confidence is already
-    // fragile in the historical window — the sim sets the fuse, the era strikes it.
-    const depressionInWindow = anchorsEmergent ? true : (y >= 1927 && y <= 1936);
-    if (!this.crashFired && depressionInWindow) {
-      if (this.privateLeverage * this.policyRate > 0.12 && this.confidence < 55) {
-        this.crashFired = true;
-        // Credit implosion
-        this.confidence = Math.max(5, this.confidence - 40);
-        this.privateLeverage *= 0.65;
-        // Depression depth: drives ongoing export suppression and confidence ceiling for ~30 months
-        this.depressionDepth = 1.0;
-        this.crashMonthCounter = 0;
-        this.depressionMeasuresUsed = [];
-        this.depressionCeilingBonus = 0;
-        // Bank failures drain reserves
-        const gdp = this.settlements.reduce(
-          (s, t) => s + SECTOR_IDS.reduce((ss, id) => ss + t.sectors[id].output, 0), 0,
-        );
-        this.treasury -= Math.round(gdp * 0.12 + 80);
-        // Political radicalization: unemployment and hunger push factions to extremes
-        for (const t of this.settlements) {
-          if (t.factionId !== this.playerFactionId) continue;
-          t.grievance = Math.min(100, t.grievance + 25);
-          t.satisfaction = Math.max(0, t.satisfaction - 15);
-          if (!t.activeEvents.some((ev) => ev.kind === 'labor_shortage')) {
-            t.activeEvents.push({ kind: 'labor_shortage', untilDay: this.day + 150, severity: 1 });
-          }
-        }
-        if (this.nationProclaimed) {
-          this.legitimacy = Math.max(0, this.legitimacy - 12);
-        }
-        this.addLog(
-          `THE CRASH: credit markets seize. Banks close their doors overnight — ` +
-          `savings vanish, factories idle, bread lines stretch around city blocks. ` +
-          `The world has not seen this before. A generation will remember.`,
-          'bad',
-        );
-        this.addLog(
-          `DEPRESSION: unemployment surges across every settlement. ` +
-          `Radical movements — left and right — are filling the void that hunger leaves.`,
-          'bad',
-        );
-      }
-    }
-
-    // 4. 2020-analog pandemic: a novel pathogen sweeps the globe.
-    // Fires once in the 2012–2027 window; antibiotics tech halves the severity.
-    const pandemicInWindow = anchorsEmergent ? this.rng.chance(0.04) : (y >= 2012 && y <= 2027 && this.rng.chance(0.04));
-    if (!this.pandemicFired && pandemicInWindow) {
-      this.pandemicFired = true;
-      const hasAntibiotics = this.has('antibiotics') || this.has('welfare_state');
-      const duration = hasAntibiotics ? 60 : 120;
-      const mult = hasAntibiotics ? 0.86 : 0.72;
-      // Push a severe pandemic_wave onto every settlement
-      for (const t of this.settlements) {
-        t.activeEvents = t.activeEvents.filter((ev) => ev.kind !== 'pandemic_wave');
-        t.activeEvents.push({ kind: 'pandemic_wave', untilDay: this.day + duration, severity: 1 });
-        const satHit = hasAntibiotics ? 6 : 14;
-        const grHit = hasAntibiotics ? 5 : 11;
-        t.satisfaction = Math.max(0, t.satisfaction - satHit);
-        t.grievance = Math.min(100, t.grievance + grHit);
-        // Manually apply output multiplier to current sector outputs
-        for (const id of SECTOR_IDS) {
-          t.sectors[id].output = Math.max(0.1, t.sectors[id].output * mult);
-        }
-      }
-      this.confidence = Math.max(5, this.confidence - (hasAntibiotics ? 12 : 28));
-      this.exportEarningsLastMonth *= 0.65;
-      const msg = hasAntibiotics
-        ? `PANDEMIC: A novel pathogen spreads across the world. Modern medicine blunts the worst — cities lock down for weeks, not years. Trade slows; recovery is measured in months.`
-        : `PANDEMIC: A novel pathogen sweeps the globe. Without modern medical infrastructure the toll is heavy — cities shutter, commerce stops, the dead are counted in silence.`;
-      this.addLog(msg, 'bad');
-    }
-  }
 
   // ---- Phase 1: the sectoral economy (GDD §5.2) ----
 
