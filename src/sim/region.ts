@@ -21,6 +21,7 @@ import { tickPollution } from './systems/pollution';
 import { tickServiceCoverage } from './systems/services';
 import { tickPriceArbitrage } from './systems/arbitrage';
 import { tickIntermediateGoods, worldGoodPrice, worldGoodScarcity, worldMarketTightness, worldPowerPressure } from './systems/goods';
+import { tickAdvisorLoyalty, tickAdvisorEvents, tickLegitimacy, tickRegimeMechanics } from './systems/regime';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -6168,8 +6169,8 @@ export class RegionSim {
     }
     // Phase 18: Advisor System Depth (GDD §8.7)
     this.generateAdvisorBriefs();
-    this.tickAdvisorLoyalty();
-    this.tickAdvisorEvents();
+    tickAdvisorLoyalty(this);
+    tickAdvisorEvents(this);
   }
 
   // ---- local markets & trade (GDD §5.2, first slice) ----
@@ -6484,8 +6485,8 @@ export class RegionSim {
       }
     }
     this.maintainRoutes();
-    this.tickLegitimacy();
-    this.tickRegimeMechanics();
+    tickLegitimacy(this);
+    tickRegimeMechanics(this);
     // Strikes: pressure vents when grievance boils over
     for (const t of this.settlements) {
       if (t.grievance > 60 && this.day >= t.strikeUntil && this.rng.chance(0.5)) {
@@ -10577,82 +10578,6 @@ export class RegionSim {
     }
   }
 
-  tickAdvisorLoyalty(): void {
-    if (!this.nationProclaimed) return;
-    const monthDays = 30;
-
-    for (const assignment of this.ministers) {
-      if (assignment.notableId === null) continue;
-      const notable = this.notables.find((n) => n.id === assignment.notableId && n.alive);
-      if (!notable) continue;
-
-      if (notable.loyalty === undefined) notable.loyalty = 100;
-      if (notable.monthsIgnored === undefined) notable.monthsIgnored = 0;
-
-      const lastAction = this.lastActionDay[assignment.role] ?? -Infinity;
-      const monthsSinceAction = (this.day - lastAction) / monthDays;
-
-      if (monthsSinceAction >= 3) {
-        notable.monthsIgnored = (notable.monthsIgnored ?? 0) + 1;
-        if (notable.monthsIgnored >= 3) {
-          notable.loyalty = Math.max(0, (notable.loyalty ?? 100) - 2);
-        }
-      } else {
-        notable.monthsIgnored = 0;
-      }
-
-      if ((notable.loyalty ?? 100) < 20 && this.rng.chance(0.03)) {
-        const faction = notable.factionAlignment ?? 'merchants';
-        const factionName = faction === 'workers' ? 'Labour' : faction === 'landowners' ? 'Conservative' : 'Liberal';
-        this.addLog(`${notable.name} has defected to the ${factionName} bloc after being sidelined.`, 'bad');
-        const oppFaction = this.factions.find((f) => f.id === faction);
-        if (oppFaction) oppFaction.power = Math.min(100, oppFaction.power + 10);
-        this.legitimacy = Math.max(0, this.legitimacy - 8);
-        assignment.notableId = null;
-      }
-    }
-  }
-
-  private tickAdvisorEvents(): void {
-    if (!this.nationProclaimed) return;
-
-    const coldRival = this.rivals.find((rv) => rv.relations < -30);
-    if (coldRival && this.rng.chance(0.05)) {
-      this.addLog(`FOREIGN SECRETARY: An envoy to ${coldRival.name} was refused audience. Relations are deteriorating.`, 'bad');
-      coldRival.relations = Math.max(-100, coldRival.relations - 5);
-    }
-
-    if (!this.researchBottleneckActive) {
-      const noSchool = this.settlements.filter((t) => !t.buildings.includes('schoolhouse'));
-      if (noSchool.length >= 3) {
-        this.researchBottleneckActive = true;
-        this.addLog(`SCIENCE MINISTRY: Our research pipeline is bottlenecked — secondary education is absent in ${noSchool.length} settlements. Recommend redirecting funding.`, 'bad');
-      }
-    } else {
-      const stillMissing = this.settlements.filter((t) => !t.buildings.includes('schoolhouse')).length;
-      if (stillMissing < 3) this.researchBottleneckActive = false;
-    }
-
-    if (this.legitimacy < 60 && (100 - this.legitimacy) > 40 && this.rng.chance(0.08)) {
-      this.addLog(`PRESS SECRETARY: The credibility gap is accelerating — recommend addressing fiscal transparency and public services.`, 'bad');
-    }
-
-    // Revanchism advisory: surface available revanchism CB (once after each defeat scar)
-    if (!this.playerWar && this.warScars.length > 0 && this.rng.chance(0.04)) {
-      const defeatScar = this.warScars.find((s) => s.outcome === 'defeat');
-      if (defeatScar) {
-        const offender = this.rivals.find((rv) => rv.id === defeatScar.rivalId);
-        if (offender && this.availableCasusBelli(offender).includes('revanchism')) {
-          this.addLog(
-            `FOREIGN SECRETARY: The humiliation of our defeat against ${defeatScar.rivalName} in ${defeatScar.yearEnded} still rankles. ` +
-            `Nationalists demand satisfaction — a revanchist campaign is available if the State has the will.`,
-            'info',
-          );
-        }
-      }
-    }
-  }
-
   recordPortfolioAction(portfolio: MinisterRoleId): void {
     this.lastActionDay[portfolio] = this.day;
     const assignment = this.ministers.find((m) => m.role === portfolio);
@@ -10661,135 +10586,6 @@ export class RegionSim {
       if (notable) {
         notable.monthsIgnored = 0;
         notable.loyalty = Math.min(100, (notable.loyalty ?? 100) + 5);
-      }
-    }
-  }
-
-  /** Monthly legitimacy tick (GDD §5.3). */
-  private tickLegitimacy(): void {
-    if (!this.nationProclaimed) return;
-    const govDef = this.govType ? GOV_TYPES.find((g) => g.id === this.govType) : null;
-    const regimeModifier = govDef?.legitimacyDecayModifier ?? 1.0;
-    // Press Freedom Act law slows decay by 30%; Information minister adds a further 25%
-    const pressBonus = this.passedLaws.has('press_freedom_act') ? 0.7 : 1.0;
-    const infoBonus = this.ministerFor('press') ? 0.75 : 1.0;
-    const decayRate = 0.5 * regimeModifier * pressBonus * infoBonus;
-    this.legitimacy = Math.max(0, this.legitimacy - decayRate);
-    if (this.govType === 'junta') {
-      const ws = this.factions.find((f) => f.id === 'workers')?.support ?? 50;
-      const ls = this.factions.find((f) => f.id === 'landowners')?.support ?? 50;
-      const avg = ws * 0.5 + ls * 0.5;
-      if (avg > 60) this.legitimacy = Math.min(100, this.legitimacy + 0.3);
-      if (avg < 30) this.legitimacy = Math.max(0, this.legitimacy - 0.5);
-    }
-    if (this.govType === 'monarchy') {
-      const elders = this.notables.filter((n) => n.alive && n.age >= 50).length;
-      if (elders > 0) this.legitimacy = Math.min(100, this.legitimacy + 0.2 * elders);
-    }
-    if (this.legitimacy < 30 && this.rng.chance(0.05)) {
-      this.addLog(
-        'LEGITIMACY CRISIS: opposition groups are openly challenging the regime.',
-        'bad',
-      );
-    }
-  }
-
-  /** Monthly per-regime mechanics (GDD §9). Called from monthlyUpdate(). */
-  private tickRegimeMechanics(): void {
-    if (!this.nationProclaimed || !this.govType) return;
-
-    // ---- One-Party State: planning optimism and reported GDP ----
-    if (this.govType === 'one_party') {
-      this.planningOptimism = Math.min(1, this.planningOptimism + 0.01);
-      this.reportedGDP = this.gdpLastMonth * (1 + this.planningOptimism * 0.3);
-    } else {
-      this.reportedGDP = this.gdpLastMonth;
-      // planningOptimism resets on regime change (handled in proclaimNation)
-    }
-
-    // ---- Credibility Gap: authoritarian press + controlled narrative ----
-    const isAuthoritarian = ['junta', 'autocracy', 'one_party', 'fascist', 'abs_monarchy', 'monarchy'].includes(this.govType);
-    const hasControlledPress = !this.passedLaws.has('press_freedom_act');
-    if (isAuthoritarian && hasControlledPress) {
-      this.credibilityGap = Math.min(100, this.credibilityGap + 0.5);
-      // Cliff event: gap > 80 + spark
-      if (this.credibilityGap > 80) {
-        const spark = this.treasury < 0 ||
-          (this.playerWar && this.playerWar.score < -20) ||
-          this.settlements.some((t) => t.grievance > 75);
-        if (spark && this.rng.chance(0.15)) {
-          this.legitimacy = Math.max(0, this.legitimacy - 30);
-          this.addLog(
-            'CREDIBILITY COLLAPSE: The gap between the official narrative and lived reality has become impossible to ignore. Legitimacy shattered.',
-            'bad',
-          );
-        }
-      }
-    } else {
-      this.credibilityGap = Math.max(0, this.credibilityGap - 0.3);
-    }
-
-    // ---- Fascist regime: legitimacy requires conflict ----
-    if (this.govType === 'fascist') {
-      const atPeace = !this.playerWar;
-      if (atPeace) {
-        this.legitimacy = Math.max(0, this.legitimacy - 1);
-        if (this.rng.chance(0.3)) {
-          this.addLog(
-            'PRESSURE TO EXPAND: The regime feeds on conflict — without a war to sustain the movement, the streets grow restless.',
-            'bad',
-          );
-        }
-      }
-    }
-
-    // ---- Theocracy: schism risk grows with secular techs ----
-    if (this.govType === 'theocracy') {
-      const secularTechs = ['computing', 'civil_rights', 'antibiotics', 'public_education', 'social_insurance'];
-      const researched = secularTechs.filter((t) => this.has(t)).length;
-      if (researched > 0) {
-        this.schismRisk = Math.min(100, this.schismRisk + researched);
-      }
-      // Schism event at risk > 70
-      if (this.schismRisk > 70 && this.rng.chance(0.03)) {
-        // Schism fires
-        for (const t of this.settlements) {
-          t.grievance = Math.min(100, t.grievance + 20);
-        }
-        this.legitimacy = Math.max(0, this.legitimacy - 10);
-        this.schismRisk = 30; // reset after schism
-        this.addLog(
-          `DOCTRINAL SCHISM: The tension between religious orthodoxy and modernizing society erupts. ` +
-          `Faction split — a reformist movement challenges the clerical establishment. Grievance surges across all towns.`,
-          'bad',
-        );
-      }
-    }
-
-    // ---- Corporatocracy: shareholder patience decays during long wars ----
-    if (this.govType === 'corporatocracy') {
-      if (this.playerWar) {
-        const warMonths = (this.day - (this.playerWar as any).startDay) / 30;
-        if (warMonths > 12) {
-          this.shareholderPatience = Math.max(0, this.shareholderPatience - 3);
-        }
-      } else {
-        // Peacetime: patience recovers slowly
-        this.shareholderPatience = Math.min(100, this.shareholderPatience + 0.5);
-      }
-      // Hostile board takeover at patience < 20
-      if (this.shareholderPatience < 20 && this.rng.chance(0.1)) {
-        this.legitimacy = Math.max(0, this.legitimacy - 15);
-        const merchantFaction = this.factions.find((f) => f.id === 'merchants');
-        if (merchantFaction) {
-          merchantFaction.support = Math.min(100, merchantFaction.support + 20);
-        }
-        this.addLog(
-          'HOSTILE BOARD TAKEOVER: The corporate council convenes an emergency session. ' +
-          'Shareholder patience exhausted — a new policy is enacted by the merchant faction without consultation.',
-          'bad',
-        );
-        this.shareholderPatience = 35; // shock resets patience
       }
     }
   }
