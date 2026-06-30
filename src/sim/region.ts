@@ -42,6 +42,7 @@ import { tickResearch } from './systems/research';
 import { updateRouteCargo } from './systems/trade';
 import { updateCharter } from './systems/charter';
 import { updateLoans } from './systems/loans';
+import { updateExploration } from './systems/exploration';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -5612,7 +5613,7 @@ export class RegionSim {
     this.updateExpeditions();
     updateCharter(this);
     this.updateConstruction(); // Phase 2: scaffolding comes down, doors open
-    this.updateExploration(); // Phase 0: Update fog of war based on scouts and settlements
+    updateExploration(this); // Phase 0: Update fog of war based on scouts and settlements (systems/exploration.ts)
     if (this.totalPop() <= 0) {
       this.gameOver = true;
       this.addLog('The last settlement is empty. (Failure state: depopulation.)', 'bad');
@@ -7976,7 +7977,7 @@ export class RegionSim {
   }
 
   /** Extra survey radius from this town's works (telegraph office). */
-  private buildingSight(t: Settlement): number {
+  buildingSight(t: Settlement): number {
     return t.buildings.reduce((s, id) => s + (REGION_BUILDINGS_MAP.get(id)?.sight ?? 0), 0);
   }
 
@@ -8898,42 +8899,6 @@ export class RegionSim {
   // ---- Phase 0: Exploration & Fog of War ----
 
   /** Update exploration visibility based on settlements and caravan routes. */
-  private updateExploration(): void {
-    // The space age ends the fog for good: orbital survey sees everything.
-    if (this.has('computing')) {
-      for (let x = 0; x < 100; x++) {
-        for (let y = 0; y < 100; y++) {
-          this.explorationMap[x][y] = 'explored';
-        }
-      }
-      return;
-    }
-    // Settlements and routes automatically reveal tiles around them
-    let sightRadius = 2; // base sight radius
-    // Technology improvements to sight: wires, then wings
-    if (this.has('electrical_grid')) sightRadius += 1; // telegraph lines along every road
-    if (this.has('combustion_engine')) sightRadius += 2; // aerial survey
-    for (const settlement of this.settlements) {
-      // Phase 2: a telegraph office extends this town's survey reach
-      this.revealTiles(settlement.x, settlement.y, sightRadius + this.buildingSight(settlement), 'explored');
-    }
-
-    // Routes also reveal tiles (caravans passively explore)
-    for (const route of this.routes) {
-      const a = this.settlement(route.a);
-      const b = this.settlement(route.b);
-      if (!a || !b) continue;
-      // Reveal a corridor along the route (simplified: just endpoints)
-      this.revealTiles(a.x, a.y, 1, 'explored');
-      this.revealTiles(b.x, b.y, 1, 'explored');
-    }
-
-    // Scout units reveal tiles
-    for (const scout of this.scouts) {
-      this.revealTiles(scout.x, scout.y, 5, 'explored');
-    }
-  }
-
   /** The promotion-as-moment (GDD §2.2): the player names the State and sets its lean. */
   completeIncorporation(stateName: string, lean: GovLean): void {
     if (!this.ceremonyPending || this.stateProclaimed) return;
