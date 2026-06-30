@@ -13,6 +13,7 @@
 
 import { describe, expect, it, beforeEach } from 'vitest';
 import { RegionSim, REGION_MINUTES_PER_TICK } from '../src/sim/region';
+import { tickDemographicTransition, tickAppealMigration, tickEducationLag, tickUnrestLadder } from '../src/sim/systems/demographics';
 import { MINUTES_PER_DAY } from '../src/sim/defs';
 
 const ticksPerDay = MINUTES_PER_DAY / REGION_MINUTES_PER_TICK;
@@ -164,7 +165,7 @@ describe('Phase 13 — Demographic Transition', () => {
     if (birthRate > 25 && deathRate < 15) {
       // Boom conditions met — tick and verify
       const popBefore = r.popOf(t);
-      priv(r).tickDemographicTransition();
+      tickDemographicTransition(r);
       const popAfter = r.popOf(t);
       // Growth should be positive with boom
       expect(popAfter).toBeGreaterThanOrEqual(popBefore);
@@ -213,7 +214,7 @@ describe('Phase 13 — Demographic Transition', () => {
     const computedPhase: string = priv(r).computeDemographicPhase() as string;
     // If post_transition conditions are met, tick and verify
     if (computedPhase === 'post_transition') {
-      priv(r).tickDemographicTransition();
+      tickDemographicTransition(r);
       expect(r.agingCrisisActive).toBe(true);
       expect(r.treasury).toBeLessThan(treasuryBefore);
     } else {
@@ -298,7 +299,7 @@ describe('Phase 13 — Migration with Appeal Scores', () => {
     const pop2Before = r.popOf(t2);
 
     // Run appeal migration
-    priv(r).tickAppealMigration();
+    tickAppealMigration(r);
 
     const pop1After = r.popOf(t1);
     const pop2After = r.popOf(t2);
@@ -342,7 +343,7 @@ describe('Phase 13 — Education Pipeline Lag', () => {
     r.researched.add('public_education');
 
     // Call tick
-    priv(r).tickEducationLag();
+    tickEducationLag(r);
 
     // First slot should be the current coverage (at least 0)
     expect(r.educationLag[0]).toBeGreaterThanOrEqual(0);
@@ -431,7 +432,7 @@ describe('Phase 13 — Unrest Ladder', () => {
     const r = makeColonyWithGrievance(35);
     expect(r.unrestLevel).toBe(0);
 
-    priv(r).tickUnrestLadder();
+    tickUnrestLadder(r);
 
     expect(r.unrestLevel).toBe(1);
   });
@@ -441,7 +442,7 @@ describe('Phase 13 — Unrest Ladder', () => {
     r.unrestLevel = 1;
     r.unrestMonthsAtLevel = 0;
 
-    priv(r).tickUnrestLadder();
+    tickUnrestLadder(r);
 
     expect(r.unrestLevel).toBe(2);
   });
@@ -457,7 +458,7 @@ describe('Phase 13 — Unrest Ladder', () => {
     let revolutionFired = false;
     const initialLegitimacy = r.legitimacy;
     for (let i = 0; i < 1000; i++) {
-      priv(r).tickUnrestLadder();
+      tickUnrestLadder(r);
       if (r.legitimacy < initialLegitimacy || r.unrestLevel < 5) {
         revolutionFired = true;
         break;
@@ -488,7 +489,7 @@ describe('Phase 13 — Unrest Ladder', () => {
     r.unrestLevel = 2;
     r.unrestMonthsAtLevel = 0;
 
-    priv(r).tickUnrestLadder();
+    tickUnrestLadder(r);
 
     expect(r.unrestLevel).toBeLessThan(2);
   });

@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { RegionSim, MINISTER_ROLES, REGION_MINUTES_PER_TICK } from '../src/sim/region';
+import { tickAdvisorLoyalty, tickAdvisorEvents } from '../src/sim/systems/regime';
 import { MINUTES_PER_DAY } from '../src/sim/defs';
 
 const ticksPerDay = MINUTES_PER_DAY / REGION_MINUTES_PER_TICK;
@@ -223,7 +224,7 @@ describe('Phase 18 — tickAdvisorLoyalty', () => {
     notable.loyalty = 50;
     notable.monthsIgnored = 3;
     r.lastActionDay['interior'] = r.day - 100;
-    r.tickAdvisorLoyalty();
+    tickAdvisorLoyalty(r);
     expect(notable.loyalty).toBeLessThan(50);
   });
 
@@ -235,7 +236,7 @@ describe('Phase 18 — tickAdvisorLoyalty', () => {
     notable.loyalty = 80;
     notable.monthsIgnored = 0;
     r.lastActionDay['interior'] = r.day - 10;
-    r.tickAdvisorLoyalty();
+    tickAdvisorLoyalty(r);
     expect(notable.loyalty).toBe(80);
   });
 
@@ -250,7 +251,7 @@ describe('Phase 18 — tickAdvisorLoyalty', () => {
     r.lastActionDay['interior'] = r.day - 1000;
     let defected = false;
     for (let i = 0; i < 200; i++) {
-      r.tickAdvisorLoyalty();
+      tickAdvisorLoyalty(r);
       if (r.log.some((l) => l.text.includes('defected'))) {
         defected = true;
         break;
@@ -282,7 +283,7 @@ describe('Phase 18 — portfolio-specific events', () => {
     }
     r.researchBottleneckActive = false;
     r.log.length = 0;
-    (r as unknown as { tickAdvisorEvents: () => void }).tickAdvisorEvents();
+    tickAdvisorEvents(r);
     expect(r.researchBottleneckActive).toBe(true);
     expect(r.log.some((l) => l.text.includes('SCIENCE MINISTRY'))).toBe(true);
   });
@@ -294,7 +295,7 @@ describe('Phase 18 — portfolio-specific events', () => {
     for (const t of r.settlements) {
       if (!t.buildings.includes('schoolhouse')) t.buildings.push('schoolhouse');
     }
-    (r as unknown as { tickAdvisorEvents: () => void }).tickAdvisorEvents();
+    tickAdvisorEvents(r);
     expect(r.researchBottleneckActive).toBe(false);
   });
 
@@ -332,7 +333,7 @@ describe('Phase 18 — portfolio-specific events', () => {
     const initialRelations = rival.relations;
     let eventFired = false;
     for (let i = 0; i < 200 && !eventFired; i++) {
-      (r as unknown as { tickAdvisorEvents: () => void }).tickAdvisorEvents();
+      tickAdvisorEvents(r);
       if (r.log.some((l) => l.text.includes('FOREIGN SECRETARY'))) {
         eventFired = true;
       }

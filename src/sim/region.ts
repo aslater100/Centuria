@@ -21,6 +21,10 @@ import { tickPollution } from './systems/pollution';
 import { tickServiceCoverage } from './systems/services';
 import { tickPriceArbitrage } from './systems/arbitrage';
 import { tickIntermediateGoods, worldGoodPrice, worldGoodScarcity, worldMarketTightness, worldPowerPressure } from './systems/goods';
+import { tickAdvisorLoyalty, tickAdvisorEvents, tickLegitimacy, tickRegimeMechanics } from './systems/regime';
+import { tickDemographicTransition, tickAppealMigration, tickEducationLag, tickUnrestLadder } from './systems/demographics';
+import { tickClimate, checkStrandedAssets, tickAutomation } from './systems/climate';
+import { updateDiplomacy } from './systems/diplomacy';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -2648,11 +2652,11 @@ const ROUTE_CONDITION_FLOOR = 15;
 /** Atmospheric CO₂ at the wagon's arrival, 1900 (GDD §8.2). */
 export const CO2_BASE_PPM = 295;
 /** Warming equilibrium per ppm above base: 600 ppm ≈ +3.4°C at rest. */
-const WARMING_PER_PPM = 0.011;
+export const WARMING_PER_PPM = 0.011;
 /** The ~20-year lag (GDD §8.2): warming closes 1/40th of the gap per
  *  climate tick (two ticks a game-year) — the bill arrives two governments
  *  after the smoke. */
-const WARMING_LAG_TICKS = 40;
+export const WARMING_LAG_TICKS = 40;
 /** Adaptation works open once the threat is on the survey maps. */
 export const SEA_WALL_YEAR = 2025;
 /** Era 8 begins: the century's verdict is read (GDD §3.2). */
@@ -3105,7 +3109,7 @@ export class RegionSim {
    *  ACCORD_DEFECT_THRESHOLD = free-rider. Cleared when accord torn. */
   accordCompliance: Record<number, number> = {};
   /** Rivals whose defection has already triggered a log (transient: resets on load). */
-  private accordDefectLogged = new Set<number>();
+  accordDefectLogged = new Set<number>();
   /** True once Deploy is activated; the aerosols are in the stratosphere. */
   geoDeployed = false;
   /** Day the aerosols were injected; used to phase the cooling. */
@@ -3268,7 +3272,7 @@ export class RegionSim {
   // ---- Phase 6: Rival-side economic diplomacy ----
   /** Trade blocs formed among rival nations independently of the player. */
   rivalTradeBlocs: RivalTradeBloc[] = [];
-  private nextRivalBlocId = 1;
+  nextRivalBlocId = 1;
   /** Active economic sanctions (player ↔ rivals). */
   sanctions: Sanction[] = [];
   // ---- Phase 9: Government Type System ----
@@ -3383,9 +3387,9 @@ export class RegionSim {
   /** Post-war bookkeeping: one entry per finished war, oldest first. */
   warScars: WarScar[] = [];
   seaRiseAnnounced = false;
-  private lastTidalLogDay = -999;
-  private lastRefugeesLogDay = -999;
-  private lastExtremeWeatherDay = -999;
+  lastTidalLogDay = -999;
+  lastRefugeesLogDay = -999;
+  lastExtremeWeatherDay = -999;
   private droughtAnnounced = false;
   // ---- Phase 17: Historical Scenarios & Alternate Starts (GDD §8.8, §6.1) ----
   /** Scenario id currently in play, or null for sandbox. */
@@ -4260,164 +4264,6 @@ export class RegionSim {
     return Math.max(0, (ppm2100 - CO2_BASE_PPM) * WARMING_PER_PPM);
   }
 
-  /** The climate tick — runs with every monthly update, from the first
-   *  decade (the ledger runs from day one; only its payoff waits). No RNG
-   *  draws here: climate is arithmetic, not luck. */
-  private tickClimate(): void {
-    const emit = this.playerEmissions() + this.worldEmissions();
-    this.emissionsLastMonth = emit;
-    this.co2ppm += emit;
-    const equilibrium = Math.max(0, (this.co2ppm - CO2_BASE_PPM) * WARMING_PER_PPM);
-    this.warmingC += (equilibrium - this.warmingC) / WARMING_LAG_TICKS;
-    // Geoengineering: phased aerosol cooling over the active window
-    if (this.geoDeployed && this.day - this.geoDeployDay < GEOENGINEER_DURATION_DAYS) {
-      const ticksInWindow = GEOENGINEER_DURATION_DAYS / 30; // 30-day climate ticks
-      this.warmingC = Math.max(0, this.warmingC - GEOENGINEER_COOLING / ticksInWindow);
-    }
-    this.tickAccords();
-    // The ghost-line announcement: quiet dread as UI (GDD §8.2)
-    if (!this.seaRiseAnnounced && this.warmingC >= 1.2 && this.settlements.some((t) => t.site.coastal)) {
-      this.seaRiseAnnounced = true;
-      this.addLog(
-        `+${this.warmingC.toFixed(1)}°C: State surveyors pencil the projected 2100 waterline onto the coastal charts. ` +
-        `It runs through streets people live on.`,
-        'bad',
-      );
-    }
-    // The sea collects (GDD §8.2): tidal flooding on unwalled coastal towns
-    if (this.year >= 2035 && this.warmingC > 1.5) {
-      const severity = (this.warmingC - 1.5) * (this.eraBranch === 'drowned' ? 1.5 : 1);
-      let hit = false;
-      for (const t of this.settlements) {
-        if (!t.site.coastal || t.seaWall || this.popOf(t) < 1) continue;
-        const damageScale = t.floodProofed ? 0.5 : 1.0;
-        t.food *= Math.max(0.7, 1 - 0.05 * severity * damageScale);
-        this.removePop(t, this.popOf(t) * 0.0015 * severity * damageScale);
-        t.satisfaction = Math.max(0, t.satisfaction - 2 * severity * damageScale);
-        hit = true;
-      }
-      if (hit && this.day - this.lastTidalLogDay > 300) {
-        this.lastTidalLogDay = this.day;
-        this.addLog(
-          'King tides take the low streets again — unwalled coastal towns pump out cellars and count who left.',
-          'bad',
-        );
-      }
-    }
-    // Climate refugee migration (GDD §8.2): coastal flooding bleeds population
-    // inland. Flight rate is mild (0.1% per severity unit/tick) so the effect
-    // builds gradually, matching the slow-burn feel of sea-level rise.
-    if (this.year >= 2035 && this.warmingC > 1.5) {
-      const severity = (this.warmingC - 1.5) * (this.eraBranch === 'drowned' ? 1.5 : 1);
-      const playerSettlements = this.settlements.filter((t) => t.factionId === this.playerFactionId);
-      const flooded = playerSettlements.filter((t) => t.site.coastal && !t.seaWall && this.popOf(t) > 5);
-      const inland = playerSettlements.filter((t) => !t.site.coastal);
-      if (flooded.length > 0 && inland.length > 0) {
-        const dest = inland.reduce((best, t) => (this.popOf(t) > this.popOf(best) ? t : best));
-        let totalMovers = 0;
-        for (const from of flooded) {
-          const fromPop = this.popOf(from);
-          if (fromPop < 5) continue;
-          const flightRate = Math.min(0.01, 0.001 * severity);
-          const movers = fromPop * flightRate;
-          if (movers < 0.1) continue;
-          this.removePop(from, movers);
-          dest.cohorts.bands[1] += movers * 0.7;
-          dest.cohorts.bands[2] += movers * 0.3;
-          totalMovers += movers;
-        }
-        if (totalMovers >= 1 && this.day - this.lastRefugeesLogDay > 365) {
-          this.lastRefugeesLogDay = this.day;
-          this.addLog(
-            `Tidal flooding pushes families inland — ${Math.round(totalMovers)} people arrive at ${dest.name} ` +
-            `seeking higher ground (+${this.warmingC.toFixed(1)}°C warming).`,
-            'bad',
-          );
-        }
-      }
-    }
-    // Sea-wall overtopping (GDD §8.2): at ≥4°C even walled towns are breached.
-    // Sea walls buy time, not immunity — extreme warming overwashes any earthwork.
-    if (this.warmingC >= 4.0 && this.year >= 2060) {
-      const overtopSeverity = (this.warmingC - 4.0) * 0.4; // gentler than unprotected
-      let overtopHit = false;
-      for (const t of this.settlements) {
-        if (!t.site.coastal || !t.seaWall || this.popOf(t) < 1) continue;
-        const damageScale = t.floodProofed ? 0.3 : 0.6;
-        t.food *= Math.max(0.85, 1 - 0.03 * overtopSeverity * damageScale);
-        this.removePop(t, this.popOf(t) * 0.0008 * overtopSeverity * damageScale);
-        t.satisfaction = Math.max(0, t.satisfaction - 1.5 * overtopSeverity * damageScale);
-        overtopHit = true;
-      }
-      if (overtopHit && this.day - this.lastTidalLogDay > 600) {
-        this.lastTidalLogDay = this.day;
-        this.addLog(
-          `+${this.warmingC.toFixed(1)}°C: The sea walls weren't built for this. Storm surge overtops the ` +
-          `barriers; the walled districts flood behind their own defences. Even protection has its ceiling.`,
-          'bad',
-        );
-      }
-    }
-    // Extreme weather amplification: warming > 1.5°C makes storms and droughts
-    // more frequent (GDD §8.2: "extreme-weather frequency ↑ with temperature rise").
-    // Monthly probability: ~4% at +2°C, ~8% at +2.5°C.
-    if (this.warmingC >= 1.5 && this.stateProclaimed) {
-      const extraChance = (this.warmingC - 1.5) * 0.08;
-      if (this.rng.next() < extraChance && this.day - this.lastExtremeWeatherDay > 60) {
-        const playerTowns = this.settlements.filter((t) => t.factionId === this.playerFactionId);
-        const target = playerTowns[this.rng.int(playerTowns.length)];
-        if (target && !target.activeEvents.some((e) => e.kind === 'drought' || e.kind === 'flood')) {
-          const isDrought = this.rng.next() < 0.55;
-          const kind: RegionalEventKind = isDrought ? 'drought' : 'flood';
-          target.activeEvents.push({ kind, untilDay: this.day + 50, severity: 0.8 });
-          this.lastExtremeWeatherDay = this.day;
-          this.addLog(
-            isDrought
-              ? `Climate volatility: prolonged drought scorches the fields around ${target.name} (+${this.warmingC.toFixed(1)}°C warming effect).`
-              : `Climate volatility: storm surge overwhelms drainage at ${target.name} — farmland underwater.`,
-            'bad',
-          );
-        }
-      }
-    }
-    // Era branching: early path (1990) if oil barons beaten, otherwise standard (2040)
-    if (this.eraBranch === null && this.year >= EARLY_SOLARPUNK_YEAR && this.beatOilBarons) this.decideBranch();
-    if (this.eraBranch === null && this.year >= BRANCH_YEAR) this.decideBranch();
-    if (!this.centuryReport && this.year >= CENTURY_YEAR) this.buildCenturyReport();
-    this.triggerEpilogueEvent(); // post-2100 flavor events
-  }
-
-  /** Monthly: drift accord compliance and detect free-riders (GDD §8.2).
-   *  Commerce-driven signatories stay honest; expansion-minded ones quietly
-   *  cheat. First detection triggers one log entry; the player can sanction. */
-  private tickAccords(): void {
-    for (const rv of this.rivals) {
-      if (!rv.treaties.includes('climate_accord')) {
-        if (this.accordCompliance[rv.id] !== undefined) {
-          delete this.accordCompliance[rv.id];
-          this.accordDefectLogged.delete(rv.id);
-        }
-        continue;
-      }
-      let comp = this.accordCompliance[rv.id] ?? 1.0;
-      // High-commerce powers keep their word; expansion hawks cut corners
-      const drift = (rv.weights.commerce - rv.weights.expansion) * 0.006;
-      comp = Math.max(0, Math.min(1, comp + drift + (this.rng.next() - 0.55) * 0.04));
-      this.accordCompliance[rv.id] = comp;
-      if (comp < ACCORD_DEFECT_THRESHOLD && !this.accordDefectLogged.has(rv.id)) {
-        this.accordDefectLogged.add(rv.id);
-        this.addLog(
-          `ACCORD DEFECTION: satellite readings show ${rv.name}'s emissions climbing behind diplomatic smiles. ` +
-          `Sanction them (−20 relations, accord torn) or absorb the betrayal to keep the network intact.`,
-          'bad',
-        );
-      }
-      if (comp >= ACCORD_DEFECT_THRESHOLD + 0.1) {
-        this.accordDefectLogged.delete(rv.id);
-      }
-    }
-  }
-
   /** True once `environmentalism` is researched and the year is right —
    *  this gates the Climate Accord treaty type in diplomacy. */
   accordUnlocked(): boolean {
@@ -4468,7 +4314,7 @@ export class RegionSim {
 
   /** Era 8 opens and the verdict is read (GDD §3.2): the sky you get was
    *  chosen by climate, regime, and how your people live — not the calendar. */
-  private decideBranch(): void {
+  decideBranch(): void {
     // `projectedWarming` extrapolates today's emission rate FLAT to 2100 — a fair
     // estimate for a static world, but pessimistic when the rival world is actively
     // bending its own curve (worldGreenShare): a transition already under way keeps
@@ -4605,7 +4451,7 @@ export class RegionSim {
 
   /** 1 Jan 2100: the Century Report (GDD §8.4) — a verdict, not a win
    *  screen. The sandbox keeps running afterward if you wish. */
-  private buildCenturyReport(): void {
+  buildCenturyReport(): void {
     const pop = this.totalPop();
     const gdpPerHead = pop > 0 ? this.gdpLastMonth / pop : 0;
     const gov = GOV_TYPES.find((g) => g.id === this.govType);
@@ -4654,46 +4500,6 @@ export class RegionSim {
   }
 
   // ---- Phase 11: Renewables, Automation & Carbon Pricing ----
-
-  /** Check whether fossil-fuel infrastructure has become stranded as clean
-   *  energy undercuts coal and oil on cost. Called monthly once solar_wind_parity
-   *  is researched. Each stranded-asset event deducts a treasury write-down and
-   *  logs the transition. Returns the loss amount (0 if no stranding occurred). */
-  checkStrandedAssets(): number {
-    if (!this.has('solar_wind_parity')) return 0;
-    // Stranding risk scales with how far the energy transition has progressed
-    // and how many fossil-era investments the economy carries.
-    const fossilDepth =
-      (this.has('combustion_engine') ? 1 : 0) +
-      (this.has('mass_production') ? 1 : 0) +
-      (this.has('electrical_grid') ? 1 : 0);
-    if (fossilDepth === 0) return 0;
-
-    // Each clean tech node reduces the stranding risk (assets are already written off or avoided)
-    const cleanDepth =
-      (this.has('solar_wind_parity') ? 1 : 0) +
-      (this.has('battery_storage') ? 1 : 0) +
-      (this.has('ev_adoption') ? 1 : 0);
-
-    // Green Industry Act buffers losses — the state absorbs them via the treasury
-    const buffered = this.passedLaws.has('green_industry_act');
-
-    // Base write-down: £ per stranded unit of fossil infrastructure
-    const baseWrite = this.gdpLastMonth * 0.015 * (fossilDepth / 3) * (1 - cleanDepth / 4);
-    if (baseWrite <= 0) return 0;
-
-    // Probabilistic: stranding events happen ~quarterly at peak
-    if (!this.rng.chance(0.25)) return 0;
-
-    const loss = buffered ? baseWrite * 0.4 : baseWrite;
-    this.treasury = Math.max(0, this.treasury - loss);
-    this.strandedAssetLoss += loss;
-    const msg = buffered
-      ? `GREEN TRANSITION: a tranche of fossil infrastructure is written down — state policy absorbs ${formatCurrency(loss)} of the stranded-asset loss.`
-      : `STRANDED ASSETS: coal and oil infrastructure loses ${formatCurrency(loss)} of book value as renewables undercut on cost. The write-down lands on the treasury.`;
-    this.addLog(msg, 'bad');
-    return loss;
-  }
 
   /** Enact Universal Basic Support — a monthly stipend for workers displaced
    *  by automation. Requires the universal_basic_support law to be passed.
@@ -4793,27 +4599,6 @@ export class RegionSim {
         t.satisfaction = Math.min(100, t.satisfaction + 5);
       }
     }
-  }
-
-  /** Monthly drift of automation unemployment. Called from monthlyUpdate when
-   *  ai_automation is researched. UBS halves the drift rate. */
-  private tickAutomation(): void {
-    if (!this.has('ai_automation')) return;
-    // Automation steadily displaces workers; UBS softens the drift
-    const rate = this.ubsActive ? 0.001 : 0.002;
-    this.automationUnemployment = Math.min(0.3, this.automationUnemployment + rate);
-
-    // High automation reduces services sector wages and satisfaction
-    if (this.automationUnemployment > 0.05) {
-      const displaceEffect = (this.automationUnemployment - 0.05) * 40;
-      for (const t of this.settlements) {
-        t.satisfaction = Math.max(0, t.satisfaction - displaceEffect * 0.01);
-        t.grievance = Math.min(100, t.grievance + displaceEffect * 0.005);
-      }
-    }
-
-    // Information sector booms (offsetting for those who can access it)
-    // This is a GDP effect, reflected through sector output in updateSectors
   }
 
   /** Built links are State works, paid from the treasury; links only upgrade. */
@@ -5921,7 +5706,7 @@ export class RegionSim {
     this.monthlyEconomy();
     if (this.stateProclaimed) this.updateFactions();
     if (this.stateProclaimed) this.updateSettlementFactions();
-    this.updateDiplomacy();
+    updateDiplomacy(this);
     this.applyProvincePolicyEffects(); // Phase 5: province governance effects
     this.updateArmyMovement();         // Phase 7: army marching, battles
     this.tickRivalArmyAI();            // Phase 7: rival army planning
@@ -5932,9 +5717,9 @@ export class RegionSim {
     if (this.playerWar) this.tickWarSupport(); // Phase 16: war support
     this.updateRivalAI(); // staggered AI updates for rivals (GDD §6.2)
     this.updateScouts(); // update faction scouts: movement, spawning, expiry (GDD §6.2)
-    this.tickClimate(); // the ledger runs from the first decade (GDD §8.2)
-    this.tickAutomation(); // Phase 11: automation unemployment drift
-    this.checkStrandedAssets(); // Phase 11: fossil write-downs as clean energy arrives
+    tickClimate(this); // the ledger runs from the first decade (GDD §8.2)
+    tickAutomation(this); // Phase 11: automation unemployment drift
+    checkStrandedAssets(this); // Phase 11: fossil write-downs as clean energy arrives
     if (this.hasCentralBank()) this.tickMonetary();
     this.tickHistoricalAnchors(); // scripted world-events that rhyme with history (GDD §1)
     this.tickMedia(); // Phase 12: media reach, press freedom, misinformation era
@@ -5982,13 +5767,13 @@ export class RegionSim {
     }
 
     // Phase 13: Population & Society Depth
-    this.tickDemographicTransition();
-    this.tickAppealMigration();
-    this.tickUnrestLadder();
+    tickDemographicTransition(this);
+    tickAppealMigration(this);
+    tickUnrestLadder(this);
     this.tickOpinionDynamics();
     // Push education coverage to lag buffer once a year (month 0 = January)
     if (this.month === 0) {
-      this.tickEducationLag();
+      tickEducationLag(this);
       this.tickStatsHistory();
     }
 
@@ -6089,7 +5874,7 @@ export class RegionSim {
   }
 
   /** Post-2100 epilogue flavor events: era-specific achievements and narrative beats. */
-  private triggerEpilogueEvent(): void {
+  triggerEpilogueEvent(): void {
     if (this.year < CENTURY_YEAR) return;
 
     const epilogueEvents = this.getEpilogueEventPool();
@@ -6168,8 +5953,8 @@ export class RegionSim {
     }
     // Phase 18: Advisor System Depth (GDD §8.7)
     this.generateAdvisorBriefs();
-    this.tickAdvisorLoyalty();
-    this.tickAdvisorEvents();
+    tickAdvisorLoyalty(this);
+    tickAdvisorEvents(this);
   }
 
   // ---- local markets & trade (GDD §5.2, first slice) ----
@@ -6484,8 +6269,8 @@ export class RegionSim {
       }
     }
     this.maintainRoutes();
-    this.tickLegitimacy();
-    this.tickRegimeMechanics();
+    tickLegitimacy(this);
+    tickRegimeMechanics(this);
     // Strikes: pressure vents when grievance boils over
     for (const t of this.settlements) {
       if (t.grievance > 60 && this.day >= t.strikeUntil && this.rng.chance(0.5)) {
@@ -7511,7 +7296,7 @@ export class RegionSim {
   }
 
   /** Compute demographic transition phase from era, education, and urbanization. */
-  private computeDemographicPhase(): 'pre_transition' | 'early_transition' | 'late_transition' | 'post_transition' {
+  computeDemographicPhase(): 'pre_transition' | 'early_transition' | 'late_transition' | 'post_transition' {
     const edu = this.educationLevel();
     const urban = this.urbanizationFraction();
     const yr = this.year;
@@ -7647,85 +7432,6 @@ export class RegionSim {
 
   // ---- Phase 13: Monthly tick methods ----
 
-  /** Tick the demographic transition: apply natural population growth to each player settlement. */
-  private tickDemographicTransition(): void {
-    this.demographicPhase = this.computeDemographicPhase();
-    const birthRate = this.globalBirthRate();
-    const deathRate = this.globalDeathRate();
-    const yr = this.year;
-    // Mid-century baby boom multiplier
-    const boomMult = (birthRate > 25 && deathRate < 15 && yr >= 1945 && yr <= 1975) ? 1.2 : 1.0;
-
-    // Era-based natural growth applies to EVERY settlement, rival or player —
-    // rivals were previously skipped here, which (with no tax income to grow on)
-    // left their towns demographically stunted. Parity lets rival populations
-    // climb with the same birth/death/baby-boom curve the player's towns ride.
-    for (const t of this.settlements) {
-      const pop = this.popOf(t);
-      if (pop <= 0) continue;
-      const naturalGrowth = pop * (birthRate - deathRate) / 1000 / 12 * boomMult;
-      if (naturalGrowth > 0) {
-        // Add to young working-age band
-        t.cohorts.bands[1] += naturalGrowth * 0.6;
-        t.cohorts.bands[0] += naturalGrowth * 0.4;
-      } else if (naturalGrowth < 0) {
-        this.removePop(t, -naturalGrowth);
-      }
-    }
-
-    // Aging crisis (2050+, post_transition): pension burden
-    if (this.demographicPhase === 'post_transition' && yr > 2050) {
-      if (!this.agingCrisisActive) {
-        this.agingCrisisActive = true;
-        this.addLog('Aging population placing strain on pension system.', 'bad');
-      }
-      const gdp = Math.max(0, this.gdpLastMonth);
-      const pensionBurden = 0.015 * gdp / 12;
-      this.treasury -= pensionBurden;
-    }
-  }
-
-  /** Tick appeal-score-driven migration between player settlements. */
-  private tickAppealMigration(): void {
-    const playerSettlements = this.settlements.filter((t) => t.factionId === this.playerFactionId);
-    if (playerSettlements.length < 2) return;
-
-    // Compute appeal scores for all player settlements (using 'middle' cohort as default)
-    const scores = new Map<number, number>();
-    for (const t of playerSettlements) {
-      scores.set(t.id, this.appealScore(String(t.id), 'middle'));
-    }
-
-    // For each pair, migrate if appeal difference > 15
-    for (let i = 0; i < playerSettlements.length; i++) {
-      for (let j = i + 1; j < playerSettlements.length; j++) {
-        const a = playerSettlements[i];
-        const b = playerSettlements[j];
-        const scoreA = scores.get(a.id) ?? 0;
-        const scoreB = scores.get(b.id) ?? 0;
-        const diff = scoreA - scoreB;
-        if (Math.abs(diff) <= 15) continue;
-        const [from, to, absDiff] = diff > 0 ? [b, a, diff] : [a, b, -diff];
-        const fromPop = this.popOf(from);
-        if (fromPop <= 5) continue;
-        // Max migration: 1% of sending settlement's pop per tick
-        const maxMove = fromPop * 0.01;
-        const movers = Math.min(maxMove, Math.floor((absDiff / 100) * 2));
-        if (movers < 0.01) continue;
-        this.removePop(from, movers);
-        to.cohorts.bands[1] += movers * 0.7;
-        to.cohorts.bands[2] += movers * 0.3;
-      }
-    }
-  }
-
-  /** Push current school coverage to the education lag ring buffer (once per year). */
-  private tickEducationLag(): void {
-    const coverage = this.currentSchoolCoverage();
-    this.educationLag.unshift(coverage);
-    if (this.educationLag.length > 25) this.educationLag.pop();
-  }
-
   /** Sample annual stats for the Century Graph. Called each January from monthlyUpdate. */
   private tickStatsHistory(): void {
     const playerSettlements = this.settlements.filter((t) => t.factionId === this.playerFactionId);
@@ -7743,110 +7449,6 @@ export class RegionSim {
       satisfaction,
     });
     if (this.statsHistory.length > STATS_HISTORY_MAX) this.statsHistory.shift();
-  }
-
-  /** Tick the unrest ladder — escalate or de-escalate based on grievance. */
-  private tickUnrestLadder(): void {
-    const playerSettlements = this.settlements.filter((t) => t.factionId === this.playerFactionId);
-    if (playerSettlements.length === 0) return;
-    const avgGrievance = playerSettlements.reduce((s, t) => s + t.grievance, 0) / playerSettlements.length;
-    const prevLevel = this.unrestLevel;
-
-    // Determine target level from grievance thresholds
-    let targetLevel: 0 | 1 | 2 | 3 | 4 | 5 = 0;
-    if (avgGrievance > 90) targetLevel = 5;
-    else if (avgGrievance > 75) targetLevel = 4;
-    else if (avgGrievance > 60) targetLevel = 3;
-    else if (avgGrievance > 45) targetLevel = 2;
-    else if (avgGrievance > 30) targetLevel = 1;
-
-    // Also check time-based escalation
-    if (this.unrestLevel >= 1 && this.unrestMonthsAtLevel >= 3 && targetLevel < 2) targetLevel = Math.max(targetLevel, 2) as 0 | 1 | 2 | 3 | 4 | 5;
-    if (this.unrestLevel >= 2 && this.unrestMonthsAtLevel >= 2 && targetLevel < 3) targetLevel = Math.max(targetLevel, 3) as 0 | 1 | 2 | 3 | 4 | 5;
-    if (this.unrestLevel >= 3 && this.unrestMonthsAtLevel >= 3 && targetLevel < 4) targetLevel = Math.max(targetLevel, 4) as 0 | 1 | 2 | 3 | 4 | 5;
-    if (this.unrestLevel >= 4 && this.unrestMonthsAtLevel >= 2 && targetLevel < 5) targetLevel = Math.max(targetLevel, 5) as 0 | 1 | 2 | 3 | 4 | 5;
-
-    // Cap: can only move one rung per month (escalate)
-    if (targetLevel > this.unrestLevel) {
-      this.unrestLevel = (this.unrestLevel + 1) as 0 | 1 | 2 | 3 | 4 | 5;
-    } else if (targetLevel < this.unrestLevel) {
-      // De-escalate: require grievance 15+ below threshold, 3-month grace
-      const threshold = [0, 30, 45, 60, 75, 90][this.unrestLevel] ?? 0;
-      if (avgGrievance < threshold - 15) {
-        this.unrestLevel = (this.unrestLevel - 1) as 0 | 1 | 2 | 3 | 4 | 5;
-      }
-    }
-
-    // Track months at current level
-    if (this.unrestLevel !== prevLevel) {
-      this.unrestMonthsAtLevel = 0;
-    } else {
-      this.unrestMonthsAtLevel++;
-    }
-
-    // Apply rung effects
-    const worstSettlement = playerSettlements.reduce((a, b) => a.grievance > b.grievance ? a : b);
-    switch (this.unrestLevel) {
-      case 1:
-        // Petitions: flavor event only
-        if (this.unrestLevel !== prevLevel) {
-          this.addLog('Workers petition for better conditions.', 'info');
-        }
-        break;
-      case 2:
-        // Strikes: sector output −15% in highest-grievance settlement (via strikeUntil)
-        if (this.unrestLevel !== prevLevel) {
-          worstSettlement.strikeUntil = this.day + 30;
-          this.addLog(`Strike wave begins at ${worstSettlement.name}.`, 'bad');
-        }
-        break;
-      case 3:
-        // Protests: trigger decision for player
-        if (this.unrestLevel !== prevLevel) {
-          this.addLog(
-            `PROTESTS erupt in ${worstSettlement.name}. Choose: Crackdown (workers relations −10) or Concede (cost 2% GDP, unrest −1) via the Politics tab.`,
-            'bad',
-          );
-        }
-        break;
-      case 4:
-        // Riots: infrastructure damage, approval hit
-        if (this.unrestLevel !== prevLevel) {
-          // Damage a random building in the worst settlement
-          if (worstSettlement.buildings.length > 0) {
-            // Just log — we don't have per-building condition tracking yet, so we apply grievance hit
-            worstSettlement.grievance = Math.min(100, worstSettlement.grievance + 5);
-          }
-          if (this.nationProclaimed && this.legitimacy > 0) {
-            this.legitimacy = Math.max(0, this.legitimacy - 8);
-          }
-          this.addLog(`Riots erupt in ${worstSettlement.name}. Infrastructure damaged. Legitimacy −8.`, 'bad');
-          for (const t of playerSettlements) t.satisfaction = Math.max(0, t.satisfaction - 10);
-        }
-        break;
-      case 5: {
-        // Revolution threat: monthly chance of government collapse
-        const grevFrac = avgGrievance / 100;
-        const revolChance = 0.03 * grevFrac;
-        if (this.rng.chance(revolChance)) {
-          const capital = playerSettlements[0];
-          this.addLog(
-            `Revolutionary movement seizes ${capital?.name ?? 'the capital'}! The government is overthrown — a successor faction rises. Regime change event pending.`,
-            'bad',
-          );
-          // Legitimacy collapse
-          if (this.nationProclaimed) this.legitimacy = Math.max(0, this.legitimacy - 30);
-          // Drop unrest a bit after the release
-          this.unrestLevel = 2;
-          this.unrestMonthsAtLevel = 0;
-          for (const t of playerSettlements) {
-            t.grievance = Math.max(0, t.grievance - 30);
-            t.satisfaction = Math.max(0, t.satisfaction - 15);
-          }
-        }
-        break;
-      }
-    }
   }
 
   /** Player action: crackdown on protests (rung 3). Workers relations −10. */
@@ -9125,17 +8727,6 @@ export class RegionSim {
       if (pol.investmentLevel >= 2 && this.treasury > 5) {
         this.treasury -= 2;
         s.garrisonStrength = Math.min(this.garrisonCap(s), s.garrisonStrength + 0.5);
-      }
-    }
-  }
-
-  /** Monthly: rival AI builds inter-provincial connections (commerce-weighted). */
-  private tickRivalProvinceGovernance(): void {
-    for (const rv of this.rivals) {
-      if (rv.weights.commerce < 5 || !this.rng.chance(0.04)) continue;
-      rv.pop = Math.round(rv.pop * 1.004);
-      if (this.rng.chance(0.3)) {
-        this.noteHistory(rv, `Improved provincial infrastructure, ${this.year}.`);
       }
     }
   }
@@ -10577,82 +10168,6 @@ export class RegionSim {
     }
   }
 
-  tickAdvisorLoyalty(): void {
-    if (!this.nationProclaimed) return;
-    const monthDays = 30;
-
-    for (const assignment of this.ministers) {
-      if (assignment.notableId === null) continue;
-      const notable = this.notables.find((n) => n.id === assignment.notableId && n.alive);
-      if (!notable) continue;
-
-      if (notable.loyalty === undefined) notable.loyalty = 100;
-      if (notable.monthsIgnored === undefined) notable.monthsIgnored = 0;
-
-      const lastAction = this.lastActionDay[assignment.role] ?? -Infinity;
-      const monthsSinceAction = (this.day - lastAction) / monthDays;
-
-      if (monthsSinceAction >= 3) {
-        notable.monthsIgnored = (notable.monthsIgnored ?? 0) + 1;
-        if (notable.monthsIgnored >= 3) {
-          notable.loyalty = Math.max(0, (notable.loyalty ?? 100) - 2);
-        }
-      } else {
-        notable.monthsIgnored = 0;
-      }
-
-      if ((notable.loyalty ?? 100) < 20 && this.rng.chance(0.03)) {
-        const faction = notable.factionAlignment ?? 'merchants';
-        const factionName = faction === 'workers' ? 'Labour' : faction === 'landowners' ? 'Conservative' : 'Liberal';
-        this.addLog(`${notable.name} has defected to the ${factionName} bloc after being sidelined.`, 'bad');
-        const oppFaction = this.factions.find((f) => f.id === faction);
-        if (oppFaction) oppFaction.power = Math.min(100, oppFaction.power + 10);
-        this.legitimacy = Math.max(0, this.legitimacy - 8);
-        assignment.notableId = null;
-      }
-    }
-  }
-
-  private tickAdvisorEvents(): void {
-    if (!this.nationProclaimed) return;
-
-    const coldRival = this.rivals.find((rv) => rv.relations < -30);
-    if (coldRival && this.rng.chance(0.05)) {
-      this.addLog(`FOREIGN SECRETARY: An envoy to ${coldRival.name} was refused audience. Relations are deteriorating.`, 'bad');
-      coldRival.relations = Math.max(-100, coldRival.relations - 5);
-    }
-
-    if (!this.researchBottleneckActive) {
-      const noSchool = this.settlements.filter((t) => !t.buildings.includes('schoolhouse'));
-      if (noSchool.length >= 3) {
-        this.researchBottleneckActive = true;
-        this.addLog(`SCIENCE MINISTRY: Our research pipeline is bottlenecked — secondary education is absent in ${noSchool.length} settlements. Recommend redirecting funding.`, 'bad');
-      }
-    } else {
-      const stillMissing = this.settlements.filter((t) => !t.buildings.includes('schoolhouse')).length;
-      if (stillMissing < 3) this.researchBottleneckActive = false;
-    }
-
-    if (this.legitimacy < 60 && (100 - this.legitimacy) > 40 && this.rng.chance(0.08)) {
-      this.addLog(`PRESS SECRETARY: The credibility gap is accelerating — recommend addressing fiscal transparency and public services.`, 'bad');
-    }
-
-    // Revanchism advisory: surface available revanchism CB (once after each defeat scar)
-    if (!this.playerWar && this.warScars.length > 0 && this.rng.chance(0.04)) {
-      const defeatScar = this.warScars.find((s) => s.outcome === 'defeat');
-      if (defeatScar) {
-        const offender = this.rivals.find((rv) => rv.id === defeatScar.rivalId);
-        if (offender && this.availableCasusBelli(offender).includes('revanchism')) {
-          this.addLog(
-            `FOREIGN SECRETARY: The humiliation of our defeat against ${defeatScar.rivalName} in ${defeatScar.yearEnded} still rankles. ` +
-            `Nationalists demand satisfaction — a revanchist campaign is available if the State has the will.`,
-            'info',
-          );
-        }
-      }
-    }
-  }
-
   recordPortfolioAction(portfolio: MinisterRoleId): void {
     this.lastActionDay[portfolio] = this.day;
     const assignment = this.ministers.find((m) => m.role === portfolio);
@@ -10661,135 +10176,6 @@ export class RegionSim {
       if (notable) {
         notable.monthsIgnored = 0;
         notable.loyalty = Math.min(100, (notable.loyalty ?? 100) + 5);
-      }
-    }
-  }
-
-  /** Monthly legitimacy tick (GDD §5.3). */
-  private tickLegitimacy(): void {
-    if (!this.nationProclaimed) return;
-    const govDef = this.govType ? GOV_TYPES.find((g) => g.id === this.govType) : null;
-    const regimeModifier = govDef?.legitimacyDecayModifier ?? 1.0;
-    // Press Freedom Act law slows decay by 30%; Information minister adds a further 25%
-    const pressBonus = this.passedLaws.has('press_freedom_act') ? 0.7 : 1.0;
-    const infoBonus = this.ministerFor('press') ? 0.75 : 1.0;
-    const decayRate = 0.5 * regimeModifier * pressBonus * infoBonus;
-    this.legitimacy = Math.max(0, this.legitimacy - decayRate);
-    if (this.govType === 'junta') {
-      const ws = this.factions.find((f) => f.id === 'workers')?.support ?? 50;
-      const ls = this.factions.find((f) => f.id === 'landowners')?.support ?? 50;
-      const avg = ws * 0.5 + ls * 0.5;
-      if (avg > 60) this.legitimacy = Math.min(100, this.legitimacy + 0.3);
-      if (avg < 30) this.legitimacy = Math.max(0, this.legitimacy - 0.5);
-    }
-    if (this.govType === 'monarchy') {
-      const elders = this.notables.filter((n) => n.alive && n.age >= 50).length;
-      if (elders > 0) this.legitimacy = Math.min(100, this.legitimacy + 0.2 * elders);
-    }
-    if (this.legitimacy < 30 && this.rng.chance(0.05)) {
-      this.addLog(
-        'LEGITIMACY CRISIS: opposition groups are openly challenging the regime.',
-        'bad',
-      );
-    }
-  }
-
-  /** Monthly per-regime mechanics (GDD §9). Called from monthlyUpdate(). */
-  private tickRegimeMechanics(): void {
-    if (!this.nationProclaimed || !this.govType) return;
-
-    // ---- One-Party State: planning optimism and reported GDP ----
-    if (this.govType === 'one_party') {
-      this.planningOptimism = Math.min(1, this.planningOptimism + 0.01);
-      this.reportedGDP = this.gdpLastMonth * (1 + this.planningOptimism * 0.3);
-    } else {
-      this.reportedGDP = this.gdpLastMonth;
-      // planningOptimism resets on regime change (handled in proclaimNation)
-    }
-
-    // ---- Credibility Gap: authoritarian press + controlled narrative ----
-    const isAuthoritarian = ['junta', 'autocracy', 'one_party', 'fascist', 'abs_monarchy', 'monarchy'].includes(this.govType);
-    const hasControlledPress = !this.passedLaws.has('press_freedom_act');
-    if (isAuthoritarian && hasControlledPress) {
-      this.credibilityGap = Math.min(100, this.credibilityGap + 0.5);
-      // Cliff event: gap > 80 + spark
-      if (this.credibilityGap > 80) {
-        const spark = this.treasury < 0 ||
-          (this.playerWar && this.playerWar.score < -20) ||
-          this.settlements.some((t) => t.grievance > 75);
-        if (spark && this.rng.chance(0.15)) {
-          this.legitimacy = Math.max(0, this.legitimacy - 30);
-          this.addLog(
-            'CREDIBILITY COLLAPSE: The gap between the official narrative and lived reality has become impossible to ignore. Legitimacy shattered.',
-            'bad',
-          );
-        }
-      }
-    } else {
-      this.credibilityGap = Math.max(0, this.credibilityGap - 0.3);
-    }
-
-    // ---- Fascist regime: legitimacy requires conflict ----
-    if (this.govType === 'fascist') {
-      const atPeace = !this.playerWar;
-      if (atPeace) {
-        this.legitimacy = Math.max(0, this.legitimacy - 1);
-        if (this.rng.chance(0.3)) {
-          this.addLog(
-            'PRESSURE TO EXPAND: The regime feeds on conflict — without a war to sustain the movement, the streets grow restless.',
-            'bad',
-          );
-        }
-      }
-    }
-
-    // ---- Theocracy: schism risk grows with secular techs ----
-    if (this.govType === 'theocracy') {
-      const secularTechs = ['computing', 'civil_rights', 'antibiotics', 'public_education', 'social_insurance'];
-      const researched = secularTechs.filter((t) => this.has(t)).length;
-      if (researched > 0) {
-        this.schismRisk = Math.min(100, this.schismRisk + researched);
-      }
-      // Schism event at risk > 70
-      if (this.schismRisk > 70 && this.rng.chance(0.03)) {
-        // Schism fires
-        for (const t of this.settlements) {
-          t.grievance = Math.min(100, t.grievance + 20);
-        }
-        this.legitimacy = Math.max(0, this.legitimacy - 10);
-        this.schismRisk = 30; // reset after schism
-        this.addLog(
-          `DOCTRINAL SCHISM: The tension between religious orthodoxy and modernizing society erupts. ` +
-          `Faction split — a reformist movement challenges the clerical establishment. Grievance surges across all towns.`,
-          'bad',
-        );
-      }
-    }
-
-    // ---- Corporatocracy: shareholder patience decays during long wars ----
-    if (this.govType === 'corporatocracy') {
-      if (this.playerWar) {
-        const warMonths = (this.day - (this.playerWar as any).startDay) / 30;
-        if (warMonths > 12) {
-          this.shareholderPatience = Math.max(0, this.shareholderPatience - 3);
-        }
-      } else {
-        // Peacetime: patience recovers slowly
-        this.shareholderPatience = Math.min(100, this.shareholderPatience + 0.5);
-      }
-      // Hostile board takeover at patience < 20
-      if (this.shareholderPatience < 20 && this.rng.chance(0.1)) {
-        this.legitimacy = Math.max(0, this.legitimacy - 15);
-        const merchantFaction = this.factions.find((f) => f.id === 'merchants');
-        if (merchantFaction) {
-          merchantFaction.support = Math.min(100, merchantFaction.support + 20);
-        }
-        this.addLog(
-          'HOSTILE BOARD TAKEOVER: The corporate council convenes an emergency session. ' +
-          'Shareholder patience exhausted — a new policy is enacted by the merchant faction without consultation.',
-          'bad',
-        );
-        this.shareholderPatience = 35; // shock resets patience
       }
     }
   }
@@ -10931,7 +10317,7 @@ export class RegionSim {
     return { personality, traits, recentHistory, approximateStrength: strength, comparison };
   }
 
-  private clampRel(v: number): number {
+  clampRel(v: number): number {
     return Math.max(-100, Math.min(100, v));
   }
 
@@ -10940,7 +10326,7 @@ export class RegionSim {
   }
 
   /** The player's bloc, for ideology distance — null before the Proclamation. */
-  private playerBloc(): RegimeBloc | null {
+  playerBloc(): RegimeBloc | null {
     if (!this.nationProclaimed || !this.govType) return null;
     return this.govType === 'junta' ? 'autocratic' : this.govType === 'monarchy' ? 'traditional' : 'liberal';
   }
@@ -11645,97 +11031,8 @@ export class RegionSim {
     return live.length * per * (1 + bloc.sharedTariff);
   }
 
-  /** Monthly diplomacy tick: emergence, relations drift, AI offers,
-   *  hostile mischief, regime change abroad, and foreign wars. */
-  private updateDiplomacy(): void {
-    // Emergence: the world proclaims its nations on its own clock (GDD §6.2),
-    // banded so the first foreign power reliably exists by mid-century.
-    if (this.year >= RIVAL_EMERGENCE_YEAR && this.rivals.length < MAX_RIVALS) {
-      const overdue = this.rivals.length === 0 && this.year >= 1940;
-      if (this.rng.chance(overdue ? 0.25 : 0.03)) this.spawnRival();
-    }
-    this.offers = this.offers.filter((o) => o.expiresDay > this.day && this.rival(o.rivalId));
-    this.counters = this.counters.filter((c) => c.expiresDay > this.day && this.rival(c.rivalId));
-    const myBloc = this.playerBloc();
-    for (const rv of this.rivals) {
-      rv.pop *= 1.0015; // they grow whether you watch or not
-      if (this.playerWar?.rivalId === rv.id) {
-        rv.relations = this.clampRel(Math.min(rv.relations, -60)); // war pins the ledger
-        continue; // mischief, offers, and drift all yield to the front
-      }
-      // Relations drift toward a baseline set by personality, regime
-      // distance (GDD §5.4), and whatever ink is already on the page.
-      let base = rv.weights.commerce * 1.2 - rv.weights.expansion * 1.5 - rv.weights.grudge * 0.8;
-      if (myBloc) base += blocAffinity(myBloc, this.regimeOf(rv).bloc);
-      if (rv.treaties.includes('non_aggression')) base += 8;
-      if (rv.treaties.includes('trade_agreement')) base += 12;
-      if (rv.treaties.includes('defensive_pact')) base += 16;
-      if (rv.borderSettled) base += 6; // a fixed frontier is a quiet one
-      rv.relations = this.clampRel(rv.relations + (base - rv.relations) * 0.04);
-      // AI-initiated offers (GDD §6.3): commerce courts you; caution wants fences
-      if (this.stateProclaimed && !this.offers.some((o) => o.rivalId === rv.id)) {
-        if (!rv.treaties.includes('trade_agreement') && rv.weights.commerce >= 5 && rv.relations > 30 && this.rng.chance(0.12)) {
-          this.offers.push({ rivalId: rv.id, kind: 'trade_agreement', expiresDay: this.day + 90 });
-          this.addLog(`Envoys from ${rv.name} arrive with ledgers and samples: they offer a Trade Agreement.`, 'info');
-        } else if (!rv.treaties.includes('non_aggression') && rv.relations < -10 && rv.relations > -50 && rv.weights.risk <= 5 && this.rng.chance(0.08)) {
-          this.offers.push({ rivalId: rv.id, kind: 'non_aggression', expiresDay: this.day + 90 });
-          this.addLog(`${rv.name} proposes a Non-Aggression Pact — cold neighbors, fenced borders.`, 'info');
-        } else if (
-          !rv.treaties.includes('climate_accord') &&
-          this.accordUnlocked() &&
-          this.warmingC > 1.8 &&
-          this.year >= 2020 &&
-          (ARCHETYPE_GREEN_PROPENSITY[rv.archetype] ?? 0.5) >= 0.6 &&
-          this.rng.chance(0.06)
-        ) {
-          // High-propensity rival (trading republic or crusader) invites player to the Climate Accord
-          this.offers.push({ rivalId: rv.id, kind: 'climate_accord', expiresDay: this.day + 180 });
-          this.addLog(
-            `${rv.name} extends a formal invitation to the Climate Accord — ` +
-            `warming is past +${this.warmingC.toFixed(1)}°C and they call for collective action.`,
-            'info',
-          );
-        }
-      }
-      // Hostile mischief (GDD §6.4): town-scale friction, deniable and cheap.
-      // Difficulty-scaled (aggroChance) so harder tiers see nastier neighbours.
-      if (rv.relations < -40 && !rv.treaties.includes('non_aggression') && this.rng.chance(this.aggroChance(0.1 + rv.weights.risk * 0.015))) {
-        if (!rv.borderSettled && (this.rng.chance(0.5) || this.tradeValueLastMonth <= 0)) {
-          const t = this.settlements[this.rng.int(this.settlements.length)];
-          if (t) {
-            t.grievance = Math.min(100, t.grievance + 6);
-            rv.relations = this.clampRel(rv.relations - 3);
-            this.addLog(`Border friction: ${rv.name}'s surveyors plant markers in ${t.name}'s outfields. Tempers fray.`, 'bad');
-          }
-        } else {
-          const toll = Math.min(this.treasury, 5 + this.rng.int(10));
-          this.treasury -= toll;
-          this.addLog(`${rv.name}'s customs men shake down caravans at the frontier — ` + formatCurrency(toll) + ` in seized goods and bribes.`, 'bad');
-        }
-      }
-      // Beyond mischief (GDD §7.1): an emboldened hostile power declares war outright
-      if (
-        !this.playerWar && this.nationProclaimed && rv.relations < -60 &&
-        !rv.treaties.includes('non_aggression') &&
-        this.rng.chance((0.01 + rv.weights.risk * 0.003 + rv.weights.expansion * 0.002) * ARCHETYPE_WAR_FREQ_MULT[rv.archetype])
-      ) {
-        // a settled frontier leaves them no honest grievance — they stage one
-        this.startPlayerWar(rv, rv.borderSettled ? 'fabricated' : 'border_dispute', true);
-        continue;
-      }
-      // Regime change abroad is world news the player reads about (GDD §6.3)
-      if (this.rng.chance(0.01)) this.changeRegime(rv, 'drift');
-    }
-    this.tickForeignRelations();
-    this.tickPlayerWar();
-    this.tickRivalEspionage();       // Phase 6: rivals spy on the player
-    this.tickRivalTradeBlocActivity(); // Phase 6: rivals form their own blocs
-    this.tickRivalProvinceGovernance(); // Phase 5: rivals invest in provinces
-    this.tickSanctions();            // Phase 6: expire elapsed sanctions
-  }
-
   /** A nation's bio stays readable: cap the beats, keep the founding line. */
-  private noteHistory(rv: RivalNation, text: string): void {
+  noteHistory(rv: RivalNation, text: string): void {
     rv.history.push(text);
     if (rv.history.length > 16) rv.history.splice(1, 1);
   }
@@ -11767,7 +11064,7 @@ export class RegionSim {
 
   /** A rival's government falls — by slow drift or by losing a war. The
    *  era gates what replaces it: the interwar pool leans autocratic. */
-  private changeRegime(rv: RivalNation, cause: 'drift' | 'defeat'): void {
+  changeRegime(rv: RivalNation, cause: 'drift' | 'defeat'): void {
     const old = this.regimeOf(rv);
     const next = this.pickRegime(rv.weights, old.id);
     rv.regime = next.id;
@@ -11782,152 +11079,6 @@ export class RegionSim {
         : `REGIME CHANGE in ${rv.name}: the ${old.name.toLowerCase()} falls; a ${next.name.toLowerCase()} takes its place.`,
       'info',
     );
-  }
-
-  /** The world's own politics (GDD §6.4): rival pairs drift, ally, feud,
-   *  and fight — the player reads the dispatches and sells into the booms. */
-  private tickForeignRelations(): void {
-    for (let i = 0; i < this.rivals.length; i++) {
-      for (let j = i + 1; j < this.rivals.length; j++) {
-        const a = this.rivals[i];
-        const b = this.rivals[j];
-        const key = this.pairKey(a.id, b.id);
-        const allied = this.alliances.includes(key);
-        const atWar = this.warBetween(a.id, b.id) !== undefined;
-        // Drift toward a baseline from both personalities and bloc distance
-        let base =
-          (a.weights.commerce + b.weights.commerce) * 1.2 -
-          (a.weights.expansion + b.weights.expansion) * 1.5 +
-          blocAffinity(this.regimeOf(a).bloc, this.regimeOf(b).bloc);
-        if (allied) base += 25;
-        let rel = (this.rivalPairs[key] ?? 0) + (base - (this.rivalPairs[key] ?? 0)) * 0.03;
-        if (atWar) rel = Math.min(rel, -50);
-        this.rivalPairs[key] = this.clampRel(rel);
-        if (atWar) continue;
-        if (!allied && rel > 45 && a.weights.honor + b.weights.honor >= 10 && this.rng.chance(0.05)) {
-          this.alliances.push(key);
-          this.noteHistory(a, `Allied with ${b.name}, ${this.year}.`);
-          this.noteHistory(b, `Allied with ${a.name}, ${this.year}.`);
-          this.addLog(`PACT ABROAD: ${a.name} and ${b.name} sign an alliance — the world is choosing sides.`, 'info');
-        } else if (!allied && rel > 25 && a.weights.commerce + b.weights.commerce >= 10 && this.rng.chance(0.04)) {
-          this.rivalPairs[key] = this.clampRel(rel + 5);
-          this.addLog(`${a.name} and ${b.name} open a customs union — freight moves freely between them.`, 'info');
-        } else if (rel < -20 && this.rng.chance(0.06)) {
-          this.rivalPairs[key] = this.clampRel(rel - 4);
-          this.addLog(`${a.name} and ${b.name} trade ultimatums over a border survey. The chanceries buzz.`, 'info');
-        }
-        if (!allied && rel < -50 && this.rng.chance(0.03 + (a.weights.risk + b.weights.risk) * 0.003)) {
-          this.startForeignWar(a.id, b.id);
-        }
-      }
-    }
-    // Run the active wars: refugees flow now, the reckoning comes at the peace
-    for (const w of [...this.foreignWars]) {
-      const a = this.rival(w.a);
-      const b = this.rival(w.b);
-      if (!a || !b) {
-        this.foreignWars = this.foreignWars.filter((x) => x !== w);
-        continue;
-      }
-      if (this.rng.chance(0.2) && this.settlements.length > 0) {
-        const t = this.settlements[this.rng.int(this.settlements.length)];
-        const wave = 2 + this.rng.int(6);
-        t.cohorts.bands[1] += wave * 0.6;
-        t.cohorts.bands[0] += wave * 0.25;
-        t.cohorts.bands[2] += wave * 0.15;
-        this.addLog(`Refugees from the ${a.name}–${b.name} war reach ${t.name} — ${wave} souls with what they could carry.`, 'info');
-      }
-      if (this.day >= w.endsDay) this.endForeignWar(w, a, b);
-    }
-  }
-
-  // ---- Phase 6: AI espionage (rivals spy on the player) ----
-
-  /** Monthly tick: hostile rivals may run covert operations against the player. */
-  private tickRivalEspionage(): void {
-    if (!this.stateProclaimed) return;
-    for (const rv of this.rivals) {
-      if (this.playerWar?.rivalId === rv.id) continue;
-      if (rv.relations > 10) continue;
-      const chance = 0.04 + rv.weights.risk * 0.006 + Math.abs(Math.min(0, rv.relations)) * 0.001;
-      if (!this.aiRng.chance(chance)) continue;
-      if (this.day - (rv.lastEspionageDay ?? -90) < 90) continue;
-      rv.lastEspionageDay = this.day;
-      // Operation chosen by personality
-      const op = rv.weights.commerce >= 6 ? 'economic_pressure'
-               : rv.weights.expansion >= 7 ? 'military_recon'
-               : 'incite_dissent';
-      const playerIntel = this.intelOf(rv.id);
-      const caught = this.aiRng.chance(0.15 + playerIntel * 0.35);
-      if (!caught) {
-        switch (op) {
-          case 'economic_pressure': {
-            const drain = Math.min(this.treasury, 5 + this.rng.int(15));
-            this.treasury = Math.max(0, this.treasury - drain);
-            this.addLog(`Trade irregularities cost the treasury ${formatCurrency(drain)} — ${rv.name} interference suspected.`, 'bad');
-            break;
-          }
-          case 'military_recon': {
-            // Rival tracks our defences; manifest as a log warning
-            this.addLog(`Military attachés from ${rv.name} are spotted near the frontier — border security alerted.`, 'info');
-            break;
-          }
-          case 'incite_dissent': {
-            const t = this.settlements.length > 0 ? this.settlements[this.rng.int(this.settlements.length)] : null;
-            if (t && t.factionId === this.playerFactionId) {
-              t.grievance = Math.min(100, t.grievance + 5);
-              this.addLog(`Agitators stir trouble in ${t.name} — ${rv.name}'s hand is suspected.`, 'bad');
-            }
-            break;
-          }
-        }
-      } else {
-        // Caught: expose the operation, slight relations hit for them, sanctions threat
-        rv.relations = this.clampRel(rv.relations - 6);
-        this.addLog(`COUNTER-INTEL: ${rv.name}'s agents are caught and expelled. Their operation fails.`, 'good');
-      }
-    }
-  }
-
-  // ---- Phase 6: AI trade blocs ----
-
-  /** Monthly tick: commerce-weighted rivals form independent trade blocs. */
-  private tickRivalTradeBlocActivity(): void {
-    // Clean up blocs whose membership has fallen below 2
-    this.rivalTradeBlocs = this.rivalTradeBlocs.filter(
-      (b) => b.memberRivalIds.filter((id) => this.rival(id)).length >= 2,
-    );
-    for (let i = 0; i < this.rivals.length; i++) {
-      const a = this.rivals[i];
-      if (a.weights.commerce < 5) continue;
-      for (let j = i + 1; j < this.rivals.length; j++) {
-        const b = this.rivals[j];
-        if (b.weights.commerce < 5) continue;
-        if (this.pairRelations(a.id, b.id) < 40) continue;
-        const together = this.rivalTradeBlocs.some(
-          (bl) => bl.memberRivalIds.includes(a.id) && bl.memberRivalIds.includes(b.id),
-        );
-        if (together || !this.rng.chance(0.025)) continue;
-        const aBloc = this.rivalTradeBlocs.find((bl) => bl.memberRivalIds.includes(a.id));
-        const bBloc = this.rivalTradeBlocs.find((bl) => bl.memberRivalIds.includes(b.id));
-        if (aBloc && !aBloc.memberRivalIds.includes(b.id)) {
-          aBloc.memberRivalIds.push(b.id);
-          this.addLog(`${b.name} joins ${a.name}'s trade union — tariff walls rise for outsiders.`, 'info');
-        } else if (bBloc && !bBloc.memberRivalIds.includes(a.id)) {
-          bBloc.memberRivalIds.push(a.id);
-          this.addLog(`${a.name} accedes to ${b.name}'s trade union — the bloc grows.`, 'info');
-        } else if (!aBloc && !bBloc) {
-          const tariff = 0.1 + (a.weights.commerce + b.weights.commerce) * 0.01;
-          this.rivalTradeBlocs.push({
-            id: this.nextRivalBlocId++,
-            memberRivalIds: [a.id, b.id],
-            foundedYear: this.year,
-            tariff: Math.min(0.4, tariff),
-          });
-          this.addLog(`${a.name} and ${b.name} found a trade union — the world organises into blocs.`, 'info');
-        }
-      }
-    }
   }
 
   /** Monthly tariff friction applied to player export earnings from rival bloc members. */
@@ -11995,11 +11146,6 @@ export class RegionSim {
     this.addLog(`SANCTIONS: ${rv.name} imposes retaliatory trade sanctions on us.`, 'bad');
   }
 
-  /** Monthly: expire elapsed sanctions. */
-  private tickSanctions(): void {
-    this.sanctions = this.sanctions.filter((s) => s.untilDay < 0 || s.untilDay > this.day);
-  }
-
   /** War between two powers (GDD §6.4: "their wars move prices").
    *  Public so scenarios and tests can light the fuse directly. */
   startForeignWar(aId: number, bId: number): boolean {
@@ -12025,26 +11171,6 @@ export class RegionSim {
     }
     this.addLog(`WAR ABROAD: ${a.name} and ${b.name} are at war. Their buyers pay any price — the valley's exports boom.`, 'info');
     return true;
-  }
-
-  /** The peace: the loser bleeds population, nurses a grudge for decades,
-   *  and may lose its government to the defeat (GDD §6.3 regime change). */
-  private endForeignWar(w: ForeignWar, a: RivalNation, b: RivalNation): void {
-    this.foreignWars = this.foreignWars.filter((x) => x !== w);
-    const aWins = this.rng.next() < a.pop / (a.pop + b.pop);
-    const winner = aWins ? a : b;
-    const loser = aWins ? b : a;
-    loser.pop *= 0.85 + this.rng.next() * 0.1;
-    winner.pop *= 1.02;
-    this.rivalPairs[this.pairKey(a.id, b.id)] = -60; // betrayal-grade memory
-    this.noteHistory(winner, `Victorious over ${loser.name}, ${this.year}.`);
-    this.noteHistory(loser, `Defeated by ${winner.name}, ${this.year}.`);
-    this.addLog(
-      `PEACE ABROAD: the ${a.name}–${b.name} war ends — ${winner.name} dictates terms, and ${loser.name} signs them. ` +
-      `The export boom cools.`,
-      'info',
-    );
-    if (this.rng.chance(0.5)) this.changeRegime(loser, 'defeat');
   }
 
   // ---- The nation at war (GDD §7) ----
@@ -12081,7 +11207,7 @@ export class RegionSim {
     return true;
   }
 
-  private startPlayerWar(rv: RivalNation, cb: CasusBelli, defensive: boolean): void {
+  startPlayerWar(rv: RivalNation, cb: CasusBelli, defensive: boolean): void {
     this.playerWar = {
       rivalId: rv.id, cb, defensive, startedDay: this.day,
       support: defensive ? 85 : CASUS_BELLI_DEFS[cb].support, // a defensive war starts at 85 (§7.1)
@@ -13160,7 +12286,7 @@ export class RegionSim {
 
   /** Monthly war resolution (GDD §7.3–7.4): the front moves on the power
    *  ratio, attrition bleeds the cohorts, and the home front keeps score. */
-  private tickPlayerWar(): void {
+  tickPlayerWar(): void {
     const w = this.playerWar;
     if (!w) return;
     if (w.startedDay === this.day) return; // the declaration day musters; the front resolves with the month
@@ -13269,7 +12395,7 @@ export class RegionSim {
     }
   }
 
-  private removePop(t: Settlement, count: number): void {
+  removePop(t: Settlement, count: number): void {
     const pop = this.popOf(t);
     if (pop <= 0) return;
     const frac = Math.min(1, count / pop);

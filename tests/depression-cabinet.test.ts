@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { RegionSim, REGION_MINUTES_PER_TICK, MINISTER_ROLES, ENVOY_COOLDOWN_DAYS } from '../src/sim/region';
+import { tickLegitimacy } from '../src/sim/systems/regime';
 import { MINUTES_PER_DAY, DAYS_PER_YEAR, START_YEAR } from '../src/sim/defs';
 
 const ticksPerDay = MINUTES_PER_DAY / REGION_MINUTES_PER_TICK;
@@ -408,16 +409,15 @@ describe('Cabinet: 6 minister roles', () => {
       const m = r.ministers.find((x) => x.role === 'press');
       if (m) m.notableId = notable.id;
     }
-    const tick = r as unknown as { tickLegitimacy(): void };
     const legBefore = r.legitimacy;
-    tick.tickLegitimacy();
+    tickLegitimacy(r);
     const decayWithMinister = legBefore - r.legitimacy;
 
     // Reset without minister
     r.legitimacy = 80;
     const m2 = r.ministers.find((x) => x.role === 'press');
     if (m2) m2.notableId = null;
-    tick.tickLegitimacy();
+    tickLegitimacy(r);
     const decayWithout = legBefore - r.legitimacy;
 
     expect(decayWithMinister).toBeLessThan(decayWithout);
