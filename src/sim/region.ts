@@ -1818,7 +1818,7 @@ export interface ProvincialArmy {
 // ---- War (GDD §7): casus belli → mobilization → war score → negotiated peace ----
 
 /** Why we fight (GDD §7.1): CB quality sets home-front war support at declaration. */
-export type CasusBelli = 'sponsored_raids' | 'border_dispute' | 'fabricated';
+export type CasusBelli = 'sponsored_raids' | 'border_dispute' | 'fabricated' | 'revanchism';
 
 export const CASUS_BELLI_DEFS: Record<CasusBelli, { name: string; support: number; desc: string }> = {
   sponsored_raids: {
@@ -1832,6 +1832,10 @@ export const CASUS_BELLI_DEFS: Record<CasusBelli, { name: string; support: numbe
   fabricated: {
     name: 'Fabricated Incident', support: 40,
     desc: 'A staged provocation. Legitimacy −10 at home, and every chancery prices the lie like a broken seal.',
+  },
+  revanchism: {
+    name: 'Revanchism', support: 85,
+    desc: 'They dictated humiliating terms last time. The home front has not forgotten — this war needs no pretext.',
   },
 };
 
@@ -1925,7 +1929,7 @@ export interface ArmyUnit {
 // ---- Phase 16: Warfare System Depth (GDD §7) ----
 
 /** Casus Belli type for Phase 16 structured CB system. */
-export type CBType = 'border_dispute' | 'treaty_violation' | 'protect_ideology' | 'resource_denial' | 'fabricated';
+export type CBType = 'border_dispute' | 'treaty_violation' | 'protect_ideology' | 'resource_denial' | 'fabricated' | 'revanchism';
 
 /** A structured casus belli with effects (Phase 16). */
 export interface CBDef {
@@ -1985,6 +1989,9 @@ export interface PlayerWar {
   units: ArmyUnit[];
   /** Food/ammunition reserve for the army (months of supply). */
   supplyReserve: number;
+  /** Front position mirroring war score: positive = we hold the initiative,
+   *  negative = we are pushed back. Write-only scaffold; future Front system reads it. */
+  front?: { position: number };
 }
 
 /** Regime × war (GDD §7.5): below this floor the war eats the regime;
@@ -1995,6 +2002,42 @@ export const WAR_SUPPORT_FLOOR: Record<GovType, number> = {
   direct_democracy: 50, corporatocracy: 30, fascist: 20,
   social_democracy: 48, autocracy: 20, one_party: 20, technocracy: 35,
 };
+
+/** Monthly war-support decay multiplier by regime — all 1.0 now (no-op scaffold);
+ *  tune non-1.0 values to differentiate regimes without a re-baseline. */
+/** Per-government war-support decay multiplier. <1 = support decays slower (propaganda/control);
+ *  >1 = support decays faster (public accountability). Tuned to regime accountability model. */
+export const WAR_SUPPORT_DECAY_MULT: Record<GovType, number> = {
+  // High accountability: opposition can voice anti-war sentiment
+  direct_democracy:  1.5, // every vote counts; casualties trigger immediate backlash
+  democracy:         1.3,
+  social_democracy:  1.2,
+  republic:          1.1,
+  // Neutral: mixed accountability
+  const_monarchy:    1.0,
+  monarchy:          1.0,
+  oligarchy:         1.0,
+  corporatocracy:    0.9, // war if it's profitable — lobbies dampen backlash
+  technocracy:       0.9, // efficiency narrative insulates the regime
+  theocracy:         0.8, // holy war framing sustains support
+  // Low accountability: regime suppresses dissent
+  abs_monarchy:      0.75,
+  autocracy:         0.7,
+  junta:             0.65, // military culture normalizes conflict
+  one_party:         0.60,
+  fascist:           0.55, // propaganda + censorship: support barely decays
+};
+
+/** Bookkeeping record written when a war ends (GDD §7 post-war state). */
+export interface WarScar {
+  rivalId: number;
+  rivalName: string;
+  yearEnded: number;
+  outcome: 'victory' | 'defeat' | 'negotiated' | 'status_quo';
+  occupied: number;
+  casualties: number;
+  durationMonths: number;
+}
 
 const RIVAL_NAMES = [
   'Vasterholm', 'Karelia', 'Tyrennia', 'Meridia', 'Vossland', 'Cantara',
@@ -2636,6 +2679,10 @@ export const GEOENGINEER_DURATION_DAYS = 120;
 export const AGRI_CLIMATE_THRESHOLD = 1.5; // °C above 1900 before the farm economy bites
 export const AGRI_CLIMATE_SLOPE = 0.06;    // sector-output drag per °C above the threshold
 export const AGRI_CLIMATE_MAX_DRAG = 0.30; // cap: agricultural GDP down at most 30%
+/** Industrial brownout climate drag: kicks in at ≥3°C, linear, capped at 30%. */
+export const INDUSTRY_BROWNOUT_THRESHOLD = 3.0;
+export const INDUSTRY_BROWNOUT_SLOPE = 0.10;   // 10% drag per °C above threshold
+export const INDUSTRY_BROWNOUT_MAX_DRAG = 0.30; // cap: industrial GDP down at most 30%
 /** Accord compliance: below this fraction the signatory is a free-rider. */
 export const ACCORD_DEFECT_THRESHOLD = 0.35;
 /** Maximum world-emissions cut from fully compliant accord coverage. */
@@ -2663,6 +2710,17 @@ export const ARCHETYPE_GREEN_PROPENSITY: Record<RivalArchetype, number> = {
   hegemon: 0.2,
   hermit_kingdom: 0.1,
 };
+
+/** Per-archetype multiplier on the base AI war-declaration probability.
+ *  Applied on the p = 0.01 + risk×0.003 + expansion×0.002 roll in tickRivalAI.
+ *  Tuned to archetype personality: hegemons escalate, hermits hide, traders negotiate. */
+export const ARCHETYPE_WAR_FREQ_MULT: Record<RivalArchetype, number> = {
+  hegemon:          1.6,  // expansion 9 + risk 7 → the natural warmonger
+  trading_republic: 0.4,  // expansion 3 + risk 3 → war disrupts trade; avoids conflict
+  hermit_kingdom:   0.3,  // expansion 2 + risk 2 → isolationist; only fights if cornered
+  crusader_state:   1.2,  // expansion 6 + risk 6 → ideological mission justifies campaigns
+  opportunist:      1.1,  // risk 9 but honorless; fights when the odds look good
+};
 export const WORLD_GREEN_START_YEAR = 1972;  // the transition can begin as renewables become conceivable
 export const WORLD_GREEN_RAMP_YEARS = 38;    // years from the start to a full ramp (≈2010)
 export const WORLD_GREEN_MAX_CUT = 0.92;     // a fully-green world cuts this fraction of its emissions
@@ -2670,6 +2728,24 @@ export const WORLD_GREEN_URGENCY_C = 1.6;    // warming (°C) at which crisis ur
 export const WORLD_GREEN_BASE = 0.55;        // baseline transition rate before warming urgency adds the rest
 export const PLAYER_GREEN_DIFFUSION = 0.6;   // how much of the world's transition spills into a passive player's own emissions (GDD §5.6 proven-tech diffusion)
 export const DROWNED_GREEN_RELIEF = 1.5;     // °C of projection credit per unit worldGreenShare at the era verdict (a transitioning world's flat projection overstates 2100 warming)
+
+/** Maximum annual snapshots retained in statsHistory (one per year, 200y of coverage). */
+export const STATS_HISTORY_MAX = 200;
+
+/** One annual data point for the Century Graph. Sampled each January. */
+export interface StatSnapshot {
+  year: number;
+  /** Annualised GDP (gdpLastMonth × 12). */
+  gdp: number;
+  /** Total population across all player settlements. */
+  pop: number;
+  /** Global warming in °C above 1900 baseline. */
+  warmingC: number;
+  /** Player national treasury at snapshot time. */
+  treasury: number;
+  /** Mean satisfaction across player settlements (0–100). */
+  satisfaction: number;
+}
 
 /** The endgame's three skies (GDD §3.2): chosen by your climate, economy,
  *  and regime outcomes — not the calendar. */
@@ -3126,6 +3202,8 @@ export class RegionSim {
   scouts: Scout[] = [];
   /** Monthly history for sparklines: last 12 months of key metrics. */
   monthlyHistory: Array<{ gdp: number; treasury: number; inflation: number; employment: number }> = [];
+  /** Annual snapshots for the Century Graph (sampled each January; ring buffer, max STATS_HISTORY_MAX). */
+  statsHistory: StatSnapshot[] = [];
   /** Regional factions competing for dominance (includes player faction) */
   regionalFactions: RegionalFaction[] = [];
   /** Player faction id (always 0 or first in list) */
@@ -3280,8 +3358,11 @@ export class RegionSim {
   }> = {};
   /** Flag: did player win a battle this month? */
   lastBattleWon = false;
+  /** Post-war bookkeeping: one entry per finished war, oldest first. */
+  warScars: WarScar[] = [];
   seaRiseAnnounced = false;
   private lastTidalLogDay = -999;
+  private lastRefugeesLogDay = -999;
   private lastExtremeWeatherDay = -999;
   private droughtAnnounced = false;
   // ---- Phase 17: Historical Scenarios & Alternate Starts (GDD §8.8, §6.1) ----
@@ -3381,6 +3462,10 @@ export class RegionSim {
     t = Math.max(t, this.maxGrievance / 100);
     // Economic crisis: a deep depression is dread even at peace.
     t = Math.max(t, this.depressionDepth);
+    // Climate dread: warming above 2°C adds ambient tension (the century closing in).
+    if (this.warmingC > 2.0) t = Math.max(t, Math.min(0.45, (this.warmingC - 2.0) * 0.15));
+    // Era branch dread: dystopia/drowned branches carry an undercurrent of unease.
+    if (this.eraBranch === 'drowned' || this.eraBranch === 'dystopia') t = Math.max(t, 0.25);
     return Math.max(0, Math.min(1, t));
   }
 
@@ -4193,6 +4278,60 @@ export class RegionSim {
         this.lastTidalLogDay = this.day;
         this.addLog(
           'King tides take the low streets again — unwalled coastal towns pump out cellars and count who left.',
+          'bad',
+        );
+      }
+    }
+    // Climate refugee migration (GDD §8.2): coastal flooding bleeds population
+    // inland. Flight rate is mild (0.1% per severity unit/tick) so the effect
+    // builds gradually, matching the slow-burn feel of sea-level rise.
+    if (this.year >= 2035 && this.warmingC > 1.5) {
+      const severity = (this.warmingC - 1.5) * (this.eraBranch === 'drowned' ? 1.5 : 1);
+      const playerSettlements = this.settlements.filter((t) => t.factionId === this.playerFactionId);
+      const flooded = playerSettlements.filter((t) => t.site.coastal && !t.seaWall && this.popOf(t) > 5);
+      const inland = playerSettlements.filter((t) => !t.site.coastal);
+      if (flooded.length > 0 && inland.length > 0) {
+        const dest = inland.reduce((best, t) => (this.popOf(t) > this.popOf(best) ? t : best));
+        let totalMovers = 0;
+        for (const from of flooded) {
+          const fromPop = this.popOf(from);
+          if (fromPop < 5) continue;
+          const flightRate = Math.min(0.01, 0.001 * severity);
+          const movers = fromPop * flightRate;
+          if (movers < 0.1) continue;
+          this.removePop(from, movers);
+          dest.cohorts.bands[1] += movers * 0.7;
+          dest.cohorts.bands[2] += movers * 0.3;
+          totalMovers += movers;
+        }
+        if (totalMovers >= 1 && this.day - this.lastRefugeesLogDay > 365) {
+          this.lastRefugeesLogDay = this.day;
+          this.addLog(
+            `Tidal flooding pushes families inland — ${Math.round(totalMovers)} people arrive at ${dest.name} ` +
+            `seeking higher ground (+${this.warmingC.toFixed(1)}°C warming).`,
+            'bad',
+          );
+        }
+      }
+    }
+    // Sea-wall overtopping (GDD §8.2): at ≥4°C even walled towns are breached.
+    // Sea walls buy time, not immunity — extreme warming overwashes any earthwork.
+    if (this.warmingC >= 4.0 && this.year >= 2060) {
+      const overtopSeverity = (this.warmingC - 4.0) * 0.4; // gentler than unprotected
+      let overtopHit = false;
+      for (const t of this.settlements) {
+        if (!t.site.coastal || !t.seaWall || this.popOf(t) < 1) continue;
+        const damageScale = t.floodProofed ? 0.3 : 0.6;
+        t.food *= Math.max(0.85, 1 - 0.03 * overtopSeverity * damageScale);
+        this.removePop(t, this.popOf(t) * 0.0008 * overtopSeverity * damageScale);
+        t.satisfaction = Math.max(0, t.satisfaction - 1.5 * overtopSeverity * damageScale);
+        overtopHit = true;
+      }
+      if (overtopHit && this.day - this.lastTidalLogDay > 600) {
+        this.lastTidalLogDay = this.day;
+        this.addLog(
+          `+${this.warmingC.toFixed(1)}°C: The sea walls weren't built for this. Storm surge overtops the ` +
+          `barriers; the walled districts flood behind their own defences. Even protection has its ceiling.`,
           'bad',
         );
       }
@@ -5826,7 +5965,10 @@ export class RegionSim {
     this.tickUnrestLadder();
     this.tickOpinionDynamics();
     // Push education coverage to lag buffer once a year (month 0 = January)
-    if (this.month === 0) this.tickEducationLag();
+    if (this.month === 0) {
+      this.tickEducationLag();
+      this.tickStatsHistory();
+    }
 
     // Phase 15: Intermediate goods, arbitrage, and FX tick
     tickIntermediateGoods(this); // Phase 15: intermediate-goods production + cascade (systems/goods.ts)
@@ -7246,8 +7388,10 @@ export class RegionSim {
       const supplyMult = id === 'industry'
         ? this.supplyShockMult * (1 - this.localGoodsScarcity * LOCAL_GOODS_OUTPUT_DRAG)
         : 1;
-      // A hotter century erodes the farm economy past +1.5°C (GDD §8.2); 1.0 below.
-      const climateMult = id === 'agriculture' ? this.agriClimateMult() : 1;
+      // A hotter century erodes the farm economy past +1.5°C and industry past +3°C.
+      const climateMult = id === 'agriculture' ? this.agriClimateMult()
+        : id === 'industry' ? this.industryClimateMult()
+        : 1;
       s.output = workers * s.share * perWorker * strike * loyalty * eventMult * svcMult * taxMult * fxMult * supplyMult * climateMult;
       // Phase 5: wage policy adjusts the migration signal without affecting output
       const wagePolicyMult = t.policies.wagePolicy === 'low' ? 0.85 : t.policies.wagePolicy === 'high' ? 1.20 : 1.0;
@@ -7558,6 +7702,25 @@ export class RegionSim {
     const coverage = this.currentSchoolCoverage();
     this.educationLag.unshift(coverage);
     if (this.educationLag.length > 25) this.educationLag.pop();
+  }
+
+  /** Sample annual stats for the Century Graph. Called each January from monthlyUpdate. */
+  private tickStatsHistory(): void {
+    const playerSettlements = this.settlements.filter((t) => t.factionId === this.playerFactionId);
+    const pop = playerSettlements.reduce((s, t) => s + this.popOf(t), 0);
+    const satisfaction =
+      playerSettlements.length > 0
+        ? playerSettlements.reduce((s, t) => s + t.satisfaction, 0) / playerSettlements.length
+        : 0;
+    this.statsHistory.push({
+      year: this.year,
+      gdp: this.gdpLastMonth * 12,
+      pop,
+      warmingC: this.warmingC,
+      treasury: this.treasury,
+      satisfaction,
+    });
+    if (this.statsHistory.length > STATS_HISTORY_MAX) this.statsHistory.shift();
   }
 
   /** Tick the unrest ladder — escalate or de-escalate based on grievance. */
@@ -10451,6 +10614,21 @@ export class RegionSim {
     if (this.legitimacy < 60 && (100 - this.legitimacy) > 40 && this.rng.chance(0.08)) {
       this.addLog(`PRESS SECRETARY: The credibility gap is accelerating — recommend addressing fiscal transparency and public services.`, 'bad');
     }
+
+    // Revanchism advisory: surface available revanchism CB (once after each defeat scar)
+    if (!this.playerWar && this.warScars.length > 0 && this.rng.chance(0.04)) {
+      const defeatScar = this.warScars.find((s) => s.outcome === 'defeat');
+      if (defeatScar) {
+        const offender = this.rivals.find((rv) => rv.id === defeatScar.rivalId);
+        if (offender && this.availableCasusBelli(offender).includes('revanchism')) {
+          this.addLog(
+            `FOREIGN SECRETARY: The humiliation of our defeat against ${defeatScar.rivalName} in ${defeatScar.yearEnded} still rankles. ` +
+            `Nationalists demand satisfaction — a revanchist campaign is available if the State has the will.`,
+            'info',
+          );
+        }
+      }
+    }
   }
 
   recordPortfolioAction(portfolio: MinisterRoleId): void {
@@ -11480,6 +11658,21 @@ export class RegionSim {
         } else if (!rv.treaties.includes('non_aggression') && rv.relations < -10 && rv.relations > -50 && rv.weights.risk <= 5 && this.rng.chance(0.08)) {
           this.offers.push({ rivalId: rv.id, kind: 'non_aggression', expiresDay: this.day + 90 });
           this.addLog(`${rv.name} proposes a Non-Aggression Pact — cold neighbors, fenced borders.`, 'info');
+        } else if (
+          !rv.treaties.includes('climate_accord') &&
+          this.accordUnlocked() &&
+          this.warmingC > 1.8 &&
+          this.year >= 2020 &&
+          (ARCHETYPE_GREEN_PROPENSITY[rv.archetype] ?? 0.5) >= 0.6 &&
+          this.rng.chance(0.06)
+        ) {
+          // High-propensity rival (trading republic or crusader) invites player to the Climate Accord
+          this.offers.push({ rivalId: rv.id, kind: 'climate_accord', expiresDay: this.day + 180 });
+          this.addLog(
+            `${rv.name} extends a formal invitation to the Climate Accord — ` +
+            `warming is past +${this.warmingC.toFixed(1)}°C and they call for collective action.`,
+            'info',
+          );
         }
       }
       // Hostile mischief (GDD §6.4): town-scale friction, deniable and cheap.
@@ -11502,7 +11695,7 @@ export class RegionSim {
       if (
         !this.playerWar && this.nationProclaimed && rv.relations < -60 &&
         !rv.treaties.includes('non_aggression') &&
-        this.rng.chance(0.01 + rv.weights.risk * 0.003 + rv.weights.expansion * 0.002)
+        this.rng.chance((0.01 + rv.weights.risk * 0.003 + rv.weights.expansion * 0.002) * ARCHETYPE_WAR_FREQ_MULT[rv.archetype])
       ) {
         // a settled frontier leaves them no honest grievance — they stage one
         this.startPlayerWar(rv, rv.borderSettled ? 'fabricated' : 'border_dispute', true);
@@ -11523,6 +11716,31 @@ export class RegionSim {
   private noteHistory(rv: RivalNation, text: string): void {
     rv.history.push(text);
     if (rv.history.length > 16) rv.history.splice(1, 1);
+  }
+
+  /** Write a WarScar when a war ends; call before nulling playerWar. */
+  private recordWarScar(w: PlayerWar, rv: RivalNation, outcome: WarScar['outcome']): void {
+    const durationMonths = Math.round((this.day - w.startedDay) / 30);
+    this.warScars.push({
+      rivalId: rv.id,
+      rivalName: rv.name,
+      yearEnded: this.year,
+      outcome,
+      occupied: w.occupied,
+      casualties: w.casualties,
+      durationMonths,
+    });
+    // Post-war relations shift: the loser resents, the winner grows confident.
+    if (outcome === 'victory') {
+      // Defeated rival resents the player; grudge scales with occupation depth.
+      rv.relations = this.clampRel(rv.relations - 30 - w.occupied * 5);
+      this.noteHistory(rv, `Defeated by ${this.stateName || 'the State'} in ${this.year} — the wound festers.`);
+    } else if (outcome === 'defeat') {
+      // Victor gains leverage; the player's humiliation emboldens them.
+      rv.relations = this.clampRel(rv.relations + 15);
+      this.noteHistory(rv, `Defeated ${this.stateName || 'the State'} in ${this.year}.`);
+    }
+    // negotiated and status_quo leave relations unchanged — both sides agreed.
   }
 
   /** A rival's government falls — by slow drift or by losing a war. The
@@ -11816,6 +12034,10 @@ export class RegionSim {
     if (rv.relations < -40 && !rv.treaties.includes('non_aggression')) list.push('sponsored_raids');
     if (rv.relations < -20 && !rv.borderSettled) list.push('border_dispute'); // a signed survey leaves nothing to dispute
     list.push('fabricated');
+    // Revanchism: available if we lost a war against this rival — warScars records it.
+    if (this.warScars.some((s) => s.rivalId === rv.id && s.outcome === 'defeat')) {
+      list.push('revanchism');
+    }
     return list;
   }
 
@@ -12163,6 +12385,15 @@ export class RegionSim {
         reputationCost: 0,
       });
     }
+    // revanchism: available if we previously lost a war against this rival
+    if (this.warScars.some((s) => s.rivalId === rivalId && s.outcome === 'defeat')) {
+      result.push({
+        type: 'revanchism',
+        targetRivalId: rivalId,
+        warSupportBonus: 25,
+        reputationCost: 0,
+      });
+    }
     // fabricated: always available
     result.push({
       type: 'fabricated',
@@ -12404,8 +12635,9 @@ export class RegionSim {
   /** Monthly tick: war support decay and rally (Phase 16). */
   tickWarSupport(): void {
     if (!this.playerWar) return;
-    // Base decay
-    this.warSupport = Math.max(0, this.warSupport - 1);
+    // Base decay — scaled by regime's decay multiplier (all 1.0 now; tune later)
+    const decayMult = WAR_SUPPORT_DECAY_MULT[this.govType ?? 'democracy'];
+    this.warSupport = Math.max(0, this.warSupport - 1 * decayMult);
     // Decay from mobilization level 2 (rationing)
     if (this.mobilizationLevel === 2) {
       this.warSupport = Math.max(0, this.warSupport - 2);
@@ -12536,6 +12768,7 @@ export class RegionSim {
       this.addLog(`Revanchism: ${rv.name} seethes — too many provinces taken; a generation will not forget.`, 'bad');
     }
     // End the war
+    this.recordWarScar(w, rv, 'victory');
     this.playerWar = null;
     this.mobilizationLevel = 0;
     this.mobilizationMonths = 0;
@@ -12795,6 +13028,7 @@ export class RegionSim {
       return false;
     }
     const nation = this.nationName || 'the nation';
+    this.recordWarScar(w, rv, 'negotiated');
     this.playerWar = null;
     rv.pop *= 0.92; // the war's bill abroad
     this.treasury *= 0.9; // demobilization and pensions — the drain after (GDD §7.2)
@@ -12877,6 +13111,7 @@ export class RegionSim {
     const w = this.playerWar;
     const rv = w ? this.rival(w.rivalId) : undefined;
     if (!w || !rv) return false;
+    this.recordWarScar(w, rv, 'defeat');
     this.playerWar = null;
     const nation = this.nationName || 'the nation';
     this.treasury *= 0.6; // reparations, paid the other way
@@ -12909,6 +13144,8 @@ export class RegionSim {
     if (w.startedDay === this.day) return; // the declaration day musters; the front resolves with the month
     const rv = this.rival(w.rivalId);
     if (!rv) {
+      // Rival no longer exists — inconclusive end (bookkeep with a placeholder name)
+      this.warScars.push({ rivalId: w.rivalId, rivalName: `rival#${w.rivalId}`, yearEnded: this.year, outcome: 'status_quo', occupied: w.occupied, casualties: w.casualties, durationMonths: Math.round((this.day - w.startedDay) / 30) });
       this.playerWar = null;
       return;
     }
@@ -12921,6 +13158,8 @@ export class RegionSim {
       rv.pop *= 0.997; // the quays starve before the trenches do
       w.score = Math.min(100, w.score + 1.5);
     }
+    // Front stub: mirrors war score; future Front system will read this position.
+    w.front = { position: w.score };
     // Attrition (GDD §7.3): burns even on quiet fronts; the pyramid keeps the scar
     const lossRate =
       (w.mobilization === 'total' ? 0.006 : w.mobilization === 'partial' ? 0.004 : 0.003) +
@@ -13385,8 +13624,10 @@ export class RegionSim {
       eraBranch: this.eraBranch,
       beatOilBarons: this.beatOilBarons,
       centuryReport: this.centuryReport,
+      statsHistory: this.statsHistory,
       seaRiseAnnounced: this.seaRiseAnnounced,
       lastTidalLogDay: this.lastTidalLogDay,
+      lastRefugeesLogDay: this.lastRefugeesLogDay,
       lastExtremeWeatherDay: this.lastExtremeWeatherDay,
       accordCompliance: this.accordCompliance,
       geoDeployed: this.geoDeployed,
@@ -13488,6 +13729,7 @@ export class RegionSim {
       mobilizationLevel: this.mobilizationLevel,
       mobilizationMonths: this.mobilizationMonths,
       warSupport: this.warSupport,
+      warScars: this.warScars,
       provincialOccupations: this.provincialOccupations,
       lastBattleWon: this.lastBattleWon,
       // Phase 17: Historical Scenarios & Alternate Starts
@@ -13654,8 +13896,10 @@ export class RegionSim {
     r.eraBranch = d.eraBranch ?? null;
     r.beatOilBarons = d.beatOilBarons ?? false;
     r.centuryReport = d.centuryReport ?? null;
+    r.statsHistory = d.statsHistory ?? [];
     r.seaRiseAnnounced = d.seaRiseAnnounced ?? false;
     r.lastTidalLogDay = d.lastTidalLogDay ?? -999;
+    r.lastRefugeesLogDay = d.lastRefugeesLogDay ?? -999;
     r.lastExtremeWeatherDay = d.lastExtremeWeatherDay ?? -999;
     r.accordCompliance = d.accordCompliance ?? {};
     r.geoDeployed = d.geoDeployed ?? false;
@@ -13808,6 +14052,7 @@ export class RegionSim {
     r.mobilizationLevel = d.mobilizationLevel ?? 0;
     r.mobilizationMonths = d.mobilizationMonths ?? 0;
     r.warSupport = d.warSupport ?? 60;
+    r.warScars = d.warScars ?? [];
     r.lastBattleWon = d.lastBattleWon ?? false;
     if (d.provincialOccupations) {
       r.provincialOccupations = Object.fromEntries(
@@ -14186,6 +14431,13 @@ export class RegionSim {
    *  no RNG, and a sink (warming is emissions-driven), so it can't diverge. */
   agriClimateMult(): number {
     return 1 - Math.min(AGRI_CLIMATE_MAX_DRAG, Math.max(0, this.warmingC - AGRI_CLIMATE_THRESHOLD) * AGRI_CLIMATE_SLOPE);
+  }
+
+  /** Industrial brownout drag: at ≥3°C sustained warming, grid reliability degrades
+   *  and heat stress cuts manufacturing productivity. Linear above the threshold,
+   *  capped at 30%. Exactly 1.0 below INDUSTRY_BROWNOUT_THRESHOLD. */
+  industryClimateMult(): number {
+    return 1 - Math.min(INDUSTRY_BROWNOUT_MAX_DRAG, Math.max(0, this.warmingC - INDUSTRY_BROWNOUT_THRESHOLD) * INDUSTRY_BROWNOUT_SLOPE);
   }
 
   /**
