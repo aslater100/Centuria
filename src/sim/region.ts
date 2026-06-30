@@ -38,6 +38,10 @@ import {
 } from './systems/military';
 import { tickHistoricalAnchors } from './systems/historical';
 import { tickNotableLifecycle } from './systems/notables';
+import { tickResearch } from './systems/research';
+import { updateRouteCargo } from './systems/trade';
+import { updateCharter } from './systems/charter';
+import { updateLoans } from './systems/loans';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -4148,21 +4152,6 @@ export class RegionSim {
     this.researchProgress = 0;
   }
 
-  /** Called once per game-day; drains the rate into the active node. */
-  private tickResearch(): void {
-    if (!this.activeResearch) return;
-    const node = TECH_TREE.find((n) => n.id === this.activeResearch);
-    if (!node) { this.activeResearch = null; return; }
-    this.researchProgress += this.researchRate();
-    if (this.researchProgress >= this.techCost(node)) {
-      this.researched.add(this.activeResearch);
-      const label = node.tree === 'tech' ? 'Technology' : 'Civics';
-      this.addLog(`${label} breakthrough: "${node.name}". ${node.desc.split('.')[0]}.`, 'good');
-      this.activeResearch = null;
-      this.researchProgress = 0;
-    }
-  }
-
   /** The Railworks gate: steel needs both a State and the 1912 era.
    *  Industrial Steel research unlocks rail five years early. */
   railUnlocked(): boolean {
@@ -5611,7 +5600,7 @@ export class RegionSim {
     this.totalWood = tw;
     this.maxGrievance = mg;
 
-    this.tickResearch();
+    tickResearch(this);
     this.checkElection();
     if (this.day % 30 === 0) this.monthlyUpdate();
     if (this.day >= this.nextEventDay) {
@@ -5621,7 +5610,7 @@ export class RegionSim {
       this.nextEventDay = this.day + eventGap;
     }
     this.updateExpeditions();
-    this.updateCharter();
+    updateCharter(this);
     this.updateConstruction(); // Phase 2: scaffolding comes down, doors open
     this.updateExploration(); // Phase 0: Update fog of war based on scouts and settlements
     if (this.totalPop() <= 0) {
@@ -5710,7 +5699,7 @@ export class RegionSim {
         t.landValue = this.computeLandValue(t.id);
       }
     }
-    this.updateRouteCargo();   // Phase 6: cargo labels follow sector surplus
+    updateRouteCargo(this);   // Phase 6: cargo labels follow sector surplus (systems/trade.ts)
     this.migrate();
     this.caravans();
     this.traders();
@@ -5742,7 +5731,7 @@ export class RegionSim {
     tickHistoricalAnchors(this); // scripted world-events that rhyme with history (systems/historical.ts, GDD §1)
     this.tickMedia(); // Phase 12: media reach, press freedom, misinformation era
     this.checkScenarioGoals();   // Phase 17: check active scenario goals monthly
-    this.updateLoans(); // process loan interest and check for defaults
+    updateLoans(this); // process loan interest and check for defaults (systems/loans.ts)
     if (this.stateProclaimed) this.collectVassalTribute();
     this.checkProclamationGate();
     this.checkWinConditions();
@@ -8428,27 +8417,6 @@ export class RegionSim {
 
   // ---- Phase 6: Trade Route Cargo ----
 
-  /** Monthly: tag each route with its dominant cargo based on the output gap
-   *  between connected settlements. The greater the surplus difference in a
-   *  sector, the more that sector's goods fill the wagons. */
-  private updateRouteCargo(): void {
-    for (const route of this.routes) {
-      const a = this.settlement(route.a);
-      const b = this.settlement(route.b);
-      if (!a || !b) { route.cargoType = null; continue; }
-      // A governor's manual pin (Phase A route-network controls) wins over the
-      // auto reading — the wagons carry what the state directs.
-      if (route.cargoPriority) { route.cargoType = route.cargoPriority; continue; }
-      let maxDiff = 0;
-      let dominant: SectorId | null = null;
-      for (const id of SECTOR_IDS) {
-        const diff = Math.abs(a.sectors[id].output - b.sectors[id].output);
-        if (diff > maxDiff) { maxDiff = diff; dominant = id; }
-      }
-      route.cargoType = maxDiff > 0.5 ? dominant : null;
-    }
-  }
-
   /** Finish any construction whose day has come. */
   private updateConstruction(): void {
     for (const t of this.settlements) {
@@ -8925,20 +8893,6 @@ export class RegionSim {
     const totalGarrison = playerSettlements.reduce((sum, s) => sum + this.garrisonOf(s), 0);
     if (totalGarrison < 10) return false;
     return true;
-  }
-
-  private updateCharter(): void {
-    if (this.stateProclaimed || this.ceremonyPending) return;
-    if (this.charterEligible()) {
-      // The Mayor drafts the Regional Charter — the slice's civics gate.
-      this.charterProgress = Math.min(100, this.charterProgress + 100 / 90); // ~90 days of drafting
-      if (this.charterProgress >= 100) {
-        this.ceremonyPending = true;
-        this.addLog('The Regional Charter is drafted. The towns await your word. (Incorporation ceremony)', 'good');
-      }
-    } else {
-      this.charterProgress = Math.max(0, this.charterProgress - 0.5);
-    }
   }
 
   // ---- Phase 0: Exploration & Fog of War ----
@@ -12502,37 +12456,6 @@ export class RegionSim {
     this.centralBankLoan = Math.max(0, this.centralBankLoan - paid);
     this.addLog(`Repaid ` + formatCurrency(Math.floor(paid)) + ` to the Central Bank.`, 'info');
     return { ok: true };
-  }
-
-  /**
-   * Called monthly to process loan interest accrual and check for defaults.
-   */
-  updateLoans(): void {
-    for (const loan of this.loans) {
-      if (loan.defaulted) continue;
-
-      // Calculate interest accrued this month
-      const monthlyRate = loan.interestRate / 12;
-      const interestThisMonth = loan.borrowed * monthlyRate;
-      loan.borrowed += interestThisMonth;
-
-      // Check for default: payment overdue by 90+ days (3 months grace)
-      if (this.day > loan.nextPaymentDue + 90 && !loan.defaulted) {
-        loan.defaulted = true;
-        const lender = this.lenders.find((l) => l.id === loan.lenderId);
-        if (lender) {
-          lender.reliability = Math.max(0, lender.reliability - 10); // lender loses confidence in player
-          lender.liquidCash = 0; // lender becomes cautious
-        }
-        this.addLog(
-          `Loan from ${lender?.name ?? 'lender'} has defaulted. Credit damaged.`,
-          'bad',
-        );
-      }
-    }
-
-    // Remove fully repaid loans
-    this.loans = this.loans.filter((l) => l.borrowed > 0.01 || l.defaulted);
   }
 
   /**
