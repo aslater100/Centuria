@@ -22,6 +22,7 @@ import { tickServiceCoverage } from './systems/services';
 import { tickPriceArbitrage } from './systems/arbitrage';
 import { tickIntermediateGoods, worldGoodPrice, worldGoodScarcity, worldMarketTightness, worldPowerPressure } from './systems/goods';
 import { tickAdvisorLoyalty, tickAdvisorEvents, tickLegitimacy, tickRegimeMechanics } from './systems/regime';
+import { tickDemographicTransition, tickAppealMigration, tickEducationLag, tickUnrestLadder } from './systems/demographics';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -5983,13 +5984,13 @@ export class RegionSim {
     }
 
     // Phase 13: Population & Society Depth
-    this.tickDemographicTransition();
-    this.tickAppealMigration();
-    this.tickUnrestLadder();
+    tickDemographicTransition(this);
+    tickAppealMigration(this);
+    tickUnrestLadder(this);
     this.tickOpinionDynamics();
     // Push education coverage to lag buffer once a year (month 0 = January)
     if (this.month === 0) {
-      this.tickEducationLag();
+      tickEducationLag(this);
       this.tickStatsHistory();
     }
 
@@ -7512,7 +7513,7 @@ export class RegionSim {
   }
 
   /** Compute demographic transition phase from era, education, and urbanization. */
-  private computeDemographicPhase(): 'pre_transition' | 'early_transition' | 'late_transition' | 'post_transition' {
+  computeDemographicPhase(): 'pre_transition' | 'early_transition' | 'late_transition' | 'post_transition' {
     const edu = this.educationLevel();
     const urban = this.urbanizationFraction();
     const yr = this.year;
@@ -7648,85 +7649,6 @@ export class RegionSim {
 
   // ---- Phase 13: Monthly tick methods ----
 
-  /** Tick the demographic transition: apply natural population growth to each player settlement. */
-  private tickDemographicTransition(): void {
-    this.demographicPhase = this.computeDemographicPhase();
-    const birthRate = this.globalBirthRate();
-    const deathRate = this.globalDeathRate();
-    const yr = this.year;
-    // Mid-century baby boom multiplier
-    const boomMult = (birthRate > 25 && deathRate < 15 && yr >= 1945 && yr <= 1975) ? 1.2 : 1.0;
-
-    // Era-based natural growth applies to EVERY settlement, rival or player —
-    // rivals were previously skipped here, which (with no tax income to grow on)
-    // left their towns demographically stunted. Parity lets rival populations
-    // climb with the same birth/death/baby-boom curve the player's towns ride.
-    for (const t of this.settlements) {
-      const pop = this.popOf(t);
-      if (pop <= 0) continue;
-      const naturalGrowth = pop * (birthRate - deathRate) / 1000 / 12 * boomMult;
-      if (naturalGrowth > 0) {
-        // Add to young working-age band
-        t.cohorts.bands[1] += naturalGrowth * 0.6;
-        t.cohorts.bands[0] += naturalGrowth * 0.4;
-      } else if (naturalGrowth < 0) {
-        this.removePop(t, -naturalGrowth);
-      }
-    }
-
-    // Aging crisis (2050+, post_transition): pension burden
-    if (this.demographicPhase === 'post_transition' && yr > 2050) {
-      if (!this.agingCrisisActive) {
-        this.agingCrisisActive = true;
-        this.addLog('Aging population placing strain on pension system.', 'bad');
-      }
-      const gdp = Math.max(0, this.gdpLastMonth);
-      const pensionBurden = 0.015 * gdp / 12;
-      this.treasury -= pensionBurden;
-    }
-  }
-
-  /** Tick appeal-score-driven migration between player settlements. */
-  private tickAppealMigration(): void {
-    const playerSettlements = this.settlements.filter((t) => t.factionId === this.playerFactionId);
-    if (playerSettlements.length < 2) return;
-
-    // Compute appeal scores for all player settlements (using 'middle' cohort as default)
-    const scores = new Map<number, number>();
-    for (const t of playerSettlements) {
-      scores.set(t.id, this.appealScore(String(t.id), 'middle'));
-    }
-
-    // For each pair, migrate if appeal difference > 15
-    for (let i = 0; i < playerSettlements.length; i++) {
-      for (let j = i + 1; j < playerSettlements.length; j++) {
-        const a = playerSettlements[i];
-        const b = playerSettlements[j];
-        const scoreA = scores.get(a.id) ?? 0;
-        const scoreB = scores.get(b.id) ?? 0;
-        const diff = scoreA - scoreB;
-        if (Math.abs(diff) <= 15) continue;
-        const [from, to, absDiff] = diff > 0 ? [b, a, diff] : [a, b, -diff];
-        const fromPop = this.popOf(from);
-        if (fromPop <= 5) continue;
-        // Max migration: 1% of sending settlement's pop per tick
-        const maxMove = fromPop * 0.01;
-        const movers = Math.min(maxMove, Math.floor((absDiff / 100) * 2));
-        if (movers < 0.01) continue;
-        this.removePop(from, movers);
-        to.cohorts.bands[1] += movers * 0.7;
-        to.cohorts.bands[2] += movers * 0.3;
-      }
-    }
-  }
-
-  /** Push current school coverage to the education lag ring buffer (once per year). */
-  private tickEducationLag(): void {
-    const coverage = this.currentSchoolCoverage();
-    this.educationLag.unshift(coverage);
-    if (this.educationLag.length > 25) this.educationLag.pop();
-  }
-
   /** Sample annual stats for the Century Graph. Called each January from monthlyUpdate. */
   private tickStatsHistory(): void {
     const playerSettlements = this.settlements.filter((t) => t.factionId === this.playerFactionId);
@@ -7744,110 +7666,6 @@ export class RegionSim {
       satisfaction,
     });
     if (this.statsHistory.length > STATS_HISTORY_MAX) this.statsHistory.shift();
-  }
-
-  /** Tick the unrest ladder — escalate or de-escalate based on grievance. */
-  private tickUnrestLadder(): void {
-    const playerSettlements = this.settlements.filter((t) => t.factionId === this.playerFactionId);
-    if (playerSettlements.length === 0) return;
-    const avgGrievance = playerSettlements.reduce((s, t) => s + t.grievance, 0) / playerSettlements.length;
-    const prevLevel = this.unrestLevel;
-
-    // Determine target level from grievance thresholds
-    let targetLevel: 0 | 1 | 2 | 3 | 4 | 5 = 0;
-    if (avgGrievance > 90) targetLevel = 5;
-    else if (avgGrievance > 75) targetLevel = 4;
-    else if (avgGrievance > 60) targetLevel = 3;
-    else if (avgGrievance > 45) targetLevel = 2;
-    else if (avgGrievance > 30) targetLevel = 1;
-
-    // Also check time-based escalation
-    if (this.unrestLevel >= 1 && this.unrestMonthsAtLevel >= 3 && targetLevel < 2) targetLevel = Math.max(targetLevel, 2) as 0 | 1 | 2 | 3 | 4 | 5;
-    if (this.unrestLevel >= 2 && this.unrestMonthsAtLevel >= 2 && targetLevel < 3) targetLevel = Math.max(targetLevel, 3) as 0 | 1 | 2 | 3 | 4 | 5;
-    if (this.unrestLevel >= 3 && this.unrestMonthsAtLevel >= 3 && targetLevel < 4) targetLevel = Math.max(targetLevel, 4) as 0 | 1 | 2 | 3 | 4 | 5;
-    if (this.unrestLevel >= 4 && this.unrestMonthsAtLevel >= 2 && targetLevel < 5) targetLevel = Math.max(targetLevel, 5) as 0 | 1 | 2 | 3 | 4 | 5;
-
-    // Cap: can only move one rung per month (escalate)
-    if (targetLevel > this.unrestLevel) {
-      this.unrestLevel = (this.unrestLevel + 1) as 0 | 1 | 2 | 3 | 4 | 5;
-    } else if (targetLevel < this.unrestLevel) {
-      // De-escalate: require grievance 15+ below threshold, 3-month grace
-      const threshold = [0, 30, 45, 60, 75, 90][this.unrestLevel] ?? 0;
-      if (avgGrievance < threshold - 15) {
-        this.unrestLevel = (this.unrestLevel - 1) as 0 | 1 | 2 | 3 | 4 | 5;
-      }
-    }
-
-    // Track months at current level
-    if (this.unrestLevel !== prevLevel) {
-      this.unrestMonthsAtLevel = 0;
-    } else {
-      this.unrestMonthsAtLevel++;
-    }
-
-    // Apply rung effects
-    const worstSettlement = playerSettlements.reduce((a, b) => a.grievance > b.grievance ? a : b);
-    switch (this.unrestLevel) {
-      case 1:
-        // Petitions: flavor event only
-        if (this.unrestLevel !== prevLevel) {
-          this.addLog('Workers petition for better conditions.', 'info');
-        }
-        break;
-      case 2:
-        // Strikes: sector output −15% in highest-grievance settlement (via strikeUntil)
-        if (this.unrestLevel !== prevLevel) {
-          worstSettlement.strikeUntil = this.day + 30;
-          this.addLog(`Strike wave begins at ${worstSettlement.name}.`, 'bad');
-        }
-        break;
-      case 3:
-        // Protests: trigger decision for player
-        if (this.unrestLevel !== prevLevel) {
-          this.addLog(
-            `PROTESTS erupt in ${worstSettlement.name}. Choose: Crackdown (workers relations −10) or Concede (cost 2% GDP, unrest −1) via the Politics tab.`,
-            'bad',
-          );
-        }
-        break;
-      case 4:
-        // Riots: infrastructure damage, approval hit
-        if (this.unrestLevel !== prevLevel) {
-          // Damage a random building in the worst settlement
-          if (worstSettlement.buildings.length > 0) {
-            // Just log — we don't have per-building condition tracking yet, so we apply grievance hit
-            worstSettlement.grievance = Math.min(100, worstSettlement.grievance + 5);
-          }
-          if (this.nationProclaimed && this.legitimacy > 0) {
-            this.legitimacy = Math.max(0, this.legitimacy - 8);
-          }
-          this.addLog(`Riots erupt in ${worstSettlement.name}. Infrastructure damaged. Legitimacy −8.`, 'bad');
-          for (const t of playerSettlements) t.satisfaction = Math.max(0, t.satisfaction - 10);
-        }
-        break;
-      case 5: {
-        // Revolution threat: monthly chance of government collapse
-        const grevFrac = avgGrievance / 100;
-        const revolChance = 0.03 * grevFrac;
-        if (this.rng.chance(revolChance)) {
-          const capital = playerSettlements[0];
-          this.addLog(
-            `Revolutionary movement seizes ${capital?.name ?? 'the capital'}! The government is overthrown — a successor faction rises. Regime change event pending.`,
-            'bad',
-          );
-          // Legitimacy collapse
-          if (this.nationProclaimed) this.legitimacy = Math.max(0, this.legitimacy - 30);
-          // Drop unrest a bit after the release
-          this.unrestLevel = 2;
-          this.unrestMonthsAtLevel = 0;
-          for (const t of playerSettlements) {
-            t.grievance = Math.max(0, t.grievance - 30);
-            t.satisfaction = Math.max(0, t.satisfaction - 15);
-          }
-        }
-        break;
-      }
-    }
   }
 
   /** Player action: crackdown on protests (rung 3). Workers relations −10. */
@@ -13065,7 +12883,7 @@ export class RegionSim {
     }
   }
 
-  private removePop(t: Settlement, count: number): void {
+  removePop(t: Settlement, count: number): void {
     const pop = this.popOf(t);
     if (pop <= 0) return;
     const frac = Math.min(1, count / pop);
