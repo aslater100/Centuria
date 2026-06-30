@@ -43,6 +43,7 @@ import { updateRouteCargo } from './systems/trade';
 import { updateCharter } from './systems/charter';
 import { updateLoans } from './systems/loans';
 import { updateExploration } from './systems/exploration';
+import { tickStatsHistory } from './systems/stats';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -5782,7 +5783,7 @@ export class RegionSim {
     // Push education coverage to lag buffer once a year (month 0 = January)
     if (this.month === 0) {
       tickEducationLag(this);
-      this.tickStatsHistory();
+      tickStatsHistory(this);
     }
 
     // Phase 15: Intermediate goods, arbitrage, and FX tick
@@ -7082,24 +7083,6 @@ export class RegionSim {
   // ---- Phase 13: Monthly tick methods ----
 
   /** Sample annual stats for the Century Graph. Called each January from monthlyUpdate. */
-  private tickStatsHistory(): void {
-    const playerSettlements = this.settlements.filter((t) => t.factionId === this.playerFactionId);
-    const pop = playerSettlements.reduce((s, t) => s + this.popOf(t), 0);
-    const satisfaction =
-      playerSettlements.length > 0
-        ? playerSettlements.reduce((s, t) => s + t.satisfaction, 0) / playerSettlements.length
-        : 0;
-    this.statsHistory.push({
-      year: this.year,
-      gdp: this.gdpLastMonth * 12,
-      pop,
-      warmingC: this.warmingC,
-      treasury: this.treasury,
-      satisfaction,
-    });
-    if (this.statsHistory.length > STATS_HISTORY_MAX) this.statsHistory.shift();
-  }
-
   /** Player action: crackdown on protests (rung 3). Workers relations −10. */
   crackdownProtests(): void {
     const workers = this.factions.find((f) => f.id === 'workers');
