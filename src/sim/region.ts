@@ -1985,6 +1985,9 @@ export interface PlayerWar {
   units: ArmyUnit[];
   /** Food/ammunition reserve for the army (months of supply). */
   supplyReserve: number;
+  /** Front position mirroring war score: positive = we hold the initiative,
+   *  negative = we are pushed back. Write-only scaffold; future Front system reads it. */
+  front?: { position: number };
 }
 
 /** Regime × war (GDD §7.5): below this floor the war eats the regime;
@@ -1995,6 +1998,26 @@ export const WAR_SUPPORT_FLOOR: Record<GovType, number> = {
   direct_democracy: 50, corporatocracy: 30, fascist: 20,
   social_democracy: 48, autocracy: 20, one_party: 20, technocracy: 35,
 };
+
+/** Monthly war-support decay multiplier by regime — all 1.0 now (no-op scaffold);
+ *  tune non-1.0 values to differentiate regimes without a re-baseline. */
+export const WAR_SUPPORT_DECAY_MULT: Record<GovType, number> = {
+  democracy: 1.0, republic: 1.0, monarchy: 1.0, junta: 1.0,
+  const_monarchy: 1.0, abs_monarchy: 1.0, oligarchy: 1.0, theocracy: 1.0,
+  direct_democracy: 1.0, corporatocracy: 1.0, fascist: 1.0,
+  social_democracy: 1.0, autocracy: 1.0, one_party: 1.0, technocracy: 1.0,
+};
+
+/** Bookkeeping record written when a war ends (GDD §7 post-war state). */
+export interface WarScar {
+  rivalId: number;
+  rivalName: string;
+  yearEnded: number;
+  outcome: 'victory' | 'defeat' | 'negotiated' | 'status_quo';
+  occupied: number;
+  casualties: number;
+  durationMonths: number;
+}
 
 const RIVAL_NAMES = [
   'Vasterholm', 'Karelia', 'Tyrennia', 'Meridia', 'Vossland', 'Cantara',
@@ -3280,6 +3303,8 @@ export class RegionSim {
   }> = {};
   /** Flag: did player win a battle this month? */
   lastBattleWon = false;
+  /** Post-war bookkeeping: one entry per finished war, oldest first. */
+  warScars: WarScar[] = [];
   seaRiseAnnounced = false;
   private lastTidalLogDay = -999;
   private lastExtremeWeatherDay = -999;
@@ -11516,6 +11541,20 @@ export class RegionSim {
     if (rv.history.length > 16) rv.history.splice(1, 1);
   }
 
+  /** Write a WarScar when a war ends; call before nulling playerWar. */
+  private recordWarScar(w: PlayerWar, rv: RivalNation, outcome: WarScar['outcome']): void {
+    const durationMonths = Math.round((this.day - w.startedDay) / 30);
+    this.warScars.push({
+      rivalId: rv.id,
+      rivalName: rv.name,
+      yearEnded: this.year,
+      outcome,
+      occupied: w.occupied,
+      casualties: w.casualties,
+      durationMonths,
+    });
+  }
+
   /** A rival's government falls — by slow drift or by losing a war. The
    *  era gates what replaces it: the interwar pool leans autocratic. */
   private changeRegime(rv: RivalNation, cause: 'drift' | 'defeat'): void {
@@ -12395,8 +12434,9 @@ export class RegionSim {
   /** Monthly tick: war support decay and rally (Phase 16). */
   tickWarSupport(): void {
     if (!this.playerWar) return;
-    // Base decay
-    this.warSupport = Math.max(0, this.warSupport - 1);
+    // Base decay — scaled by regime's decay multiplier (all 1.0 now; tune later)
+    const decayMult = WAR_SUPPORT_DECAY_MULT[this.govType ?? 'democracy'];
+    this.warSupport = Math.max(0, this.warSupport - 1 * decayMult);
     // Decay from mobilization level 2 (rationing)
     if (this.mobilizationLevel === 2) {
       this.warSupport = Math.max(0, this.warSupport - 2);
@@ -12527,6 +12567,7 @@ export class RegionSim {
       this.addLog(`Revanchism: ${rv.name} seethes — too many provinces taken; a generation will not forget.`, 'bad');
     }
     // End the war
+    this.recordWarScar(w, rv, 'victory');
     this.playerWar = null;
     this.mobilizationLevel = 0;
     this.mobilizationMonths = 0;
@@ -12786,6 +12827,7 @@ export class RegionSim {
       return false;
     }
     const nation = this.nationName || 'the nation';
+    this.recordWarScar(w, rv, 'negotiated');
     this.playerWar = null;
     rv.pop *= 0.92; // the war's bill abroad
     this.treasury *= 0.9; // demobilization and pensions — the drain after (GDD §7.2)
@@ -12868,6 +12910,7 @@ export class RegionSim {
     const w = this.playerWar;
     const rv = w ? this.rival(w.rivalId) : undefined;
     if (!w || !rv) return false;
+    this.recordWarScar(w, rv, 'defeat');
     this.playerWar = null;
     const nation = this.nationName || 'the nation';
     this.treasury *= 0.6; // reparations, paid the other way
@@ -12900,6 +12943,8 @@ export class RegionSim {
     if (w.startedDay === this.day) return; // the declaration day musters; the front resolves with the month
     const rv = this.rival(w.rivalId);
     if (!rv) {
+      // Rival no longer exists — inconclusive end (bookkeep with a placeholder name)
+      this.warScars.push({ rivalId: w.rivalId, rivalName: `rival#${w.rivalId}`, yearEnded: this.year, outcome: 'status_quo', occupied: w.occupied, casualties: w.casualties, durationMonths: Math.round((this.day - w.startedDay) / 30) });
       this.playerWar = null;
       return;
     }
@@ -12912,6 +12957,8 @@ export class RegionSim {
       rv.pop *= 0.997; // the quays starve before the trenches do
       w.score = Math.min(100, w.score + 1.5);
     }
+    // Front stub: mirrors war score; future Front system will read this position.
+    w.front = { position: w.score };
     // Attrition (GDD §7.3): burns even on quiet fronts; the pyramid keeps the scar
     const lossRate =
       (w.mobilization === 'total' ? 0.006 : w.mobilization === 'partial' ? 0.004 : 0.003) +
@@ -13479,6 +13526,7 @@ export class RegionSim {
       mobilizationLevel: this.mobilizationLevel,
       mobilizationMonths: this.mobilizationMonths,
       warSupport: this.warSupport,
+      warScars: this.warScars,
       provincialOccupations: this.provincialOccupations,
       lastBattleWon: this.lastBattleWon,
       // Phase 17: Historical Scenarios & Alternate Starts
@@ -13799,6 +13847,7 @@ export class RegionSim {
     r.mobilizationLevel = d.mobilizationLevel ?? 0;
     r.mobilizationMonths = d.mobilizationMonths ?? 0;
     r.warSupport = d.warSupport ?? 60;
+    r.warScars = d.warScars ?? [];
     r.lastBattleWon = d.lastBattleWon ?? false;
     if (d.provincialOccupations) {
       r.provincialOccupations = Object.fromEntries(

@@ -2522,3 +2522,51 @@ body {
   border-color: #6366f1;
   color: #6366f1;
 }
+
+/* ---- Era skins (data-era on #app) ---- */
+/* Applied once eraBranch resolves (~2040); default styling unchanged for null. */
+
+#app[data-era="solarpunk"] {
+  --era-accent: #7fd6a8;
+  --era-accent2: #ffe08a;
+}
+#app[data-era="solarpunk"] .topbar {
+  border-bottom: 2px solid var(--era-accent, transparent);
+}
+#app[data-era="solarpunk"] .tb-era {
+  color: #7fd6a8;
+}
+#app[data-era="solarpunk"] .tb-btn:hover {
+  border-color: #7fd6a8;
+  color: #7fd6a8;
+}
+
+#app[data-era="dystopia"] {
+  --era-accent: #ff3da6;
+  --era-accent2: #5a2a6a;
+}
+#app[data-era="dystopia"] .topbar {
+  border-bottom: 2px solid var(--era-accent, transparent);
+}
+#app[data-era="dystopia"] .tb-era {
+  color: #ff3da6;
+}
+#app[data-era="dystopia"] .tb-btn:hover {
+  border-color: #ff3da6;
+  color: #ff3da6;
+}
+
+#app[data-era="drowned"] {
+  --era-accent: #7fd3ff;
+  --era-accent2: #26618a;
+}
+#app[data-era="drowned"] .topbar {
+  border-bottom: 2px solid var(--era-accent, transparent);
+}
+#app[data-era="drowned"] .tb-era {
+  color: #7fd3ff;
+}
+#app[data-era="drowned"] .tb-btn:hover {
+  border-color: #7fd3ff;
+  color: #7fd3ff;
+}

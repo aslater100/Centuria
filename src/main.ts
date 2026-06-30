@@ -295,6 +295,8 @@ function loop(now: number): void {
   if (region && regionView) {
     regionView.draw();
     minimapCanvas.classList.add('hidden');
+    // Era skin: mirror eraBranch onto #app[data-era] so CSS can theme per branch.
+    root.dataset.era = region.eraBranch ?? '';
   }
 
   const year = region?.year ?? 1900;
