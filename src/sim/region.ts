@@ -45,6 +45,7 @@ import { updateLoans } from './systems/loans';
 import { updateExploration } from './systems/exploration';
 import { tickStatsHistory } from './systems/stats';
 import { updateMarket } from './systems/market';
+import { checkScenarioGoals } from './systems/scenarios';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -5268,24 +5269,6 @@ export class RegionSim {
   // ---- Phase 17: Scenario Goal Checks ----
 
   /** Called monthly; checks each active scenario goal and marks completions. */
-  checkScenarioGoals(): void {
-    if (!this.activeScenario) return;
-    const scenario = SCENARIOS.find((s) => s.id === this.activeScenario);
-    if (!scenario) return;
-
-    for (const goal of scenario.startingGoals) {
-      if (this.scenarioGoalsCompleted.includes(goal.id)) continue;
-      const checkFn = (this as unknown as Record<string, () => boolean>)[goal.checkFn];
-      if (typeof checkFn === 'function' && checkFn.call(this)) {
-        this.scenarioGoalsCompleted.push(goal.id);
-        this.addLog(
-          `SCENARIO GOAL ACHIEVED: ${goal.description}`,
-          'good',
-        );
-      }
-    }
-  }
-
   // ---- Scenario goal check functions ----
 
   goalSurviveTo2000(): boolean {
@@ -5733,7 +5716,7 @@ export class RegionSim {
     if (this.hasCentralBank()) tickMonetary(this);
     tickHistoricalAnchors(this); // scripted world-events that rhyme with history (systems/historical.ts, GDD §1)
     this.tickMedia(); // Phase 12: media reach, press freedom, misinformation era
-    this.checkScenarioGoals();   // Phase 17: check active scenario goals monthly
+    checkScenarioGoals(this);   // Phase 17: check active scenario goals monthly (systems/scenarios.ts)
     updateLoans(this); // process loan interest and check for defaults (systems/loans.ts)
     if (this.stateProclaimed) this.collectVassalTribute();
     this.checkProclamationGate();
