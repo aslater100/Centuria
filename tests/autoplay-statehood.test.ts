@@ -84,3 +84,48 @@ describe('autoplayStatehood flag — reachability and gating in the sweep', () =
     expect(r.has('statecraft')).toBe(false);
   });
 });
+
+describe('autoplay STATE government-consumption sink — bounds the treasury', () => {
+  const advanceMonths = (r: RegionSim, n: number): void => {
+    for (let i = 0; i < n; i++) {
+      const d0 = r.day;
+      while (r.day < d0 + 30 && !r.gameOver) r.tick();
+    }
+  };
+
+  it('spends a flush autoplay state treasury back down toward a ~1.5-month reserve', () => {
+    const r = RegionSim.create(1000);
+    r.autoDevelopPlayer = true;
+    r.autoExpandPlayer = true;
+    r.autoplayStatehood = true;
+    // Reach statehood + a real GDP (the probe shows seed 1000 proclaims by ~1960).
+    while (r.year < 1970 && !r.gameOver) r.tick();
+    expect(r.stateProclaimed).toBe(true);
+    const gdpMo = r.gdpLastMonth;
+    expect(gdpMo).toBeGreaterThan(0);
+    // Flush the treasury to the pre-sink balloon (~40 months of GDP) and let the
+    // monthly gov-consumption skim run. It should pull the hoard down to the reserve.
+    r.treasury = gdpMo * 40;
+    advanceMonths(r, 12);
+    // Steady state is reserve + net-inflow/skim ≈ 1.5 months; allow generous slack.
+    expect(r.treasury).toBeLessThan(r.gdpLastMonth * 3);
+  });
+
+  it('never fires the sink when autoplayStatehood is OFF (the byte-identity guard)', () => {
+    // With the director OFF the autoplayer stays a colony and the sink's guard
+    // (autoplayStatehood && stateProclaimed) is false on both counts, so a flush
+    // treasury is left alone — this is what keeps live human play byte-identical.
+    const r = RegionSim.create(1000);
+    r.autoDevelopPlayer = true;
+    r.autoExpandPlayer = true;
+    r.autoplayStatehood = false;
+    while (r.year < 1970 && !r.gameOver) r.tick();
+    expect(r.stateProclaimed).toBe(false);
+    const gdpMo = Math.max(1, r.gdpLastMonth);
+    r.treasury = gdpMo * 40;
+    advanceMonths(r, 3);
+    // No autoplay skim → the colony's modest economy leaves the hoard well above the
+    // ~1.5-month reserve the sink would have imposed.
+    expect(r.treasury).toBeGreaterThan(gdpMo * 10);
+  });
+});

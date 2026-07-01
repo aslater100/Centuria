@@ -756,6 +756,19 @@ const RIVAL_RESERVE_MONTHS = 1.5; // months of output kept untouched (famine rel
 const RIVAL_DEV_RESERVE_MONTHS = 0.5;
 const RIVAL_SURPLUS_SKIM = 0.25; // monthly fraction of the above-reserve surplus the state spends down
 const RIVAL_ADMIN_PER_TOWN = 5; // gold/settlement/month — mirrors the player's `settlements.length * 5`
+// Autoplay STATE government-consumption sink (headless autoplay-statehood only).
+// A proclaimed autoplay STATE draws income-tax revenue (+3% GDP/mo) it never fully
+// spends via slow purse-gated development, so its treasury runs to ~40 months of GDP
+// (£8–9bn). This models the government consumption a real state runs (transfers,
+// procurement, unmodeled services): each month it spends down a fraction of the
+// surplus above a few-months reserve, converging the treasury to a bounded steady
+// state (reserve + net-inflow/skim ≈ a handful of months of GDP — both terms scale
+// with GDP, so the bound holds in months-of-GDP terms across the century). Mirrors
+// the rival state-cost skim but keyed off the player's national treasury + GDP. Fires
+// ONLY under the autoplay-statehood director → live human play and the default
+// headless sweep are byte-identical (the guard short-circuits when the flag is off).
+const AUTOPLAY_STATE_RESERVE_MONTHS = 1.5; // months of monthly GDP a proclaimed autoplay state keeps untouched
+const AUTOPLAY_STATE_GOV_SKIM = 0.5; // monthly fraction of the above-reserve surplus spent as gov consumption
 // Territory ceiling for the autoplay PLAYER (`autoExpandPlayer`). Deliberately far
 // below the rival `settlementCap` (12 on normal): the player pays the full
 // monthlyEconomy public-sector bill on every town, and its spatial DEVELOPMENT is
@@ -6147,6 +6160,17 @@ export class RegionSim {
     const treasuryBefore = this.treasury;
     this.treasury += revenue - spending + incomeTaxBonus + centralBankingBonus + estateLevyBonus +
       progressiveTaxBonus + protectionismBonus + austerityBonus + bankInterest + carbonLevyBonus + this.exportEarningsLastMonth;
+
+    // Autoplay STATE government-consumption sink (see AUTOPLAY_STATE_* above). Bounds
+    // the headless autoplay state's treasury, which would otherwise pile income-tax
+    // revenue into an unbounded reserve. Applied as a clamped outflow (never below the
+    // reserve floor → the treasury can't go negative from it, so no false service cut).
+    // Guarded on autoplayStatehood → byte-identical for live play and the default sweep.
+    if (this.autoplayStatehood && this.stateProclaimed) {
+      const govReserve = Math.max(0, this.gdpLastMonth) * AUTOPLAY_STATE_RESERVE_MONTHS;
+      const govConsumption = Math.max(0, this.treasury - govReserve) * AUTOPLAY_STATE_GOV_SKIM;
+      this.treasury -= govConsumption;
+    }
 
     // Treasury milestone events (fire once per milestone, never on re-crossing)
     if (this.treasury > 0) {
