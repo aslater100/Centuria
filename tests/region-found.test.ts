@@ -32,15 +32,15 @@ describe('RegionSim.foundColony — the 4X day zero', () => {
     expect(r.nationProclaimed).toBe(false);
   });
 
-  it('reveals the founding valley but leaves the rest of the region fogged', () => {
+  it('starts with the whole region revealed — fog of war retired (2026-07)', () => {
     const r = colony(123);
     let explored = 0, fogged = 0;
     for (const col of r.explorationMap) for (const v of col) {
       if (v === 'explored' || v === 'scouted') explored++;
       else fogged++;
     }
-    expect(explored).toBeGreaterThan(0);
-    expect(fogged).toBeGreaterThan(explored); // most of the map is still unknown
+    expect(explored).toBe(100 * 100);
+    expect(fogged).toBe(0);
   });
 
   it('is deterministic for a fixed seed', () => {

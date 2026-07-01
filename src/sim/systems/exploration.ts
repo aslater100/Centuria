@@ -7,8 +7,11 @@
  */
 import type { RegionSim } from '../region';
 
-/** Called once per game-day: settlements, routes and scouts lift the fog. */
+/** Called once per game-day: settlements, routes and scouts lift the fog.
+ *  Fog of war RETIRED (2026-07): the map starts fully revealed, so this whole
+ *  tick is a no-op — kept (with the machinery below) for API compatibility. */
 export function updateExploration(r: RegionSim): void {
+    if (r.exploredCount >= 100 * 100) return; // fog retired: always true
     // The space age ends the fog for good: orbital survey sees everything.
     if (r.has('computing')) {
       for (let x = 0; x < 100; x++) {

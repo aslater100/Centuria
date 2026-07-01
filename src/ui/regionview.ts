@@ -1211,7 +1211,7 @@ export class RegionView {
     cg.clearRect(0, 0, W, H);
     this.drawTerrain(cg, W, H);
     this.drawTerritories(cg, W, H);
-    this.drawFog(cg, W, H);
+    // Fog of war retired (2026-07): no shroud layer — the map reads clean.
     this.mapCacheSig = sig;
   }
 
@@ -1230,7 +1230,7 @@ export class RegionView {
     }
     const mg = this.memFogCtx!;
     mg.clearRect(0, 0, W, H);
-    this.drawMemoryFog(mg, W, H);
+    // Fog of war retired (2026-07): no memory-fog dim — explored ground stays bright.
     this.memFogSig = sig;
   }
 
@@ -1883,64 +1883,7 @@ export class RegionView {
     g.fillText('Click scout to deselect', spx + 10, spy + 82);
   }
 
-  /** Fog of war: the world beyond the explored frontier lies under a soft,
-   *  cloud-mottled shroud. Cells you have never seen ('fogged') sink under a
-   *  near-opaque veil; the frontier feathers (lighter where it abuts known
-   *  ground) so the discovered map melts into the unknown rather than ending at
-   *  a hard rectangle. Baked into the map cache (over terrain + territory, so
-   *  undiscovered rivals stay hidden) and rebuilt when the frontier advances. */
-  private drawFog(g: CanvasRenderingContext2D, W: number, H: number): void {
-    const N = REGION_N;
-    const m = 60;
-    const { size, ox, oy } = hexLayoutParams(W, H, N, m);
-    const known = (col: number, row: number): boolean => {
-      if (col < 0 || row < 0 || col >= N || row >= N) return false;
-      return this.revealedAt((col / N) * 100, (row / N) * 100);
-    };
-    for (let y = 0; y < N; y++) {
-      for (let x = 0; x < N; x++) {
-        if (known(x, y)) continue;
-        // Feather toward the frontier: any known hex neighbour thins the veil.
-        const frontier = hexNeighbors(x, y).some(([nc, nr]) => known(nc, nr));
-        const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
-        const corners = hexCorners(cx, cy, size);
-        // Painterly cloud mottle so the shroud reads as drifting fog, not a slab.
-        const hash = (x * 374761393 ^ y * 668265263) >>> 0;
-        const mottle = ((hash % 7) - 3) * 0.012;
-        const base = frontier ? 0.48 : 0.9;
-        g.fillStyle = `rgba(9,13,21,${Math.max(0, Math.min(0.96, base + mottle))})`;
-        fillHexPath(g, corners);
-        // A cool, sparse cloud highlight catching light over the deep unknown.
-        if (!frontier && (hash >> 4) % 6 === 0) {
-          g.fillStyle = 'rgba(74,88,116,0.10)';
-          fillHexPath(g, corners);
-        }
-      }
-    }
-  }
-
-  private drawMemoryFog(g: CanvasRenderingContext2D, W: number, H: number): void {
-    const N = REGION_N;
-    const m = 60;
-    const { size, ox, oy } = hexLayoutParams(W, H, N, m);
-    const pid = this.region.playerFactionId;
-    for (let row = 0; row < N; row++) {
-      for (let col = 0; col < N; col++) {
-        const lx = Math.round((col / N) * 100);
-        const ly = Math.round((row / N) * 100);
-        if (!this.revealedAt(lx, ly)) continue;
-        if (this.region.isVisibleToFaction(lx, ly, pid)) continue;
-        const frontier = hexNeighbors(col, row).some(([nc, nr]) => {
-          const fx = Math.round((nc / N) * 100);
-          const fy = Math.round((nr / N) * 100);
-          return this.region.isVisibleToFaction(fx, fy, pid);
-        });
-        const { x: cx, y: cy } = hexCenter(col, row, size, ox, oy);
-        g.fillStyle = frontier ? 'rgba(140,150,170,0.32)' : 'rgba(140,150,170,0.58)';
-        fillHexPath(g, hexCorners(cx, cy, size));
-      }
-    }
-  }
+  // (drawFog / drawMemoryFog removed 2026-07 — fog of war retired; the map renders clean.)
 
   /** Is a base-coord point within the current viewport (plus margin)? */
   private inView(px: number, py: number, margin: number): boolean {
@@ -5686,22 +5629,12 @@ export class RegionView {
     );
   }
 
-  /** Scout-hire button — available pre-state so the player can explore the fog. */
+  /** Scout-hire button — RETIRED with the fog of war (2026-07): with the whole
+   *  region revealed there is nothing left to scout. Kept returning '' so the
+   *  call sites stay stable. */
   private scoutHtml(t: Settlement): string {
-    const r = this.region;
-    if (t.factionId !== r.playerFactionId) return '';
-    const active = r.scouts.filter((s) => s.factionId === r.playerFactionId).length;
-    const scoutCost = r.scoutCost();
-    const canAfford = r.treasury >= scoutCost;
-    const atCap = active >= 2;
-    const disabled = !canAfford || atCap;
-    const reason = atCap ? '2 scouts already active' : !canAfford ? `need ${formatCurrency(scoutCost)}` : '';
-    return (
-      `<p class="insp-skills">EXPLORATION · ${active}/2 scouts active</p>` +
-      `<p><button class="mini scout-btn" ${disabled ? 'disabled' : ''} ` +
-      `title="${disabled ? reason : 'Hire a scout to explore the fog of war — active for 200 days'}">` +
-      `Hire Scout (${formatCurrency(scoutCost)})</button></p>`
-    );
+    void t;
+    return '';
   }
 
   /** Pre-state colony management: development focus and basic local policies. */
