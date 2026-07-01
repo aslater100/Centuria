@@ -1195,8 +1195,9 @@ describe('City works & zoning (Phase 2)', () => {
   it('ground breaks, the treasury pays, and the doors open on schedule', () => {
     const r = stateCity(42);
     const capital = r.settlements[0];
+    const grainCost = r.cityBuildCost(REGION_BUILDINGS.find((b) => b.id === 'grain_exchange')!);
     expect(r.buildCity(capital.id, 'grain_exchange')).toBe(true);
-    expect(r.treasury).toBe(440); // 500 − 60
+    expect(r.treasury).toBe(500 - grainCost); // effect-scaled build cost debited
     expect(capital.construction?.id).toBe('grain_exchange');
     expect(r.buildCity(capital.id, 'market_hall')).toBe(false); // one project at a time
     runDays(r, 41);
@@ -1277,8 +1278,31 @@ describe('Cost scaling with development & size (Baumol / Wagner / ideas-harder-t
     const r = freshState(42);
     expect(r.devFactor()).toBe(1);
     expect(r.researchScale()).toBe(1);
-    expect(r.cityBuildCost(factory)).toBe(factory.cost);
     expect(r.techCost(node)).toBe(node.cost);
+    // Build cost is now the authored base × devFactor × the building's effect-scaling
+    // multiplier (economy-realism increment 1). At devFactor 1 the raw price is the
+    // base times that effect multiplier — the factory is a strong industrial work so
+    // it costs more than its authored base even at floor.
+    expect(r.cityBuildCost(factory)).toBe(Math.round(factory.cost * r.effectCostMult(r.buildingEffectMagnitude(factory))));
+  });
+
+  it('charges more for a higher-effect building than a trivial one (effect-scaled cost)', () => {
+    const r = freshState(42);
+    const university = REGION_BUILDINGS.find((b) => b.id === 'university')!;
+    const waterworks = REGION_BUILDINGS.find((b) => b.id === 'waterworks')!;
+    // The University (+30% information +15% research) is a far bigger lever than the
+    // Waterworks (+5% services), so its effect magnitude — and its price multiplier —
+    // is strictly higher.
+    expect(r.buildingEffectMagnitude(university)).toBeGreaterThan(r.buildingEffectMagnitude(waterworks));
+    expect(r.effectCostMult(r.buildingEffectMagnitude(university))).toBeGreaterThan(
+      r.effectCostMult(r.buildingEffectMagnitude(waterworks)),
+    );
+    // The multiplier is clamped to a sane band so nothing is trivial or unbuildable.
+    for (const def of REGION_BUILDINGS) {
+      const mult = r.effectCostMult(r.buildingEffectMagnitude(def));
+      expect(mult).toBeGreaterThanOrEqual(0.7);
+      expect(mult).toBeLessThanOrEqual(3.0);
+    }
   });
 
   it('a large, wealthy nation pays strictly more for the same work and the same tech', () => {
