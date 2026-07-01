@@ -59,6 +59,7 @@ import { navalTradeIncome } from './systems/naval';
 import { migrate } from './systems/migration';
 import { weatherRoutes } from './systems/route-weather';
 import { updateFactions, updateSettlementFactions } from './systems/factions';
+import { traders, caravans } from './systems/trade-season';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -3949,7 +3950,7 @@ export class RegionSim {
   /** Spare capacity on the tightest leg of a path — the bottleneck a caravan
    *  must squeeze through. Loop, not Math.min(...legs.map()): no per-call array
    *  and no spread (which overflows the stack on a very long corridor). */
-  private legCapacity(legs: Route[]): number {
+  legCapacity(legs: Route[]): number {
     let min = Infinity;
     for (const r of legs) {
       const spare = this.effectiveCapacity(r) - r.freight;
@@ -5674,8 +5675,8 @@ export class RegionSim {
     }
     updateRouteCargo(this);   // Phase 6: cargo labels follow sector surplus (systems/trade.ts)
     migrate(this);
-    this.caravans();
-    this.traders();
+    caravans(this);
+    traders(this);
     navalTradeIncome(this);
     tickNotableLifecycle(this);
     // The treasury runs even before the Charter: pre-statehood the Mayor still
@@ -5890,7 +5891,7 @@ export class RegionSim {
     return g === 'food' ? t.food : t.wood;
   }
 
-  private addStock(t: Settlement, g: TradeGood, v: number): void {
+  addStock(t: Settlement, g: TradeGood, v: number): void {
     if (g === 'food') t.food += v;
     else t.wood += v;
   }
@@ -5903,51 +5904,6 @@ export class RegionSim {
    *  run a trade season directly (same deal as caravans). */
   tradeValueLastMonth = 0;
 
-  traders(): void {
-    if (this.settlements.length < 2) return;
-    this._routePathCache.clear(); // fresh route memo: this is also a direct test entry point
-    let turnover = 0;
-    for (const g of TRADE_GOODS) {
-      // dearest market first: traders chase the widest margin
-      const dear = [...this.settlements].sort((a, b) => b.prices[g] - a.prices[g]);
-      for (const buyer of dear) {
-        // cheapest market that isn't the buyer — a linear scan, not a copy+sort per buyer
-        let seller: Settlement | undefined;
-        let sellerPrice = Infinity;
-        for (const s of this.settlements) {
-          if (s === buyer) continue;
-          if (s.prices[g] < sellerPrice) { sellerPrice = s.prices[g]; seller = s; }
-        }
-        if (!seller) continue;
-        const legs = this.routePath(seller.id, buyer.id);
-        if (!legs || legs.length === 0) continue; // traders need a route
-        const freightRate = 0.01 * legs.length; // £/unit per hop on the wagon
-        const margin = buyer.prices[g] - seller.prices[g];
-        if (margin <= freightRate * 1.5) continue; // not worth the trip
-        const surplus = this.stockOf(seller, g) - this.monthNeed(seller, g);
-        const capLeft = this.legCapacity(legs);
-        const volume = Math.min(surplus * 0.25, capLeft, 80);
-        if (volume < 1) continue;
-        this.addStock(seller, g, -volume);
-        this.addStock(buyer, g, volume * 0.95); // handling and spillage
-        for (const r of legs) r.freight += volume;
-        turnover += volume * (seller.prices[g] + buyer.prices[g]) / 2;
-        if (volume > 30 && this.rng.chance(0.25)) {
-          this.addLog(`${g === 'food' ? 'Grain' : 'Timber'} is dear in ${buyer.name} — traders run the route from ${seller.name}.`, 'info');
-        }
-      }
-    }
-    this.tradeValueLastMonth = turnover;
-    if (turnover > 0) {
-      // Free Trade policy removes the levy entirely; otherwise use the configured rate.
-      const baseRate = this.policyActive('free_trade') ? 0 : this.tradeLevyRate;
-      // Before the State exists the Mayor still collects market tolls on every
-      // caravan — at a gentler rate — so connecting and trading between towns
-      // visibly builds the treasury toward the Charter's economic gate.
-      const effectiveLevyRate = this.stateProclaimed ? baseRate : baseRate * 0.8;
-      this.treasury += turnover * effectiveLevyRate;
-    }
-  }
 
   /** True if the player has a Harbor built in any of their settlements. */
   hasHarbor(): boolean {
@@ -5959,52 +5915,6 @@ export class RegionSim {
   /** Monthly: harbors generate sea-trade income; warships add a naval-supremacy
    *  premium that also deters coastal rivals. */
 
-  /** Grain caravans ride the route network (M6b): surplus towns provision
-   *  hungry ones, but every leg clamps to its route's remaining capacity —
-   *  a famine behind a goat trail is now possible, and fixable with money.
-   *  Public so tests and the harness can run a caravan season directly. */
-  caravans(): void {
-    if (this.settlements.length < 2) return;
-    this._routePathCache.clear(); // fresh route memo: this is also a direct test entry point
-    for (const r of this.routes) r.freight = 0;
-    for (const needy of this.settlements) {
-      const need = this.popOf(needy) * 0.75 * 20 - needy.food; // 20-day buffer target
-      if (need <= 0) continue;
-      // fullest larder in the same faction — a linear scan, not a copy+filter+sort per needy town
-      let donor: Settlement | undefined;
-      let donorFood = -Infinity;
-      for (const t of this.settlements) {
-        if (t === needy || t.factionId !== needy.factionId) continue;
-        if (t.food <= this.popOf(t) * 0.75 * 60) continue;
-        if (t.food > donorFood) { donorFood = t.food; donor = t; }
-      }
-      if (!donor) continue;
-      const surplus = donor.food - this.popOf(donor) * 0.75 * 60;
-      const legs = this.routePath(donor.id, needy.id);
-      if (legs && legs.length > 0) {
-        const cap = this.legCapacity(legs);
-        const sent = Math.max(0, Math.min(need, surplus, cap));
-        if (sent <= 0) continue;
-        donor.food -= sent;
-        needy.food += sent * 0.9; // the road takes its tithe
-        for (const r of legs) r.freight += sent;
-        if (sent < Math.min(need, surplus) - 1 && this.rng.chance(0.4)) {
-          this.addLog(`The route to ${needy.name} is choked — wagons turn back with grain still wanted.`, 'bad');
-        } else if (sent > 40 && this.rng.chance(0.4)) {
-          this.addLog(`Grain caravans roll from ${donor.name} to ${needy.name}.`, 'info');
-        }
-      } else {
-        // No route at all: smugglers and peddlers move a trickle, at a price
-        const sent = Math.min(need, surplus);
-        if (sent <= 0) continue;
-        donor.food -= sent;
-        needy.food += sent * 0.3;
-        if (this.rng.chance(0.3)) {
-          this.addLog(`Peddlers carry what they can to ${needy.name} — no road reaches it.`, 'bad');
-        }
-      }
-    }
-  }
 
   /** The money layer that arrives with Statehood (GDD §2.5). */
   private monthlyEconomy(): void {
