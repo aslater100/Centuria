@@ -769,6 +769,22 @@ const RIVAL_ADMIN_PER_TOWN = 5; // gold/settlement/month — mirrors the player'
 // headless sweep are byte-identical (the guard short-circuits when the flag is off).
 const AUTOPLAY_STATE_RESERVE_MONTHS = 1.5; // months of monthly GDP a proclaimed autoplay state keeps untouched
 const AUTOPLAY_STATE_GOV_SKIM = 0.5; // monthly fraction of the above-reserve surplus spent as gov consumption
+// ---- Effect-scaled construction cost (economy-realism increment 1). Buildings and
+// districts now cost in proportion to their IMPACT: a University (+30% information +15%
+// research) or an empire-wide Wonder is a real investment; a Waterworks (+5% services)
+// stays cheap. A work's effect "magnitude" sums its bonus channels, weighting
+// broad-reach effects (all-sector, empire-wide) by how many sectors/towns they touch;
+// the price is authored-base × devFactor × clamp(magnitude / baseline). On for everyone
+// (a deliberate balance re-baseline) — it makes the powerful buildings expensive and
+// the trivial ones cheap, so placement is a real choice, not a rounding error. ----
+const EFFECT_COST_BASELINE = 0.16; // effect magnitude that maps to a ~1× cost multiplier (a mid single-sector work)
+const EFFECT_COST_MULT_MIN = 0.7; // floor: even a weak work still costs a fair fraction of its base
+const EFFECT_COST_MULT_MAX = 3.0; // ceiling: even an empire Wonder tops out at 3× its authored base
+const EFFECT_ALL_SECTOR_SPAN = 3.5; // an 'all'-sector bonus effectively lands on ~3–4 sectors
+const EFFECT_EMPIRE_WEIGHT = 4; // an empire-wide bonus (every owned town) is far more powerful than a local one
+const EFFECT_RESEARCH_WEIGHT = 1.0; // a research-rate bonus counts like a same-size sector bonus
+const EFFECT_SATISFACTION_WEIGHT = 0.02; // satisfaction points → magnitude (a +5-sat work adds 0.10)
+const EFFECT_SIGHT_WEIGHT = 0.02; // survey-radius points → magnitude
 // Territory ceiling for the autoplay PLAYER (`autoExpandPlayer`). Deliberately far
 // below the rival `settlementCap` (12 on normal): the player pays the full
 // monthlyEconomy public-sector bill on every town, and its spatial DEVELOPMENT is
@@ -4231,9 +4247,39 @@ export class RegionSim {
     return Math.round(base * this.devFactor());
   }
 
-  /** What a civic work actually costs to raise here and now (Baumol-scaled). */
+  /** A building's total effect "power" — sums its bonus channels, weighting broad-reach
+   *  effects (all-sector, empire-wide) by how many sectors/towns they touch. Drives
+   *  effect-scaled build cost; pure, so the UI can also surface "why this costs so much". */
+  buildingEffectMagnitude(def: RegionalBuildingDef): number {
+    const span = def.sector === 'all' ? EFFECT_ALL_SECTOR_SPAN : 1;
+    let mag = Math.abs(def.bonus ?? 0) * span;
+    mag += (def.research ?? 0) * EFFECT_RESEARCH_WEIGHT;
+    mag += (def.satisfaction ?? 0) * EFFECT_SATISFACTION_WEIGHT;
+    mag += (def.sight ?? 0) * EFFECT_SIGHT_WEIGHT;
+    if (def.empireBonus) {
+      const empSpan = def.empireSector === 'all' ? EFFECT_ALL_SECTOR_SPAN : 1;
+      mag += Math.abs(def.empireBonus) * empSpan * EFFECT_EMPIRE_WEIGHT;
+    }
+    return mag;
+  }
+
+  /** A district's effect "power" — its flat sector bonus plus the adjacency stacking it
+   *  can realize (the zoning reward). */
+  districtEffectMagnitude(def: DistrictDef): number {
+    return Math.abs(def.bonus ?? 0) + RegionSim.DISTRICT_ZONE_BONUS * RegionSim.DISTRICT_ZONE_CAP;
+  }
+
+  /** Cost multiplier from an effect magnitude — normalized to the baseline work and
+   *  clamped so nothing is trivialized or made unbuildable. */
+  effectCostMult(magnitude: number): number {
+    return Math.min(EFFECT_COST_MULT_MAX, Math.max(EFFECT_COST_MULT_MIN, magnitude / EFFECT_COST_BASELINE));
+  }
+
+  /** What a civic work actually costs to raise here and now: authored base, Baumol-scaled
+   *  by the economy's development, then scaled by the building's effect magnitude so a
+   *  powerful work is a real investment (economy-realism increment 1). */
   cityBuildCost(def: RegionalBuildingDef): number {
-    return Math.round(def.cost * this.devFactor());
+    return Math.round(def.cost * this.devFactor() * this.effectCostMult(this.buildingEffectMagnitude(def)));
   }
 
   /** What a tech/civics node actually costs in RP for a nation this size. */
@@ -7160,7 +7206,7 @@ export class RegionSim {
 
   /** Cost to zone a district at the current development level (mirrors building cost). */
   districtCost(def: DistrictDef): number {
-    return Math.round(def.cost * this.devFactor());
+    return Math.round(def.cost * this.devFactor() * this.effectCostMult(this.districtEffectMagnitude(def)));
   }
 
   /** How many of district `id` this town already hosts (district-scale `max` cap). */
