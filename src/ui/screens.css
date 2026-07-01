@@ -208,3 +208,79 @@
   border-radius: var(--radius);
   cursor: pointer;
 }
+
+/* ---- Scenario cards (title screen "Choose your start") ---- */
+.ts-scenario-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 38vh;
+  overflow-y: auto;
+  padding-right: 4px;
+  margin: 4px 0 6px;
+}
+.ts-scenario-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  grid-template-areas:
+    'radio name era diff'
+    'radio desc desc desc';
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-gold-soft);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.ts-scenario-row:hover {
+  border-color: var(--border-gold);
+  box-shadow: var(--glow-gold);
+}
+.ts-scenario-row.ts-scenario-selected {
+  background: var(--surface-raised);
+  border-color: var(--gold-400);
+  box-shadow: 0 1px 0 var(--border-inner) inset, var(--glow-gold);
+}
+.ts-scenario-row input[type='radio'] {
+  grid-area: radio;
+  accent-color: var(--gold-500);
+  width: 14px;
+  height: 14px;
+}
+.ts-scenario-name {
+  grid-area: name;
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--gold-300);
+  white-space: nowrap;
+}
+.ts-scenario-era {
+  grid-area: era;
+  justify-self: end;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dark);
+  background: var(--gold-face);
+  border: 1px solid #8a6620;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-weight: 700;
+}
+.ts-scenario-diff {
+  grid-area: diff;
+  color: var(--bad);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+.ts-scenario-desc {
+  grid-area: desc;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  white-space: normal;
+}
