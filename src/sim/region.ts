@@ -30,6 +30,7 @@ import {
   updateArmyMovement,
   tickRivalArmyAI,
   consumeWarSupply,
+  consumeWarMateriel,
   tickMobilization,
   tickSupplyLines,
   tickOccupation,
@@ -2051,6 +2052,20 @@ export const ARMAMENTS_WARPOWER_FLOOR = 0.5;
  *  Exactly ×1 at a full arms base, so healthy war economies are unchanged. */
 export const ARMAMENTS_STRAIN_PREMIUM = 1.0;
 
+/** The goods a fielded army physically eats each month (GDD §7.3 supply lines) —
+ *  the same two the arms base is priced off, so the strain premium (money) and the
+ *  materiel draw (stocks) tell one story: steel for the guns, chemicals for the shells. */
+export const WAR_MATERIEL_GOODS = ['steel', 'chemicals'] as const;
+/** Units of EACH materiel good drawn per point of fielded unit power per month —
+ *  at 0.01, an army of 1000 militia consumes one producing town's full monthly
+ *  base output (10) of each good. Drawn via `drawGood` from real town stocks, so a
+ *  war visibly drains the arsenals, lifts local prices, and pulls arbitrage flows. */
+export const WAR_MATERIEL_PER_POWER = 0.01;
+/** Morale lost per month at a TOTAL materiel shortfall (scaled linearly by the unmet
+ *  fraction, floored at morale 30 — the supply-crisis floor in consumeWarSupply):
+ *  an army without shells fights on, but it fights sullen. */
+export const WAR_MATERIEL_MORALE_DRAG = 8;
+
 /** Unit type recruitment costs and supply needs (GDD §7.1 military depth). */
 export const UNIT_TYPES: Record<ArmyUnitType, {
   recruitCost: number;   // £ per unit
@@ -2929,6 +2944,52 @@ export function rivalClimateUrgency(r: RegionSim, rv: RivalNation): number {
   const warmingUrgency = Math.max(0, Math.min(1, r.warmingC / WORLD_GREEN_URGENCY_C));
   const greenSlack = 1 - (ARCHETYPE_GREEN_PROPENSITY[rv.archetype] ?? 0.5);
   return warmingUrgency * greenSlack;
+}
+
+// ---- Rival-side arms base (flag `rivalClimateResponse`, default OFF → the
+// pop-ratio peace roll stays byte-identical): the off-map analogue of
+// `armamentsCapacity()`. A rival has no towns or cascade, so its arms base is
+// priced off what IS known about it: an autarkic industrial base (fossil-locked
+// archetypes keep the mills that also feed arsenals) plus procurement on the
+// world market (commerce weight), which world steel/chemicals scarcity chokes.
+// Feeds the foreign-war peace roll in systems/diplomacy.ts, so who WINS the
+// abstract rival↔rival wars is scarcity-decided, not pop-decided. ----
+
+/** Arms base every rival holds regardless of posture — no great power is unarmed. */
+export const RIVAL_ARMS_BASE = 0.4;
+/** Arms-base share from the autarkic fossil-industrial lean (1 − green propensity):
+ *  the archetypes that never left coal and steel arm themselves at home. */
+export const RIVAL_ARMS_INDUSTRIAL = 0.35;
+/** Arms-base share from world-market procurement, scaled by the rival's commerce
+ *  weight and choked by world steel/chemicals scarcity — the traders arm from the
+ *  arsenal of the world, until the world runs short. */
+export const RIVAL_ARMS_MARKET = 0.25;
+
+/** The world-market chokepoint on arms procurement: the WORSE of world steel and
+ *  chemicals scarcity (Liebig — the binding input constrains the arsenal), mirroring
+ *  the player-side `armamentsCapacity()` min over the same two goods. Pure read. */
+export function worldArmsScarcity(r: RegionSim): number {
+  return Math.max(r.worldGoodScarcity('steel'), r.worldGoodScarcity('chemicals'));
+}
+
+/** Pure core of `rivalArmsCapacity` (unit-tested exactly): base + industrial lean
+ *  + market access, clamped to [0,1]. `commerce` is the 0–10 personality weight;
+ *  `industrialLean`/`armsScarcity` are 0–1. */
+export function rivalArmsCapacityCore(industrialLean: number, commerce: number, armsScarcity: number): number {
+  const lean = Math.max(0, Math.min(1, industrialLean));
+  const access = Math.max(0, Math.min(1, commerce / 9)) * (1 - Math.max(0, Math.min(1, armsScarcity)));
+  const cap = RIVAL_ARMS_BASE + RIVAL_ARMS_INDUSTRIAL * lean + RIVAL_ARMS_MARKET * access;
+  return Math.max(0, Math.min(1, cap));
+}
+
+/** How well an off-map rival can arm itself, 0..1 — 1 when the flag is off so the
+ *  legacy pop-ratio peace roll is reproduced bit-for-bit (×1.0 equipment cancels).
+ *  No RNG, no new serialized field — pure arithmetic over archetype, personality,
+ *  and world-market scarcity, the `rivalClimateUrgency` pattern. */
+export function rivalArmsCapacity(r: RegionSim, rv: RivalNation): number {
+  if (!r.rivalClimateResponse) return 1;
+  const industrialLean = 1 - (ARCHETYPE_GREEN_PROPENSITY[rv.archetype] ?? 0.5);
+  return rivalArmsCapacityCore(industrialLean, rv.weights.commerce, worldArmsScarcity(r));
 }
 
 /** Maximum annual snapshots retained in statsHistory (one per year, 200y of coverage). */
@@ -5969,6 +6030,7 @@ export class RegionSim {
     updateArmyMovement(this);         // Phase 7: army marching, battles (systems/military.ts)
     tickRivalArmyAI(this);            // Phase 7: rival army planning
     consumeWarSupply(this); // deplete supply reserves based on army size and supply consumption rate
+    consumeWarMateriel(this); // …and the arsenals: fielded power draws real steel/chemicals stocks (GDD §7.3)
     tickMobilization(this);           // Phase 16: mobilization effects
     tickSupplyLines(this);            // Phase 16: supply line decay for army groups
     tickOccupation(this);             // Phase 16: occupation resistance
