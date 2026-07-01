@@ -52,6 +52,7 @@ import { tickRegionalEvents } from './systems/events';
 import { checkElection } from './systems/elections';
 import { updateConstruction } from './systems/construction';
 import { updateScouts } from './systems/scouts';
+import { updateRivalAI } from './systems/rival-ai';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -5714,7 +5715,7 @@ export class RegionSim {
     tickSupplyLines(this);            // Phase 16: supply line decay for army groups
     tickOccupation(this);             // Phase 16: occupation resistance
     if (this.playerWar) tickWarSupport(this); // Phase 16: war support
-    this.updateRivalAI(); // staggered AI updates for rivals (GDD §6.2)
+    updateRivalAI(this); // staggered AI updates for rivals (GDD §6.2) (systems/rival-ai.ts)
     updateScouts(this); // update faction scouts: movement, spawning, expiry (GDD §6.2) (systems/scouts.ts)
     tickClimate(this); // the ledger runs from the first decade (GDD §8.2)
     tickAutomation(this); // Phase 11: automation unemployment drift
@@ -12622,7 +12623,7 @@ export class RegionSim {
    *  treasury for the player, the faction treasury for a rival), so it can never drain
    *  the buffer that feeds the people (the same discipline as `rivalStateCost`).
    *  Intentional headless re-baseline. */
-  private maybeDevelopFactionTown(faction: RegionalFaction, knobs: typeof AI_DIFFICULTY[AiDifficulty], output: number): void {
+  maybeDevelopFactionTown(faction: RegionalFaction, knobs: typeof AI_DIFFICULTY[AiDifficulty], output: number): void {
     if (faction.settlementIds.length === 0) return;
     if (!this.aiRng.chance(RIVAL_BUILD_CHANCE * knobs.techMult)) return;
     // Only ever spend what sits ABOVE a famine floor — emergency grain is paid from
@@ -13117,44 +13118,11 @@ export class RegionSim {
 
   /** Monthly update hook for faction AI: check if any faction is due for update.
    *  Staggered scheduling keeps this O(factions) but amortized O(1) per month. */
-  private updateRivalAI(): void {
-    // Nation-level rivals: staggered diplomatic cadence (peace, war, treaties).
-    // GDD §6.2: Personality-driven AI generates offers based on weights, relations, and situation.
-    for (const rival of this.rivals) {
-      if (this.day - rival.lastEnvoyDay >= 365) {
-        this.rivalDiplomaticRound(rival);
-        rival.lastEnvoyDay = this.day;
-      }
-    }
-
-    // Regional factions: staggered AI so not every faction acts each month.
-    // Runs from tick 1 — rivals expand and scout regardless of player statehood.
-    for (const faction of this.regionalFactions) {
-      if (faction.id === this.playerFactionId) {
-        // The player faction never runs the full rival AI (no procedural goals,
-        // expansion, military or diplomacy — those are the human's to drive). But
-        // in autoplay (flag-gated; OFF for live human play) it DOES exercise its
-        // own spatial path: develop the player's town(s) on the same cadence,
-        // funded from the national treasury and reserve-gated like a rival. This
-        // is what makes the headless balance signal reflect a player who actually
-        // builds, instead of one bare town carrying the whole economy on raw yields.
-        if (this.autoDevelopPlayer && this.day - faction.lastUpdateDay >= faction.updateFrequency) {
-          this.maybeDevelopFactionTown(faction, this.aiKnobs(), this.factionTownOutput(faction));
-          faction.lastUpdateDay = this.day;
-        }
-        continue;
-      }
-      if (this.day - faction.lastUpdateDay >= faction.updateFrequency) {
-        this.updateFactionAI(faction);
-        faction.lastUpdateDay = this.day;
-      }
-    }
-  }
 
   /** Total monthly sector output across a faction's towns — the reserve basis for
    *  `maybeDevelopFactionTown` (development spends only the surplus above a fraction
    *  of this). Mirrors the inline `rivalOutput` sum in `updateFactionAI`. */
-  private factionTownOutput(faction: RegionalFaction): number {
+  factionTownOutput(faction: RegionalFaction): number {
     let output = 0;
     for (const id of faction.settlementIds) {
       const t = this.settlement(id);
@@ -13164,7 +13132,7 @@ export class RegionSim {
   }
 
   /** Annual diplomatic round: AI initiates offers based on personality and relations. */
-  private rivalDiplomaticRound(rival: RivalNation): void {
+  rivalDiplomaticRound(rival: RivalNation): void {
     if (!this.stateProclaimed) return; // Player must be a nation to be courted
 
     // Clean up expired offers
