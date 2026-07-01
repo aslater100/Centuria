@@ -11,6 +11,9 @@ import {
   worldGoodSupply,
   worldGoodScarcity,
   worldMarketTightness,
+  localFinalGoodDemand,
+  localGoodPrice,
+  tickIntermediateGoods,
 } from '../src/sim/systems/goods';
 
 /**
@@ -278,10 +281,11 @@ describe('consumer-demand in live autoplay', () => {
     expect(r.worldMarketTightness()).toBe(0);
   });
 
-  it('the on-map serialized economy is byte-identical with the flag on vs off (telemetry-only activation)', () => {
-    const run = (cd: boolean): string => {
+  it('increment 2: consumer-demand ON now DIVERGES the on-map economy from OFF (the sink makes it respond), yet stays deterministic & bounded', () => {
+    const run = (cd: boolean): RegionSim => {
       const r = RegionSim.create(1007);
       r.autoDevelopPlayer = true;
+      r.autoExpandPlayer = true; // a multi-town nation so cross-town shortage can open
       r.consumerDemand = cd;
       const target = r.year + 40;
       let guard = 0;
@@ -289,12 +293,95 @@ describe('consumer-demand in live autoplay', () => {
         r.tick();
         guard++;
       }
-      return JSON.stringify(r.serialize());
+      return r;
     };
-    // The world scarcity feeds the one-sided price anchor, but on-map towns are uniformly
-    // slack on local stock → the lift is uniform → no price gaps → no arbitrage flow change
-    // → the serialized economy is byte-for-byte identical. The activation is telemetry-only
-    // until the per-town local price is made flow-based (the handed-off next increment).
-    expect(run(true)).toBe(run(false));
+    const on = run(true);
+    const off = run(false);
+    // Increment 2 (the per-town final-consumption SINK) is deliberately NOT telemetry-only:
+    // households DRAIN each town's stock, so a town short of a good it doesn't make goes
+    // genuinely short → its price rises → arbitrage ships it in → the serialized on-map
+    // economy DIVERGES from the flag-off (legacy, no-sink) run. This asserts the response
+    // that increment 1 explicitly deferred ("telemetry-only until the per-town local price
+    // is made flow-based — the next increment").
+    expect(JSON.stringify(on.serialize())).not.toBe(JSON.stringify(off.serialize()));
+    // The response is real: some households went short, and real goods are moving on-map.
+    expect(on.finalConsumptionShortfall).toBeGreaterThan(0);
+    expect(on.finalConsumptionShortfall).toBeLessThanOrEqual(1);
+    // Determinism holds under the flag (same seed + flag → byte-identical), the Track-C contract.
+    expect(JSON.stringify(run(true).serialize())).toBe(JSON.stringify(on.serialize()));
+    // Bounded / finite: the sink cannot spiral the nation into non-finite state.
+    expect(Number.isFinite(on.treasury)).toBe(true);
+    expect(on.playerPop()).toBeGreaterThan(0);
+  });
+});
+
+describe('CONSUMER-DEMAND increment 2 — the per-town final-consumption SINK', () => {
+  it('localFinalGoodDemand is 0 for every good when the model is off (byte-identical)', () => {
+    const r = worldSim([{ ind: 10, agri: 10 }, { ind: 0, agri: 20 }], { consumerDemand: false });
+    for (const g of INTERMEDIATE_GOODS) {
+      for (const t of r.settlements) expect(localFinalGoodDemand(r, t, g.id)).toBe(0);
+    }
+  });
+
+  it('splits the world final appetite by POPULATION share (Σ over towns == finalGoodDemand; a bigger town wants more)', () => {
+    const r = worldSim([{ ind: 10, agri: 10 }, { ind: 10, agri: 10 }], { consumerDemand: true });
+    r.settlements[0].cohorts.bands = r.settlements[0].cohorts.bands.map((b) => b * 2); // town 0 twice the people
+    const good = 'steel'; // unlocked well before the fixture year (2000)
+    const d0 = localFinalGoodDemand(r, r.settlements[0], good);
+    const d1 = localFinalGoodDemand(r, r.settlements[1], good);
+    expect(d0).toBeCloseTo(2 * d1, 6);                       // demand tracks population
+    expect(d0 + d1).toBeCloseTo(finalGoodDemand(r, good), 6); // and decomposes the world appetite exactly
+  });
+
+  it('localGoodPrice: the sink makes a terminal good stock-sensitive when ON (dear when empty), inert to stock when OFF', () => {
+    // `food` is terminal — no chain consumes it → intermediate-input demand is 0, so the
+    // legacy (OFF) price ignores stock entirely. The final-consumption sink is what gives
+    // it a demand to be short against.
+    const price = (cd: boolean, stock: number): number => {
+      const r = worldSim([{ ind: 10, agri: 10 }], { consumerDemand: cd });
+      r.settlements[0].goodStocks = { food: stock };
+      return localGoodPrice(r, r.settlements[0], 'food');
+    };
+    expect(price(false, 0)).toBe(price(false, 100000));      // OFF: no final demand → price is stock-blind (base)
+    expect(price(true, 0)).toBeGreaterThan(price(true, 100000)); // ON: empty shelf dear, full shelf base
+  });
+
+  it('the sink DRAINS a pure-consumer town\'s stock and records its shortfall (ON); OFF the shelf is untouched', () => {
+    const run = (cd: boolean) => {
+      // Town 1 produces nothing (ind=agri=0) but has people → a pure consumer.
+      const r = worldSim([{ ind: 10, agri: 10 }, { ind: 0, agri: 0 }], { consumerDemand: cd });
+      const consumer = r.settlements[1];
+      consumer.goodStocks = { food: 1000 };
+      tickIntermediateGoods(r);
+      return {
+        stock: consumer.goodStocks?.food ?? 0,
+        townShortfall: r.goodsShortfall.get(consumer.id) ?? 0,
+        worldShortfall: r.finalConsumptionShortfall,
+      };
+    };
+    const off = run(false);
+    expect(off.stock).toBe(1000);            // OFF: no drain runs
+    expect(off.townShortfall).toBe(0);
+    expect(off.worldShortfall).toBe(0);
+    const on = run(true);
+    expect(on.stock).toBeLessThan(1000);     // ON: households ate into the shelf
+    expect(on.townShortfall).toBeGreaterThan(0); // it holds only food, so most of its appetite went unmet
+    expect(on.townShortfall).toBeLessThanOrEqual(1);
+    expect(on.worldShortfall).toBeGreaterThan(0);
+    expect(on.worldShortfall).toBeLessThanOrEqual(1);
+  });
+
+  it('a well-supplied producer town meets its own households (low shortfall) while a bare consumer town goes short (high shortfall)', () => {
+    const r = worldSim([{ ind: 40, agri: 40 }, { ind: 0, agri: 0 }], { consumerDemand: true });
+    // Give the producer a deep buffer of everything; leave the consumer bare.
+    const stocks: Record<string, number> = {};
+    for (const g of INTERMEDIATE_GOODS) stocks[g.id] = 100000;
+    r.settlements[0].goodStocks = { ...stocks };
+    r.settlements[1].goodStocks = {};
+    tickIntermediateGoods(r);
+    const producer = r.goodsShortfall.get(r.settlements[0].id) ?? 0;
+    const consumer = r.goodsShortfall.get(r.settlements[1].id) ?? 0;
+    expect(producer).toBeLessThan(consumer); // the shelf-rich town feeds its people; the bare one cannot
+    expect(consumer).toBeGreaterThan(0.5);   // the bare consumer meets almost none of its appetite
   });
 });

@@ -3304,6 +3304,22 @@ export class RegionSim {
    *  flow scarcity can read this-tick production capacity without re-resolving the chain
    *  per price query. Rebuilt every tick → NOT serialized (like `_districtCache`). */
   goodLevels: Map<string, number> = new Map();
+  /** CONSUMER-DEMAND increment 2 — the per-town final-consumption SINK's readouts,
+   *  both TRANSIENT (rebuilt every `tickIntermediateGoods`, NOT serialized → the save
+   *  format stays byte-identical to HEAD, flag on or off). `goodsShortfall` maps a
+   *  settlement id → the fraction of its households' final-good appetite that went
+   *  UNMET this month (∈[0,1]), read by the satisfaction coupling in `dailyUpdate`;
+   *  `finalConsumptionShortfall` is the demand-weighted world aggregate (telemetry).
+   *  Both empty / 0 when the consumer-demand model is off (no drain runs) → live human
+   *  play byte-identical. */
+  goodsShortfall: Map<number, number> = new Map();
+  finalConsumptionShortfall = 0;
+  /** Transient cache of total world population, refreshed once per `tickIntermediateGoods`
+   *  so the per-town final-demand split (`localFinalGoodDemand`, read O(N²·G) times by the
+   *  arbitrage price scan when the sink is active) doesn't re-sum every town's cohorts on
+   *  every call. Rebuilt each tick → NOT serialized; 0 outside a tick (direct callers fall
+   *  back to a live sum). Only read when `consumerDemand` is on → no live-play cost. */
+  worldPopCache = 0;
   /** Difficulty chosen at town design — tunes the regional AI competitors. */
   aiDifficulty: AiDifficulty = 'normal';
   /** Currency exchange rates: { from:factionId:to:factionId => rate } */

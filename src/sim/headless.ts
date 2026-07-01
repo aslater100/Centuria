@@ -29,8 +29,8 @@ const autoExpandPlayer = process.env.SIM_PLAYER_MANUAL !== '1';
 const consumerDemand = process.env.SIM_CONSUMER_DEMAND === '1';
 
 console.log(`headless sim: ${years} game-year(s) × ${runs} run(s)  [player spatial play: ${autoDevelopPlayer ? 'AUTO' : 'manual'}; consumer-demand: ${consumerDemand ? 'ON' : 'off'}]\n`);
-console.log('seed |  year | towns | pTwn |    treasury |        GDP | treas/GDP(mo) | infl% |  pop   | sat | pBld | wMkt% |  gpP% | ticks | outcome');
-console.log('-----+-------+-------+------+-------------+------------+---------------+-------+--------+-----+------+-------+-------+-------+--------');
+console.log('seed |  year | towns | pTwn |    treasury |        GDP | treas/GDP(mo) | infl% |  pop   | sat | pBld | flows | lScar% | fShort% | wMkt% |  gpP% | ticks | outcome');
+console.log('-----+-------+-------+------+-------------+------------+---------------+-------+--------+-----+------+-------+--------+---------+-------+-------+-------+--------');
 
 for (let run = 0; run < runs; run++) {
   const seed = 1000 + run * 7;
@@ -67,6 +67,12 @@ for (let run = 0; run < runs; run++) {
     `${r.playerPop().toFixed(0).padStart(6)} | ` +
     `${r.avgSatisfaction().toFixed(0).padStart(3)} | ` +
     `${String(pBld).padStart(4)} | ` +
+    // On-map economy RESPONSE telemetry (consumer-demand increment 2): active trade
+    // flows in transit, the nation-wide local-goods (input-stranding) scarcity, and
+    // the household final-consumption shortfall — all a structural 0 before the sink.
+    `${String(r.tradeFlows.length).padStart(5)} | ` +
+    `${(r.localGoodsScarcity * 100).toFixed(1).padStart(6)} | ` +
+    `${(r.finalConsumptionShortfall * 100).toFixed(1).padStart(7)} | ` +
     `${(r.worldMarketTightness() * 100).toFixed(1).padStart(5)} | ` +
     `${(r.worldPowerPressure() * 100).toFixed(1).padStart(5)} | ` +
     `${String(ticks).padStart(5)} | ` +
