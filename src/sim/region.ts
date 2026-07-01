@@ -58,6 +58,7 @@ import { collectVassalTribute, applyProvincePolicyEffects } from './systems/stat
 import { navalTradeIncome } from './systems/naval';
 import { migrate } from './systems/migration';
 import { weatherRoutes } from './systems/route-weather';
+import { updateFactions, updateSettlementFactions } from './systems/factions';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -5683,8 +5684,8 @@ export class RegionSim {
     // (otherwise the only pre-State income is trade tolls and the books can only
     // sink). Nation-tier machinery (factions/diplomacy/central bank) stays gated.
     this.monthlyEconomy();
-    if (this.stateProclaimed) this.updateFactions();
-    if (this.stateProclaimed) this.updateSettlementFactions();
+    if (this.stateProclaimed) updateFactions(this);
+    if (this.stateProclaimed) updateSettlementFactions(this);
     updateDiplomacy(this);
     applyProvincePolicyEffects(this); // Phase 5: province governance effects (systems/statecraft.ts)
     updateArmyMovement(this);         // Phase 7: army marching, battles (systems/military.ts)
@@ -8606,71 +8607,9 @@ export class RegionSim {
   // ---- Faction system (GDD §5.3) ----
 
   /** Recompute faction power and support from current game state (called monthly). */
-  private updateFactions(): void {
-    const pop = this.totalPop();
-    const food = this.settlements.reduce((s, t) => s + t.food, 0);
-    const trade = this.tradeValueLastMonth;
-
-    const workerPower = Math.min(70, 30 + pop * 0.05);
-    const workerSupport = Math.max(0, Math.min(100,
-      50 + (this.servicesLevel - 1) * 20
-      - Math.max(0, this.taxRate - 0.15) * 100
-      + (this.passedLaws.has('workers_charter') ? 20 : 0)
-      - (this.passedLaws.has('conscription_act') ? 5 : 0)
-      + (this.passedLaws.has('estate_tax') ? 10 : 0)
-      + (this.passedLaws.has('progressive_tax') ? 15 : 0)
-      + (this.passedLaws.has('welfare_benefits') ? 10 : 0)
-      + (this.passedLaws.has('national_education_act') ? 10 : 0)
-      + (this.passedLaws.has('healthcare_act') ? 10 : 0)
-      + (this.passedLaws.has('land_reform') ? 20 : 0)
-      + (this.passedLaws.has('trade_unions_act') ? 20 : 0),
-    ));
-
-    const landownerPower = Math.min(50, 15 + food * 0.005);
-    const landownerSupport = Math.max(0, Math.min(100,
-      70 - this.taxRate * 160
-      - (this.passedLaws.has('estate_tax') ? 25 : 0)
-      - (this.passedLaws.has('workers_charter') ? 10 : 0)
-      - (this.passedLaws.has('progressive_tax') ? 10 : 0)
-      - (this.passedLaws.has('land_reform') ? 30 : 0)
-      - (this.passedLaws.has('trade_unions_act') ? 10 : 0)
-      + (this.passedLaws.has('tariff_act') ? 10 : 0),
-    ));
-
-    const merchantPower = Math.min(40, 10 + trade * 0.12);
-    const merchantSupport = Math.max(0, Math.min(100,
-      50 + trade * 0.05
-      + (this.passedLaws.has('merchants_charter') ? 25 : 0)
-      - (this.passedLaws.has('workers_charter') ? 10 : 0)
-      - (this.passedLaws.has('progressive_tax') ? 10 : 0)
-      + (this.passedLaws.has('press_freedom_act') ? 10 : 0)
-      - (this.passedLaws.has('tariff_act') ? 10 : 0),
-    ));
-
-    this.factions = [
-      {
-        id: 'workers', name: 'Workers', power: workerPower, support: workerSupport,
-        demand: workerSupport < 40 ? 'better services & lower taxes' : 'content',
-      },
-      {
-        id: 'landowners', name: 'Landowners', power: landownerPower, support: landownerSupport,
-        demand: landownerSupport < 40 ? 'tax cuts' : 'content',
-      },
-      {
-        id: 'merchants', name: 'Merchants', power: merchantPower, support: merchantSupport,
-        demand: merchantSupport < 40 ? 'open markets' : 'content',
-      },
-    ];
-
-    // Update regional faction economies: calculate production based on resource focus
-    this.updateRegionalTrade();
-
-    // Update faction alliances: compatible goals form pacts, incompatible ones break
-    this.updateFactionAlliances();
-  }
 
   /** Calculate regional trade dynamics: factions compete for market dominance by resource type. */
-  private updateRegionalTrade(): void {
+  updateRegionalTrade(): void {
     // Calculate resource production for each faction
     const factionResources: Record<number, Record<string, number>> = {};
 
@@ -12875,7 +12814,7 @@ export class RegionSim {
   }
 
   /** Update faction alliance dynamics (Phase 3b: called during monthly faction update). */
-  private updateFactionAlliances(): void {
+  updateFactionAlliances(): void {
     for (let i = 0; i < this.regionalFactions.length; i++) {
       for (let j = i + 1; j < this.regionalFactions.length; j++) {
         const a = this.regionalFactions[i];
@@ -12896,65 +12835,6 @@ export class RegionSim {
 
   /** Update settlement-level faction strengths based on laws, policies, and economic conditions.
    *  Factions gain strength when the player enacts laws they support, and lose when blocked. */
-  private updateSettlementFactions(): void {
-    for (const settlement of this.settlements) {
-      // Get active factions for this year
-      const activeFacs = activeFactions(this.year);
-
-      for (const factionDef of activeFacs) {
-        const currentStrength = settlement.factionStrengths.get(factionDef.id) ?? 50;
-        let newStrength = currentStrength;
-
-        // Faction gains 20 strength when player passes a law they promote
-        for (const law of factionDef.promotes) {
-          if (this.passedLaws.has(law)) {
-            newStrength += 2;
-          }
-        }
-
-        // Faction loses 15 strength when player passes a law they oppose
-        for (const law of factionDef.opposes) {
-          if (this.passedLaws.has(law)) {
-            newStrength -= 2;
-          }
-        }
-
-        // Tech research boosts faction strength (if they have modifiers for that tech)
-        // Example: environmentalists boost when solar/wind researched
-        if (factionDef.id === 'environmentalists' && (this.has('solar_cells') || this.has('wind_power'))) {
-          newStrength += 1;
-        }
-        if (factionDef.id === 'oil_barons' && (this.has('coal_mining') || this.has('oil_refining'))) {
-          newStrength += 1;
-        }
-        if (factionDef.id === 'scientists' && (this.has('computing') || this.has('automation'))) {
-          newStrength += 1;
-        }
-
-        // Economic conditions affect factions
-        // Industrialists grow stronger during high GDP growth
-        if (factionDef.id === 'industrialists' && this.gdpLastMonth > 50000) {
-          newStrength += 0.5;
-        }
-        // Pacifists gain strength during peace
-        if (factionDef.id === 'pacifists' && !this.playerWar) {
-          newStrength += 0.5;
-        }
-        // Militarists gain during war
-        if (factionDef.id === 'militarists' && this.playerWar) {
-          newStrength += 0.5;
-        }
-
-        // Natural decay if faction goals are being ignored (very slow)
-        newStrength *= 0.99;
-
-        // Clamp to 0-100
-        newStrength = Math.max(0, Math.min(100, newStrength));
-
-        settlement.factionStrengths.set(factionDef.id, newStrength);
-      }
-    }
-  }
 
   /** Monthly update hook for faction AI: check if any faction is due for update.
    *  Staggered scheduling keeps this O(factions) but amortized O(1) per month. */
