@@ -25,6 +25,8 @@ import {
   ARCHETYPE_GREEN_PROPENSITY,
   ARCHETYPE_WAR_FREQ_MULT,
   rivalClimateUrgency,
+  rivalArmsCapacity,
+  ARMAMENTS_WARPOWER_FLOOR,
   URGENCY_AGGRESSION_LIFT,
   URGENCY_RELATIONS_DRAG,
   CLIMATE_BLOC_RELATIONS_THRESHOLD,
@@ -209,11 +211,24 @@ export function tickForeignRelations(r: RegionSim): void {
       if (r.day >= w.endsDay) endForeignWar(r, w, a, b);
     }
   }
+  /** Side A's chance of dictating the peace: population weighted by how well each
+   *  side could ARM that population — the same `FLOOR + (1−FLOOR)×capacity` equipment
+   *  curve `warPower()` applies to the player (GDD §7.3: quality and logistics beat
+   *  raw mass). With `rivalClimateResponse` off both capacities are exactly 1, the
+   *  equipment factors cancel, and this reproduces the legacy pop-ratio roll
+   *  bit-for-bit — the default sweep never moves. */
+export function rivalWarWinChance(r: RegionSim, a: RivalNation, b: RivalNation): number {
+    const equip = (rv: RivalNation) =>
+      ARMAMENTS_WARPOWER_FLOOR + (1 - ARMAMENTS_WARPOWER_FLOOR) * rivalArmsCapacity(r, rv);
+    const powA = a.pop * equip(a);
+    const powB = b.pop * equip(b);
+    return powA / (powA + powB);
+  }
   /** The peace: the loser bleeds population, nurses a grudge for decades,
    *  and may lose its government to the defeat (GDD §6.3 regime change). */
 export function endForeignWar(r: RegionSim, w: ForeignWar, a: RivalNation, b: RivalNation): void {
     r.foreignWars = r.foreignWars.filter((x) => x !== w);
-    const aWins = r.rng.next() < a.pop / (a.pop + b.pop);
+    const aWins = r.rng.next() < rivalWarWinChance(r, a, b);
     const winner = aWins ? a : b;
     const loser = aWins ? b : a;
     loser.pop *= 0.85 + r.rng.next() * 0.1;
