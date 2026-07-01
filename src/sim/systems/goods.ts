@@ -264,6 +264,36 @@ export function localGoodDemand(r: RegionSim, t: Settlement, goodId: string): nu
   return demand;
 }
 
+/** Total world population (every settlement, all factions) — the denominator that
+ *  splits the world's exogenous final appetite into per-town household demand. Reads
+ *  the per-tick `worldPopCache` (set at the top of `tickIntermediateGoods`) so the
+ *  O(N²·G) arbitrage price scan doesn't re-sum every cohort on each call; falls back to
+ *  a live sum for direct callers (tests) before any tick has cached it. */
+function worldPopulation(r: RegionSim): number {
+  if (r.worldPopCache > 0) return r.worldPopCache;
+  let total = 0;
+  for (const s of r.settlements) total += r.popOf(s);
+  return total;
+}
+
+/** CONSUMER-DEMAND increment 2 — town t's household FINAL-consumption demand for a
+ *  good, in production units: its share of the world's exogenous final appetite
+ *  (`finalGoodDemand`), split by the town's POPULATION share (households consume, so a
+ *  big city wants more). Σ over all towns == `finalGoodDemand(r, goodId)` — the same
+ *  world appetite `worldGoodDemand` clears against, decomposed per town exactly as
+ *  `distributeGoodProduction` decomposes production by sector share. 0 when the
+ *  consumer-demand model is off (`finalGoodDemand` 0) or the world is empty →
+ *  byte-identical to the legacy input-only demand. It is BOTH the demand the per-town
+ *  price prices against AND the amount the sink drains each month, so a town short of a
+ *  good it doesn't make prices it dear AND stays short until arbitrage relieves it. */
+export function localFinalGoodDemand(r: RegionSim, t: Settlement, goodId: string): number {
+  const fd = finalGoodDemand(r, goodId);
+  if (fd <= 0) return 0;
+  const total = worldPopulation(r);
+  if (total <= 0) return 0;
+  return fd * (r.popOf(t) / total);
+}
+
 /** Local scarcity of a good in a town, 0..1: how far its stock falls short of its
  *  local demand. 0 when the town holds at least its demand (a producer, or shipped
  *  in); 1 when it consumes the good but holds none. 0 for an un-demanded good. */
@@ -280,7 +310,12 @@ function stockScarcity(stock: number, demand: number): number {
  *  the economy. Used by arbitrage to ship goods from cheap (abundant) to dear
  *  (short) towns. */
 export function localGoodPrice(r: RegionSim, t: Settlement, goodId: string): number {
-  const demand = localGoodDemand(r, t, goodId);
+  // Demand = intermediate-INPUT demand + (consumer-demand) household FINAL demand.
+  // The final term is 0 when the model is off → byte-identical to the input-only curve;
+  // when on it makes a town that CONSUMES a good it doesn't produce read genuinely
+  // short (stock 0 vs a positive final demand → scarcity 1 → dear → pulls imports),
+  // which the input-only demand missed for the 8 terminal goods (they feed no chain).
+  const demand = localGoodDemand(r, t, goodId) + localFinalGoodDemand(r, t, goodId);
   const stock = t.goodStocks?.[goodId] ?? 0;
   const localScar = stockScarcity(stock, demand);
   // World-price anchor (global-world leg 1): a town's price reflects WORLD scarcity,
@@ -520,6 +555,12 @@ export function tickIntermediateGoods(r: RegionSim): void {
   // this month against an up-to-date trailing average — and so the norm warms
   // through the pre-1920 years before any good unlocks.
   r.advanceSectorOutputNorms();
+  // Refresh the world-population cache the per-town final-demand split reads (the sink
+  // + the arbitrage price scan) so it is computed once per tick, not per price query.
+  // Only when the consumer-demand model is active — off, nothing reads it (every
+  // `localFinalGoodDemand` short-circuits before `worldPopulation`), so this is zero
+  // live-play overhead.
+  if (r.consumerDemand) r.worldPopCache = r.settlements.reduce((s, t) => s + r.popOf(t), 0);
   // Drop embargoes whose window has elapsed, so the chain heals on its own and
   // the save ledger stays tidy (a stale entry would still read available, but
   // pruning keeps `rawEmbargoes` to what's actually live).
@@ -533,6 +574,8 @@ export function tickIntermediateGoods(r: RegionSim): void {
     r.supplyShockMult = 1; // no goods, no shock (defensive — already 1.0 here)
     r.localGoodsScarcity = 0; // no goods, no local shortage
     r.goodLevels = new Map(); // no goods unlocked → no production capacity to cache
+    r.goodsShortfall.clear();  // no goods → no household shortage (consumer-demand sink)
+    r.finalConsumptionShortfall = 0;
     return;
   }
 
@@ -574,6 +617,41 @@ export function tickIntermediateGoods(r: RegionSim): void {
   // (region.ts). Bounded [0,1]; a pure gate ratio, so it never reads a stock
   // magnitude or a raw level (no double-count with the raw cascade's severity).
   r.localGoodsScarcity = potentialTotal > 0 ? lostTotal / potentialTotal : 0;
+
+  // CONSUMER-DEMAND increment 2 — the final-consumption SINK. Each town's population
+  // DRAWS its household appetite (`localFinalGoodDemand`, a pop-share of the world
+  // final demand) out of its own stock every month — the drain the legacy model lacked
+  // (which is why the 8 terminal goods accumulated UNBOUNDED and no town ever went
+  // short → the on-map economy could never respond to scarcity). A town that PRODUCES a
+  // good replenishes what its households eat (stays flush → prices it at base →
+  // exports the surplus); a town that CONSUMES but doesn't produce it runs its stock to
+  // 0 and goes SHORT → its `localGoodPrice` rises → arbitrage ships it in → the on-map
+  // economy RESPONDS. Per-town unmet consumption feeds `goodsShortfall` (→ satisfaction
+  // in dailyUpdate); the demand-weighted world aggregate is `finalConsumptionShortfall`
+  // (telemetry). Gated on `consumerDemand`: off → no drain, empty shortfall, stocks
+  // untouched → BYTE-IDENTICAL to the legacy model (live human play + determinism).
+  r.goodsShortfall.clear();
+  if (r.consumerDemand) {
+    let worldAppetite = 0;
+    let worldUnmet = 0;
+    for (const t of r.settlements) {
+      let townAppetite = 0;
+      let townUnmet = 0;
+      for (const good of availableGoods) {
+        const appetite = localFinalGoodDemand(r, t, good.id);
+        if (appetite <= 0) continue;
+        townAppetite += appetite;
+        // Draw what the shelf can meet; the remainder is what households went without.
+        townUnmet += appetite - r.shipGoodFrom(t, good.id, appetite);
+      }
+      if (townAppetite > 0) r.goodsShortfall.set(t.id, townUnmet / townAppetite);
+      worldAppetite += townAppetite;
+      worldUnmet += townUnmet;
+    }
+    r.finalConsumptionShortfall = worldAppetite > 0 ? worldUnmet / worldAppetite : 0;
+  } else {
+    r.finalConsumptionShortfall = 0;
+  }
 
   // Shortfalls (1 − level) drive the random secondary effects, scaled by how
   // deep the cut is. A full cut → shortfall 1 → the exact pre-graded draw
