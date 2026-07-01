@@ -56,6 +56,8 @@ import { updateRivalAI } from './systems/rival-ai';
 import { updateExpeditions } from './systems/expeditions';
 import { collectVassalTribute, applyProvincePolicyEffects } from './systems/statecraft';
 import { navalTradeIncome } from './systems/naval';
+import { migrate } from './systems/migration';
+import { weatherRoutes } from './systems/route-weather';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -4736,7 +4738,7 @@ export class RegionSim {
    *  selects the edge filter ('no-trail' excludes footpaths); paths are only ever
    *  consumed for length/connectivity/freight, so caching the (possibly reversed)
    *  path is sound. The reload-keeps-ticking determinism test guards correctness. */
-  private routePath(fromId: number, toId: number, mode: 'all' | 'no-trail' = 'all'): Route[] | null {
+  routePath(fromId: number, toId: number, mode: 'all' | 'no-trail' = 'all'): Route[] | null {
     if (fromId === toId) return [];
     const key = fromId + ':' + toId + ':' + mode;
     const cached = this._routePathCache.get(key);
@@ -4797,32 +4799,6 @@ export class RegionSim {
 
   /** Storms wear routes down; footfall keeps trails open, roads need £.
    *  M6c adds the washout: a big storm can take a whole crossing out. */
-  private weatherRoutes(): void {
-    const storm = this.weather.forDay(this.day).sky === 'storm';
-    for (const r of this.routes) {
-      if (storm) {
-        r.condition = Math.max(ROUTE_CONDITION_FLOOR, r.condition - (r.kind === 'trail' ? 2 : 0.5));
-      } else if (r.kind === 'trail') {
-        r.condition = Math.min(100, r.condition + 0.1);
-      }
-    }
-    // Washout odds rise with the thermometer (GDD §8.2): a warmer sky
-    // carries more water, and the storms that drop it hit harder.
-    const washoutChance = Math.min(0.3, 0.12 * (1 + this.warmingC * 0.3));
-    if (storm && this.routes.length > 0 && this.rng.chance(washoutChance)) {
-      const r = this.routes[this.rng.int(this.routes.length)];
-      if (r.kind !== 'trail' && r.condition > 40) {
-        r.condition = Math.max(ROUTE_CONDITION_FLOOR, r.condition - 45);
-        const a = this.settlement(r.a)?.name ?? '?';
-        const b = this.settlement(r.b)?.name ?? '?';
-        this.addLog(
-          `Storm washout: the ${r.kind} between ${a} and ${b} is cut — ` +
-          `${r.kind === 'rail' ? 'a trestle is down' : r.kind === 'maglev' ? 'a guideway pylon is down' : 'a bridge is out'}. Repairs would cost ` + formatCurrency(this.repairCost(r)) + `.`,
-          'bad',
-        );
-      }
-    }
-  }
 
   /** What a link's road gangs (or drone crews) bill per month — Automated
    *  Freight research swaps the work crews for machines at 60% the cost, and
@@ -5559,7 +5535,7 @@ export class RegionSim {
     } else if (!drought) {
       this.droughtAnnounced = false;
     }
-    this.weatherRoutes();
+    weatherRoutes(this);
     // The rail era arrives (M6c): one announcement, the year the gate opens
     if (!this.railAnnounced && this.railUnlocked()) {
       this.railAnnounced = true;
@@ -5696,7 +5672,7 @@ export class RegionSim {
       }
     }
     updateRouteCargo(this);   // Phase 6: cargo labels follow sector surplus (systems/trade.ts)
-    this.migrate();
+    migrate(this);
     this.caravans();
     this.traders();
     navalTradeIncome(this);
@@ -8228,33 +8204,6 @@ export class RegionSim {
 
   /** Finish any construction whose day has come. */
 
-  private migrate(): void {
-    if (this.settlements.length < 2) return;
-    // People follow both contentment and pay (Phase 1): a booming mill town
-    // pulls labor off poor farms even when life there is pleasant enough.
-    const regionWage = this.settlements.reduce((s, t) => s + this.avgWageOf(t), 0) / this.settlements.length;
-    const score = (t: Settlement) => t.satisfaction + (this.avgWageOf(t) - regionWage) * 30;
-    // One pass for the magnet and the source — no full sort, and avgWageOf runs
-    // once per town instead of O(n log n) times through a comparator.
-    let best = this.settlements[0], worst = this.settlements[0];
-    let bestScore = score(best), worstScore = bestScore;
-    for (const t of this.settlements) {
-      const sc = score(t);
-      if (sc > bestScore) { bestScore = sc; best = t; }      // first max (matches stable sort [0])
-      if (sc <= worstScore) { worstScore = sc; worst = t; }  // last min (matches stable sort [last])
-    }
-    // Don't feed an already-overcrowded destination; cap the capital magnet effect.
-    const destFull = this.popOf(best) >= best.housing;
-    if (bestScore - worstScore > 15 && this.popOf(worst) > 10 && !destFull) {
-      // movers ride the network too: without a route, only a trickle walks out
-      const connected = this.routePath(worst.id, best.id) !== null;
-      // 1% per month (was 2%): urbanization is gradual, not a mass exodus
-      const movers = this.popOf(worst) * 0.01 * (connected ? 1 : 0.3);
-      this.removePop(worst, movers);
-      best.cohorts.bands[1] += movers * 0.7;
-      best.cohorts.bands[2] += movers * 0.3;
-    }
-  }
 
   /** New Notables rise from the cohorts when a role falls vacant (GDD §2.4). */
   /** Public for systems/notables.ts (heir birth / vacancy fill). */
