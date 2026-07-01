@@ -51,6 +51,7 @@ import { tickUtilities } from './systems/utilities';
 import { tickRegionalEvents } from './systems/events';
 import { checkElection } from './systems/elections';
 import { updateConstruction } from './systems/construction';
+import { updateScouts } from './systems/scouts';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -5714,7 +5715,7 @@ export class RegionSim {
     tickOccupation(this);             // Phase 16: occupation resistance
     if (this.playerWar) tickWarSupport(this); // Phase 16: war support
     this.updateRivalAI(); // staggered AI updates for rivals (GDD §6.2)
-    this.updateScouts(); // update faction scouts: movement, spawning, expiry (GDD §6.2)
+    updateScouts(this); // update faction scouts: movement, spawning, expiry (GDD §6.2) (systems/scouts.ts)
     tickClimate(this); // the ledger runs from the first decade (GDD §8.2)
     tickAutomation(this); // Phase 11: automation unemployment drift
     checkStrandedAssets(this); // Phase 11: fossil write-downs as clean energy arrives
@@ -13314,7 +13315,7 @@ export class RegionSim {
   // ---- Scout System (GDD §6.2: exploratory units for faction AI) ----
 
   /** Spawn scouts for a faction if it has budget and slots. Called during faction AI update. */
-  private spawnScout(faction: RegionalFaction): Scout | null {
+  spawnScout(faction: RegionalFaction): Scout | null {
     if (faction.settlementIds.length === 0) return null;
     const scoutCount = this.scouts.filter((s) => s.factionId === faction.id).length;
     if (scoutCount >= 2) return null; // max 2 scouts per faction
@@ -13346,7 +13347,7 @@ export class RegionSim {
   }
 
   /** Move a single scout by 2-3 cells toward objective or random direction. */
-  private moveScout(scout: Scout): void {
+  moveScout(scout: Scout): void {
     const oldX = scout.x, oldY = scout.y;
     const faction = this.faction(scout.factionId);
     if (!faction || !faction.currentGoal) {
@@ -13595,31 +13596,9 @@ export class RegionSim {
   }
 
   /** Update all scouts: move, age, expire. Called during monthly update. */
-  private updateScouts(): void {
-    for (const scout of this.scouts) {
-      if (this.day < scout.expireDay) {
-        const oldX = scout.x, oldY = scout.y;
-        // Player scouts use deterministic movement (no AI RNG consumed).
-        if (scout.factionId === this.playerFactionId) {
-          this.movePlayerScout(scout);
-        } else {
-          this.moveScout(scout);
-        }
-        if (Math.abs(scout.x - oldX) > 0.1 || Math.abs(scout.y - oldY) > 0.1) {
-          this.invalidateFactionVisibility(scout.factionId);
-        }
-      }
-    }
-    this.scouts = this.scouts.filter((s) => this.day < s.expireDay);
-    // Auto-spawn only for rival factions; player hires scouts manually.
-    for (const faction of this.regionalFactions) {
-      if (faction.id === this.playerFactionId) continue;
-      if (this.rng.chance(0.1)) this.spawnScout(faction);
-    }
-  }
 
   /** Deterministic movement for player scouts — no RNG consumed. */
-  private movePlayerScout(scout: Scout): void {
+  movePlayerScout(scout: Scout): void {
     // Manual waypoint: move toward it, clear when arrived.
     if (scout.manualTargetX !== undefined && scout.manualTargetY !== undefined) {
       const dx = scout.manualTargetX - scout.x;
@@ -13689,7 +13668,7 @@ export class RegionSim {
   }
 
   /** Mark faction visibility cache as dirty (rebuild on next check). */
-  private invalidateFactionVisibility(factionId: number): void {
+  invalidateFactionVisibility(factionId: number): void {
     this.lastVisibilityRebuild.set(factionId, -999); // force rebuild
   }
 
