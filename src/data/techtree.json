@@ -513,6 +513,24 @@
       "prereqs": ["radio_broadcasting"],
       "era": 1935,
       "desc": "Government-controlled media shapes the national narrative. Satisfaction +3."
+    },
+    {
+      "id": "rocketry",
+      "name": "Rocketry",
+      "tree": "tech",
+      "cost": 180,
+      "prereqs": ["aviation", "chemical_industry"],
+      "era": 1955,
+      "desc": "Propellant chemistry and guidance turn the aircraft's ceiling into a starting line. Unlocks the Space Program."
+    },
+    {
+      "id": "satellites",
+      "name": "Satellites",
+      "tree": "tech",
+      "cost": 220,
+      "prereqs": ["rocketry"],
+      "era": 1965,
+      "desc": "Hand-made moons circle the world every ninety minutes, carrying weather, signals, and maps. Unlocks the Satellite Network."
     }
   ]
 }
