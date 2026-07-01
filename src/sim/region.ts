@@ -47,6 +47,8 @@ import { tickStatsHistory } from './systems/stats';
 import { updateMarket } from './systems/market';
 import { checkScenarioGoals } from './systems/scenarios';
 import { checkWinConditions, checkProclamationGate } from './systems/victory';
+import { tickUtilities } from './systems/utilities';
+import { tickRegionalEvents } from './systems/events';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -5676,9 +5678,9 @@ export class RegionSim {
     }
     for (const t of this.settlements) this.updateSectors(t); // Phase 1: labor follows the technology
     this.wageCache = new Map(this.settlements.map((t) => [t.id, this.avgWageOf(t)]));
-    this.tickRegionalEvents(); // Phase 4: disasters and windfalls
+    tickRegionalEvents(this); // Phase 4: disasters and windfalls (systems/events.ts)
     tickPollution(this);       // Phase 14: pollution diffusion (systems/pollution.ts)
-    this.tickUtilities();      // Phase 14: power/water/waste utilities
+    tickUtilities(this);      // Phase 14: power/water/waste utilities (systems/utilities.ts)
     tickServiceCoverage(this); // Phase 14: service coverage effects (systems/services.ts)
     // Phase 14: update land value for each player settlement
     for (const t of this.settlements) {
@@ -7975,71 +7977,7 @@ export class RegionSim {
 
   /** Update pollution levels monthly for all player settlements. */
   /** Update utilities (power, water, waste) monthly for all player settlements. */
-  private tickUtilities(): void {
-    for (const t of this.settlements) {
-      if (t.factionId !== this.playerFactionId) continue;
-      const pop = this.popOf(t);
-      // Power balance
-      const pb = this.computePowerBalance(t.id);
-      t.powerCapacity = pb.capacity;
-      t.powerDemand = pb.demand;
-      if (pb.demand > pb.capacity) {
-        // Brownout: log once per year
-        const lastBrownout = t.lastBrownoutYear ?? -999;
-        if (this.year > lastBrownout) {
-          t.lastBrownoutYear = this.year;
-          this.townEvent(t, `Power demand exceeds supply — brownouts rolling across ${t.name}.`, 'bad');
-        }
-        t.satisfaction = Math.max(0, t.satisfaction - 5);
-        // Industry output penalty applied via sector output mult (tracked via active event instead)
-        // We model it as a monthly satisfaction drag and log the event
-      }
-      // Water coverage
-      if (t.buildings.includes('waterworks')) {
-        t.waterCoverage = 1.0;
-      } else {
-        t.waterCoverage = Math.min(0.5, pop / 200);
-      }
-      // Waste coverage
-      if (t.buildings.includes('sanitation') || t.buildings.includes('market_hall')) {
-        t.wasteCoverage = 1.0;
-      } else {
-        t.wasteCoverage = Math.min(0.3, pop / 500);
-      }
-      // Disease event: waterCoverage < 0.5 and pop > 100: 5% chance/month
-      if ((t.waterCoverage ?? 0) < 0.5 && pop > 100 && this.rng.chance(0.05)) {
-        this.townEvent(t, `Poor water supply in ${t.name} — disease spreads among the population.`, 'bad');
-        t.satisfaction = Math.max(0, t.satisfaction - 3);
-      }
-    }
-  }
-
   /** Update service coverage monthly for all player settlements. */
-  // ---- Phase 4: Regional Events ----
-
-  /** Fire and expire settlement-level events monthly. */
-  private tickRegionalEvents(): void {
-    for (const t of this.settlements) {
-      // Expire events whose duration has run
-      t.activeEvents = t.activeEvents.filter((ev) => ev.untilDay > this.day);
-      // Roll each event definition per settlement
-      // Phase 17: scale event probability by crisisFrequency difficulty knob
-      const crisisScale = this.difficultySettings.crisisFrequency;
-      for (const def of REGION_EVENT_DEFS) {
-        if (def.minYear !== undefined && this.year < def.minYear) continue; // era-gated
-        if (!this.rng.chance(def.probability * crisisScale)) continue;
-        if (t.activeEvents.some((ev) => ev.kind === def.kind)) continue; // no stacking
-        t.activeEvents.push({ kind: def.kind, untilDay: this.day + def.durationDays, severity: 1 });
-        // events-depth: one-shot satisfaction/grievance swings (bounded, clamped)
-        if (def.satisfaction) t.satisfaction = Math.max(0, Math.min(100, t.satisfaction + def.satisfaction));
-        if (def.grievance) t.grievance = Math.max(0, Math.min(100, t.grievance + def.grievance));
-        const good = def.outputMult >= 1.0;
-        this.townEvent(t, `${def.name}: ${def.desc}`, good ? 'good' : 'bad');
-        this.addLog(`${def.name} strikes ${t.name} — ${def.desc}`, good ? 'good' : 'bad');
-      }
-    }
-  }
-
   // ---- Emergency Aid ----
 
   /** Spend treasury to send emergency grain to a starving player-owned town.
@@ -12205,7 +12143,7 @@ export class RegionSim {
   }
 
   /** Push a per-town event (kept newest-first, capped at 12). */
-  private townEvent(t: Settlement, text: string, kind: 'good' | 'bad' | 'info'): void {
+  townEvent(t: Settlement, text: string, kind: 'good' | 'bad' | 'info'): void {
     t.recentEvents.unshift({ day: this.day, text, kind });
     if (t.recentEvents.length > 12) t.recentEvents.pop();
   }
