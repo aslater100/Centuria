@@ -23,6 +23,9 @@ import {
   WAR_SUPPORT_FLOOR,
   WAR_SUPPORT_DECAY_MULT,
   ROUTE_CONDITION_FLOOR,
+  WAR_MATERIEL_GOODS,
+  WAR_MATERIEL_PER_POWER,
+  WAR_MATERIEL_MORALE_DRAG,
   blocAffinity,
 } from '../region';
 
@@ -366,6 +369,37 @@ export function consumeWarSupply(r: RegionSim): void {
         r.addLog(`DESERTION: ${disbanded} troops abandon the army — supply exhausted.`, 'bad');
       }
       w.supplyReserve = 0;
+    }
+  }
+
+  /** The military-industrial loop closes (GDD §7.3): a fielded army physically
+   *  draws steel and chemicals from real town stocks each month, in proportion to
+   *  the unit power fielded — so a war drains the arsenals the economy filled,
+   *  local prices rise where the draw lands, and arbitrage hauls materiel toward
+   *  the drained towns. When the stocks can't cover the draw, the shortfall saps
+   *  morale (the same floor as the supply crisis above) — the money-side strain
+   *  premium in `monthlyEconomy` prices the SAME shortage, this is its physical
+   *  half. Gated on `playerWar` (autoplay never fights), so every headless sweep
+   *  is byte-identical; a good never tracked in the ledger (a pre-industrial war)
+   *  is skipped — the era of local forges predates the arsenal ledger. */
+export function consumeWarMateriel(r: RegionSim): void {
+    const w = r.playerWar;
+    if (!w || w.units.length === 0) return;
+    const powerFielded = w.units.reduce((s, u) => s + u.count * UNIT_TYPES[u.type].powerPerUnit, 0);
+    const need = powerFielded * WAR_MATERIEL_PER_POWER;
+    if (need <= 0) return;
+    let met = 1;
+    for (const good of WAR_MATERIEL_GOODS) {
+      if (!r.hasGoodStock(good)) continue;
+      met = Math.min(met, Math.min(1, r.goodStock(good) / need));
+      r.drawGood(good, need);
+    }
+    if (met < 1) {
+      const drag = Math.round(WAR_MATERIEL_MORALE_DRAG * (1 - met));
+      if (drag > 0) {
+        for (const u of w.units) u.morale = Math.max(30, u.morale - drag);
+        if (r.rng.chance(0.3)) r.addLog('Shells rationed at the front — the arsenals cannot keep pace with the war.', 'bad');
+      }
     }
   }
 

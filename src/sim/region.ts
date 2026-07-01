@@ -30,6 +30,7 @@ import {
   updateArmyMovement,
   tickRivalArmyAI,
   consumeWarSupply,
+  consumeWarMateriel,
   tickMobilization,
   tickSupplyLines,
   tickOccupation,
@@ -2050,6 +2051,20 @@ export const ARMAMENTS_WARPOWER_FLOOR = 0.5;
  *  a deindustrialised belligerent can field forces, but struggles to afford them.
  *  Exactly ×1 at a full arms base, so healthy war economies are unchanged. */
 export const ARMAMENTS_STRAIN_PREMIUM = 1.0;
+
+/** The goods a fielded army physically eats each month (GDD §7.3 supply lines) —
+ *  the same two the arms base is priced off, so the strain premium (money) and the
+ *  materiel draw (stocks) tell one story: steel for the guns, chemicals for the shells. */
+export const WAR_MATERIEL_GOODS = ['steel', 'chemicals'] as const;
+/** Units of EACH materiel good drawn per point of fielded unit power per month —
+ *  at 0.01, an army of 1000 militia consumes one producing town's full monthly
+ *  base output (10) of each good. Drawn via `drawGood` from real town stocks, so a
+ *  war visibly drains the arsenals, lifts local prices, and pulls arbitrage flows. */
+export const WAR_MATERIEL_PER_POWER = 0.01;
+/** Morale lost per month at a TOTAL materiel shortfall (scaled linearly by the unmet
+ *  fraction, floored at morale 30 — the supply-crisis floor in consumeWarSupply):
+ *  an army without shells fights on, but it fights sullen. */
+export const WAR_MATERIEL_MORALE_DRAG = 8;
 
 /** Unit type recruitment costs and supply needs (GDD §7.1 military depth). */
 export const UNIT_TYPES: Record<ArmyUnitType, {
@@ -6015,6 +6030,7 @@ export class RegionSim {
     updateArmyMovement(this);         // Phase 7: army marching, battles (systems/military.ts)
     tickRivalArmyAI(this);            // Phase 7: rival army planning
     consumeWarSupply(this); // deplete supply reserves based on army size and supply consumption rate
+    consumeWarMateriel(this); // …and the arsenals: fielded power draws real steel/chemicals stocks (GDD §7.3)
     tickMobilization(this);           // Phase 16: mobilization effects
     tickSupplyLines(this);            // Phase 16: supply line decay for army groups
     tickOccupation(this);             // Phase 16: occupation resistance
