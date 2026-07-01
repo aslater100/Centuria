@@ -54,6 +54,8 @@ import { updateConstruction } from './systems/construction';
 import { updateScouts } from './systems/scouts';
 import { updateRivalAI } from './systems/rival-ai';
 import { updateExpeditions } from './systems/expeditions';
+import { collectVassalTribute, applyProvincePolicyEffects } from './systems/statecraft';
+import { navalTradeIncome } from './systems/naval';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
@@ -5697,7 +5699,7 @@ export class RegionSim {
     this.migrate();
     this.caravans();
     this.traders();
-    this.navalTradeIncome();
+    navalTradeIncome(this);
     tickNotableLifecycle(this);
     // The treasury runs even before the Charter: pre-statehood the Mayor still
     // taxes the towns and pays for services/militia, so the player has real
@@ -5708,7 +5710,7 @@ export class RegionSim {
     if (this.stateProclaimed) this.updateFactions();
     if (this.stateProclaimed) this.updateSettlementFactions();
     updateDiplomacy(this);
-    this.applyProvincePolicyEffects(); // Phase 5: province governance effects
+    applyProvincePolicyEffects(this); // Phase 5: province governance effects (systems/statecraft.ts)
     updateArmyMovement(this);         // Phase 7: army marching, battles (systems/military.ts)
     tickRivalArmyAI(this);            // Phase 7: rival army planning
     consumeWarSupply(this); // deplete supply reserves based on army size and supply consumption rate
@@ -5726,7 +5728,7 @@ export class RegionSim {
     this.tickMedia(); // Phase 12: media reach, press freedom, misinformation era
     checkScenarioGoals(this);   // Phase 17: check active scenario goals monthly (systems/scenarios.ts)
     updateLoans(this); // process loan interest and check for defaults (systems/loans.ts)
-    if (this.stateProclaimed) this.collectVassalTribute();
+    if (this.stateProclaimed) collectVassalTribute(this);
     checkProclamationGate(this);
     checkWinConditions(this);
     // Early solarpunk trigger: beaten the oil barons when renewables are cheap + available tech
@@ -5830,21 +5832,6 @@ export class RegionSim {
   }
 
   /** Vassals pay 5% of their treasury each month as tribute to the player. */
-  private collectVassalTribute(): void {
-    const playerFaction = this.faction(this.playerFactionId);
-    if (!playerFaction) return;
-    for (const vassalId of playerFaction.vassals) {
-      const vassal = this.faction(vassalId);
-      if (!vassal) continue;
-      const tribute = Math.floor(vassal.treasury * 0.05);
-      if (tribute <= 0) continue;
-      vassal.treasury -= tribute;
-      this.treasury += tribute;
-      if (tribute >= 10) {
-        this.addLog(`TRIBUTE: ${vassal.name} pays ${formatCurrency(tribute)} to your treasury.`, 'good');
-      }
-    }
-  }
 
   /** Post-2100 epilogue flavor events: era-specific achievements and narrative beats. */
   triggerEpilogueEvent(): void {
@@ -5994,24 +5981,6 @@ export class RegionSim {
 
   /** Monthly: harbors generate sea-trade income; warships add a naval-supremacy
    *  premium that also deters coastal rivals. */
-  private navalTradeIncome(): void {
-    const harborTowns = this.settlements.filter(
-      (t) => t.factionId === this.playerFactionId && t.buildings.includes('harbor'),
-    );
-    if (harborTowns.length === 0) return;
-    const warships = this.playerWar?.units.find((u) => u.type === 'warship')?.count ?? 0;
-    // Base income per harbor (£/month) plus a warship escort premium
-    const perHarbor = 12 + warships * 2;
-    const income = harborTowns.length * perHarbor;
-    this.treasury += income;
-    if (this.rng.chance(0.3)) {
-      const town = harborTowns[this.rng.int(harborTowns.length)];
-      this.addLog(
-        `Sea trade earns ${formatCurrency(income)} this month — ${town.name}'s harbor is busy.`,
-        'good',
-      );
-    }
-  }
 
   /** Grain caravans ride the route network (M6b): surplus towns provision
    *  hungry ones, but every leg clamps to its route's remaining capacity —
@@ -8218,24 +8187,6 @@ export class RegionSim {
   }
 
   /** Monthly: apply province policy effects (autonomy satisfaction, investment garrison, tax multipliers). */
-  private applyProvincePolicyEffects(): void {
-    if (!this.stateProclaimed) return;
-    for (const s of this.settlements) {
-      if (s.factionId !== this.playerFactionId) continue;
-      const pol = this.provincePolicies[s.id];
-      if (!pol) continue;
-      if (pol.autonomyLevel >= 2) {
-        s.satisfaction = Math.min(100, s.satisfaction + 0.3);
-        s.grievance = Math.max(0, s.grievance - 0.5);
-      } else if (pol.autonomyLevel === 0 && s.satisfaction > 40) {
-        s.satisfaction = Math.max(0, s.satisfaction - 0.1);
-      }
-      if (pol.investmentLevel >= 2 && this.treasury > 5) {
-        this.treasury -= 2;
-        s.garrisonStrength = Math.min(this.garrisonCap(s), s.garrisonStrength + 0.5);
-      }
-    }
-  }
 
   // ---- Phase 5: Local Policies ----
 
