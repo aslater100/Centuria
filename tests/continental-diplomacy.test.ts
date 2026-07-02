@@ -25,10 +25,16 @@ import {
   CONTINENT_NEIGHBOR_FRICTION,
   CONTINENT_WAR_MULT,
   OVERSEAS_WAR_MULT,
+  BLOC_RELATIONS_NEIGHBOR,
+  BLOC_RELATIONS_OVERSEAS,
   blocAffinity,
 } from '../src/sim/region';
 import type { RivalNation } from '../src/sim/region';
-import { tickForeignRelations } from '../src/sim/systems/diplomacy';
+import {
+  tickForeignRelations,
+  tickRivalTradeBlocActivity,
+  tickRivalClimateBlocActivity,
+} from '../src/sim/systems/diplomacy';
 
 // ---- helpers (the front-occupation.test.ts inject-rival pattern) ----
 
@@ -36,6 +42,7 @@ type RivalOpts = {
   id: number;
   compass: RivalNation['compass'];
   regime?: string;
+  archetype?: string;
   weights?: Partial<RivalNation['weights']>;
 };
 
@@ -44,7 +51,7 @@ function injectRival(r: RegionSim, opts: RivalOpts): RivalNation {
     id: opts.id,
     name: `Power ${opts.id}`,
     leader: 'Test Directorate',
-    archetype: 'hegemon',
+    archetype: opts.archetype ?? 'hegemon',
     weights: {
       expansion: 5, commerce: 3, ideology: 3, honor: 3, risk: 5, grudge: 3,
       ...opts.weights,
@@ -156,6 +163,83 @@ describe('wars cluster on shared ground', () => {
     // p ≈ 0.081 × 1.5 vs × 0.6 over 800 pinned months — a wide, stable gap.
     expect(near).toBeGreaterThan(far * 1.5);
     expect(far).toBeGreaterThan(0); // overseas wars are rarer, not extinct
+  });
+});
+
+describe('trade blocs organise by continent (commit 2)', () => {
+  const commerce = { commerce: 8, expansion: 2 };
+
+  it('a cross-continent pair at the neighbour bar never blocs — the overseas bar is higher', () => {
+    const r = RegionSim.create(42);
+    const a = injectRival(r, { id: 9001, compass: 'east', weights: commerce });
+    const b = injectRival(r, { id: 9002, compass: 'west', weights: commerce });
+    const key = r.pairKey(a.id, b.id);
+    expect(BLOC_RELATIONS_OVERSEAS).toBeGreaterThan(BLOC_RELATIONS_NEIGHBOR);
+    for (let m = 0; m < 400; m++) {
+      r.rivalPairs[key] = BLOC_RELATIONS_NEIGHBOR + 5; // 45: over the old bar, under the overseas one
+      tickRivalTradeBlocActivity(r);
+    }
+    expect(r.rivalTradeBlocs).toHaveLength(0);
+  });
+
+  it('the same pair as neighbours blocs at the historical bar', () => {
+    const r = RegionSim.create(42);
+    const a = injectRival(r, { id: 9001, compass: 'east', weights: commerce });
+    const b = injectRival(r, { id: 9002, compass: 'east', weights: commerce });
+    const key = r.pairKey(a.id, b.id);
+    for (let m = 0; m < 400 && r.rivalTradeBlocs.length === 0; m++) {
+      r.rivalPairs[key] = BLOC_RELATIONS_NEIGHBOR + 5;
+      tickRivalTradeBlocActivity(r);
+    }
+    expect(r.rivalTradeBlocs).toHaveLength(1);
+    expect(r.rivalTradeBlocs[0].memberRivalIds.sort()).toEqual([a.id, b.id]);
+  });
+
+  it('an overseas pact still forms once ties are genuinely warm', () => {
+    const r = RegionSim.create(42);
+    const a = injectRival(r, { id: 9001, compass: 'east', weights: commerce });
+    const b = injectRival(r, { id: 9002, compass: 'west', weights: commerce });
+    const key = r.pairKey(a.id, b.id);
+    for (let m = 0; m < 400 && r.rivalTradeBlocs.length === 0; m++) {
+      r.rivalPairs[key] = BLOC_RELATIONS_OVERSEAS + 5;
+      tickRivalTradeBlocActivity(r);
+    }
+    expect(r.rivalTradeBlocs).toHaveLength(1);
+  });
+
+  it('joining an existing bloc reads the candidate pair geography, not the bloc', () => {
+    const r = RegionSim.create(42);
+    const a = injectRival(r, { id: 9001, compass: 'east', weights: commerce });
+    const b = injectRival(r, { id: 9002, compass: 'east', weights: commerce });
+    const c = injectRival(r, { id: 9003, compass: 'east', weights: commerce });
+    const d = injectRival(r, { id: 9004, compass: 'west', weights: commerce });
+    r.rivalTradeBlocs.push({ id: 1, memberRivalIds: [a.id, b.id], foundedYear: 1930, tariff: 0.2 });
+    (r as unknown as { nextRivalBlocId: number }).nextRivalBlocId = 2;
+    const pin = () => {
+      r.rivalPairs[r.pairKey(a.id, b.id)] = 80;   // co-members, skipped
+      r.rivalPairs[r.pairKey(a.id, c.id)] = 45;   // neighbour of the bloc's members
+      r.rivalPairs[r.pairKey(b.id, c.id)] = -100;
+      r.rivalPairs[r.pairKey(a.id, d.id)] = 45;   // warm-ish, but an ocean away
+      r.rivalPairs[r.pairKey(b.id, d.id)] = -100;
+      r.rivalPairs[r.pairKey(c.id, d.id)] = -100;
+    };
+    for (let m = 0; m < 400; m++) { pin(); tickRivalTradeBlocActivity(r); }
+    expect(r.rivalTradeBlocs).toHaveLength(1);
+    expect(r.rivalTradeBlocs[0].memberRivalIds).toContain(c.id); // neighbour admitted
+    expect(r.rivalTradeBlocs[0].memberRivalIds).not.toContain(d.id); // overseas at 45 stays out
+  });
+
+  it('climate coalitions stay continent-blind — a planetary threat unites across oceans', () => {
+    const r = RegionSim.create(42);
+    (r as unknown as { rivalClimateResponse: boolean }).rivalClimateResponse = true;
+    const a = injectRival(r, { id: 9001, compass: 'east', archetype: 'trading_republic' });
+    const b = injectRival(r, { id: 9002, compass: 'west', archetype: 'trading_republic' });
+    const key = r.pairKey(a.id, b.id);
+    for (let m = 0; m < 400 && r.rivalClimateBlocs.length === 0; m++) {
+      r.rivalPairs[key] = 0; // far under BLOC_RELATIONS_OVERSEAS, over the climate bar (−15)
+      tickRivalClimateBlocActivity(r);
+    }
+    expect(r.rivalClimateBlocs).toHaveLength(1);
   });
 });
 

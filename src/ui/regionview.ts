@@ -7,7 +7,7 @@ import './panels.css';
 import type { Settlement, Scout, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, DepressionMeasure, TownFocus, WagePolicy, Route, SectorId, ArmyUnitType, TechNode, Province, DynastyNode, SectorBonusBreakdown } from '../sim/region';
 import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, DISTRICT_DEFS, INTERMEDIATE_GOODS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES, BRANCH_YEAR, UNIT_TYPES, ESPIONAGE_OPS, BLOC_RELATIONS_FLOOR, DEPRESSION_MEASURES, SUPPLY_SHOCK_INFLATION, SUPPLY_SHOCK_EXPORT_DRAG, AGRI_CLIMATE_THRESHOLD, INDUSTRY_BROWNOUT_THRESHOLD, FRONT_PEAK_LEVERAGE_SCALE, FRONT_OCCUPY_THRESHOLD, GOV_OUTLAY_RESERVE_MONTHS, frontPhase, FRONT_PHASE_LABEL, AGENDA_PEACE_RESISTANCE, AGENDA_TABLE_COST, rivalAgendaKind } from '../sim/region';
 import type { EspionageOp } from '../sim/region';
-import { rivalArmsCapacity } from '../sim/region';
+import { rivalArmsCapacity, rivalContinent, sameContinent } from '../sim/region';
 import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS } from '../sim/defs';
 import type { CurrencySymbol } from '../sim/defs';
 import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
@@ -3436,7 +3436,11 @@ export class RegionView {
     const pacts = r.alliances
       .map((k) => {
         const [a, b] = k.split(':').map(Number);
-        return r.rival(a) && r.rival(b) ? `<p class="insp-skills">🤝 ${name(a)} – ${name(b)} allied</p>` : '';
+        const rvA = r.rival(a);
+        const rvB = r.rival(b);
+        if (!rvA || !rvB) return '';
+        const geo = sameContinent(rvA, rvB) ? ' · neighbours' : ' · across the oceans';
+        return `<p class="insp-skills">🤝 ${name(a)} – ${name(b)} allied${geo}</p>`;
       })
       .join('');
     const world = wars || pacts ? `<p class="insp-skills">WORLD AFFAIRS</p>` + wars + pacts : '';
@@ -3517,9 +3521,12 @@ export class RegionView {
     if (blocs.length === 0) return '';
     const friction = r.rivalBlocTariffFriction();
     const rows = blocs.map((b) => {
-      const members = b.memberRivalIds.map((id) => r.rival(id)?.name).filter(Boolean).join(' · ');
+      const living = b.memberRivalIds.map((id) => r.rival(id)).filter((rv) => rv !== undefined);
+      const members = living.map((rv) => rv.name).join(' · ');
+      const horizons = new Set(living.map((rv) => rivalContinent(rv))).size;
+      const span = horizons > 1 ? 'intercontinental' : 'continental';
       const tariffPct = Math.round(b.tariff * 100);
-      return `<p class="t-sm c-muted">${members} (${tariffPct}% external tariff, est. ${b.foundedYear})</p>`;
+      return `<p class="t-sm c-muted">${members} (${span}, ${tariffPct}% external tariff, est. ${b.foundedYear})</p>`;
     }).join('');
     return `<p class="insp-skills">RIVAL TRADE BLOCS${friction > 0 ? ` — trade friction −${Math.round(friction * 100)}%` : ''}</p>` + rows;
   }

@@ -24,6 +24,8 @@ import {
   sameContinent,
   CONTINENT_WAR_MULT,
   OVERSEAS_WAR_MULT,
+  BLOC_RELATIONS_NEIGHBOR,
+  BLOC_RELATIONS_OVERSEAS,
   RIVAL_EMERGENCE_YEAR,
   MAX_RIVALS,
   ARCHETYPE_GREEN_PROPENSITY,
@@ -319,7 +321,11 @@ export function tickRivalEspionage(r: RegionSim): void {
       }
     }
   }
-  /** Monthly tick: commerce-weighted rivals form independent trade blocs. */
+  /** Monthly tick: commerce-weighted rivals form independent trade blocs.
+   *  Blocs organise by continent (session 21): neighbours bloc at the
+   *  historical bar, an OVERSEAS pact needs genuinely warm ties — so the
+   *  unions that form read as geographic neighbourhoods, bridged across
+   *  oceans only by real friendships. */
 export function tickRivalTradeBlocActivity(r: RegionSim): void {
     // Clean up blocs whose membership has fallen below 2
     r.rivalTradeBlocs = r.rivalTradeBlocs.filter(
@@ -331,7 +337,8 @@ export function tickRivalTradeBlocActivity(r: RegionSim): void {
       for (let j = i + 1; j < r.rivals.length; j++) {
         const b = r.rivals[j];
         if (b.weights.commerce < 5) continue;
-        if (r.pairRelations(a.id, b.id) < 40) continue;
+        const relBar = sameContinent(a, b) ? BLOC_RELATIONS_NEIGHBOR : BLOC_RELATIONS_OVERSEAS;
+        if (r.pairRelations(a.id, b.id) < relBar) continue;
         const together = r.rivalTradeBlocs.some(
           (bl) => bl.memberRivalIds.includes(a.id) && bl.memberRivalIds.includes(b.id),
         );
@@ -352,7 +359,12 @@ export function tickRivalTradeBlocActivity(r: RegionSim): void {
             foundedYear: r.year,
             tariff: Math.min(0.4, tariff),
           });
-          r.addLog(`${a.name} and ${b.name} found a trade union — the world organises into blocs.`, 'info');
+          r.addLog(
+            sameContinent(a, b)
+              ? `${a.name} and ${b.name} found a continental trade union — the neighbourhood organises into a bloc.`
+              : `${a.name} and ${b.name} sign an intercontinental compact — merchants bridge the horizons.`,
+            'info',
+          );
         }
       }
     }
@@ -361,7 +373,9 @@ export function tickRivalTradeBlocActivity(r: RegionSim): void {
    *  decent relations autonomously found/join a climate coalition. Exactly the
    *  `tickRivalTradeBlocActivity` shape (gate → join-or-found), gated on green
    *  propensity instead of commerce and an easier relations bar (a shared
-   *  existential threat unites faster than shared trade). Entirely inert — no
+   *  existential threat unites faster than shared trade). Deliberately
+   *  CONTINENT-BLIND, unlike the trade blocs above — a planetary threat
+   *  unites across oceans, so no `sameContinent` bar here. Entirely inert — no
    *  RNG draw, `rivalClimateBlocs` never touched — unless `rivalClimateResponse`
    *  is on, so OFF is byte-identical to every session before this one. */
 export function tickRivalClimateBlocActivity(r: RegionSim): void {
