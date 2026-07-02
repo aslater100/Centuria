@@ -5,7 +5,7 @@
  */
 import './panels.css';
 import type { Settlement, Scout, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, DepressionMeasure, TownFocus, WagePolicy, Route, SectorId, ArmyUnitType, TechNode, Province, DynastyNode, SectorBonusBreakdown } from '../sim/region';
-import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, DISTRICT_DEFS, INTERMEDIATE_GOODS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES, BRANCH_YEAR, UNIT_TYPES, ESPIONAGE_OPS, BLOC_RELATIONS_FLOOR, DEPRESSION_MEASURES, SUPPLY_SHOCK_INFLATION, SUPPLY_SHOCK_EXPORT_DRAG, AGRI_CLIMATE_THRESHOLD, INDUSTRY_BROWNOUT_THRESHOLD, FRONT_PEAK_LEVERAGE_SCALE, frontPhase, FRONT_PHASE_LABEL } from '../sim/region';
+import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, DISTRICT_DEFS, INTERMEDIATE_GOODS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES, BRANCH_YEAR, UNIT_TYPES, ESPIONAGE_OPS, BLOC_RELATIONS_FLOOR, DEPRESSION_MEASURES, SUPPLY_SHOCK_INFLATION, SUPPLY_SHOCK_EXPORT_DRAG, AGRI_CLIMATE_THRESHOLD, INDUSTRY_BROWNOUT_THRESHOLD, FRONT_PEAK_LEVERAGE_SCALE, frontPhase, FRONT_PHASE_LABEL, AGENDA_PEACE_RESISTANCE, rivalAgendaKind } from '../sim/region';
 import type { EspionageOp } from '../sim/region';
 import { rivalArmsCapacity } from '../sim/region';
 import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS } from '../sim/defs';
@@ -3566,12 +3566,17 @@ export class RegionView {
     for (const t of [...this.peacePicks]) {
       if (t === 'border_province' && w.occupied === 0) this.peacePicks.delete(t);
     }
+    const agendaResist = AGENDA_PEACE_RESISTANCE[rivalAgendaKind(rv)];
     const termBtns = (Object.keys(PEACE_TERMS) as PeaceTerm[])
       .map((t) => {
         const picked = this.peacePicks.has(t);
         const blocked = t === 'border_province' && w.occupied === 0;
+        const delta = agendaResist[t] ?? 0;
+        const resistNote = delta > 0 ? ` ${rv.name} will resist (${RIVAL_ARCHETYPES[rv.archetype].name}: +${delta}).`
+          : delta < 0 ? ` ${rv.name} is more willing (${RIVAL_ARCHETYPES[rv.archetype].name}: ${delta}).`
+          : '';
         return `<button class="mini war-term-btn${picked ? ' toggle-on' : ''}" data-term="${t}" ${blocked ? 'disabled' : ''} ` +
-          `title="${PEACE_TERMS[t].desc}${blocked ? ' (you must hold a march to claim it)' : ''} (worth ${PEACE_TERMS[t].score})">` +
+          `title="${PEACE_TERMS[t].desc}${blocked ? ' (you must hold a march to claim it)' : ''}${resistNote} (effective cost ${PEACE_TERMS[t].score + delta})">` +
           `${picked ? '☑ ' : ''}${PEACE_TERMS[t].name}</button>`;
       })
       .join(' ');

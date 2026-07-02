@@ -2002,6 +2002,34 @@ export const PEACE_TERMS: Record<PeaceTerm, { name: string; score: number; desc:
   regime_change: { name: 'Regime Change', score: 80, desc: 'Their government falls; a friendlier one signs the instrument.' },
 };
 
+/** Structured agenda category — the strategic priority that actually drives peace-table behaviour.
+ *  Derived from archetype; exported so the UI can surface it and tests can validate it. */
+export type AgendaKind = 'expansion' | 'commerce' | 'isolation' | 'ideology' | 'opportunism';
+
+export const ARCHETYPE_AGENDA: Record<RivalArchetype, AgendaKind> = {
+  hegemon:          'expansion',
+  trading_republic: 'commerce',
+  hermit_kingdom:   'isolation',
+  crusader_state:   'ideology',
+  opportunist:      'opportunism',
+};
+
+/** Extra war-score cost on a peace term by agenda kind.
+ *  Positive → rival resists that demand (player needs more war score);
+ *  negative → rival is more willing to accept it. */
+export const AGENDA_PEACE_RESISTANCE: Record<AgendaKind, Partial<Record<PeaceTerm, number>>> = {
+  expansion:   { border_province: 15, reparations: -5 },    // hegemons defend their territory above all
+  commerce:    { reparations: 15, border_province: -5 },    // trading republics guard the purse tightest
+  isolation:   { border_province: 10, regime_change: -10 }, // hermit kingdoms hold the gates; toppling the court is fine
+  ideology:    { regime_change: 20, reparations: -5 },      // crusader states will burn before the faith falls
+  opportunism: { reparations: -5, border_province: -5 },    // opportunists want out — nearly any exit will do
+};
+
+/** Pure: the agenda kind for a rival (derived from archetype — no serialization needed). */
+export function rivalAgendaKind(rv: Pick<RivalNation, 'archetype'>): AgendaKind {
+  return ARCHETYPE_AGENDA[rv.archetype] ?? 'opportunism';
+}
+
 /** Occupied marches are administered with a light hand or a heavy one —
  *  brutality is cheaper now, costlier forever (GDD §7.4). */
 export type OccupationPolicy = 'conciliatory' | 'brutal';
@@ -11225,7 +11253,8 @@ export class RegionSim {
     const w = this.playerWar;
     const occupied = w?.occupied ?? 0;
     const peakLeverage = Math.floor(Math.max(0, w?.front?.peak ?? 0) * FRONT_PEAK_LEVERAGE_SCALE);
-    const sum = terms.reduce((s, t) => s + PEACE_TERMS[t].score, 0);
+    const resist = AGENDA_PEACE_RESISTANCE[rivalAgendaKind(rv)];
+    const sum = terms.reduce((s, t) => s + PEACE_TERMS[t].score + (resist[t] ?? 0), 0);
     return Math.max(0, Math.round(sum + rv.weights.grudge * 2 - occupied * OCCUPATION_SCORE_DISCOUNT - peakLeverage));
   }
 
@@ -11367,7 +11396,11 @@ export class RegionSim {
   private peaceCounter(rv: RivalNation, terms: PeaceTerm[]): PeaceTerm[] {
     const w = this.playerWar;
     if (!w) return [];
-    const sorted = [...terms].sort((a, b) => PEACE_TERMS[b].score - PEACE_TERMS[a].score);
+    // Sort by effective score (raw + agenda resistance) so counter-offers shed terms the rival
+    // values least first — a hegemon concedes cash before land; a trading republic the reverse.
+    const resist = AGENDA_PEACE_RESISTANCE[rivalAgendaKind(rv)];
+    const eff = (t: PeaceTerm) => PEACE_TERMS[t].score + (resist[t] ?? 0);
+    const sorted = [...terms].sort((a, b) => eff(b) - eff(a));
     while (sorted.length > 0 && w.score < this.peaceBasketAsk(rv, sorted)) sorted.shift();
     return sorted;
   }

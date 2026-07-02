@@ -5,6 +5,7 @@ import {
   OCCUPATION_SCORE_DISCOUNT,
   PEACE_TERMS,
   type RivalNation,
+  type RivalArchetype,
   type PlayerWar,
 } from '../src/sim/region';
 
@@ -74,6 +75,9 @@ describe('peaceBasketAsk — front-peak leverage', () => {
     const r = makeRegion();
     const rv = ensureRival(r);
     rv.weights.grudge = 0;
+    // Pin to hermit_kingdom (isolation agenda) — no special resistance on reparations,
+    // so the formula stays score − peakLeverage without an agenda offset.
+    (rv as unknown as { archetype: RivalArchetype }).archetype = 'hermit_kingdom';
 
     const peak = 80;
     setWar(r, rv, peak, 0);
