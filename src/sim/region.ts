@@ -2002,6 +2002,42 @@ export const PEACE_TERMS: Record<PeaceTerm, { name: string; score: number; desc:
   regime_change: { name: 'Regime Change', score: 80, desc: 'Their government falls; a friendlier one signs the instrument.' },
 };
 
+/** Structured agenda category — the strategic priority that actually drives peace-table behaviour.
+ *  Derived from archetype; exported so the UI can surface it and tests can validate it. */
+export type AgendaKind = 'expansion' | 'commerce' | 'isolation' | 'ideology' | 'opportunism';
+
+export const ARCHETYPE_AGENDA: Record<RivalArchetype, AgendaKind> = {
+  hegemon:          'expansion',
+  trading_republic: 'commerce',
+  hermit_kingdom:   'isolation',
+  crusader_state:   'ideology',
+  opportunist:      'opportunism',
+};
+
+/** Extra war-score cost on a peace term by agenda kind.
+ *  Positive → rival resists that demand (player needs more war score);
+ *  negative → rival is more willing to accept it. */
+export const AGENDA_PEACE_RESISTANCE: Record<AgendaKind, Partial<Record<PeaceTerm, number>>> = {
+  expansion:   { border_province: 15, reparations: -5 },    // hegemons defend their territory above all
+  commerce:    { reparations: 15, border_province: -5 },    // trading republics guard the purse tightest
+  isolation:   { border_province: 10, regime_change: -10 }, // hermit kingdoms hold the gates; toppling the court is fine
+  ideology:    { regime_change: 20, reparations: -5 },      // crusader states will burn before the faith falls
+  opportunism: { reparations: -5, border_province: -5 },    // opportunists want out — nearly any exit will do
+};
+
+/** Pure: the agenda kind for a rival (derived from archetype — no serialization needed). */
+export function rivalAgendaKind(rv: Pick<RivalNation, 'archetype'>): AgendaKind {
+  return ARCHETYPE_AGENDA[rv.archetype] ?? 'opportunism';
+}
+
+/** Flat adjustment to the deal table-cost by agenda kind.
+ *  Positive = rival is harder to sit down with (even at neutral relations);
+ *  negative = rival deals with anyone (opening move cheaper). */
+export const AGENDA_TABLE_COST: Partial<Record<AgendaKind, number>> = {
+  isolation:   10,  // hermit kingdoms hold the gates — any deal costs extra persuasion
+  opportunism: -5,  // opportunists will deal with anyone; the door is always open
+};
+
 /** Occupied marches are administered with a light hand or a heavy one —
  *  brutality is cheaper now, costlier forever (GDD §7.4). */
 export type OccupationPolicy = 'conciliatory' | 'brutal';
@@ -2027,6 +2063,10 @@ export const OCCUPATION_DEFS: Record<OccupationPolicy, {
 export const MAX_OCCUPIED_MARCHES = 3;
 /** Each occupied march discounts the peace table: the flag already flies. */
 export const OCCUPATION_SCORE_DISCOUNT = 6;
+/** A deep advance at the front's peak earns diplomatic leverage even if the
+ *  line later retreats: £0.15 discount per front-peak point (positive only).
+ *  A peak of 80 (breakthrough) shaves ~12 off the ask alongside occupation. */
+export const FRONT_PEAK_LEVERAGE_SCALE = 0.15;
 /** Blockade upkeep: gunboats and requisitioned merchantmen, £/pop/month. */
 export const BLOCKADE_UPKEEP_PER_POP = 0.02;
 
@@ -2948,6 +2988,9 @@ export const ARCHETYPE_WAR_FREQ_MULT: Record<RivalArchetype, number> = {
   crusader_state:   1.2,  // expansion 6 + risk 6 → ideological mission justifies campaigns
   opportunist:      1.1,  // risk 9 but honorless; fights when the odds look good
 };
+/** Minimum years after a defeat before a rival is ready to seek revenge.
+ *  Time to rebuild army, rally grievance, and wait for the right moment. */
+export const REVANCHISM_BUILDUP_YEARS = 5;
 export const WORLD_GREEN_START_YEAR = 1972;  // the transition can begin as renewables become conceivable
 export const WORLD_GREEN_RAMP_YEARS = 38;    // years from the start to a full ramp (≈2010)
 export const WORLD_GREEN_MAX_CUT = 0.92;     // a fully-green world cuts this fraction of its emissions
@@ -10024,9 +10067,10 @@ export class RegionSim {
     return Math.max(0.5, 1 + this.treatiesBroken * 0.3 + rv.weights.grudge * 0.03 - rv.relations / 150);
   }
 
-  /** Sitting down at all has a price when they hate you. */
+  /** Sitting down at all has a price when they hate you — and some never want to sit at all. */
   private tableCost(rv: RivalNation): number {
-    return Math.max(0, -rv.relations / 8) + this.treatiesBroken * 2 + rv.weights.grudge * 0.4;
+    const base = Math.max(0, -rv.relations / 8) + this.treatiesBroken * 2 + rv.weights.grudge * 0.4;
+    return Math.max(0, base + (AGENDA_TABLE_COST[rivalAgendaKind(rv)] ?? 0));
   }
 
   /** Strip a basket to the items that still mean anything. */
@@ -10694,12 +10738,15 @@ export class RegionSim {
     }
     const nation = this.nationName || this.stateName || 'the nation';
     this.noteHistory(rv, defensive ? `Declared war on ${nation}, ${this.year}.` : `Attacked by ${nation}, ${this.year}.`);
-    this.addLog(
-      defensive
-        ? `WAR: ${rv.name} declares war on ${nation}! A defensive war — the home front rallies (support ${this.playerWar.support}).`
-        : `WAR DECLARED on ${rv.name} — casus belli: ${CASUS_BELLI_DEFS[cb].name.toLowerCase()} (support ${this.playerWar.support}).`,
-      'bad',
-    );
+    let warMsg: string;
+    if (defensive && cb === 'revanchism') {
+      warMsg = `WAR: ${rv.name} marches for revenge — they have not forgiven their defeat. The home front rallies (support ${this.playerWar.support}).`;
+    } else if (defensive) {
+      warMsg = `WAR: ${rv.name} declares war on ${nation}! A defensive war — the home front rallies (support ${this.playerWar.support}).`;
+    } else {
+      warMsg = `WAR DECLARED on ${rv.name} — casus belli: ${CASUS_BELLI_DEFS[cb].name.toLowerCase()} (support ${this.playerWar.support}).`;
+    }
+    this.addLog(warMsg, 'bad');
   }
 
   /** Recruit military units for the active war (GDD §7.1). Returns cost if successful, null if failed. */
@@ -11208,12 +11255,16 @@ export class RegionSim {
   }
 
   /** Combined ask for a basket of terms (GDD §7.4 priced with the §6.3
-   *  engine): scores sum, the grudge premium is charged once, and ground
-   *  the army already holds discounts the bill. */
+   *  engine): scores sum, the grudge premium is charged once, ground the
+   *  army holds discounts the bill, and a deep historical advance earns
+   *  diplomatic leverage even after the line retreats (front.peak). */
   peaceBasketAsk(rv: RivalNation, terms: PeaceTerm[]): number {
-    const occupied = this.playerWar?.occupied ?? 0;
-    const sum = terms.reduce((s, t) => s + PEACE_TERMS[t].score, 0);
-    return Math.max(0, Math.round(sum + rv.weights.grudge * 2 - occupied * OCCUPATION_SCORE_DISCOUNT));
+    const w = this.playerWar;
+    const occupied = w?.occupied ?? 0;
+    const peakLeverage = Math.floor(Math.max(0, w?.front?.peak ?? 0) * FRONT_PEAK_LEVERAGE_SCALE);
+    const resist = AGENDA_PEACE_RESISTANCE[rivalAgendaKind(rv)];
+    const sum = terms.reduce((s, t) => s + PEACE_TERMS[t].score + (resist[t] ?? 0), 0);
+    return Math.max(0, Math.round(sum + rv.weights.grudge * 2 - occupied * OCCUPATION_SCORE_DISCOUNT - peakLeverage));
   }
 
   /** Station units at a settlement garrison (GDD §7.1: garrison management). */
@@ -11354,7 +11405,11 @@ export class RegionSim {
   private peaceCounter(rv: RivalNation, terms: PeaceTerm[]): PeaceTerm[] {
     const w = this.playerWar;
     if (!w) return [];
-    const sorted = [...terms].sort((a, b) => PEACE_TERMS[b].score - PEACE_TERMS[a].score);
+    // Sort by effective score (raw + agenda resistance) so counter-offers shed terms the rival
+    // values least first — a hegemon concedes cash before land; a trading republic the reverse.
+    const resist = AGENDA_PEACE_RESISTANCE[rivalAgendaKind(rv)];
+    const eff = (t: PeaceTerm) => PEACE_TERMS[t].score + (resist[t] ?? 0);
+    const sorted = [...terms].sort((a, b) => eff(b) - eff(a));
     while (sorted.length > 0 && w.score < this.peaceBasketAsk(rv, sorted)) sorted.shift();
     return sorted;
   }
