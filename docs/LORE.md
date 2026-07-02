@@ -1,6 +1,6 @@
 # CENTURIA — World Bible
 
-**Version 0.1 — first draft of the canon.**
+**Version 0.2 — canon draft + settled design decisions (2026-07-02 lore session, round 2).**
 Companion to `GDD.md`. This document is *lore canon*: the history of the world, its nations,
 and their leaders across 1919–2100. Game data (`src/data/rival_nations.json`, `names.json`)
 should converge on this document as the lore is wired in; where they conflict, this file wins
@@ -47,6 +47,9 @@ compression of Europe's. Its geography, west to east:
 > **Procedural-map note:** the campaign map is procedurally generated, so this geography is
 > *narrative* geography — it constrains flavor text, names, and who-hates-whom, never tile
 > layouts. "Vasterholm is upriver of you" is a sentence for event text, not a map assertion.
+> **One worldgen requirement it does impose (settled, round 2 — no off-map rivals):** the map
+> must be large enough to seat all canon rivals as real map powers, with the far powers
+> (Columbria, Kessaria) placed at distance and, where terrain allows, across water.
 
 ### 1.2 The Dead Empire: Sarethia
 
@@ -96,7 +99,21 @@ who inherits it; the rivals who arrive are the war's survivors acting exactly in
 
 ### 1.4 The Founding Column (the player's origin)
 
-The player's colony is founded by **demobilized veterans and war refugees** — a mixed column
+**Settled (round 2): founding stories are player-selectable at new game, with light mechanical
+seasoning.** Three origins, all walking into the Hollow Crown in 1919:
+
+| Origin | Who they are | Mechanical seasoning (light) |
+|---|---|---|
+| **The Veterans' Column** *(default)* | Demobilized soldiers and war refugees from every belligerent | + starting militia/warrior strength; faster raid recovery |
+| **The Chartered Expedition** | A Kalimeran-style trading charter opening the interior for profit | + starting treasury; early trade-route affinity; the charter's shareholders as a recurring event voice |
+| **The Covenant of the Meek** | A dissident congregation fleeing the post-war order to build its model society | + cohesion/mood resilience; ideology starts coherent (low spread); friction events when the world intrudes |
+
+Each origin changes founding narration, early event text, and eventually its own flavor of
+Notable backstories. Seasoning must stay *light* — a nudge, not a build; the spine
+(Town → State → Nation) is identical for all three.
+
+The **Veterans' Column** remains the canonical default and the origin all era-neutral lore
+assumes — a mixed column
 from every belligerent, walking into the Hollow Crown under no flag. Ex-Compact gunners beside
 ex-Concordat sappers; a Sarethine land-clerk who kept the registry books; farm families whose
 farms are now a border. What they share is the one conviction of 1919: *never again someone
@@ -111,17 +128,28 @@ This explains, in fiction, several existing mechanics:
 - **The Constitutional Convention** at Proclamation: the moment the column's children finally
   answer the question the founders deferred — *what were we, all along?*
 
-*(Alternative founding stories — chartered-company expedition, dissident congregation — were
-considered and parked; they'd suit a future selectable-origin feature but the veterans' column
-is canon for the default campaign.)*
+The other two origins answer the same three questions differently: the Expedition's name pool
+skews Kalimeran and its deferred question is *who does the charter serve once it's a country*;
+the Covenant's names are scriptural-plain and its deferred question is *what happens to a
+church that becomes a state* (a small, pointed echo of Tyrennia's answer).
 
 ---
 
 ## 2. Timeline of the Century (the world's default script)
 
-The rhyme-scheme with real history, as it unfolds **if the player never interferes**. The sim's
-own dynamics (crash cycles, rival wars, climate) should be tuned to *tend* toward these beats;
-the player's rise is precisely what bends them.
+The rhyme-scheme with real history, as it unfolds **if the player never interferes**.
+
+**Settled (round 2): how hard these beats push is a player-set dial** — a new-game
+**Historical Fidelity** option (precedent: the shipped World Dynamism toggles, which are
+serialized campaign options):
+
+- **Sandbox** — no scripted beats; the sim's own dynamics (crash cycles, rival AI, climate)
+  are merely *tuned* so the century tends to rhyme. Any run can diverge completely.
+- **Rhyming** *(default)* — major beats (the Slump, the second war, Volgoria's collapse) fire
+  as events in a loose window **unless world-state already contradicts them**; the player can
+  dampen or dodge, not toggle off.
+- **Guided** — beats fire on schedule and hit hard; the century is a story you live through.
+  Best first-campaign experience; the alt-history sandbox is what you unlock by mastering it.
 
 | Years | Beat | Real-world rhyme |
 |---|---|---|
@@ -321,10 +349,13 @@ each other), the player (only over prestige — Auristelle cannot bear being thi
 Across the Meridian Sea: a continent-sized republic of settlers, factories, and creditors that
 would very much prefer Eurycia be somebody else's problem. Columbria enters both great wars
 late and decides both; spends the Long Watch as one of its two poles; and owns the crash of
-1929, the boom of the '90s, and a good share of the carbon in the sky. **Design note:** for a
-first implementation Columbria works best as an *off-map power* — a presence in the world
-market, trade blocs, and diplomacy events (the existing off-map RivalNation world-demand
-machinery is the natural seam) rather than a settler of the shared map.
+1929, the boom of the '90s, and a good share of the carbon in the sky. **Design note
+(settled, round 2): no off-map rivals — Columbria is a full map rival, and the map expands to
+fit it.** Worldgen places it far from the player's start (the "across the sea" of the lore
+becomes literal distance/water on the procedural map where possible); its personality does the
+rest — low early expansion toward the player, overwhelming economy, late decisive entry into
+wars. The existing off-map world-demand machinery remains for *flavor-only* far powers, not
+for any of the eight canon nations.
 
 **Succession line** (presidents, term-limited — the line is long; these are the ones event
 text needs):
@@ -345,7 +376,10 @@ the century), the player (none by default — Columbria's lever is the market, n
 ### 3.8 Kessaria — the Rising Sun of the Eastern Sea *(NEW)*
 
 *Analog: Japan. Archetype: late-industrializing island empire (suggested: `opportunist` early,
-`trading_republic` late). Regime arc: militarist empire → occupied → pacifist trading state.*
+`trading_republic` late). Regime arc: militarist empire → occupied → pacifist trading state.
+**Design note (settled, round 2): full map rival** — worldgen seats it on a coast or island
+group at the map's eastern reach where terrain allows; where it doesn't, distance stands in
+for the sea and the island-empire flavor lives in event text.*
 
 The island chain beyond the Eastern Sea that watched Eurycia industrialize and decided to do
 it in one generation. Kessaria joined the Great War on the Compact side purely for Sarethia's
@@ -371,7 +405,48 @@ into alliance), the player (commercial rivalry only — unless you hold the east
 
 ---
 
-## 4. Naming & Culture Notes (for name pools and event text)
+## 4. The Pretender in Karelia (event-chain design sketch)
+
+**Settled (round 2): Sarethia gets a full restorationist event chain.** The dead empire's heir
+is the century's best recurring guest star, and the chain gives the Hollow Crown's landlords —
+including the player — a running legitimacy problem money can't settle.
+
+**The premise.** The Emperor abdicated to a Karelian hotel in 1917 and died there in 1924; the
+line continues through his grandchild, the **Archduke Valentin Sarethis**, raised in exile on
+Karelian courtesy and Tyrennine tutors. Karelia shelters the household (neutrality plus old
+deposits); Tyrennia maintains, delicately, that the crown passed to the altar — so a living
+claimant is as awkward for the Prelate as for everyone squatting on imperial land.
+
+**The chain, in five movements** (windows assume the Rhyming fidelity setting; Sandbox lets
+world-state trigger them, Guided pins them):
+
+1. **The Manifesto (mid-1920s).** Pamphlets appear in every settlement on former Sarethine
+   land — the player's towns qualify — asserting the Archduke's title to it. Small ideology
+   nudge toward authority among older cohorts; a Notable may declare as a loyalist.
+2. **The Courtship (1930s).** Powers bid for the claim: von Stahl's Vasterholm offers to
+   "restore" Valentin as a client; Tyrennia offers recognition-for-renunciation. The player is
+   approached too — host the court-in-exile (prestige + Tyrennia/Volgoria friction), extradite
+   an agitating loyalist to a bidder (relations + ideology backlash), or shut the door
+   (Karelia's respect, quietly).
+3. **The Rising (second-war years).** Somewhere in the Hollow Crown a restorationist rising
+   seizes a provincial town under the double eagle. If it's in your territory it's your civil
+   emergency; if a rival crushes it, the refugees walk to you.
+4. **The Long Suit (Long Watch).** The claim dwindles into the century's most fascinating
+   court case — the land-registry paper of §1.2 finally litigated. Periodic events: a deed
+   your third town sits on surfaces in a Karelian vault; settling (buy the quiet title) vs.
+   defying (unrest among loyalist cohorts, Tyrennia tuts).
+5. **The Renunciation (or the Museum) (1990s+).** The last Sarethis heir either renounces —
+   a continent-wide closure event, prestige to whoever hosted the signing — or dies claimant,
+   leaving a "Pretender's Museum" wonder-lite in whichever nation holds the relics.
+
+**Mechanical seams it can reuse today:** the event system, Notables (loyalist ministers,
+declared sympathizers), ideology distributions (authority-axis nudges), diplomacy relations,
+and prestige. **New state it would need** (succession of the claimant, chain progress) is
+serialized → hard-stop approval before implementation, like all §6 items.
+
+---
+
+## 5. Naming & Culture Notes (for name pools and event text)
 
 Per-nation flavor for future per-nation name pools (rival notables, generals, ministers) and
 for event-text writers. The player's own pool stays deliberately mixed (§1.4).
@@ -390,7 +465,7 @@ for event-text writers. The player's own pool stays deliberately mixed (§1.4).
 
 ---
 
-## 5. Wiring Plan (lore → game data, future work)
+## 6. Wiring Plan (lore → game data, future work)
 
 Nothing below is implemented by this document; it is the roadmap for converging data on canon.
 Ordered by payoff-per-effort:
@@ -398,30 +473,52 @@ Ordered by payoff-per-effort:
 1. **Deepen the existing 4 rivals' JSON** — replace the one-paragraph `description` with
    canon-derived text; add a non-mechanical `lore` field (war record, grudge summary, treaty
    stance) surfaced in the diplomacy panel. No schema risk if additive + optional.
-2. **Add the 4 new nations** to `rival_nations.json` (Volgoria and Auristelle as full map
-   rivals; Columbria as an off-map world-market power via the existing off-map RivalNation
-   seam; Kessaria either). *Balance-affecting — needs its own session and headless A/B.*
+2. **Add the 4 new nations** to `rival_nations.json` — **all four as full map rivals** (no
+   off-map powers, settled round 2). Prerequisite: **worldgen sizing** — the map must scale to
+   seat 8 rivals, with Columbria/Kessaria placed at distance (across water where terrain
+   allows). *Balance-affecting — needs its own session and headless A/B.*
 3. **Per-nation name pools** — extend `names.json` (or a sibling file) with per-nation pools
-   keyed by faction id, used when minting rival notables/generals; player pool unchanged.
-4. **Succession events** — leaders age and die on the canon schedule; a succession fires a
+   keyed by faction id, used when minting rival notables/generals; player pool unchanged
+   (mixed by canon — with Expedition/Covenant origin skews per §1.4 once origins land).
+4. **Selectable founding origins** (§1.4) — new-game choice of three origins with light
+   mechanical seasoning + origin-keyed founding narration and early events. Likely a
+   serialized campaign option (precedent: World Dynamism toggles) → **hard-stop approval**.
+5. **Historical Fidelity dial** (§2) — Sandbox / Rhyming *(default)* / Guided as a serialized
+   new-game option gating the beat-event layer → **hard-stop approval**. Ship the dial with,
+   or before, the first beat events; Sandbox must equal today's behavior byte-for-byte.
+6. **Succession events** — leaders age and die on the canon schedule; a succession fires a
    diplomacy event and swaps the personality weights toward the successor's profile. This is
    the big one (new serialized state → **hard-stop approval required**), and the succession
    lines above are written to be its content.
-5. **Historical beat events** — the §2 timeline as a low-key scripted event layer (the Slump,
-   the second war, the Long Watch) that the sim's own dynamics can pre-empt or the player can
-   derail. Design carefully against determinism guarantees.
-6. **Sarethine flavor layer** — ruins/deeds/ghost-town event text drawing on §1.2; pure
-   flavor, zero mechanics.
+7. **Historical beat events** — the §2 timeline as the event layer behind the fidelity dial
+   (the Slump, the second war, the Long Watch). Design carefully against determinism
+   guarantees.
+8. **The Pretender chain** (§4) — after succession events exist (the claimant is himself a
+   succession line); new serialized chain state → **hard-stop approval**.
+9. **Sarethine flavor layer** — ruins/deeds/ghost-town event text drawing on §1.2; pure
+   flavor, zero mechanics. Can ship any time.
 
 ---
 
-## 6. Open Questions (parked, not settled)
+## 7. Decision Log & Open Questions
 
-- Should the **player's founding story** become selectable (veterans' column / chartered
-  company / dissident congregation) with light mechanical seasoning? Canon default: veterans.
-- **Kessaria on-map or off-map?** Depends on whether the procedural map reliably generates an
-  eastern sea worth crossing.
-- How hard should the **timeline beats** push? Full alt-history sandbox (beats are tendencies)
-  vs. guided century (beats fire unless actively prevented).
-- Does **Sarethia** ever get a restorationist movement event chain ("the Pretender in
-  Karelia")? Cheap flavor, high drama; unwritten.
+**Settled — round 1 (2026-07-02):** thinly-veiled Earth · world-first design · succession
+lines over immortal leaders · lore bible + data convergence.
+
+**Settled — round 2 (2026-07-02):**
+- **Founding origins:** selectable at new game (Veterans' Column default / Chartered
+  Expedition / Covenant of the Meek), each with *light* mechanical seasoning (§1.4).
+- **No off-map rivals:** Columbria and Kessaria are full map rivals; **the map expands to fit
+  the roster** (§1.1 note, §3.7, §3.8).
+- **Timeline beats:** player-set **Historical Fidelity** dial — Sandbox / Rhyming (default) /
+  Guided (§2).
+- **The Pretender in Karelia:** yes, a full event chain (§4).
+
+**Still open:**
+- Worldgen specifics for the 8-rival map: how much bigger, water generation guarantees, and
+  what "distance stands in for the sea" means in tiles.
+- Origin seasoning exact numbers (must stay a nudge, not a build) — balance session.
+- Whether Guided fidelity should be the suggested first-campaign default in the new-game UI,
+  or merely offered.
+- Post-1996 Volgoria and post-2031 Tyrennia: the sim decides today; do late-century scripted
+  forks ever exist at Guided fidelity?
