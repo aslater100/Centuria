@@ -2251,6 +2251,16 @@ export function advanceFront(
   return { position, peak, phase: frontPhase(position) };
 }
 
+/** Occupation gate (GDD §7.4): ground changes hands on the FRONT — the integrated
+ *  line, not the noisy monthly score — so a march is taken on a sustained advance,
+ *  never a single lucky roll while the front is still contested. The posture moves
+ *  the odds: a breakthrough overruns ground faster, a collapse cedes it faster. */
+export const FRONT_OCCUPY_THRESHOLD = 35;
+export const MARCH_TAKE_CHANCE = 0.3;
+export const MARCH_TAKE_CHANCE_BREAKTHROUGH = 0.5;
+export const MARCH_CEDE_CHANCE = 0.25;
+export const MARCH_CEDE_CHANCE_COLLAPSE = 0.45;
+
 /** Regime × war (GDD §7.5): below this floor the war eats the regime;
  *  15 below it, the home front breaks and the war ends on dictated terms. */
 export const WAR_SUPPORT_FLOOR: Record<GovType, number> = {
