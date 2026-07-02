@@ -20,6 +20,10 @@ import type { RegionSim } from '../region';
 import type { ForeignWar, RivalNation, CasusBelli, WarScar } from '../region';
 import {
   blocAffinity,
+  continentTerm,
+  sameContinent,
+  CONTINENT_WAR_MULT,
+  OVERSEAS_WAR_MULT,
   RIVAL_EMERGENCE_YEAR,
   MAX_RIVALS,
   ARCHETYPE_GREEN_PROPENSITY,
@@ -172,11 +176,14 @@ export function tickForeignRelations(r: RegionSim): void {
         const key = r.pairKey(a.id, b.id);
         const allied = r.alliances.includes(key);
         const atWar = r.warBetween(a.id, b.id) !== undefined;
-        // Drift toward a baseline from both personalities and bloc distance
+        // Drift toward a baseline from both personalities, bloc distance, and
+        // geography — neighbours beyond the same horizon feel each other's
+        // ideology harder than powers an ocean apart (continentTerm).
+        const blocAff = blocAffinity(r.regimeOf(a).bloc, r.regimeOf(b).bloc);
         let base =
           (a.weights.commerce + b.weights.commerce) * 1.2 -
           (a.weights.expansion + b.weights.expansion) * 1.5 +
-          blocAffinity(r.regimeOf(a).bloc, r.regimeOf(b).bloc);
+          blocAff + continentTerm(a, b, blocAff);
         // Existential climate response: whichever of the pair is more cornered
         // by warming urgency sours the relationship faster (mirrors the
         // rival→player drift above).
@@ -208,7 +215,10 @@ export function tickForeignRelations(r: RegionSim): void {
         const foreignUrgencyMult = r.rivalClimateResponse
           ? 1 + Math.max(rivalClimateUrgency(r, a), rivalClimateUrgency(r, b)) * URGENCY_AGGRESSION_LIFT
           : 1;
-        if (!allied && rel < -50 && r.rng.chance((0.03 + (a.weights.risk + b.weights.risk) * 0.003) * foreignUrgencyMult)) {
+        // Wars cluster on shared ground: neighbours can march on each other,
+        // an overseas expedition is a rarer, harder undertaking.
+        const geoWarMult = sameContinent(a, b) ? CONTINENT_WAR_MULT : OVERSEAS_WAR_MULT;
+        if (!allied && rel < -50 && r.rng.chance((0.03 + (a.weights.risk + b.weights.risk) * 0.003) * foreignUrgencyMult * geoWarMult)) {
           r.startForeignWar(a.id, b.id);
         }
       }
