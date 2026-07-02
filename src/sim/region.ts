@@ -1776,6 +1776,37 @@ export interface RivalNation {
   };
 }
 
+/** Continental identity of an off-map rival power (GDD §6.4). The visible map
+ *  is the PLAYER's home region; each rival looms beyond one compass horizon,
+ *  and powers beyond the SAME horizon share a continent. This seam is what
+ *  Phase C (real multi-continent worlds) re-implements with on-map landmasses
+ *  — the diplomacy wiring below only ever asks `sameContinent`. */
+export type RivalContinent = RivalNation['compass'];
+export function rivalContinent(rv: RivalNation): RivalContinent {
+  return rv.compass;
+}
+export function sameContinent(a: RivalNation, b: RivalNation): boolean {
+  return rivalContinent(a) === rivalContinent(b);
+}
+/** Geography amplifies ideology between neighbours: compatible regimes sharing
+ *  a horizon bond over the border they keep, incompatible ones grind against
+ *  it. Distant powers are background to each other — no term at all. */
+export const CONTINENT_NEIGHBOR_AFFINITY = 6;
+export const CONTINENT_NEIGHBOR_FRICTION = 8;
+export function continentTerm(a: RivalNation, b: RivalNation, blocAff: number): number {
+  if (!sameContinent(a, b)) return 0;
+  return blocAff >= 0 ? CONTINENT_NEIGHBOR_AFFINITY : -CONTINENT_NEIGHBOR_FRICTION;
+}
+/** Wars cluster on shared ground: neighbours reach each other's marches,
+ *  overseas power projection is hard (GDD §7.1). */
+export const CONTINENT_WAR_MULT = 1.5;
+export const OVERSEAS_WAR_MULT = 0.6;
+/** An overseas trade pact needs genuinely warm ties; neighbours bloc at the
+ *  historical bar. Climate coalitions stay continent-blind by design — a
+ *  planetary threat unites across oceans. */
+export const BLOC_RELATIONS_NEIGHBOR = 40;
+export const BLOC_RELATIONS_OVERSEAS = 55;
+
 /** A war between two rival powers — the player reads about it, and sells into it. */
 export interface ForeignWar {
   a: number; // rival ids
@@ -9982,13 +10013,16 @@ export class RegionSim {
       flagData: namedDef ? namedDef.flag : undefined,
     };
 
-    // The newcomer arrives into a world with opinions already formed
+    // The newcomer arrives into a world with opinions already formed — and
+    // the powers beyond its own horizon are the ones with the firmest ones
+    // (the same geography term the monthly drift baseline uses).
     for (const other of this.rivals) {
       const ob = this.regimeOf(other).bloc;
+      const blocAff = blocAffinity(regime.bloc, ob);
       const rel =
         (rv.weights.commerce + other.weights.commerce) * 1.2 -
         (rv.weights.expansion + other.weights.expansion) * 1.5 +
-        blocAffinity(regime.bloc, ob) +
+        blocAff + continentTerm(rv, other, blocAff) +
         this.rng.int(21) - 10;
       this.rivalPairs[this.pairKey(rv.id, other.id)] = this.clampRel(Math.max(-60, Math.min(40, rel)));
     }
