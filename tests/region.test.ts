@@ -1120,14 +1120,14 @@ describe('Sectoral economy (Phase 1)', () => {
 describe('Faction & fog-of-war persistence (Phase 0)', () => {
   function flippedPair(seed: number): RegionSim { return twoTownColony(seed); }
 
-  it('the flip raises the player banner and fogs the rest of the world', () => {
+  it('the flip raises the player banner over a fully revealed world (fog retired 2026-07)', () => {
     const r = flippedPair(42);
     expect(r.regionalFactions.length).toBeGreaterThanOrEqual(3); // player + 2-3 rivals
     expect(r.faction(0)?.capital).toBe(r.settlements[0].id);
     const home = r.settlements[0];
     expect(r.explorationMap[Math.round(home.x)][Math.round(home.y)]).toBe('explored');
     const fogged = r.explorationMap.flat().filter((v) => v === 'fogged').length;
-    expect(fogged).toBeGreaterThan(5000); // most of the map is still unknown
+    expect(fogged).toBe(0);
   });
 
   it('factions, sectors, and the fog survive save/load', () => {

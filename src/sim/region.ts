@@ -3523,7 +3523,9 @@ export class RegionSim {
    *  → the world-price anchor → arbitrage. Default OFF so live human play + the determinism
    *  harness stay byte-identical (every demand fn returns its legacy value, every world
    *  scarcity its legacy stock-based 0); the headless sweep turns it on (SIM_CONSUMER_DEMAND).
-   *  Not serialized — a run-mode toggle, not game state. */
+   *  A World Dynamism campaign option: chosen at new game ('Living World Market'),
+   *  serialized in saves, restored on load (?? false for old saves). Headless env
+   *  flags still override after construction. */
   consumerDemand = false;
   /** Existential climate response: rivals stop sitting still for the Drowned
    *  branch. Gates THREE effects, all previously entirely absent for rivals:
@@ -3536,9 +3538,11 @@ export class RegionSim {
    *  diplomatic/economic while a fossil-locked one's is military. Every new RNG
    *  draw and every changed probability is guarded behind this flag, so OFF
    *  is byte-identical (no draw fires, no probability changes) to every
-   *  session before this one. Not serialized — a run-mode toggle, not game
-   *  state (`rivalClimateBlocs` itself IS serialized — see below — since it's
-   *  real accumulating state once the flag is on, not a derived cache). */
+   *  session before this one. A World Dynamism campaign option: chosen at new
+   *  game ('A World That Fights Back'), serialized in saves, restored on load
+   *  (?? false for old saves); headless env flags still override after
+   *  construction (`rivalClimateBlocs` is also serialized — see below — since
+   *  it's real accumulating state once the flag is on, not a derived cache). */
   rivalClimateResponse = false;
   /** Transient per-good supply LEVEL (∈[0,1], Liebig min of input availability) cached
    *  by `tickIntermediateGoods` each month from the cascade solve, so the (consumer-demand)
@@ -3773,10 +3777,14 @@ export class RegionSim {
     this.weather = weather;
     this.nextEventDay = this.day + 4 + rng.int(4);
     this.townNamePool = [...TOWN_NAMES];
-    // Initialize fog of war: 100×100 grid of fogged tiles
+    // Fog of war RETIRED (2026-07, player call: it added nothing to play — the
+    // region is the player's home theatre, not a discovery map). The world
+    // starts fully revealed; the explorationMap machinery is kept so old saves,
+    // scouts, and the render caches stay API-compatible.
     this.explorationMap = Array.from({ length: 100 }, () =>
-      Array.from({ length: 100 }, () => 'fogged' as TileVisibility)
+      Array.from({ length: 100 }, () => 'explored' as TileVisibility)
     );
+    this.exploredCount = 100 * 100;
   }
 
   // ---- time (mirrors town sim) ----
@@ -11787,6 +11795,9 @@ export class RegionSim {
       scenarioGoalsCompleted: this.scenarioGoalsCompleted ?? [],
       govLockExpiry: this.govLockExpiry ?? null,
       difficultySettings: this.difficultySettings ?? { ...DEFAULT_DIFFICULTY_SETTINGS },
+      // World Dynamism campaign options (chosen at new game, restored on load)
+      consumerDemand: this.consumerDemand,
+      rivalClimateResponse: this.rivalClimateResponse,
       // Phase 15: Extended Economy & FX
       // Note: intermediate-goods stocks are now per-settlement and ride the
       // `settlements` spread above — no top-level field. Old saves that carry a
@@ -12027,18 +12038,13 @@ export class RegionSim {
       const pf = r.faction(r.playerFactionId);
       if (pf) pf.settlementIds = r.settlements.map((s) => s.id);
     }
-    if (d.explorationMap) {
-      r.explorationMap = (d.explorationMap as string[]).map((row) =>
-        [...row].map((c) => (c === '1' ? 'explored' : 'fogged') as TileVisibility),
-      );
-    } else {
-      // pre-fog save: what the towns can see today is what's on the maps
-      for (const s of r.settlements) r.revealTiles(s.x, s.y, 3, 'explored');
-    }
-    // Recompute exploredCount from restored map (revealTiles above already increments for the else branch)
-    if (d.explorationMap) {
-      r.exploredCount = r.explorationMap.reduce((sum, col) => sum + col.filter((v) => v !== 'fogged').length, 0);
-    }
+    // Fog of war retired: every save — old or new, whatever its bitmap said —
+    // loads fully revealed. (The constructor already built an all-explored map;
+    // restate it here so the migration intent is explicit.)
+    r.explorationMap = Array.from({ length: 100 }, () =>
+      Array.from({ length: 100 }, () => 'explored' as TileVisibility),
+    );
+    r.exploredCount = 100 * 100;
     // Phase 18: Advisor System Depth — backfill with empty defaults for pre-Phase-18 saves
     r.advisorBriefs = d.advisorBriefs ?? [];
     r.advisorBriefLastDay = d.advisorBriefLastDay ?? {};
@@ -12153,6 +12159,9 @@ export class RegionSim {
     r.localGoodsScarcity = d.localGoodsScarcity ?? 0;      // no-shortage default
     r.wonderOwner = d.wonderOwner ?? {};                   // Phase D: no Wonders default
     r.prestige = d.prestige ?? 0;
+    // World Dynamism campaign options — old saves carry neither key → both OFF
+    r.consumerDemand = d.consumerDemand ?? false;
+    r.rivalClimateResponse = d.rivalClimateResponse ?? false;
     r._electronicsDisrupted = d.electronicsDisrupted ?? false;
     // Pre-transit-pipeline flows carried no pendingIncome — backfill to 0 (they
     // simply transit out without a payout); pre-cargo flows carried no physical
