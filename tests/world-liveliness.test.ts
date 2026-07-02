@@ -13,6 +13,12 @@
  * INTENTIONAL RE-BASELINE: the wander draw and ramp draws change RNG draw
  * counts for every seed. Same-seed same-code determinism is unchanged
  * (guarded here and by tests/serialize-determinism).
+ *
+ * Follow-up in the same session: alliances were forever once signed (no
+ * dissolution path except the targeted `incite_unrest` espionage action).
+ * `ALLIANCE_DISSOLUTION_RAMP_START`/`_RATE` add an organic decay path with a
+ * wide 0..25 dead zone below the formation ramp so ordinary wander can never
+ * flicker a healthy alliance.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -24,6 +30,8 @@ import {
   ALLIANCE_RATE,
   FOREIGN_WAR_RAMP_START,
   FOREIGN_WAR_RATE,
+  ALLIANCE_DISSOLUTION_RAMP_START,
+  ALLIANCE_DISSOLUTION_RATE,
   RIVAL_ARCHETYPES,
   blocAffinity,
 } from '../src/sim/region';
@@ -191,5 +199,77 @@ describe('the world is alive — a synthetic century is not frozen', () => {
       return JSON.stringify([r.rivalPairs, r.alliances, r.warsDeclaredCount, r.foreignWars]);
     };
     expect(run()).toBe(run());
+  });
+});
+
+describe('alliance dissolution — a pact can outlive the warmth that formed it', () => {
+  it('dials are sane: dissolution starts well below the formation ramp (a dead zone, not a hair-trigger)', () => {
+    expect(ALLIANCE_DISSOLUTION_RATE).toBeGreaterThan(0);
+    expect(ALLIANCE_DISSOLUTION_RAMP_START).toBeLessThan(ALLIANCE_RAMP_START);
+  });
+
+  it('a pinned deep-cold allied pair dissolves within a bounded horizon', () => {
+    const r = RegionSim.create(21);
+    const a = injectRival(r, 9001, 'hegemon', 'east', 'junta');
+    const b = injectRival(r, 9002, 'hegemon', 'east', 'parliamentary');
+    const key = r.pairKey(a.id, b.id);
+    r.alliances.push(key);
+    let dissolvedAt = -1;
+    for (let m = 0; m < 600; m++) {
+      r.rivalPairs[key] = -90; // re-pin each month: deep into the dissolution ramp
+      tickForeignRelations(r);
+      if (!r.alliances.includes(key)) { dissolvedAt = m; break; }
+    }
+    expect(dissolvedAt).toBeGreaterThanOrEqual(0);
+  });
+
+  it('a pinned pair inside the 0..25 dead zone never dissolves — no flicker from ordinary wander', () => {
+    const r = RegionSim.create(23);
+    const a = injectRival(r, 9001, 'hegemon', 'east', 'junta');
+    const b = injectRival(r, 9002, 'hegemon', 'east', 'parliamentary');
+    const key = r.pairKey(a.id, b.id);
+    r.alliances.push(key);
+    for (let m = 0; m < 600; m++) {
+      r.rivalPairs[key] = 10; // inside the dead zone: below ALLIANCE_RAMP_START, above ALLIANCE_DISSOLUTION_RAMP_START
+      tickForeignRelations(r);
+      expect(r.alliances).toContain(key);
+    }
+  });
+
+  it('a hostile regime change organically sours an alliance over time — no special-case hook needed', () => {
+    const r = RegionSim.create(29);
+    // Low-commerce/high-expansion archetype (hegemon) keeps the warmth term
+    // small relative to the ideology/geography swing, so a bloc flip actually
+    // crosses the dissolution ramp instead of being masked by the `allied`
+    // baseline lift (a high-commerce pair like trading_republic never does —
+    // verified: the swing alone can't out-cold their trade warmth).
+    const a = injectRival(r, 9001, 'hegemon', 'east', 'junta');
+    const b = injectRival(r, 9002, 'hegemon', 'east', 'one_party'); // both autocratic: compatible
+    const key = r.pairKey(a.id, b.id);
+    r.alliances.push(key);
+    for (let m = 0; m < 60; m++) tickForeignRelations(r); // settle to the compatible-bloc baseline first
+    expect(r.alliances).toContain(key);
+    // A coup: the one-party state liberalises into a parliamentary democracy —
+    // blocAff flips from compatible (+12) to the quarrel pair (−14), and
+    // pairRelationsBase reads the live bloc fresh every tick — no special case.
+    b.regime = 'parliamentary';
+    let dissolvedAt = -1;
+    for (let m = 0; m < 1200; m++) {
+      tickForeignRelations(r);
+      if (!r.alliances.includes(key)) { dissolvedAt = m; break; }
+    }
+    expect(dissolvedAt).toBeGreaterThanOrEqual(0);
+  });
+
+  it('the existing incite_unrest espionage dissolution path is untouched (still a plain filter)', () => {
+    // Regression guard: the organic dissolution above must not interfere with
+    // the pre-existing player-triggered alliance fracture.
+    const r = RegionSim.create(31);
+    const a = injectRival(r, 9001, 'hegemon', 'east', 'junta');
+    const b = injectRival(r, 9002, 'hegemon', 'west', 'parliamentary');
+    const key = r.pairKey(a.id, b.id);
+    r.alliances.push(key);
+    r.alliances = r.alliances.filter((k) => k !== key);
+    expect(r.alliances).not.toContain(key);
   });
 });

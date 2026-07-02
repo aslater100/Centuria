@@ -1835,6 +1835,18 @@ export const ALLIANCE_RATE = 0.06;
  *  not every other year. */
 export const FOREIGN_WAR_RAMP_START = -30;
 export const FOREIGN_WAR_RATE = 0.045;
+/** Alliances were forever once signed — no dissolution path existed except a
+ *  targeted espionage action (incite_unrest). A pact that formed under warm
+ *  ideology/geography can outlive the conditions that made it: a coup flips
+ *  blocAff hostile, or a long cold spell just wears the friendship down. The
+ *  dissolution ramp starts well BELOW the formation ramp (0 vs
+ *  ALLIANCE_RAMP_START 25) — a wide 0..25 dead zone so the ±3 monthly wander
+ *  alone can never flicker an alliance on and off. No regime-change special
+ *  case is needed: `pairRelationsBase` already reads the current blocAff
+ *  every tick, so a regime change organically drags `rel` down over the
+ *  following months and this ramp picks it up exactly like any other decay. */
+export const ALLIANCE_DISSOLUTION_RAMP_START = 0;
+export const ALLIANCE_DISSOLUTION_RATE = 0.03;
 /** An overseas trade pact needs genuinely warm ties; neighbours bloc at the
  *  historical bar. Climate coalitions stay continent-blind by design — a
  *  planetary threat unites across oceans. */
@@ -2427,7 +2439,7 @@ const RIVAL_ORIGINS = [
   'a federation of farming communes that grew into a national power',
   'forged by a visionary who united warring clans under one banner',
 ];
-const COMPASS_FLAVOR: Record<RivalNation['compass'], string> = {
+export const COMPASS_FLAVOR: Record<RivalNation['compass'], string> = {
   north: 'beyond the northern ranges',
   east: 'across the eastern marches',
   south: 'down the southern coast',

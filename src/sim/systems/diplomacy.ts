@@ -24,6 +24,8 @@ import {
   pairRelationsBase,
   ALLIANCE_RAMP_START,
   ALLIANCE_RATE,
+  ALLIANCE_DISSOLUTION_RAMP_START,
+  ALLIANCE_DISSOLUTION_RATE,
   FOREIGN_WAR_RAMP_START,
   FOREIGN_WAR_RATE,
   CONTINENT_WAR_MULT,
@@ -204,6 +206,22 @@ export function tickForeignRelations(r: RegionSim): void {
         if (atWar) rel = Math.min(rel, -50);
         r.rivalPairs[key] = r.clampRel(rel);
         if (atWar) continue;
+        // Alliance dissolution: a pact can outlive the warmth that formed it.
+        // Wide dead zone (0..ALLIANCE_RAMP_START) below the formation bar so
+        // ordinary wander never flickers a healthy alliance; a regime change
+        // or a sustained cold spell drags rel here organically (no special
+        // case — pairRelationsBase already reads the live blocAff).
+        if (allied) {
+          const dissolveChance =
+            (ALLIANCE_DISSOLUTION_RATE * Math.max(0, ALLIANCE_DISSOLUTION_RAMP_START - rel)) /
+            (100 + ALLIANCE_DISSOLUTION_RAMP_START);
+          if (dissolveChance > 0 && r.rng.chance(dissolveChance)) {
+            r.alliances = r.alliances.filter((k) => k !== key);
+            r.noteHistory(a, `Alliance with ${b.name} collapses, ${r.year}.`);
+            r.noteHistory(b, `Alliance with ${a.name} collapses, ${r.year}.`);
+            r.addLog(`ALLIANCE COLLAPSES: ${a.name} and ${b.name} let their pact lapse — the old warmth is gone.`, 'info');
+          }
+        }
         // Warmth ramp: above ALLIANCE_RAMP_START the pact chance scales with
         // how deep the friendship runs (no cliff — a knife-edge bar the drift
         // could never cross is what kept the world frozen; see PAIR_* dials).
