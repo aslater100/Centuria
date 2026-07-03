@@ -95,6 +95,39 @@
 > are the bold roadmap items and remain **un-started in earnest** — they need an env
 > with network egress + image/audio tooling to actually generate.
 
+## Recent session (2026-07-03) — audit-to-9 execution: 20 of 23 plan tasks landed (PR #346)
+
+**Executed `centuria-plan.md` (the audit remediation plan) end to end**, orchestrated as two
+waves of parallel agents over disjoint file clusters, each task verified against its diff and
+committed separately. Design pre-work lives in `docs/specs/09-audit-nine.md`; the L0 lore
+bible is `docs/lore-bible.md`. Final gate: build ✓, 103 files / 1567 tests ✓, 100yr×10-seed
+headless sweep healthy (inflation flat 2.0%, no pathologies).
+
+Landed: **M1** 3-round attrition battles (home-ground/supply/rout) · **M2** `counterOffer()`
+signing-gift negotiation (sim + tests; **UI hookup pending**) · **M3** wartime sea-lane
+blockade (income side; capacity side needs a `region.ts` seam) · **R1** monetary constants
+cited + 20-seed bounds sweep test · **R2** estate-coalition elections · **R3** war-refugee
+migration · **L0–L5** lore bible, names.json pools (generic + 10 nation-flavored), notable
+traits with gated bio beats (4/role), historical anchor follow-up beats, voice-flavored
+diplomacy/war lines (`rivalVoiceTone`) · **D3** difficulty legend · **G2** `npm run shoot`
+Playwright A/B harness (proved the override seam) · **U1–U11 minus none**: Modal/ErrorState
+swap, top-bar legitimacy+crisis badge, WikiPanel wired (play view + title screen + first-run
+auto-open), mainmenu.ts deleted, save-slot bug fixed (per-slot + overwrite confirm),
+E/G/O/C/?/H shortcuts + wiki keybindings section, volume sliders (sfx/music/ambience) +
+`--ui-scale` + non-hue crisis cues, 1280/1024 breakpoints + WindowManager viewport clamp,
+minimap crisis pins + legend (fog stays cut), standalone century graph, sandbox difficulty
+selector.
+
+**Deferred (need explicit sign-off — Hard Stops):** **D1** hyperinflation loss state and
+**D2** revolution→partition chain; both fully spec'd in `docs/specs/09-audit-nine.md` but
+require persisted `RegionSim` counters/territory mutation. **Blocked:** **G1** art override
+generation — no channel live in this env (no local SD; HF MCP tools not exposed to
+subagents; proxy 403s HF egress); unblock options documented in session-log.md.
+
+Smaller follow-ups: diplomacy-panel Counter button for M2; `panels.css`/`regionview.ts`
+hue-only tone classes inventoried (U7c) but not yet fixed; M1 fortification modifier is
+wired-but-dormant until defensive building ids exist.
+
 ## Recent session (2026-07-02) — the front line becomes real (D2-mil `front` scaffold activated)
 
 **Activated the one genuinely-inert D2-mil scaffold, then gave the recorded-but-hidden war history a home.** Two coherent "the war becomes legible" increments (2 commits).

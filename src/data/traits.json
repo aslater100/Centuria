@@ -8,6 +8,12 @@
     { "id": "gourmand", "name": "Gourmand", "foodDecay": 1.3, "desc": "Gets hungry 30% faster." },
     { "id": "loner", "name": "Loner", "housingPreference": "private", "desc": "Prefers private quarters; moody in shared housing." },
     { "id": "sociable", "name": "Sociable", "housingPreference": "communal", "desc": "Thrives in shared housing; uncomfortable alone." },
-    { "id": "disciplined", "name": "Disciplined", "housingPreference": "military", "desc": "Suited to barracks life; finds private quarters wasteful." }
+    { "id": "disciplined", "name": "Disciplined", "housingPreference": "military", "desc": "Suited to barracks life; finds private quarters wasteful." },
+    { "id": "corrupt", "name": "Corrupt", "desc": "Skims what passes through their hands.", "notableOnly": true },
+    { "id": "diligent", "name": "Diligent", "desc": "Never leaves the ledger unbalanced.", "notableOnly": true },
+    { "id": "bold", "name": "Bold", "desc": "Acts first, explains later.", "notableOnly": true },
+    { "id": "cautious", "name": "Cautious", "desc": "Weighs every risk twice.", "notableOnly": true },
+    { "id": "charismatic", "name": "Charismatic", "desc": "A room warms when they walk in.", "notableOnly": true },
+    { "id": "reclusive", "name": "Reclusive", "desc": "Keeps to themselves; the town knows them by reputation, not face.", "notableOnly": true }
   ]
 }

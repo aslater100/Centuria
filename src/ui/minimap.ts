@@ -2,7 +2,7 @@
  * Minimap — a small corner viewport showing the full region, camera frame, and fog.
  */
 
-import { RegionSim } from '../sim/region';
+import { RegionSim, Settlement } from '../sim/region';
 
 export interface MinimapConfig {
   size: number; // width/height in pixels (e.g., 150)
@@ -15,6 +15,12 @@ const DEFAULT_CONFIG: MinimapConfig = {
   position: 'bottom-right',
   opacity: 0.85,
 };
+
+// Ownership + crisis-pin palette (kept separate from the terrain palette above
+// so the legend swatches stay visually distinct from biome colors).
+const PLAYER_SETTLEMENT_COLOR = '#e8d27a';
+const RIVAL_SETTLEMENT_COLOR = '#8fa3c2';
+const CRISIS_PIN_COLOR = '#ff4d4d';
 
 export class Minimap {
   private canvas: HTMLCanvasElement;
@@ -110,13 +116,25 @@ export class Minimap {
       }
     }
 
-    // Draw settlements as small squares
-    ctx.fillStyle = '#e8d27a';
+    // Draw settlements as small squares — gold for the player's own towns,
+    // muted blue-grey for rivals. Any settlement currently in a crisis/alert
+    // state (same condition the settlement-alert list reads in regionview.ts
+    // drawSettlementListPanel: low food, high grievance, or an active strike)
+    // gets a thin red ring around it.
     for (const settlement of region.settlements) {
       const x = Math.floor((settlement.x / 100) * mapW);
       const y = Math.floor((settlement.y / 100) * mapH);
-      if (x >= 0 && x < mapW && y >= 0 && y < mapH) {
-        ctx.fillRect(x, y, 2, 2);
+      if (x < 0 || x >= mapW || y < 0 || y >= mapH) continue;
+      ctx.fillStyle = settlement.factionId === region.playerFactionId
+        ? PLAYER_SETTLEMENT_COLOR
+        : RIVAL_SETTLEMENT_COLOR;
+      ctx.fillRect(x, y, 2, 2);
+      if (this.isSettlementInCrisis(settlement, region)) {
+        ctx.strokeStyle = CRISIS_PIN_COLOR;
+        ctx.lineWidth = 1.4 / scale;
+        ctx.beginPath();
+        ctx.arc(x + 1, y + 1, 3, 0, Math.PI * 2);
+        ctx.stroke();
       }
     }
 
@@ -136,6 +154,62 @@ export class Minimap {
     ctx.strokeStyle = 'rgba(90, 169, 216, 0.3)';
     ctx.lineWidth = 1;
     ctx.strokeRect(0.5, 0.5, size - 1, size - 1);
+
+    // Static legend, drawn last so it sits on top of everything else.
+    this.drawLegend();
+  }
+
+  /** Same crisis/alert condition the settlement-alert list reads in
+   *  regionview.ts (drawSettlementListPanel/settlementListHtml): a town is
+   *  flagged when it's short on food, its grievance is boiling over, or it's
+   *  mid-strike. Kept in sync manually — regionview.ts is not imported here
+   *  to avoid a UI-module cross-dependency from a render-only widget. */
+  private isSettlementInCrisis(t: Settlement, region: RegionSim): boolean {
+    return t.food < region.popOf(t) * 5 || t.grievance > 60 || region.day < t.strikeUntil;
+  }
+
+  /** Small static legend in the minimap's top-left corner explaining the
+   *  terrain, ownership, and crisis-pin markup. Fog-of-war is deliberately
+   *  absent from this map (see exploration.ts) — the legend must not imply
+   *  any masking/visibility mechanic. */
+  private drawLegend(): void {
+    const { ctx } = this;
+    const rows: { draw: () => void; label: string }[] = [
+      { draw: () => { ctx.fillStyle = '#4e5e40'; ctx.fillRect(0, 0, 5, 5); }, label: 'Land' },
+      { draw: () => { ctx.fillStyle = '#1c2a3c'; ctx.fillRect(0, 0, 5, 5); }, label: 'Sea' },
+      { draw: () => { ctx.fillStyle = PLAYER_SETTLEMENT_COLOR; ctx.fillRect(0, 0, 5, 5); }, label: 'You' },
+      { draw: () => { ctx.fillStyle = RIVAL_SETTLEMENT_COLOR; ctx.fillRect(0, 0, 5, 5); }, label: 'Rival' },
+      {
+        draw: () => {
+          ctx.strokeStyle = CRISIS_PIN_COLOR;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(2.5, 2.5, 2.5, 0, Math.PI * 2);
+          ctx.stroke();
+        },
+        label: 'Crisis',
+      },
+    ];
+
+    const pad = 3;
+    const rowH = 8;
+    const boxW = 36;
+    const boxH = pad * 2 + rows.length * rowH - (rowH - 6);
+
+    ctx.fillStyle = 'rgba(10, 14, 20, 0.72)';
+    ctx.fillRect(pad - 2, pad - 2, boxW, boxH);
+
+    ctx.font = '6px sans-serif';
+    ctx.textBaseline = 'middle';
+    rows.forEach((row, i) => {
+      const ry = pad + i * rowH;
+      ctx.save();
+      ctx.translate(pad, ry);
+      row.draw();
+      ctx.restore();
+      ctx.fillStyle = '#cfe0ee';
+      ctx.fillText(row.label, pad + 8, ry + 3);
+    });
   }
 
   /**

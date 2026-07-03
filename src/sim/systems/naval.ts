@@ -26,7 +26,13 @@ export function navalTradeIncome(r: RegionSim): void {
         r.settlement(rt.b)?.factionId === r.playerFactionId,
     ).length;
     const perLane = 9 + warships * 2;
-    const income = harborTowns.length * perHarbor + seaLanes * perLane;
+    // Wartime blockade (spec §M3): an active player war runs a blockade
+    // gauntlet on the sea lanes — harbor base income is untouched, but the
+    // overseas-leg term is squeezed unless the fleet is large enough to
+    // contest it. Peacetime (no playerWar) keeps the multiplier at exactly 1
+    // with no extra branch cost to the RNG stream — byte-identical to before.
+    const blockadeMult = r.playerWar ? 0.65 + 0.35 * Math.min(1, warships / 6) : 1;
+    const income = harborTowns.length * perHarbor + seaLanes * perLane * blockadeMult;
     r.treasury += income;
     if (r.rng.chance(0.3)) {
       const town = harborTowns[r.rng.int(harborTowns.length)];

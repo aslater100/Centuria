@@ -9,5 +9,107 @@
     "Garrick", "Hollis", "Iverson", "Joffe", "Kessler", "Lindqvist",
     "Marsh", "Novak", "Ostrander", "Pell", "Quill", "Rourke",
     "Soltis", "Thorne", "Ulrich", "Vance", "Whitlock", "Zale"
-  ]
+  ],
+  "nations": {
+    "vasterholm": {
+      "first": [
+        "Aldric", "Dietmar", "Greta", "Wolfram", "Hedwig", "Ludovic",
+        "Brunhilde", "Otto", "Sieglinde", "Reinhard", "Ingrid", "Manfred"
+      ],
+      "last": [
+        "Stahl", "Brandt", "Krieger", "Falkenrath", "Steiner", "Hartmann",
+        "Voss", "Adler", "Reuter", "Wendel"
+      ]
+    },
+    "kalimera": {
+      "first": [
+        "Maren", "Luca", "Bianca", "Rafael", "Elena", "Marco",
+        "Sofia", "Nico", "Isabella", "Dario", "Carmela", "Renzo"
+      ],
+      "last": [
+        "Costa", "Marino", "Ferro", "Albanesi", "Rossi", "Greco",
+        "Serra", "Bruno", "Vitale", "Conti"
+      ]
+    },
+    "tyrennia": {
+      "first": [
+        "Oswyn", "Deirdre", "Caleb", "Rhiannon", "Aidan", "Branna",
+        "Cormac", "Fiona", "Declan", "Maeve", "Eamon", "Siobhan"
+      ],
+      "last": [
+        "Brennan", "Carrick", "Whitefriar", "Malone", "Kildare", "Corrigan",
+        "Boswell", "Fenwick", "Dunleavy", "Blackwood"
+      ]
+    },
+    "karelia": {
+      "first": [
+        "Torsten", "Aino", "Eero", "Sigrid", "Pekka", "Helmi",
+        "Vilho", "Kaisa", "Arvid", "Tuuli", "Onni", "Saga"
+      ],
+      "last": [
+        "Skau", "Kivi", "Halonen", "Berg", "Laine", "Virtanen",
+        "Salo", "Nurmi", "Koski", "Rautio"
+      ]
+    },
+    "sundered_communes": {
+      "first": [
+        "Alexi", "Vanya", "Irina", "Bogdan", "Mikhail", "Yelena",
+        "Pavel", "Katya", "Dmitri", "Oksana", "Stepan", "Nadia"
+      ],
+      "last": [
+        "Petrov", "Sokolova", "Marek", "Volkov", "Baranov", "Zorin",
+        "Kovalenko", "Dragomir", "Ilyin", "Vasin"
+      ]
+    },
+    "northern_league": {
+      "first": [
+        "Soren", "Njall", "Astrid", "Leif", "Bjorn", "Freya",
+        "Sigurd", "Kari", "Magnus", "Solveig", "Torvald", "Runa"
+      ],
+      "last": [
+        "Havik", "Strand", "Norling", "Vinter", "Solberg", "Fjeld",
+        "Bakke", "Lindgren", "Holm", "Skarsgard"
+      ]
+    },
+    "highland_federation": {
+      "first": [
+        "Grania", "Ewan", "Moira", "Callum", "Aileen", "Duncan",
+        "Isla", "Ronan", "Brighid", "Angus", "Niamh", "Tavish"
+      ],
+      "last": [
+        "MacRae", "Dunmore", "Craigie", "Bhaltair", "MacLeod", "Farquhar",
+        "Sinclair", "Cameron", "MacInnes", "Urquhart"
+      ]
+    },
+    "crescent_sultanate": {
+      "first": [
+        "Jahangir", "Layla", "Tariq", "Soraya", "Farid", "Yasmin",
+        "Kamal", "Zahra", "Rashid", "Amina", "Bahram", "Parisa"
+      ],
+      "last": [
+        "al-Rashid", "Qadiri", "Farouk", "ibn Sallum", "al-Amin", "Hassani",
+        "Khoury", "Zahir", "Malouf", "Nasrallah"
+      ]
+    },
+    "iron_republics": {
+      "first": [
+        "Petra", "Konrad", "Ute", "Emil", "Hilde", "Gustav",
+        "Marlene", "Anton", "Roswitha", "Klaus", "Editha", "Bernhard"
+      ],
+      "last": [
+        "Eisenmann", "Schacht", "Werfel", "Gruber", "Falke", "Horst",
+        "Reinke", "Dresler", "Kempf", "Wulff"
+      ]
+    },
+    "sunset_empire": {
+      "first": [
+        "Marcos", "Lucia", "Esteban", "Beatriz", "Rodrigo", "Ines",
+        "Alonso", "Catalina", "Diego", "Elvira", "Fernando", "Teresa"
+      ],
+      "last": [
+        "Herrera", "Valcázar", "Montiel", "Duarte", "Salazar", "Guerrero",
+        "Reyes", "Cifuentes", "Aranda", "Villanueva"
+      ]
+    }
+  }
 }

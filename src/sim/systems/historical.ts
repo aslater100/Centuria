@@ -66,6 +66,37 @@ export function tickHistoricalAnchors(r: RegionSim): void {
       }
     }
 
+    // 1b. World-war follow-ups (LOG-ONLY): rhymes the war's chronicle without
+    // touching a single number. Timing is read straight off the `foreignWars`
+    // entry (startedDay/endsDay) that firing the war already recorded — the
+    // first entry whose two sides are still tracked rivals stands in for "the"
+    // conflagration. No RNG, no new latches: rounding the entry's own window to
+    // the 30-day tick grid means each beat's day is hit on exactly one call.
+    if (r.worldWarFired) {
+      const ww = r.foreignWars.find((w) => r.rival(w.a) && r.rival(w.b));
+      if (ww) {
+        const round30 = (d: number) => Math.round(d / 30) * 30;
+        const midDay = round30((ww.startedDay + ww.endsDay) / 2);
+        const endDay = round30(ww.endsDay);
+        const aName = r.rival(ww.a)?.name ?? 'one power';
+        const bName = r.rival(ww.b)?.name ?? 'another';
+        if (r.day === midDay) {
+          r.addLog(
+            `THE LONG FRONT: ${aName} and ${bName} are still burying their dead. ` +
+            `Neither army has broken, and neither treasury can hold much longer.`,
+            'bad',
+          );
+        }
+        if (r.day === endDay) {
+          r.addLog(
+            `THE ARMISTICE: ${aName} and ${bName} sign the peace at last. ` +
+            `The guns fall silent, but the maps — and the grudges — are redrawn for good.`,
+            'good',
+          );
+        }
+      }
+    }
+
     // 2. Oil shock (1970s-equivalent): fossil dependency meets a supply embargo.
     // Fires when combustion-engine tech is researched but no clean energy exists yet.
     const oilInWindow = anchorsEmergent ? true : (y >= 1970 && y <= 1985);
@@ -103,6 +134,31 @@ export function tickHistoricalAnchors(r: RegionSim): void {
           `The answer is in the renewables labs.`,
           'bad',
         );
+      }
+    }
+
+    // 2b. Oil-shock follow-ups (LOG-ONLY): timing comes straight off the embargo's
+    // own `until` day already recorded in `rawEmbargoes['oil']` — no new state,
+    // no RNG. OIL_EMBARGO_DAYS is a fixed multiple of 30, so both derived days
+    // land exactly on the monthly tick grid.
+    if (r.oilShockFired) {
+      const embargo = r.rawEmbargoes['oil'];
+      if (embargo) {
+        const midDay = embargo.until - OIL_EMBARGO_DAYS / 2;
+        if (r.day === midDay) {
+          r.addLog(
+            `THE LONG QUEUE: months into the embargo, filling stations post handwritten signs ` +
+            `and shuttered pumps. Every ledger from harbor to hinterland now reads "fuel" in red ink.`,
+            'bad',
+          );
+        }
+        if (r.day === embargo.until) {
+          r.addLog(
+            `THE TAPS REOPEN: the embargo lifts and tankers return to harbor. ` +
+            `The price at the pump remembers — and so do the men building the renewables labs.`,
+            'good',
+          );
+        }
       }
     }
 
@@ -152,6 +208,28 @@ export function tickHistoricalAnchors(r: RegionSim): void {
       }
     }
 
+    // 3b. Depression follow-ups (LOG-ONLY): keyed off `crashMonthCounter`, the
+    // counter the decay logic already increments once per month while the
+    // depression is active (see the ~30-month horizon noted above). It is a
+    // strictly-increasing integer that freezes once the depression lifts, so
+    // each exact count is reached at most once — no new state, no RNG.
+    if (r.crashFired) {
+      if (r.crashMonthCounter === 15) {
+        r.addLog(
+          `THE LONG WINTER: fifteen months on, the soup lines have not shortened. ` +
+          `Shuttered storefronts wear their padlocks like medals.`,
+          'bad',
+        );
+      }
+      if (r.crashMonthCounter === 30) {
+        r.addLog(
+          `THE SLOW MEND: the ledgers stop bleeding red and furnaces relight, one by one. ` +
+          `The Depression is not forgotten — but at last, it is history.`,
+          'good',
+        );
+      }
+    }
+
     // 4. 2020-analog pandemic: a novel pathogen sweeps the globe.
     // Fires once in the 2012–2027 window; antibiotics tech halves the severity.
     const pandemicInWindow = anchorsEmergent ? r.rng.chance(0.04) : (y >= 2012 && y <= 2027 && r.rng.chance(0.04));
@@ -179,5 +257,37 @@ export function tickHistoricalAnchors(r: RegionSim): void {
         ? `PANDEMIC: A novel pathogen spreads across the world. Modern medicine blunts the worst — cities lock down for weeks, not years. Trade slows; recovery is measured in months.`
         : `PANDEMIC: A novel pathogen sweeps the globe. Without modern medical infrastructure the toll is heavy — cities shutter, commerce stops, the dead are counted in silence.`;
       r.addLog(msg, 'bad');
+    }
+
+    // 4b. Pandemic follow-ups (LOG-ONLY): read the wave's own `untilDay` off any
+    // settlement's `activeEvents` — pushed identically for every settlement at
+    // fire time, so any copy carries the same value. No new state, no RNG. The
+    // resolution beat targets the wave's last still-visible tick (`untilDay - 30`)
+    // since the regional-events sweep already prunes an entry the instant
+    // `r.day` reaches `untilDay`, before this system runs.
+    if (r.pandemicFired) {
+      let wave: { untilDay: number } | undefined;
+      for (const t of r.settlements) {
+        wave = t.activeEvents.find((ev) => ev.kind === 'pandemic_wave');
+        if (wave) break;
+      }
+      if (wave) {
+        const hasAntibiotics = r.has('antibiotics') || r.has('welfare_state');
+        const halfDuration = hasAntibiotics ? 30 : 60;
+        if (r.day === wave.untilDay - halfDuration) {
+          r.addLog(
+            `THE QUIET STREETS: weeks into the sickness, market squares stand empty and ` +
+            `the church bells ring for the dead more than the living.`,
+            'bad',
+          );
+        }
+        if (r.day === wave.untilDay - 30) {
+          r.addLog(
+            `THE ALL-CLEAR: quarantine flags come down, the shops reopen, ` +
+            `and the ledgers total what the pathogen cost.`,
+            'good',
+          );
+        }
+      }
     }
   }

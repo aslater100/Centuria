@@ -47,6 +47,51 @@ const NATION_ALLIANCE: Choice<NationDesign['allianceStance']>[] = [
   { value: 'coalition-builder', label: 'Coalition Builder', desc: 'Easier treaties, shared obligations.' },
 ];
 
+export type DifficultyTag = 'standard' | 'hard' | 'brutal';
+
+/**
+ * One-line summaries of what each scenario difficulty tag scales. These mirror the multipliers
+ * `RegionSim` applies to the base `DifficultySettings` (`crisisFrequency` / `aiAggression` /
+ * `economicVolatility`, defined at src/sim/region.ts:3384-3394, defaulting to 1.0 each — see
+ * also the `AI_DIFFICULTY` rival-AI knobs at src/sim/defs.ts:138-142) when a scenario starts
+ * (src/sim/region.ts:5846-5853). Display-only: the multipliers themselves live in the sim and
+ * are not duplicated as logic here.
+ */
+export const DIFFICULTY_TAGS: Choice<DifficultyTag>[] = [
+  { value: 'standard', label: 'Standard', desc: 'Baseline crisis frequency, AI aggression, and economic volatility (1x).' },
+  { value: 'hard', label: 'Hard', desc: '1.5x crisis frequency, AI aggression, and economic volatility.' },
+  { value: 'brutal', label: 'Brutal', desc: '2x crisis frequency, AI aggression, and economic volatility.' },
+];
+
+/**
+ * Read-only legend of the standard/hard/brutal difficulty tags, each with a one-line
+ * description of what it multiplies. Non-interactive (no click handlers) — for surfacing
+ * difficulty context inside a design screen, or for reuse by other pickers (e.g. the scenario
+ * and sandbox flows) that already carry the same tag values. Highlights `current` if given.
+ */
+export function difficultyLegend(current?: DifficultyTag): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'design-row';
+  const h = document.createElement('p');
+  h.innerHTML = '<strong>Difficulty</strong>';
+  h.className = 'design-row-title';
+  wrap.appendChild(h);
+  const row = document.createElement('div');
+  row.className = 'design-choices';
+  for (const tag of DIFFICULTY_TAGS) {
+    const badge = document.createElement('span');
+    badge.textContent = tag.label;
+    badge.className = tag.value === current ? 'design-choice design-choice-on' : 'design-choice';
+    row.appendChild(badge);
+    const desc = document.createElement('p');
+    desc.className = 'design-desc';
+    desc.textContent = tag.desc;
+    row.appendChild(desc);
+  }
+  wrap.appendChild(row);
+  return wrap;
+}
+
 /**
  * Full-screen modal. One instance per showing; removes itself on confirm.
  * Selection state lives in closures (no globals), buttons re-render on click.
@@ -126,7 +171,7 @@ export class DesignScreen {
     this.box.appendChild(p);
   }
 
-  showRegionDesign(cb: (d: RegionDesign) => void): void {
+  showRegionDesign(cb: (d: RegionDesign) => void, currentDifficulty?: DifficultyTag): void {
     this.title('REGIONAL CHARTER', 'Town #2 is founded. Set the region\'s course.');
 
     const expansion = this.choiceRow('Expansion', REGION_EXPANSION, 'steady');
@@ -162,6 +207,7 @@ export class DesignScreen {
     this.box.appendChild(trade.el);
     this.box.appendChild(taxWrap);
     this.box.appendChild(services.el);
+    this.box.appendChild(difficultyLegend(currentDifficulty));
     this.box.appendChild(
       this.confirmButton('ESTABLISH CHARTER', () => {
         this.close();

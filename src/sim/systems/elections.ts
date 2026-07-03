@@ -27,15 +27,23 @@ export function runElection(r: RegionSim): void {
     const avgSat = n > 0
       ? r.settlements.reduce((s, t) => s + t.satisfaction, 0) / n
       : 50;
-    const earned = Math.round(20 + (avgSat / 100) * 80);
+    // Blend the three national estates (r.factions power×support) 50/50 with avgSat
+    // (GDD §5.3 / spec §R2). No RNG — deterministic weighted average. Falls back to
+    // avgSat alone if there are no estates yet (pre-nation regions).
+    const powerSum = r.factions.reduce((s, f) => s + f.power, 0);
+    const estateBlend = powerSum > 0
+      ? r.factions.reduce((s, f) => s + f.power * f.support, 0) / powerSum
+      : avgSat;
+    const electoralApproval = 0.5 * avgSat + 0.5 * estateBlend;
+    const earned = Math.round(20 + (electoralApproval / 100) * 80);
     r.politicalCapital = Math.min(200, r.politicalCapital + earned);
     r.lastElectionYear = r.year;
     r.nextElectionDay = r.day + 240;
-    const result = avgSat >= 65 ? 'LANDSLIDE' : avgSat >= 50 ? 'MAJORITY' : avgSat >= 35 ? 'MINORITY' : 'LOST';
+    const result = electoralApproval >= 65 ? 'LANDSLIDE' : electoralApproval >= 50 ? 'MAJORITY' : electoralApproval >= 35 ? 'MINORITY' : 'LOST';
     r.addLog(
-      `ELECTION ${r.year}: ${result} (approval ${Math.round(avgSat)}%) — ${earned} political capital earned.` +
+      `ELECTION ${r.year}: ${result} (approval ${Math.round(electoralApproval)}%) — ${earned} political capital earned.` +
       (result === 'LOST' ? ' The government limps on.' : ''),
-      avgSat >= 50 ? 'good' : 'bad',
+      electoralApproval >= 50 ? 'good' : 'bad',
     );
     // Democracy/Republic: legitimacy refreshed by elections (GDD §5.3)
     if (r.nationProclaimed && (r.govType === 'democracy' || r.govType === 'republic')) {

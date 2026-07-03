@@ -86,15 +86,20 @@ fpsDiv.id = 'fps';
 fpsDiv.style.cssText = 'position:fixed;bottom:4px;left:4px;font:10px monospace;color:#888;pointer-events:none;';
 root.appendChild(fpsDiv);
 
-function save(): boolean {
+// `slot` routes the save into one of the pause menu's named save slots (clicked
+// from the Save Game panel). Omitted for the Ctrl+S quicksave hotkey, which only
+// refreshes the autosave key — it has no slot of its own to pick without
+// silently clobbering one of the three named slots.
+function save(slot?: number): boolean {
   if (!region) return false;
   try {
     const regionJson = region.serialize();
     localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 4, region: regionJson }));
-    // Also save to pause menu slots
-    const year = region.minute / (60 * 24 * 365);
-    const description = `Year ${Math.floor(year)}, ${region.settlements.length} settlements`;
-    pauseMenu.saveGame(regionJson, description);
+    if (slot !== undefined) {
+      const year = region.minute / (60 * 24 * 365);
+      const description = `Year ${Math.floor(year)}, ${region.settlements.length} settlements`;
+      pauseMenu.saveGame(slot, regionJson, description);
+    }
     return true;
   } catch (err) {
     console.error('save failed:', err);
@@ -168,7 +173,7 @@ pauseMenu.onResume = () => {
   paused = false;
   updateUIState();
 };
-pauseMenu.onSave = () => { save(); };
+pauseMenu.onSave = (slot: number) => { save(slot); };
 pauseMenu.onQuit = () => {
   pauseMenuOpen = false;
   showTitleScreen();
@@ -230,6 +235,18 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'p' || e.key === 'P') { regionView.toggleProvinceView(); e.preventDefault(); return; }
     if ((e.key === 'b' || e.key === 'B') && region?.hasCentralBank()) {
       regionView.centralBankOpen = !regionView.centralBankOpen; e.preventDefault(); return;
+    }
+    // U6: gameplay-panel shortcuts (docs/specs/09-audit-nine.md §U6). Skipped
+    // while focus is in a text field (town rename, tax slider, loan prompts)
+    // so single letters never hijack typing.
+    const target = document.activeElement;
+    const typing = target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+    if (!typing) {
+      if (e.key === 'e' || e.key === 'E') { regionView.toggleEconomyPanel(); e.preventDefault(); return; }
+      if (e.key === 'g' || e.key === 'G') { regionView.toggleStatePanel(); e.preventDefault(); return; }
+      if (e.key === 'o' || e.key === 'O') { regionView.toggleOverviewPanel(); e.preventDefault(); return; }
+      if (e.key === 'c' || e.key === 'C') { regionView.openCenturyGraph(); e.preventDefault(); return; }
+      if (e.key === '?' || e.key === 'h' || e.key === 'H') { regionView.toggleWikiPanel(); e.preventDefault(); return; }
     }
   }
 });

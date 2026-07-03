@@ -22,6 +22,13 @@ function freqAt(baseHz: number, semitones: number): number {
   return baseHz * Math.pow(2, semitones / 12);
 }
 
+/** Clamp a volume input to the valid [0, 1] gain range, falling back to full
+ *  volume for non-finite input (e.g. a corrupted localStorage value). */
+function clampVolume(v: number): number {
+  if (!Number.isFinite(v)) return 1;
+  return Math.min(1, Math.max(0, v));
+}
+
 // Scales as semitone offsets within the octave.
 const SCALES = {
   major: [0, 2, 4, 5, 7, 9, 11],
@@ -254,6 +261,8 @@ export class Music {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   enabled: boolean;
+  /** Master gain multiplier (0–1) layered under the mix's own 0.4 ceiling. */
+  volume: number;
 
   // Scheduler state.
   private nextNoteTime = 0;
@@ -282,12 +291,16 @@ export class Music {
 
   constructor() {
     let on = true;
+    let vol = 1;
     try {
       on = localStorage.getItem('centuria-music') !== '0';
+      const stored = localStorage.getItem('centuria-music-volume');
+      if (stored !== null) vol = clampVolume(Number(stored));
     } catch {
-      // storage unavailable — default to music on
+      // storage unavailable — default to music on, full volume
     }
     this.enabled = on;
+    this.volume = vol;
   }
 
   toggle(): void {
@@ -298,6 +311,16 @@ export class Music {
       // preference just won't persist
     }
     if (!this.enabled && this.master) this.master.gain.value = 0;
+  }
+
+  /** Set the music master volume (0–1); clamps and persists like `toggle`. */
+  setVolume(v: number): void {
+    this.volume = clampVolume(v);
+    try {
+      localStorage.setItem('centuria-music-volume', String(this.volume));
+    } catch {
+      // preference just won't persist
+    }
   }
 
   /** Attach a manifest-driven stem registry. The registry decodes its stems on
@@ -602,8 +625,9 @@ export class Music {
     const era = eraForYear(c.year);
     // Ease master volume up from silence, and the lead/drum intensity toward a
     // target set by pause and tension. Paused → pad only; tension → full kit.
-    // Volume slightly reduced for mid-game immersion (0.4 is subtle but present).
-    const targetMaster = 0.4;
+    // Volume slightly reduced for mid-game immersion (0.4 is subtle but present),
+    // then scaled by the player's own Music volume preference (0–1).
+    const targetMaster = 0.4 * this.volume;
     this.master.gain.value += (targetMaster - this.master.gain.value) * 0.02;
     const targetIntensity = c.paused ? 0 : 0.45 + 0.55 * Math.min(1, Math.max(0, c.tension));
     this.intensity += (targetIntensity - this.intensity) * 0.03;

@@ -169,6 +169,36 @@ const WIKI_SECTIONS: WikiSection[] = [
     ]
   },
   {
+    id: 'keybindings',
+    title: 'Keybindings',
+    icon: '⌨️',
+    articles: [
+      {
+        id: 'keybindings-table',
+        title: 'Keyboard Shortcuts',
+        content: `<strong>General</strong>
+        • <em>Space</em> — Pause / unpause
+        • <em>1 / 2 / 3</em> — Game speed (1×/3×/8×)
+        • <em>+ / −</em> — Zoom in/out
+        • <em>Ctrl+S</em> — Quicksave
+        • <em>Esc</em> — Pause menu
+
+        <strong>Gameplay Panels</strong>
+        • <em>T</em> — Toggle Research tree
+        • <em>P</em> — Toggle Province view
+        • <em>B</em> — Toggle Central Bank (once unlocked)
+        • <em>E</em> — Toggle Economy panel
+        • <em>G</em> — Toggle State/Government panel
+        • <em>O</em> — Toggle Overview panel (the settlement inspector)
+        • <em>C</em> — Open the century graph — long-run trends, any time
+        • <em>? or H</em> — Toggle this help wiki
+
+        <strong>Tip:</strong> Shortcuts are ignored while typing in a text field (e.g. renaming a town).`,
+        tags: ['keybindings', 'reference', 'controls']
+      }
+    ]
+  },
+  {
     id: 'tips',
     title: 'Pro Tips',
     icon: '💡',
