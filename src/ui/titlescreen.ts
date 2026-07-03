@@ -85,6 +85,15 @@ export class TitleScreen {
   private hasSave = false;
   private canvas: HTMLCanvasElement | null = null;
   private animFrame = 0;
+  private lastFrameTs = 0;
+  private resizeObserver: ResizeObserver | null = null;
+  /** Canvas size, kept in sync by the ResizeObserver below rather than by a
+   *  per-frame clientWidth/clientHeight read in the rAF loop. */
+  private canvasW = 1280;
+  private canvasH = 720;
+  /** Background gradients are expensive to rebuild and only depend on (w, h),
+   *  so they're cached here and only recreated when the size actually changes. */
+  private bgGradients: { w: number; h: number; sky: CanvasGradient; glow: CanvasGradient; ground: CanvasGradient; haze: CanvasGradient } | null = null;
   private clouds: Cloud[] = [];
   private selectedScenario: string | null = null; // null = sandbox
   /** World Dynamism toggles (scenario screen). Both default OFF. */
@@ -139,6 +148,7 @@ export class TitleScreen {
   hide(): void {
     this.el.classList.add('hidden');
     if (this.animFrame) { cancelAnimationFrame(this.animFrame); this.animFrame = 0; }
+    if (this.resizeObserver) { this.resizeObserver.disconnect(); this.resizeObserver = null; }
   }
 
   // ---- Background canvas ----
@@ -156,41 +166,73 @@ export class TitleScreen {
         speed: 0.05 + Math.random() * 0.12,
       }));
     }
+    this.canvasW = this.el.clientWidth || 1280;
+    this.canvasH = this.el.clientHeight || 720;
+    if (!this.resizeObserver) {
+      this.resizeObserver = new ResizeObserver(() => {
+        this.canvasW = this.el.clientWidth || 1280;
+        this.canvasH = this.el.clientHeight || 720;
+      });
+      this.resizeObserver.observe(this.el);
+    }
     if (this.animFrame) cancelAnimationFrame(this.animFrame);
-    const loop = () => {
-      const w = this.el.clientWidth || 1280;
-      const h = this.el.clientHeight || 720;
+    this.lastFrameTs = 0;
+    const loop = (ts: number) => {
+      const w = this.canvasW;
+      const h = this.canvasH;
       if (this.canvas!.width !== w || this.canvas!.height !== h) {
         this.canvas!.width = w; this.canvas!.height = h;
       }
+      const dt = this.lastFrameTs ? Math.min(0.1, Math.max(0, (ts - this.lastFrameTs) / 1000)) : 1 / 60;
+      this.lastFrameTs = ts;
       const ctx = this.canvas!.getContext('2d')!;
-      this.drawScene(ctx, w, h);
+      this.drawScene(ctx, w, h, dt);
       this.animFrame = requestAnimationFrame(loop);
     };
     this.animFrame = requestAnimationFrame(loop);
   }
 
-  private drawScene(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  private drawScene(ctx: CanvasRenderingContext2D, w: number, h: number, dt: number): void {
     const hz = Math.floor(h * 0.53); // horizon y
     const s  = w / 1280;             // scale factor
 
-    // --- SKY ---
-    const sky = ctx.createLinearGradient(0, 0, 0, hz);
-    sky.addColorStop(0,    '#3a90c8');
-    sky.addColorStop(0.45, '#68bce4');
-    sky.addColorStop(0.82, '#a0d8f0');
-    sky.addColorStop(1,    '#c8e8f8');
-    ctx.fillStyle = sky;
+    let grads = this.bgGradients;
+    if (!grads || grads.w !== w || grads.h !== h) {
+      // --- SKY ---
+      const sky = ctx.createLinearGradient(0, 0, 0, hz);
+      sky.addColorStop(0,    '#3a90c8');
+      sky.addColorStop(0.45, '#68bce4');
+      sky.addColorStop(0.82, '#a0d8f0');
+      sky.addColorStop(1,    '#c8e8f8');
+
+      // Sun glow (upper-right, above the city skyline)
+      const sx = w * 0.74, sy = h * 0.13;
+      const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, h * 0.52);
+      glow.addColorStop(0,    'rgba(255,245,170,0.70)');
+      glow.addColorStop(0.14, 'rgba(255,220,100,0.38)');
+      glow.addColorStop(0.38, 'rgba(255,195, 70,0.14)');
+      glow.addColorStop(1,    'rgba(255,175, 50,0)');
+
+      const ground = ctx.createLinearGradient(0, hz, 0, h);
+      ground.addColorStop(0,   '#72bc48');
+      ground.addColorStop(0.2, '#5aaa34');
+      ground.addColorStop(0.6, '#489828');
+      ground.addColorStop(1,   '#387820');
+
+      const haze = ctx.createLinearGradient(0, hz-18, 0, hz+12);
+      haze.addColorStop(0, 'rgba(175,220,255,0)');
+      haze.addColorStop(0.5,'rgba(175,220,255,0.20)');
+      haze.addColorStop(1, 'rgba(175,220,255,0)');
+
+      grads = { w, h, sky, glow, ground, haze };
+      this.bgGradients = grads;
+    }
+    const sx = w * 0.74, sy = h * 0.13;
+
+    ctx.fillStyle = grads.sky;
     ctx.fillRect(0, 0, w, hz);
 
-    // Sun glow (upper-right, above the city skyline)
-    const sx = w * 0.74, sy = h * 0.13;
-    const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, h * 0.52);
-    glow.addColorStop(0,    'rgba(255,245,170,0.70)');
-    glow.addColorStop(0.14, 'rgba(255,220,100,0.38)');
-    glow.addColorStop(0.38, 'rgba(255,195, 70,0.14)');
-    glow.addColorStop(1,    'rgba(255,175, 50,0)');
-    ctx.fillStyle = glow; ctx.fillRect(0, 0, w, hz);
+    ctx.fillStyle = grads.glow; ctx.fillRect(0, 0, w, hz);
     ctx.fillStyle = '#fff8d0';
     ctx.beginPath(); ctx.arc(sx, sy, 26*s, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = '#ffe858';
@@ -201,7 +243,7 @@ export class TitleScreen {
     ctx.shadowColor = 'rgba(100,160,210,0.28)';
     ctx.shadowBlur  = 10;
     for (const c of this.clouds) {
-      c.x -= c.speed;
+      c.x -= c.speed * dt * 60;
       if (c.x + c.r * 3 < 0) c.x = w + c.r * 2;
       ctx.fillStyle = 'rgba(255,255,255,0.93)';
       ctx.beginPath(); ctx.arc(c.x,             c.y,            c.r,       0, Math.PI*2); ctx.fill();
@@ -212,12 +254,7 @@ export class TitleScreen {
     ctx.restore();
 
     // --- GROUND ---
-    const ground = ctx.createLinearGradient(0, hz, 0, h);
-    ground.addColorStop(0,   '#72bc48');
-    ground.addColorStop(0.2, '#5aaa34');
-    ground.addColorStop(0.6, '#489828');
-    ground.addColorStop(1,   '#387820');
-    ctx.fillStyle = ground; ctx.fillRect(0, hz, w, h - hz);
+    ctx.fillStyle = grads.ground; ctx.fillRect(0, hz, w, h - hz);
 
     // Far hill ridge
     ctx.fillStyle = '#9cce68';
@@ -267,11 +304,7 @@ export class TitleScreen {
     this.drawTrees(ctx, w, hz, s);
 
     // Horizon atmosphere haze
-    const haze = ctx.createLinearGradient(0, hz-18, 0, hz+12);
-    haze.addColorStop(0, 'rgba(175,220,255,0)');
-    haze.addColorStop(0.5,'rgba(175,220,255,0.20)');
-    haze.addColorStop(1, 'rgba(175,220,255,0)');
-    ctx.fillStyle = haze; ctx.fillRect(0, hz-18, w, 30);
+    ctx.fillStyle = grads.haze; ctx.fillRect(0, hz-18, w, 30);
   }
 
   private drawHamlet(ctx: CanvasRenderingContext2D, w: number, hz: number, s: number): void {

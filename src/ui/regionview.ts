@@ -15,6 +15,7 @@ import { REGION_N } from '../sim/worldgen';
 import { hexNeighbors, hexNeighborDir, hexCenter, hexCorners, hexLayoutParams, screenToHex } from '../sim/hex';
 import { DesignScreen } from './designscreen';
 import { Minimap } from './minimap';
+import { displayScale } from './dpr';
 import { sparklineGrid } from './sparklines';
 import { centuryGraphHtml } from './centuryGraph';
 import { AssetRegistry, townSpriteTier, TOWN_TIER_PX } from './assets/registry';
@@ -25,6 +26,22 @@ import { WikiPanel } from './WikiPanel';
 
 /** localStorage flag (U3): the in-game wiki auto-opens once on a player's first game. */
 const WIKI_FIRST_RUN_KEY = 'centuria-wiki-seen';
+
+// Hoisted draw-path color tables — the per-frame loops that use these run
+// every frame, so the literals must not be rebuilt inside them.
+const CARGO_RGB: Record<string, string> = {
+  agriculture: '194,161,77', industry: '140,104,72', services: '74,127,164', information: '122,90,154',
+};
+const SECTOR_RGB: Record<string, string> = {
+  agriculture: '138,154,74', industry: '154,106,58', services: '74,127,164', information: '122,90,154',
+};
+const SECTOR_HEX: Record<string, string> = {
+  agriculture: '#8a9a4a', industry: '#9a6a3a', services: '#4a7fa4', information: '#7a5a9a', all: '#9a8a5a',
+};
+// O(1) def lookups for the per-frame building/district render loops (the
+// arrays are small, but `.find` per placed item per frame adds up).
+const DISTRICT_DEF_BY_ID = new Map(DISTRICT_DEFS.map((d) => [d.id, d]));
+const REGION_BUILDING_BY_ID = new Map(REGION_BUILDINGS.map((b) => [b.id, b]));
 
 /** Fill a hex polygon from precomputed corners (no stroke). */
 function fillHexPath(g: CanvasRenderingContext2D, corners: { x: number; y: number }[]): void {
@@ -189,7 +206,13 @@ export class RegionView {
   private playedWinCinematic = false;
   /** Unit recruitment modal (GDD §7.1: military depth). */
   private recruitmentModal: HTMLElement;
+  /** Animation clock in 60ths of a second (a "frame" at the 60 fps design
+   *  baseline). Advanced by wall-clock dt each draw — NOT by 1 per draw — so
+   *  pulses, waves, and cadence throttles run at the same real-world speed at
+   *  any render rate. Fractional; comparisons stay inequality-based. */
   private frame = 0;
+  /** Wall-clock timestamp of the previous draw, for the `frame` advance. */
+  private lastDrawMs = 0;
   /** Pawn sprites (settler/armed/raider) for rendering armies on the map; built
    *  lazily on first army draw so a session with no armies pays nothing. */
   private pawns?: ReturnType<typeof buildPawnSprites>;
@@ -203,9 +226,6 @@ export class RegionView {
   private mapCacheSig = '';
   // Memory-fog cache: explored-but-not-visible tiles. Same idea as mapCache but
   // keyed on exploredCount + visibilityVersion so it rebuilds when scouts move.
-  private memFogCanvas: HTMLCanvasElement | null = null;
-  private memFogCtx: CanvasRenderingContext2D | null = null;
-  private memFogSig = '';
   // Offscreen canvas of water pixels; rebuilt only on canvas resize (biomes are fixed).
   private waterMaskCanvas: HTMLCanvasElement | null = null;
   private waterMaskDims = '';
@@ -216,6 +236,9 @@ export class RegionView {
   private cachedHexLayout: { size: number; ox: number; oy: number } | null = null;
   // Cached pixel-coord arrays for route paths — stable until canvas resize.
   private routePtsCache = new WeakMap<object, { px: number; py: number }[]>();
+  /** Route bounding boxes in base coords, for viewport culling — derived from
+   *  `routePtsCache`, reset together with it (paths are immutable per route). */
+  private routeBBoxCache = new WeakMap<object, { l: number; t: number; r: number; b: number }>();
   // Last HTML written to each panel, so setInnerHtml can skip no-op reflows.
   private lastPanelHtml = new WeakMap<HTMLElement, string>();
   // Canvas dims from last frame — detects resize so caches above can be cleared.
@@ -260,7 +283,7 @@ export class RegionView {
   private readonly backdrop = new Backdrop();
 
   constructor(private canvas: HTMLCanvasElement, private region: RegionSim, root: HTMLElement) {
-    this.g = canvas.getContext('2d')!;
+    this.g = canvas.getContext('2d', { alpha: false })!;
     void this.assets.load();
     // If the era was already decided in a prior session (loaded save), treat the
     // reveal as already dismissed — only fire for a fork that happens live here.
@@ -351,12 +374,12 @@ export class RegionView {
     if (region.settlements.length > 0) {
       const home = region.settlements[0];
       this.camScale = 8;
-      const { size, ox, oy } = hexLayoutParams(canvas.width, canvas.height, REGION_N, 60);
+      const { size, ox, oy } = hexLayoutParams(this.viewW, this.viewH, REGION_N, 60);
       const col = Math.max(0, Math.min(REGION_N - 1, Math.floor((home.x / 100) * REGION_N)));
       const row = Math.max(0, Math.min(REGION_N - 1, Math.floor((home.y / 100) * REGION_N)));
       const { x: bx, y: by } = hexCenter(col, row, size, ox, oy);
-      this.camX = canvas.width / 2 - bx * this.camScale;
-      this.camY = canvas.height / 2 - by * this.camScale;
+      this.camX = this.viewW / 2 - bx * this.camScale;
+      this.camY = this.viewH / 2 - by * this.camScale;
       this.clampCamera();
     }
   }
@@ -401,11 +424,42 @@ export class RegionView {
     this.provincePanel.remove();
   }
 
-  private toPx(rx: number, ry: number): { px: number; py: number } {
-    if (!this.cachedHexLayout) {
-      this.cachedHexLayout = hexLayoutParams(this.canvas.width, this.canvas.height, REGION_N, 60);
+  /** Logical (CSS-pixel) view size. The backing store is scaled by the device
+   *  pixel ratio (see `displayScale`); all layout/camera math stays logical. */
+  private get viewW(): number {
+    return this.canvas.width / displayScale();
+  }
+
+  private get viewH(): number {
+    return this.canvas.height / displayScale();
+  }
+
+  /** measureText memo for the statehood banner — its strings change a few
+   *  times per game-day, not per frame, and measureText is a layout-engine
+   *  call. Keyed by font+text; cleared wholesale if it ever grows unbounded. */
+  private textWidthCache = new Map<string, number>();
+
+  private textW(s: string): number {
+    const key = `${this.g.font}|${s}`;
+    let w = this.textWidthCache.get(key);
+    if (w === undefined) {
+      if (this.textWidthCache.size > 256) this.textWidthCache.clear();
+      w = this.g.measureText(s).width;
+      this.textWidthCache.set(key, w);
     }
-    const { size, ox, oy } = this.cachedHexLayout;
+    return w;
+  }
+
+  /** The standard hex layout for the current view size, cached until resize. */
+  private hexLayout(): { size: number; ox: number; oy: number } {
+    if (!this.cachedHexLayout) {
+      this.cachedHexLayout = hexLayoutParams(this.viewW, this.viewH, REGION_N, 60);
+    }
+    return this.cachedHexLayout;
+  }
+
+  private toPx(rx: number, ry: number): { px: number; py: number } {
+    const { size, ox, oy } = this.hexLayout();
     const col = Math.max(0, Math.min(REGION_N - 1, Math.floor((rx / 100) * REGION_N)));
     const row = Math.max(0, Math.min(REGION_N - 1, Math.floor((ry / 100) * REGION_N)));
     const { x: px, y: py } = hexCenter(col, row, size, ox, oy);
@@ -415,7 +469,7 @@ export class RegionView {
   /** Width of one hex in base/map units (constant across zoom). */
   private hexWidth(): number {
     const size = this.cachedHexLayout?.size
-      ?? hexLayoutParams(this.canvas.width, this.canvas.height, REGION_N, 60).size;
+      ?? hexLayoutParams(this.viewW, this.viewH, REGION_N, 60).size;
     return Math.sqrt(3) * size;
   }
 
@@ -453,6 +507,27 @@ export class RegionView {
       this.routePtsCache.set(r, pts);
     }
     return pts;
+  }
+
+  /** True if any part of the route's corridor can be on screen this frame.
+   *  Settlements/scouts cull per point; routes are polylines, so cull on a
+   *  cached bounding box — most routes are fully off-screen at close zoom. */
+  private routeInView(r: { path: { x: number; y: number }[] }, margin: number): boolean {
+    let bb = this.routeBBoxCache.get(r);
+    if (!bb) {
+      const pts = this.getRoutePts(r);
+      let l = Infinity, t = Infinity, rt = -Infinity, b = -Infinity;
+      for (const p of pts) {
+        if (p.px < l) l = p.px;
+        if (p.px > rt) rt = p.px;
+        if (p.py < t) t = p.py;
+        if (p.py > b) b = p.py;
+      }
+      bb = { l, t, r: rt, b };
+      this.routeBBoxCache.set(r, bb);
+    }
+    const vb = this.vb;
+    return bb.r >= vb.l - margin && bb.l <= vb.r + margin && bb.b >= vb.t - margin && bb.t <= vb.b + margin;
   }
 
   private setInnerHtml(el: HTMLElement, html: string, scrollSelectors: string[] = ['']): void {
@@ -524,8 +599,8 @@ export class RegionView {
     // Place building: in placement mode, a map click breaks ground on the chosen
     // worked-ring hex (validated by buildCity).
     if (this.buildingPlacement !== null) {
-      const W = this.canvas.width;
-      const H = this.canvas.height;
+      const W = this.viewW;
+      const H = this.viewH;
       const { size, ox, oy } = hexLayoutParams(W, H, REGION_N, 60);
       const { col, row } = screenToHex(mx, my, size, ox, oy);
       if (col >= 0 && col < REGION_N && row >= 0 && row < REGION_N) {
@@ -537,8 +612,8 @@ export class RegionView {
     }
     // Zone district: in district-placement mode, a map click zones the chosen hex.
     if (this.districtPlacement !== null) {
-      const W = this.canvas.width;
-      const H = this.canvas.height;
+      const W = this.viewW;
+      const H = this.viewH;
       const { size, ox, oy } = hexLayoutParams(W, H, REGION_N, 60);
       const { col, row } = screenToHex(mx, my, size, ox, oy);
       if (col >= 0 && col < REGION_N && row >= 0 && row < REGION_N) {
@@ -551,8 +626,8 @@ export class RegionView {
     // Click-to-found: in placement mode, a map click sites the new town's
     // expedition at the chosen hex (validated by foundTownAt).
     if (this.foundingFromId !== null) {
-      const W = this.canvas.width;
-      const H = this.canvas.height;
+      const W = this.viewW;
+      const H = this.viewH;
       const { size, ox, oy } = hexLayoutParams(W, H, REGION_N, 60);
       const { col, row } = screenToHex(mx, my, size, ox, oy);
       if (col >= 0 && col < REGION_N && row >= 0 && row < REGION_N) {
@@ -564,8 +639,8 @@ export class RegionView {
     }
     // If a scout is selected, clicking the map sends it to that hex.
     if (this.selectedScoutId !== null) {
-      const W = this.canvas.width;
-      const H = this.canvas.height;
+      const W = this.viewW;
+      const H = this.viewH;
       const { size, ox, oy } = hexLayoutParams(W, H, REGION_N, 60);
       const { col: hc, row: hr } = screenToHex(mx, my, size, ox, oy);
       if (hc >= 0 && hc < REGION_N && hr >= 0 && hr < REGION_N) {
@@ -592,8 +667,8 @@ export class RegionView {
 
     // If in claim land mode and no settlement was clicked, try to claim the hex
     if (this.claimLandMode) {
-      const W = this.canvas.width;
-      const H = this.canvas.height;
+      const W = this.viewW;
+      const H = this.viewH;
       const { size, ox, oy } = hexLayoutParams(W, H, REGION_N, 60);
       const { col, row } = screenToHex(mx, my, size, ox, oy);
       if (col >= 0 && col < REGION_N && row >= 0 && row < REGION_N) {
@@ -683,8 +758,8 @@ export class RegionView {
 
   /** Pan to a logical coordinate (0..100), centering the viewport on it. */
   panTo(regionX: number, regionY: number): void {
-    const W = this.canvas.width;
-    const H = this.canvas.height;
+    const W = this.viewW;
+    const H = this.viewH;
     const p = this.toPx(regionX, regionY);
     this.camX = W / 2 - p.px * this.camScale;
     this.camY = H / 2 - p.py * this.camScale;
@@ -693,8 +768,8 @@ export class RegionView {
 
   /** Center the viewport on a logical coordinate; optionally set zoom level. */
   centerOn(regionX: number, regionY: number, zoom?: number): void {
-    const W = this.canvas.width;
-    const H = this.canvas.height;
+    const W = this.viewW;
+    const H = this.viewH;
     if (zoom !== undefined) {
       this.camScale = Math.max(RegionView.MIN_SCALE, Math.min(RegionView.MAX_SCALE, zoom));
     }
@@ -751,8 +826,8 @@ export class RegionView {
 
   /** Keep the scaled map from drifting off-screen; at scale 1 it stays pinned. */
   private clampCamera(): void {
-    const W = this.canvas.width;
-    const H = this.canvas.height;
+    const W = this.viewW;
+    const H = this.viewH;
     const minX = W - W * this.camScale; // most-negative offset (right edge held)
     const minY = H - H * this.camScale;
     this.camX = Math.min(0, Math.max(minX, this.camX));
@@ -760,10 +835,17 @@ export class RegionView {
   }
 
   draw(): void {
-    this.frame++;
-    const { g, canvas, region } = this;
-    const W = canvas.width;
-    const H = canvas.height;
+    // Advance the animation clock by wall-clock time in 60fps frame units,
+    // clamped so a stall (tab switch, breakpoint) can't lurch the animations.
+    // The floor keeps `frame` strictly increasing for per-draw memo keys.
+    const nowMs = performance.now();
+    const dtMs = this.lastDrawMs === 0 ? 1000 / 60 : nowMs - this.lastDrawMs;
+    this.lastDrawMs = nowMs;
+    this.frame += Math.min(6, Math.max(0.01, dtMs / (1000 / 60)));
+    const { g, region } = this;
+    const dpr = displayScale();
+    const W = this.viewW;
+    const H = this.viewH;
 
     // Detect canvas resize: clear position caches that depend on canvas dimensions.
     if (W !== this.prevCanvasW || H !== this.prevCanvasH) {
@@ -771,8 +853,11 @@ export class RegionView {
       this.prevCanvasH = H;
       this.cachedHexLayout = null;
       this.routePtsCache = new WeakMap();
+      this.routeBBoxCache = new WeakMap();
     }
 
+    // Base transform maps logical (CSS px) coords onto the HiDPI backing store.
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.imageSmoothingEnabled = false;
     g.fillStyle = '#10141c';
     g.fillRect(0, 0, W, H);
@@ -795,22 +880,22 @@ export class RegionView {
     // Terrain + territory (the O(N²) layers) come from the static cache as one blit.
     this.ensureMapCache(W, H);
     g.drawImage(this.mapCache!, 0, 0);
-    // Memory fog (explored-but-not-visible) from its own cache — O(1) per frame.
-    this.ensureMemFogCache(W, H);
-    if (this.memFogCanvas) g.drawImage(this.memFogCanvas, 0, 0);
+    // (Memory-fog layer deleted 2026-07: fog of war is retired, so the old
+    // per-frame full-screen blit composited only transparent pixels.)
 
     // Placed districts zone the worked ring underneath; then buildings, then overlays.
-    this.drawPlacedDistricts(W, H);
+    this.drawPlacedDistricts();
     // Placed buildings dot the worked ring; placement highlights when arming a build.
-    this.drawPlacedBuildings(W, H);
-    this.drawFoundingOverlay(W, H);
-    this.drawBuildingPlacementOverlay(W, H);
-    this.drawDistrictPlacementOverlay(W, H);
+    this.drawPlacedBuildings();
+    this.drawFoundingOverlay();
+    this.drawBuildingPlacementOverlay();
+    this.drawDistrictPlacementOverlay();
 
     // Routes along their actual corridors (M6b/6c): dotted trails, solid
     // roads, cross-tied rail; line brightness is the route's condition.
     const ss = region.settlements;
     for (const r of region.routes) {
+      if (!this.routeInView(r, 48)) continue;
       const alpha = 0.2 + 0.6 * (r.condition / 100);
       if (r.sea) {
         // A sea lane: a dashed teal wake across the water, with a small hull
@@ -875,15 +960,13 @@ export class RegionView {
     }
 
     // Phase 6: Cargo flow indicators — a small colored dot at each route midpoint
-    const cargoRgb: Record<string, string> = {
-      agriculture: '194,161,77', industry: '140,104,72', services: '74,127,164', information: '122,90,154',
-    };
     for (const r of region.routes) {
       if (!r.cargoType || r.kind === 'trail' || r.path.length < 2) continue;
       const mid = r.path[Math.floor(r.path.length / 2)];
       const mc = region.map.cellToCoord(mid.x, mid.y);
       const mp = this.toPx(mc.rx, mc.ry);
-      const rgb = cargoRgb[r.cargoType];
+      if (!this.inView(mp.px, mp.py, 8)) continue;
+      const rgb = CARGO_RGB[r.cargoType];
       if (!rgb) continue;
       g.fillStyle = `rgba(${rgb},0.85)`;
       g.fillRect(Math.round(mp.px) - 3, Math.round(mp.py) - 3, 6, 6);
@@ -1107,7 +1190,7 @@ export class RegionView {
         const need = region.ceremonyPending
           ? 'The Charter is drafted — the towns await your proclamation.'
           : `Regional Charter being drafted… ${Math.floor(region.charterProgress)}%`;
-        const bw = Math.max(460, g.measureText(need).width + 28);
+        const bw = Math.max(460, this.textW(need) + 28);
         g.fillStyle = 'rgba(12,10,7,0.94)';
         g.fillRect(W / 2 - bw / 2, barTop - 32, bw, 32);
         g.strokeStyle = 'rgba(143,194,106,0.5)';
@@ -1126,8 +1209,8 @@ export class RegionView {
           color: gt.met ? '#a8e06a' : '#f0a868',
         }));
         const sep = '   ';
-        const totalW = g.measureText(head).width +
-          segs.reduce((w, s, i) => w + g.measureText(s.text).width + (i ? g.measureText(sep).width : 0), 0);
+        const totalW = this.textW(head) +
+          segs.reduce((w, s, i) => w + this.textW(s.text) + (i ? this.textW(sep) : 0), 0);
         const bw = Math.max(460, totalW + 28);
         g.fillStyle = 'rgba(12,10,7,0.94)';
         g.fillRect(W / 2 - bw / 2, barTop - 32, bw, 32);
@@ -1138,12 +1221,12 @@ export class RegionView {
         g.textAlign = 'left';
         g.fillStyle = '#fffcf0';
         g.fillText(head, x, y);
-        x += g.measureText(head).width;
+        x += this.textW(head);
         for (let i = 0; i < segs.length; i++) {
-          if (i) { g.fillStyle = '#7a7060'; g.fillText(sep, x, y); x += g.measureText(sep).width; }
+          if (i) { g.fillStyle = '#7a7060'; g.fillText(sep, x, y); x += this.textW(sep); }
           g.fillStyle = segs[i].color;
           g.fillText(segs[i].text, x, y);
-          x += g.measureText(segs[i].text).width;
+          x += this.textW(segs[i].text);
         }
       }
     } else if (!region.nationProclaimed) {
@@ -1166,8 +1249,8 @@ export class RegionView {
           color: '#f0a868',
         }));
         const sep = '   ';
-        const totalW = g.measureText(head).width +
-          segs.reduce((w, s, i) => w + g.measureText(s.text).width + (i ? g.measureText(sep).width : 0), 0);
+        const totalW = this.textW(head) +
+          segs.reduce((w, s, i) => w + this.textW(s.text) + (i ? this.textW(sep) : 0), 0);
         const bw = Math.max(460, totalW + 28);
         g.fillStyle = 'rgba(12,10,7,0.94)';
         g.fillRect(W / 2 - bw / 2, barTop - 32, bw, 32);
@@ -1178,12 +1261,12 @@ export class RegionView {
         g.textAlign = 'left';
         g.fillStyle = '#e8d27a';
         g.fillText(head, x, y);
-        x += g.measureText(head).width;
+        x += this.textW(head);
         for (let i = 0; i < segs.length; i++) {
-          if (i) { g.fillStyle = '#7a7060'; g.fillText(sep, x, y); x += g.measureText(sep).width; }
+          if (i) { g.fillStyle = '#7a7060'; g.fillText(sep, x, y); x += this.textW(sep); }
           g.fillStyle = segs[i].color;
           g.fillText(segs[i].text, x, y);
-          x += g.measureText(segs[i].text).width;
+          x += this.textW(segs[i].text);
         }
       }
     } else {
@@ -1256,7 +1339,7 @@ export class RegionView {
    *  is founded/taken/relocated — so hash size + each town's id/owner/position. */
   private mapCacheSignature(): string {
     const r = this.region;
-    let s = `${this.canvas.width}x${this.canvas.height}|${r.regionalFactions.length}`;
+    let s = `${this.viewW}x${this.viewH}|${r.regionalFactions.length}`;
     for (const t of r.settlements) s += `;${t.id},${t.factionId},${Math.round(t.x)},${Math.round(t.y)}`;
     // Fog-of-war frontier: use the pre-tracked counter instead of scanning 10 000 tiles.
     s += `|fog${r.exploredCount}`;
@@ -1282,25 +1365,6 @@ export class RegionView {
     this.drawTerritories(cg, W, H);
     // Fog of war retired (2026-07): no shroud layer — the map reads clean.
     this.mapCacheSig = sig;
-  }
-
-  /** Cache the memory-fog (explored-but-not-visible) layer into an offscreen canvas.
-   *  Rebuilt only when exploredCount or visibilityVersion changes. */
-  private ensureMemFogCache(W: number, H: number): void {
-    const r = this.region;
-    const sig = `${W}x${H}|exp${r.exploredCount}|vis${r.visibilityVersion}`;
-    if (this.memFogCanvas && this.memFogSig === sig &&
-        this.memFogCanvas.width === W && this.memFogCanvas.height === H) return;
-    if (!this.memFogCanvas) this.memFogCanvas = document.createElement('canvas');
-    if (this.memFogCanvas.width !== W || this.memFogCanvas.height !== H) {
-      this.memFogCanvas.width = W;
-      this.memFogCanvas.height = H;
-      this.memFogCtx = this.memFogCanvas.getContext('2d');
-    }
-    const mg = this.memFogCtx!;
-    mg.clearRect(0, 0, W, H);
-    // Fog of war retired (2026-07): no memory-fog dim — explored ground stays bright.
-    this.memFogSig = sig;
   }
 
   /** Composite + blit the parallax atmosphere behind the map. Palette is rebuilt
@@ -1515,12 +1579,12 @@ export class RegionView {
 
   /** Per-frame highlight of valid founding sites (map-space, under the camera).
    *  A soft pulsing green hex on each reachable, legal site. */
-  private drawFoundingOverlay(W: number, H: number): void {
+  private drawFoundingOverlay(): void {
     const cells = this.foundingValidCells;
     if (this.foundingFromId === null || !cells || cells.size === 0) return;
     const g = this.g;
     const N = REGION_N;
-    const { size, ox, oy } = hexLayoutParams(W, H, N, 60);
+    const { size, ox, oy } = this.hexLayout();
     const pulse = 0.18 + 0.12 * Math.abs(Math.sin(this.frame / 18));
     g.lineWidth = 1.5;
     for (const key of cells) {
@@ -1571,12 +1635,12 @@ export class RegionView {
   /** Per-frame highlight of legal building sites. Amber for an ordinary building,
    *  gold for a one-per-empire Wonder (Phase D) — both distinct from the green
    *  town-founding highlight. */
-  private drawBuildingPlacementOverlay(W: number, H: number): void {
+  private drawBuildingPlacementOverlay(): void {
     const cells = this.buildingValidCells;
     if (!this.buildingPlacement || !cells || cells.size === 0) return;
     const g = this.g;
     const N = REGION_N;
-    const { size, ox, oy } = hexLayoutParams(W, H, N, 60);
+    const { size, ox, oy } = this.hexLayout();
     const pulse = 0.16 + 0.12 * Math.abs(Math.sin(this.frame / 18));
     const { townId, defId } = this.buildingPlacement;
     const wonder = REGION_BUILDINGS.find((b) => b.id === defId)?.unique === true;
@@ -1616,19 +1680,16 @@ export class RegionView {
    *  by the themed sector and labelled with the zone bonus the site would earn (its
    *  flat bonus + adjacency reward from neighbouring same-sector buildings). Render-
    *  only — districtPlacementPreview is pure. */
-  private drawDistrictPlacementOverlay(W: number, H: number): void {
+  private drawDistrictPlacementOverlay(): void {
     const cells = this.districtValidCells;
     if (!this.districtPlacement || !cells || cells.size === 0) return;
     const g = this.g;
     const N = REGION_N;
-    const { size, ox, oy } = hexLayoutParams(W, H, N, 60);
+    const { size, ox, oy } = this.hexLayout();
     const pulse = 0.18 + 0.12 * Math.abs(Math.sin(this.frame / 18));
     const { townId, defId } = this.districtPlacement;
-    const sectorColor: Record<string, string> = {
-      agriculture: '138,154,74', industry: '154,106,58', services: '74,127,164', information: '122,90,154',
-    };
-    const sector = DISTRICT_DEFS.find((d) => d.id === defId)?.sector ?? 'agriculture';
-    const rgb = sectorColor[sector] ?? '138,154,74';
+    const sector = DISTRICT_DEF_BY_ID.get(defId)?.sector ?? 'agriculture';
+    const rgb = SECTOR_RGB[sector] ?? '138,154,74';
     for (const key of cells) {
       const col = Math.floor(key / N), row = key % N;
       const { x: cx, y: cy } = hexCenter(col, row, size, ox, oy);
@@ -1653,18 +1714,15 @@ export class RegionView {
   /** Render each town's placed DISTRICTS as a translucent themed hex zone with a
    *  sector-tinted border and a short label (spatial-4X Phase D — render-only). Drawn
    *  under the building icons so a building sited inside its zone reads on top. */
-  private drawPlacedDistricts(W: number, H: number): void {
+  private drawPlacedDistricts(): void {
     const g = this.g;
     const N = REGION_N;
-    const { size, ox, oy } = hexLayoutParams(W, H, N, 60);
-    const sectorColor: Record<string, string> = {
-      agriculture: '138,154,74', industry: '154,106,58', services: '74,127,164', information: '122,90,154',
-    };
+    const { size, ox, oy } = this.hexLayout();
     for (const t of this.region.settlements) {
       if (!t.placedDistricts || t.placedDistricts.length === 0) continue;
       for (const p of t.placedDistricts) {
-        const def = DISTRICT_DEFS.find((d) => d.id === p.id);
-        const rgb = sectorColor[def?.sector ?? 'agriculture'] ?? '138,154,74';
+        const def = DISTRICT_DEF_BY_ID.get(p.id);
+        const rgb = SECTOR_RGB[def?.sector ?? 'agriculture'] ?? '138,154,74';
         const col = Math.floor(p.cell / N), row = p.cell % N;
         const { x: cx, y: cy } = hexCenter(col, row, size, ox, oy);
         if (cx < this.vb.l - size || cx > this.vb.r + size || cy < this.vb.t - size || cy > this.vb.b + size) continue;
@@ -1688,13 +1746,10 @@ export class RegionView {
 
   /** Render each town's placed buildings as small shaded icons on their hexes,
    *  tinted by the building's economic sector (spatial-4X Phase B — render-only). */
-  private drawPlacedBuildings(W: number, H: number): void {
+  private drawPlacedBuildings(): void {
     const g = this.g;
     const N = REGION_N;
-    const { size, ox, oy } = hexLayoutParams(W, H, N, 60);
-    const sectorColor: Record<string, string> = {
-      agriculture: '#8a9a4a', industry: '#9a6a3a', services: '#4a7fa4', information: '#7a5a9a', all: '#9a8a5a',
-    };
+    const { size, ox, oy } = this.hexLayout();
     for (const t of this.region.settlements) {
       if (!t.placedBuildings || t.placedBuildings.length === 0) continue;
       // Spatial-4X Phase D slice 2: draw a faint connector glow between same-sector
@@ -1702,7 +1757,7 @@ export class RegionView {
       // a glance. Render-only — mirrors the sim's districtAdjacencyBonus rule.
       const cellSector = new Map<number, string>();
       for (const p of t.placedBuildings) {
-        const def = REGION_BUILDINGS.find((b) => b.id === p.id);
+        const def = REGION_BUILDING_BY_ID.get(p.id);
         if (def && def.sector !== 'all') cellSector.set(p.cell, def.sector);
       }
       if (cellSector.size >= 2) {
@@ -1719,7 +1774,7 @@ export class RegionView {
             const b = hexCenter(ax, ay, size, ox, oy);
             if (Math.max(a.x, b.x) < this.vb.l - size || Math.min(a.x, b.x) > this.vb.r + size) continue;
             if (Math.max(a.y, b.y) < this.vb.t - size || Math.min(a.y, b.y) > this.vb.b + size) continue;
-            g.strokeStyle = sectorColor[sec] ?? '#9a8a5a';
+            g.strokeStyle = SECTOR_HEX[sec] ?? '#9a8a5a';
             g.globalAlpha = 0.35;
             g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
           }
@@ -1730,8 +1785,8 @@ export class RegionView {
         const col = Math.floor(p.cell / N), row = p.cell % N;
         const { x: cx, y: cy } = hexCenter(col, row, size, ox, oy);
         if (cx < this.vb.l - size || cx > this.vb.r + size || cy < this.vb.t - size || cy > this.vb.b + size) continue;
-        const def = REGION_BUILDINGS.find((b) => b.id === p.id);
-        const base = sectorColor[def?.sector ?? 'all'] ?? '#9a8a5a';
+        const def = REGION_BUILDING_BY_ID.get(p.id);
+        const base = SECTOR_HEX[def?.sector ?? 'all'] ?? '#9a8a5a';
         const s = Math.max(6, size * 0.5);
         // little shaded building: body + lit roof + drop shadow
         g.fillStyle = 'rgba(0,0,0,0.25)';
@@ -1887,8 +1942,8 @@ export class RegionView {
 
   /** Subtle per-frame water shimmer — one drawImage instead of 65 536 fillRects. */
   private drawWaterAnimation(): void {
-    const W = this.canvas.width;
-    const H = this.canvas.height;
+    const W = this.viewW;
+    const H = this.viewH;
     this.ensureWaterMask(W, H);
     const wave = Math.sin(this.frame * 0.05) * 0.5 + 0.5; // 0..1
     this.g.globalAlpha = wave * 0.04; // max 4% opacity — very subtle shimmer
@@ -2053,12 +2108,10 @@ export class RegionView {
    *  scaled by freight, so flow and its bearing read from the map. */
   private drawTradeFlows(): void {
     const { region } = this;
-    const cargoRgb: Record<string, string> = {
-      agriculture: '194,161,77', industry: '140,104,72', services: '74,127,164', information: '122,90,154',
-    };
     for (const r of region.routes) {
       if (r.path.length < 3 || r.freight <= 0) continue;
-      const rgb = (r.cargoType && cargoRgb[r.cargoType]) || '200,200,200';
+      if (!this.routeInView(r, 16)) continue;
+      const rgb = (r.cargoType && CARGO_RGB[r.cargoType]) || '200,200,200';
       const size = 4 + Math.min(4, Math.log10(1 + r.freight));
       for (const f of [0.4, 0.7]) {
         const i = Math.max(1, Math.min(r.path.length - 1, Math.floor(r.path.length * f)));
