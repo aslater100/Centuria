@@ -236,6 +236,18 @@ window.addEventListener('keydown', (e) => {
     if ((e.key === 'b' || e.key === 'B') && region?.hasCentralBank()) {
       regionView.centralBankOpen = !regionView.centralBankOpen; e.preventDefault(); return;
     }
+    // U6: gameplay-panel shortcuts (docs/specs/09-audit-nine.md §U6). Skipped
+    // while focus is in a text field (town rename, tax slider, loan prompts)
+    // so single letters never hijack typing.
+    const target = document.activeElement;
+    const typing = target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+    if (!typing) {
+      if (e.key === 'e' || e.key === 'E') { regionView.toggleEconomyPanel(); e.preventDefault(); return; }
+      if (e.key === 'g' || e.key === 'G') { regionView.toggleStatePanel(); e.preventDefault(); return; }
+      if (e.key === 'o' || e.key === 'O') { regionView.toggleOverviewPanel(); e.preventDefault(); return; }
+      if (e.key === 'c' || e.key === 'C') { regionView.openCenturyGraph(); e.preventDefault(); return; }
+      if (e.key === '?' || e.key === 'h' || e.key === 'H') { regionView.toggleWikiPanel(); e.preventDefault(); return; }
+    }
   }
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key));

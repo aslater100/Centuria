@@ -20,6 +20,11 @@ import { centuryGraphHtml } from './centuryGraph';
 import { AssetRegistry, townSpriteTier, TOWN_TIER_PX } from './assets/registry';
 import { buildPawnSprites } from './sprites';
 import { Backdrop, buildBackdropPalette, type Sky, type Branch } from './backdrop';
+import { Modal, createErrorState } from './components';
+import { WikiPanel } from './WikiPanel';
+
+/** localStorage flag (U3): the in-game wiki auto-opens once on a player's first game. */
+const WIKI_FIRST_RUN_KEY = 'centuria-wiki-seen';
 
 /** Fill a hex polygon from precomputed corners (no stroke). */
 function fillHexPath(g: CanvasRenderingContext2D, corners: { x: number; y: number }[]): void {
@@ -115,8 +120,13 @@ export class RegionView {
   private g: CanvasRenderingContext2D;
   private panel: HTMLElement;
   private panelTab: 'overview' | 'economy' | 'people' = 'overview';
+  /** U6: the settlement inspector's visibility (O key). Independent of selection —
+   *  a settlement can be selected while the panel itself is hidden. */
+  private overviewOpen = true;
   private statePanel: HTMLElement;
   private lastStatePanelBuildFrame = -999;
+  /** U6: the State/Government panel's visibility (G key), mirroring economyOpen. */
+  private stateOpen = true;
   /** Active tab in the (dense) state panel — split into Finance/Politics/Diplomacy. */
   private statePanelTab: 'finance' | 'politics' | 'diplomacy' = 'finance';
   /** Sub-tab within Finance: Treasury (dashboard + controls) vs Credit (lenders/monetary/freight). */
@@ -169,6 +179,8 @@ export class RegionView {
   private eraDismissed = false;
   /** Post-2100 epilogue scroll: the accumulated legacy beats (GDD §8.5). */
   private epilogueModal: HTMLElement;
+  /** U3: in-game help/wiki, opened from the top bar's Help button or the ?/H keys. */
+  private wikiPanel: WikiPanel;
   /** Cinematic state machine: a frame-driven canvas sequence under the era/win
    *  modal. While active, the DOM reveal is held back so the animation reads. */
   private cinematic: { kind: 'era' | 'win'; variant: string; startFrame: number } | null = null;
@@ -311,6 +323,14 @@ export class RegionView {
     this.provincePanel = document.createElement('div');
     this.provincePanel.className = 'inspector region-panel hidden';
     root.appendChild(this.provincePanel);
+    // U3: in-game wiki — dead code until now. Auto-opens once on a player's very
+    // first game (localStorage flag), otherwise stays closed until the Help
+    // button or ?/H keys open it.
+    this.wikiPanel = new WikiPanel(root);
+    if (!localStorage.getItem(WIKI_FIRST_RUN_KEY)) {
+      localStorage.setItem(WIKI_FIRST_RUN_KEY, '1');
+      this.wikiPanel.show();
+    }
     this.minimap = new Minimap(region, root, { size: 140, position: 'bottom-right' });
     // Create tooltip element
     this.tooltip = document.createElement('div');
@@ -602,6 +622,49 @@ export class RegionView {
     this.provinceViewActive = !this.provinceViewActive;
     if (!this.provinceViewActive) this.selectedProvinceId = null;
     this.lastStatePanelBuildFrame = -999;
+  }
+
+  // ---- U6: keyboard-shortcut entry points (bound from main.ts's keydown
+  // handler, alongside T/P/B). Each wraps an existing toggle/flag so the key
+  // map reuses the real panel machinery instead of inventing a new one. ----
+
+  /** E key: toggle the Economy panel. */
+  toggleEconomyPanel(): void {
+    this.economyOpen = !this.economyOpen;
+    this.lastEconomyBuildFrame = -999;
+  }
+
+  /** G key: toggle the State/Government panel. */
+  toggleStatePanel(): void {
+    this.stateOpen = !this.stateOpen;
+    this.lastStatePanelBuildFrame = -999;
+  }
+
+  /** O key: toggle the settlement inspector (Overview/Economy/People tabs). */
+  toggleOverviewPanel(): void {
+    this.overviewOpen = !this.overviewOpen;
+    this.lastPanelBuildFrame = -999;
+  }
+
+  /** ?/H keys: toggle the in-game help wiki (U3). */
+  toggleWikiPanel(): void {
+    this.wikiPanel.toggle();
+  }
+
+  /** C key / nav-strip button (U10): open the century graph standalone, any
+   *  time — not just from the Century Report modal or Economy panel. Reuses
+   *  centuryGraphHtml() verbatim; no new charting path. */
+  openCenturyGraph(): void {
+    const body = document.createElement('div');
+    body.innerHTML = centuryGraphHtml(this.region.statsHistory) ||
+      `<p class="insp-skills">No history yet — check back after the first in-game year.</p>`;
+    const modal = new Modal({
+      title: 'THE LONG VIEW',
+      content: body,
+      size: 'lg',
+      actions: [{ label: 'Close', variant: 'primary', onClick: () => modal.close() }],
+    });
+    modal.show();
   }
 
   /** Pan by a screen-space delta (drag or arrow/WASD keys). */
@@ -2885,12 +2948,16 @@ export class RegionView {
   /** Wire a panel's tab buttons to show the matching section. Sections all stay
    *  in the DOM (so ID-bound handlers survive); switching is pure CSS, no
    *  rebuild. `set` records the choice so the next rebuild matches. The class
-   *  pair is parameterised so a panel can nest a second (sub-tab) level. */
+   *  pair is parameterised so a panel can nest a second (sub-tab) level.
+   *  `animate` (G3, Overview panel pilot) fades/slides the newly active section
+   *  in via inline styles — no style.css rule needed, so it's opt-in per call
+   *  site rather than a global change to every tabbed panel. */
   private wireTabs(
     panel: HTMLElement,
     set: (tab: string) => void,
     tabClass = 'pal-tab',
     sectionClass = 'pal-section',
+    animate = false,
   ): void {
     for (const btn of panel.querySelectorAll<HTMLButtonElement>(`.${tabClass}`)) {
       btn.onclick = () => {
@@ -2900,7 +2967,18 @@ export class RegionView {
           t.classList.toggle('active', t.dataset.ptab === tab);
         }
         for (const s of panel.querySelectorAll<HTMLElement>(`.${sectionClass}`)) {
-          s.classList.toggle('hidden', s.dataset.psection !== tab);
+          const isActive = s.dataset.psection === tab;
+          s.classList.toggle('hidden', !isActive);
+          if (animate && isActive) {
+            s.style.transition = 'none';
+            s.style.opacity = '0';
+            s.style.transform = 'translateX(6px)';
+            requestAnimationFrame(() => {
+              s.style.transition = 'opacity 0.16s ease-out, transform 0.16s ease-out';
+              s.style.opacity = '1';
+              s.style.transform = 'translateX(0)';
+            });
+          }
         }
       };
     }
@@ -2912,6 +2990,12 @@ export class RegionView {
     // levers (tax / services / militia). The nation-tier machinery (Credit
     // sub-tab, Politics, Diplomacy) only appears once the State is proclaimed.
     const preState = !r.stateProclaimed;
+    // U6 (G key): the State/Government panel can be hidden like its sibling
+    // windows (economy, research, …); closed state still short-circuits below.
+    if (!this.stateOpen) {
+      this.statePanel.classList.add('hidden');
+      return;
+    }
     this.statePanel.classList.remove('hidden');
     // Same DOM-stability guard as the other panels: rebuild on a ~1s timer, not
     // every frame, so a button node survives between mousedown and click.
@@ -3034,7 +3118,8 @@ export class RegionView {
       `<button class="mini" id="research-toggle" title="Research tree (T)">${this.researchOpen ? '▲' : '▼'} T:research</button> ` +
       `<button class="mini" id="routenet-toggle" title="Route network (R)">${this.routeNetworkOpen ? '▲' : '▼'} R:routes</button> ` +
       `<button class="mini" id="settlements-toggle" title="Settlement list (S)">${this.settlementListOpen ? '▲' : '▼'} S:towns</button> ` +
-      `<button class="mini" id="economy-toggle" title="Economy panel (E)">${this.economyOpen ? '▲' : '▼'} E:econ</button>` +
+      `<button class="mini" id="economy-toggle" title="Economy panel (E)">${this.economyOpen ? '▲' : '▼'} E:econ</button> ` +
+      `<button class="mini" id="century-graph-toggle" title="The century graph — long-run trends, any time (C)">C:graph</button>` +
       (r.hasCentralBank()
         ? ` <button class="mini cb-badge" id="centralbank-toggle" title="Central Bank — monetary policy, bonds, FX (B)">${this.centralBankOpen ? '▲' : '▼'} B:bank</button>`
         : '') +
@@ -3082,6 +3167,10 @@ export class RegionView {
     };
     this.statePanel.querySelector<HTMLButtonElement>('#economy-toggle')!.onclick = () => {
       this.economyOpen = !this.economyOpen; forceRebuild();
+    };
+    // U10: standalone entry point for the century graph, reachable any time.
+    this.statePanel.querySelector<HTMLButtonElement>('#century-graph-toggle')!.onclick = () => {
+      this.openCenturyGraph();
     };
     this.statePanel.querySelector<HTMLButtonElement>('#centralbank-toggle')?.addEventListener('click', () => {
       this.centralBankOpen = !this.centralBankOpen; forceRebuild();
@@ -4394,6 +4483,21 @@ export class RegionView {
     const happy = Math.round(r.avgSatisfaction());
     const happyCls = happy >= 60 ? 'c-good' : happy >= 40 ? 'c-warn' : 'c-bad';
 
+    // U2: legitimacy at glance-altitude — same field the State→Politics nation
+    // header reads (nationHtml(), ~line 3921). Meaningless pre-nation (stays 0).
+    const legPct = Math.round(r.legitimacy);
+    const legCls = legPct >= 60 ? 'c-good' : legPct >= 35 ? 'c-warn' : 'c-bad';
+    const legItem = r.nationProclaimed
+      ? `<div class="tb-item tb-legitimacy" title="Legitimacy — the regime's right to rule (GDD §5.3)"><span class="${legCls}">⚖ ${legPct}%</span></div>`
+      : '';
+
+    // U2: compact crisis badge, driven by the exact same condition that gates
+    // the crisis-banner (depressionResponseHtml()) — no new sim state.
+    const inCrisis = r.depressionDepth > 0.01 || r.crashRecoveryChoice === 'pending';
+    const crisisItem = inCrisis
+      ? `<div class="tb-item tb-crisis" title="A crisis is active — see the Nation panel for details"><span class="c-bad">⚠ CRISIS</span></div>`
+      : '';
+
     const treasury = formatCurrency(r.treasury);
     const w = window as any;
     const speed = w.gameSpeed || 1;
@@ -4408,8 +4512,13 @@ export class RegionView {
       <div class="tb-item tb-resources">🌾 ${Math.floor(totalFood)} | 🪵 ${Math.floor(totalWood)}</div>
       <div class="tb-item tb-population" title="Total population of your settlements${selected ? ' (selected settlement in parentheses)' : ''}">👥 ${popLabel}</div>
       <div class="tb-item tb-happiness" title="Overall happiness — population-weighted satisfaction across your settlements"><span class="${happyCls}">☺ ${happy}%</span></div>
+      ${legItem}
+      ${crisisItem}
       <div class="tb-item tb-speed push-right">${paused} ${speedLabel}</div>
+      <button class="mini tb-item" id="tb-help-btn" title="Help & Wiki (? or H)">❓ Help</button>
     `;
+    // U3: '?' Help entry point — rebind each rebuild since innerHTML replaces the node.
+    this.topBar.querySelector<HTMLButtonElement>('#tb-help-btn')!.onclick = () => this.toggleWikiPanel();
   }
 
   private updateEventLog(): void {
@@ -4428,7 +4537,9 @@ export class RegionView {
 
   private drawPanel(): void {
     const t = this.region.settlements.find((s) => s.id === this.selectedId);
-    if (!t) {
+    // U6 (O key): the inspector can be hidden independently of the selection —
+    // reselecting or reopening with O brings it back without losing the pick.
+    if (!t || !this.overviewOpen) {
       this.panel.classList.add('hidden');
       this.lastPanelBuildId = null;
       return;
@@ -4446,7 +4557,8 @@ export class RegionView {
     this.lastPanelBuildFrame = this.frame;
 
     this.panel.innerHTML = this.panelHtml(t);
-    this.wireTabs(this.panel, (tab) => { this.panelTab = tab as 'overview' | 'economy' | 'people'; });
+    // G3: fade/slide pilot — this is the "Overview" panel (settlement inspector).
+    this.wireTabs(this.panel, (tab) => { this.panelTab = tab as 'overview' | 'economy' | 'people'; }, 'pal-tab', 'pal-section', true);
     const btn = this.panel.querySelector<HTMLButtonElement>('#found-btn');
     if (btn) {
       // Enter click-to-found placement mode (valid sites highlight; click one to
@@ -5186,21 +5298,24 @@ export class RegionView {
         const verdict = cause === 'crisis'
           ? 'Markets are already in crisis — they will understand this move.'
           : 'Markets see no reason for this. Expect heavy capital flight and years of friction.';
-        if (confirm(`Switch the currency standard to ${sym}?\n\n${verdict}\n\nAnnounced switches (${ANNOUNCE_LEAD_DAYS}+ days notice) and deep treasury reserves soften the blow.`)) {
-          r.changeCurrency(sym, cause); refresh();
-        }
+        this.showConfirm(
+          `Switch the currency standard to ${sym}?`,
+          `${verdict}\n\nAnnounced switches (${ANNOUNCE_LEAD_DAYS}+ days notice) and deep treasury reserves soften the blow.`,
+          'Switch',
+          () => { r.changeCurrency(sym, cause); refresh(); },
+        );
       };
     }
     for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-dw-draw')) {
       btn.onclick = () => {
         const result = r.borrowFromCentralBank(Number(btn.dataset.amount));
-        if (!result.ok) alert(result.reason); else refresh();
+        if (!result.ok) this.showError(result.reason ?? 'Request rejected.'); else refresh();
       };
     }
     for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-dw-repay')) {
       btn.onclick = () => {
         const result = r.repayCentralBank(Number(btn.dataset.amount));
-        if (!result.ok) alert(result.reason); else refresh();
+        if (!result.ok) this.showError(result.reason ?? 'Request rejected.'); else refresh();
       };
     }
   }
@@ -5789,6 +5904,47 @@ export class RegionView {
       : '';
   }
 
+  // ---- U1: Modal/ErrorState replacements for raw alert()/confirm(). Message
+  // text is preserved verbatim (just split between the dialog title and body
+  // rather than concatenated into one native alert string). ----
+
+  /** Simple client-side validation notice (replaces alert() for input checks
+   *  that happen before anything is sent to the sim). */
+  private showNotice(message: string, title = 'Invalid Input'): void {
+    const modal = new Modal({
+      title,
+      content: message,
+      actions: [{ label: 'OK', variant: 'primary', onClick: () => modal.close() }],
+    });
+    modal.show();
+  }
+
+  /** A sim-rejected action (replaces alert() for `{ ok: false, reason }` results) —
+   *  uses the shared ErrorState so screen readers announce it immediately. */
+  private showError(message: string, title = 'Request Rejected'): void {
+    const modal = new Modal({
+      title,
+      content: createErrorState({ message }),
+      actions: [{ label: 'OK', variant: 'primary', onClick: () => modal.close() }],
+    });
+    modal.show();
+  }
+
+  /** Blocking confirm() replacement — the destructive action only runs from the
+   *  confirm button's own callback, so callers keep confirm()'s "nothing
+   *  happens unless the player explicitly confirms" guarantee. */
+  private showConfirm(title: string, message: string, confirmLabel: string, onConfirm: () => void): void {
+    const modal = new Modal({
+      title,
+      content: message,
+      actions: [
+        { label: 'Cancel', variant: 'ghost', onClick: () => modal.close() },
+        { label: confirmLabel, variant: 'primary', onClick: () => { modal.close(); onConfirm(); } },
+      ],
+    });
+    modal.show();
+  }
+
   private showLoanDialog(lenderId: number): void {
     const r = this.region;
     const lender = r.lenders.find((l) => l.id === lenderId);
@@ -5803,11 +5959,11 @@ export class RegionView {
 
     const amount = Number(amountStr);
     if (isNaN(amount) || amount <= 0) {
-      alert('Invalid amount');
+      this.showNotice('Invalid amount');
       return;
     }
     if (amount > maxBorrow) {
-      alert(`Cannot borrow more than ` + formatCurrency(maxBorrow) + ``);
+      this.showNotice(`Cannot borrow more than ` + formatCurrency(maxBorrow) + ``);
       return;
     }
 
@@ -5816,7 +5972,7 @@ export class RegionView {
 
     const term = Number(termStr);
     if (isNaN(term) || term < 1 || term > 120) {
-      alert('Invalid term (must be 1-120 months)');
+      this.showNotice('Invalid term (must be 1-120 months)');
       return;
     }
 
@@ -5824,7 +5980,7 @@ export class RegionView {
     if (result.ok) {
       this.refreshPanel();
     } else {
-      alert(`Loan rejected: ${result.reason}`);
+      this.showError(`Loan rejected: ${result.reason}`);
     }
   }
 
@@ -5845,15 +6001,15 @@ export class RegionView {
 
     const amount = Number(amountStr);
     if (isNaN(amount) || amount <= 0) {
-      alert('Invalid amount');
+      this.showNotice('Invalid amount');
       return;
     }
     if (amount > r.treasury) {
-      alert('Insufficient treasury funds');
+      this.showNotice('Insufficient treasury funds');
       return;
     }
     if (amount < minPayment) {
-      alert(`Minimum payment is ` + formatCurrency(minPayment) + ``);
+      this.showNotice(`Minimum payment is ` + formatCurrency(minPayment) + ``);
       return;
     }
 
@@ -5861,7 +6017,7 @@ export class RegionView {
     if (result.ok) {
       this.refreshPanel();
     } else {
-      alert(`Repayment failed: ${result.reason}`);
+      this.showError(`Repayment failed: ${result.reason}`);
     }
   }
 }
