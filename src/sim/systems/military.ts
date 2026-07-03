@@ -14,7 +14,7 @@
  * (computeCombatPower / computeWarScore) stay on RegionSim — the moved bodies reach
  * them, and the war state, through `r`.
  */
-import type { RegionSim, ProvincialArmy } from '../region';
+import type { RegionSim, ProvincialArmy, ArmyGroup } from '../region';
 import {
   UNIT_TYPES,
   MOBILIZATION_DEFS,
@@ -36,6 +36,30 @@ import {
   WAR_MATERIEL_MORALE_DRAG,
   blocAffinity,
 } from '../region';
+
+  /** §M1 — 3-round attrition battle model (docs/specs/09-audit-nine.md). Shared by
+   *  resolveProvinceBattle and resolveArmyGroupBattle. No walls/fort/citadel ids exist
+   *  in src/data/buildings.json or region_buildings.json today, so the fortification
+   *  modifier is omitted per spec — only the home-ground bonus applies, well under the cap. */
+  const BATTLE_MAX_ROUNDS = 3;
+  const BATTLE_HOME_GROUND_MULT = 1.10;
+  const BATTLE_DEFENDER_BONUS_CAP = 1.25;
+  const BATTLE_DEFENDER_MULT = Math.min(BATTLE_HOME_GROUND_MULT, BATTLE_DEFENDER_BONUS_CAP);
+  const BATTLE_SUPPLY_PENALTY_MULT = 0.90;
+  const BATTLE_ROUND_WIN_BASE = 0.85;
+  const BATTLE_ROUND_WIN_SPREAD = 0.3;
+  const BATTLE_ROUND_LOSER_MULT = 0.85;
+  const BATTLE_ROUND_WINNER_MULT = 0.95;
+  const BATTLE_ROUND_LOSER_MORALE_DELTA = -8;
+  const BATTLE_ROUND_WINNER_MORALE_DELTA = -3;
+  const BATTLE_ROUT_THRESHOLD = 0.30;
+  const BATTLE_ROUT_MORALE_DELTA = -10;
+
+  /** Defender = the faction that owns the province; if neither the player nor the
+   *  rival on-site owns it, the rival defends (the player is marching in) — §M1. */
+  function isPlayerDefender(r: RegionSim, provinceId: number): boolean {
+    return r.settlement(provinceId)?.factionId === r.playerFactionId;
+  }
 
   /** Monthly: advance armies, resolve battles on arrival, drain supply. */
 export function updateArmyMovement(r: RegionSim): void {
@@ -69,20 +93,81 @@ export function resolveProvinceBattle(r: RegionSim, provinceId: number): void {
     const rivalArmies = r.provincialArmies.filter((a) => a.ownerId !== 0 && a.provinceId === provinceId && !a.destinationId);
     if (!playerArmies.length || !rivalArmies.length) return;
     const sName = r.settlement(provinceId)?.name ?? 'the province';
-    const calcPower = (armies: ProvincialArmy[], rivalBoost = 1) =>
-      armies.reduce((sum, a) => sum + a.units.reduce((s, u) =>
-        s + u.count * UNIT_TYPES[u.type].powerPerUnit * (u.morale / 100), 0) * rivalBoost, 0);
     const rvId = rivalArmies[0].ownerId;
     const rv = r.rival(rvId);
     const rivalBoost = rv ? 0.6 + rv.weights.expansion * 0.04 : 0.6;
-    const playerPower = calcPower(playerArmies);
-    const rivalPower = calcPower(rivalArmies, rivalBoost);
-    const playerWins = playerPower >= rivalPower * (0.8 + r.rng.next() * 0.4);
-    if (playerWins) {
-      r.provincialArmies = r.provincialArmies.filter((a) => !(a.ownerId === rvId && a.provinceId === provinceId));
-      for (const a of playerArmies) {
-        for (const u of a.units) { u.count = Math.max(1, Math.round(u.count * 0.8)); u.morale = Math.max(40, u.morale - 10); }
+    const defenderIsPlayer = isPlayerDefender(r, provinceId);
+    const playerUndersupplied = playerArmies.some((a) => a.supply <= 0);
+    const rivalUndersupplied = rivalArmies.some((a) => a.supply <= 0);
+
+    const rawPower = (armies: ProvincialArmy[]) =>
+      armies.reduce((sum, a) => sum + a.units.reduce((s, u) =>
+        s + u.count * UNIT_TYPES[u.type].powerPerUnit * (u.morale / 100), 0), 0);
+    const playerSidePower = () => {
+      let p = rawPower(playerArmies);
+      if (defenderIsPlayer) p *= BATTLE_DEFENDER_MULT;
+      if (playerUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
+      return p;
+    };
+    const rivalSidePower = () => {
+      let p = rawPower(rivalArmies) * rivalBoost;
+      if (!defenderIsPlayer) p *= BATTLE_DEFENDER_MULT;
+      if (rivalUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
+      return p;
+    };
+    const applyRoundResult = (armies: ProvincialArmy[], mult: number, moraleDelta: number) => {
+      for (const a of armies) {
+        for (const u of a.units) {
+          u.count = Math.max(1, Math.round(u.count * mult));
+          u.morale = Math.max(0, u.morale + moraleDelta);
+        }
       }
+    };
+
+    let playerRoundWins = 0;
+    let rivalRoundWins = 0;
+    let round1PlayerPower = 0;
+    let round1RivalPower = 0;
+    let playerWinsBattle = defenderIsPlayer; // tie-after-3-rounds fallback: defender holds
+    let routed = false;
+    for (let round = 1; round <= BATTLE_MAX_ROUNDS; round++) {
+      const pPower = playerSidePower();
+      const rPower = rivalSidePower();
+      if (round === 1) { round1PlayerPower = pPower; round1RivalPower = rPower; }
+      const attackerPower = defenderIsPlayer ? rPower : pPower;
+      const defenderPower = defenderIsPlayer ? pPower : rPower;
+      const attackerWinsRound = attackerPower >= defenderPower * (BATTLE_ROUND_WIN_BASE + r.rng.next() * BATTLE_ROUND_WIN_SPREAD);
+      const roundPlayerWins = defenderIsPlayer ? !attackerWinsRound : attackerWinsRound;
+      if (roundPlayerWins) {
+        playerRoundWins++;
+        applyRoundResult(playerArmies, BATTLE_ROUND_WINNER_MULT, BATTLE_ROUND_WINNER_MORALE_DELTA);
+        applyRoundResult(rivalArmies, BATTLE_ROUND_LOSER_MULT, BATTLE_ROUND_LOSER_MORALE_DELTA);
+      } else {
+        rivalRoundWins++;
+        applyRoundResult(rivalArmies, BATTLE_ROUND_WINNER_MULT, BATTLE_ROUND_WINNER_MORALE_DELTA);
+        applyRoundResult(playerArmies, BATTLE_ROUND_LOSER_MULT, BATTLE_ROUND_LOSER_MORALE_DELTA);
+      }
+      const postPlayerPower = playerSidePower();
+      const postRivalPower = rivalSidePower();
+      if (postPlayerPower < round1PlayerPower * BATTLE_ROUT_THRESHOLD) {
+        applyRoundResult(playerArmies, 1, BATTLE_ROUT_MORALE_DELTA);
+        playerWinsBattle = false;
+        routed = true;
+        break;
+      }
+      if (postRivalPower < round1RivalPower * BATTLE_ROUT_THRESHOLD) {
+        applyRoundResult(rivalArmies, 1, BATTLE_ROUT_MORALE_DELTA);
+        playerWinsBattle = true;
+        routed = true;
+        break;
+      }
+    }
+    if (!routed && playerRoundWins !== rivalRoundWins) {
+      playerWinsBattle = playerRoundWins > rivalRoundWins;
+    }
+
+    if (playerWinsBattle) {
+      r.provincialArmies = r.provincialArmies.filter((a) => !(a.ownerId === rvId && a.provinceId === provinceId));
       if (rv) rv.relations = r.clampRel(rv.relations - 5);
       r.addLog(`BATTLE of ${sName}: our forces rout ${rv?.name ?? 'the enemy'}!`, 'good');
     } else {
@@ -90,7 +175,6 @@ export function resolveProvinceBattle(r: RegionSim, provinceId: number): void {
       for (const a of playerArmies) {
         a.provinceId = homeId;
         a.destinationId = null;
-        for (const u of a.units) { u.count = Math.max(1, Math.round(u.count * 0.7)); u.morale = Math.max(20, u.morale - 20); }
       }
       r.addLog(`BATTLE of ${sName}: ${rv?.name ?? 'the enemy'} drives our forces back!`, 'bad');
     }
@@ -158,42 +242,94 @@ export function resolveArmyGroupBattle(r: RegionSim, provinceId: number): void {
     const rivalArmies = r.armyGroups.filter((a) => a.ownerId !== 0 && a.provinceId === provinceId && !a.destinationId);
     if (!playerArmies.length || !rivalArmies.length) return;
     const sName = r.settlement(provinceId)?.name ?? `Province ${provinceId}`;
-    const playerPower = playerArmies.reduce((s, a) => s + r.computeCombatPower(a), 0);
-    const rivalPower = rivalArmies.reduce((s, a) => s + r.computeCombatPower(a), 0);
-    const playerWins = playerPower >= rivalPower * (0.8 + r.rng.next() * 0.4);
     const rvId = rivalArmies[0].ownerId;
     const rv = r.rival(rvId);
     const rvName = rv?.name ?? 'rival forces';
-    if (playerWins) {
+    const defenderIsPlayer = isPlayerDefender(r, provinceId);
+    const playerUndersupplied = playerArmies.some((a) => a.supply < 0.4);
+    const rivalUndersupplied = rivalArmies.some((a) => a.supply < 0.4);
+
+    const rawPower = (armies: ArmyGroup[]) => armies.reduce((s, a) => s + r.computeCombatPower(a), 0);
+    const playerSidePower = () => {
+      let p = rawPower(playerArmies);
+      if (defenderIsPlayer) p *= BATTLE_DEFENDER_MULT;
+      if (playerUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
+      return p;
+    };
+    const rivalSidePower = () => {
+      let p = rawPower(rivalArmies);
+      if (!defenderIsPlayer) p *= BATTLE_DEFENDER_MULT;
+      if (rivalUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
+      return p;
+    };
+    const applyRoundResult = (armies: ArmyGroup[], mult: number, moraleDelta: number) => {
+      for (const a of armies) {
+        a.manpower = Math.round(a.manpower * mult);
+        a.morale = Math.max(0, a.morale + moraleDelta);
+      }
+    };
+
+    const playerStartManpower = playerArmies.reduce((s, a) => s + a.manpower, 0);
+    const rivalStartManpower = rivalArmies.reduce((s, a) => s + a.manpower, 0);
+
+    let playerRoundWins = 0;
+    let rivalRoundWins = 0;
+    let round1PlayerPower = 0;
+    let round1RivalPower = 0;
+    let playerWinsBattle = defenderIsPlayer; // tie-after-3-rounds fallback: defender holds
+    let routed = false;
+    for (let round = 1; round <= BATTLE_MAX_ROUNDS; round++) {
+      const pPower = playerSidePower();
+      const rPower = rivalSidePower();
+      if (round === 1) { round1PlayerPower = pPower; round1RivalPower = rPower; }
+      const attackerPower = defenderIsPlayer ? rPower : pPower;
+      const defenderPower = defenderIsPlayer ? pPower : rPower;
+      const attackerWinsRound = attackerPower >= defenderPower * (BATTLE_ROUND_WIN_BASE + r.rng.next() * BATTLE_ROUND_WIN_SPREAD);
+      const roundPlayerWins = defenderIsPlayer ? !attackerWinsRound : attackerWinsRound;
+      if (roundPlayerWins) {
+        playerRoundWins++;
+        applyRoundResult(playerArmies, BATTLE_ROUND_WINNER_MULT, BATTLE_ROUND_WINNER_MORALE_DELTA);
+        applyRoundResult(rivalArmies, BATTLE_ROUND_LOSER_MULT, BATTLE_ROUND_LOSER_MORALE_DELTA);
+      } else {
+        rivalRoundWins++;
+        applyRoundResult(rivalArmies, BATTLE_ROUND_WINNER_MULT, BATTLE_ROUND_WINNER_MORALE_DELTA);
+        applyRoundResult(playerArmies, BATTLE_ROUND_LOSER_MULT, BATTLE_ROUND_LOSER_MORALE_DELTA);
+      }
+      const postPlayerPower = playerSidePower();
+      const postRivalPower = rivalSidePower();
+      if (postPlayerPower < round1PlayerPower * BATTLE_ROUT_THRESHOLD) {
+        applyRoundResult(playerArmies, 1, BATTLE_ROUT_MORALE_DELTA);
+        playerWinsBattle = false;
+        routed = true;
+        break;
+      }
+      if (postRivalPower < round1RivalPower * BATTLE_ROUT_THRESHOLD) {
+        applyRoundResult(rivalArmies, 1, BATTLE_ROUT_MORALE_DELTA);
+        playerWinsBattle = true;
+        routed = true;
+        break;
+      }
+    }
+    if (!routed && playerRoundWins !== rivalRoundWins) {
+      playerWinsBattle = playerRoundWins > rivalRoundWins;
+    }
+
+    const playerLost = playerStartManpower - playerArmies.reduce((s, a) => s + a.manpower, 0);
+    const rivalLost = rivalStartManpower - rivalArmies.reduce((s, a) => s + a.manpower, 0);
+    const casualties = Math.max(0, Math.round(playerLost + rivalLost));
+
+    if (playerWinsBattle) {
       // Loser retreats to adjacent province
       const retreatTarget = r.settlements.find((s) => s.factionId === rvId)?.id ?? provinceId;
-      for (const a of rivalArmies) {
-        a.manpower = Math.round(a.manpower * 0.7); // loser manpower ×0.7
-        a.morale = Math.max(0, a.morale - 20);     // loser morale -20
-        a.provinceId = retreatTarget;
-      }
-      for (const a of playerArmies) {
-        a.manpower = Math.round(a.manpower * 0.9); // winner manpower ×0.9
-        a.morale = Math.min(100, a.morale + 5);    // winner morale +5
-        a.wonBattleThisMonth = true;
-      }
+      for (const a of rivalArmies) a.provinceId = retreatTarget;
+      for (const a of playerArmies) a.wonBattleThisMonth = true;
       r.lastBattleWon = true;
-      const casualties = Math.round(rivalPower * 0.3 + playerPower * 0.1);
       r.addLog(`BATTLE OF ${sName.toUpperCase()}: our forces prevail, ${rvName} retreats — ${casualties} casualties.`, 'good');
     } else {
       // Player loses — retreat to nearest player province
       const homeId = r.settlements.find((s) => s.factionId === r.playerFactionId)?.id ?? provinceId;
-      for (const a of playerArmies) {
-        a.manpower = Math.round(a.manpower * 0.7); // loser manpower ×0.7
-        a.morale = Math.max(0, a.morale - 20);     // loser morale -20
-        a.provinceId = homeId;
-      }
-      for (const a of rivalArmies) {
-        a.manpower = Math.round(a.manpower * 0.9); // winner manpower ×0.9
-        a.morale = Math.min(100, a.morale + 5);    // winner morale +5
-      }
+      for (const a of playerArmies) a.provinceId = homeId;
       r.lastBattleWon = false;
-      const casualties = Math.round(playerPower * 0.3 + rivalPower * 0.1);
       r.addLog(`BATTLE OF ${sName.toUpperCase()}: our forces lose, ${rvName} holds the field — ${casualties} casualties.`, 'bad');
     }
     // Remove armies with no manpower
