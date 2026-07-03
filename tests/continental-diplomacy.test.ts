@@ -28,6 +28,7 @@ import {
   BLOC_RELATIONS_NEIGHBOR,
   BLOC_RELATIONS_OVERSEAS,
   blocAffinity,
+  pairRelationsBase,
 } from '../src/sim/region';
 import type { RivalNation } from '../src/sim/region';
 import {
@@ -102,21 +103,24 @@ describe('the continent seam (compass horizon = continent, Phase C re-implements
 });
 
 describe('geography in the relations drift baseline', () => {
-  it('compatible neighbours drift closer than the same pair an ocean apart', () => {
+  // Session 22 (world-liveliness): the drift step now adds a ±3 monthly
+  // wander draw per pair, so single-tick deltas are no longer draw-free.
+  // The geography term is asserted EXACTLY at the baseline seam instead —
+  // `pairRelationsBase` is the one formula both the drift target and the
+  // spawn seeding read, so the tick-level behaviour follows from it.
+  it('compatible neighbours read a warmer baseline than the same pair an ocean apart', () => {
     const r = RegionSim.create(42);
     // A/B share the eastern horizon, C is identical but west — junta all
     // round (same regime bloc, blocAffinity +12 ≥ 0 → neighbour bond).
     const a = injectRival(r, { id: 9001, compass: 'east' });
     const b = injectRival(r, { id: 9002, compass: 'east' });
     const c = injectRival(r, { id: 9003, compass: 'west' });
-    tickForeignRelations(r);
-    const near = pairRel(r, a.id, b.id);
-    const far = pairRel(r, a.id, c.id);
+    const near = pairRelationsBase(a, b, 12);
+    const far = pairRelationsBase(a, c, 12);
     expect(near).toBeGreaterThan(far);
-    // One drift step eases 3% of the baseline gap — exactly the affinity term.
-    expect(near - far).toBeCloseTo(CONTINENT_NEIGHBOR_AFFINITY * 0.03, 6);
+    expect(near - far).toBeCloseTo(CONTINENT_NEIGHBOR_AFFINITY, 6);
     // And C's two cross-continent pairs read identical baselines.
-    expect(far).toBeCloseTo(pairRel(r, b.id, c.id), 6);
+    expect(far).toBeCloseTo(pairRelationsBase(b, c, 12), 6);
   });
 
   it('incompatible neighbours grind below the same quarrel an ocean apart', () => {
@@ -127,11 +131,10 @@ describe('geography in the relations drift baseline', () => {
     const b = injectRival(r, { id: 9002, compass: 'east', regime: 'parliamentary' });
     const c = injectRival(r, { id: 9003, compass: 'west', regime: 'parliamentary' });
     expect(blocAffinity('autocratic', 'liberal')).toBeLessThan(0);
-    tickForeignRelations(r);
-    const near = pairRel(r, a.id, b.id);
-    const far = pairRel(r, a.id, c.id);
+    const near = pairRelationsBase(a, b, -14);
+    const far = pairRelationsBase(a, c, -14);
     expect(near).toBeLessThan(far);
-    expect(far - near).toBeCloseTo(CONTINENT_NEIGHBOR_FRICTION * 0.03, 6);
+    expect(far - near).toBeCloseTo(CONTINENT_NEIGHBOR_FRICTION, 6);
   });
 });
 

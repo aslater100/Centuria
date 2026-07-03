@@ -1801,6 +1801,52 @@ export function continentTerm(a: RivalNation, b: RivalNation, blocAff: number): 
  *  overseas power projection is hard (GDD §7.1). */
 export const CONTINENT_WAR_MULT = 1.5;
 export const OVERSEAS_WAR_MULT = 0.6;
+
+/** World-liveliness pass (session 22). The measured pair-relations band over
+ *  181y×8 autoplay was [−40, +23] against action bars at +45 (alliance) and
+ *  −50 (war) — the world abroad was structurally frozen: 0 alliances, 0 blocs,
+ *  0 foreign wars in every sweep. Two fixes, both here so they are testable:
+ *  (1) personality spreads pairs wider (warmth/friction dials below, with a
+ *  floor so no pair is PERMANENTLY war-deep — arch-enemies coexist coldly and
+ *  war eligibility stays an excursion, not a steady state), and (2) the
+ *  alliance/war cliffs became probability RAMPS scaling with how deep the
+ *  warmth/hostility runs, so event rates are bounded and tunable instead of
+ *  living on a knife-edge threshold. */
+export const PAIR_COMMERCE_WARMTH = 2.4;
+export const PAIR_EXPANSION_FRICTION = 2.6;
+export const PAIR_BASE_FLOOR = -45;
+/** One baseline formula, two call sites: the monthly drift target in
+ *  `tickForeignRelations` and the newcomer's opening opinions in `spawnRival`. */
+export function pairRelationsBase(a: RivalNation, b: RivalNation, blocAff: number): number {
+  const raw =
+    (a.weights.commerce + b.weights.commerce) * PAIR_COMMERCE_WARMTH -
+    (a.weights.expansion + b.weights.expansion) * PAIR_EXPANSION_FRICTION +
+    blocAff + continentTerm(a, b, blocAff);
+  return Math.max(PAIR_BASE_FLOOR, raw);
+}
+/** Alliance forms probabilistically above the ramp start; monthly chance
+ *  reaches ALLIANCE_RATE at rel=100. Warm honor-bound pairs ally within a
+ *  generation; lukewarm ones only over a long peace. */
+export const ALLIANCE_RAMP_START = 25;
+export const ALLIANCE_RATE = 0.06;
+/** Foreign war likewise ramps with hostility depth below the ramp start,
+ *  reaching FOREIGN_WAR_RATE at rel=−100 (before risk/urgency/geography
+ *  multipliers). An arch-enemy pair at the floor wars every few decades,
+ *  not every other year. */
+export const FOREIGN_WAR_RAMP_START = -30;
+export const FOREIGN_WAR_RATE = 0.045;
+/** Alliances were forever once signed — no dissolution path existed except a
+ *  targeted espionage action (incite_unrest). A pact that formed under warm
+ *  ideology/geography can outlive the conditions that made it: a coup flips
+ *  blocAff hostile, or a long cold spell just wears the friendship down. The
+ *  dissolution ramp starts well BELOW the formation ramp (0 vs
+ *  ALLIANCE_RAMP_START 25) — a wide 0..25 dead zone so the ±3 monthly wander
+ *  alone can never flicker an alliance on and off. No regime-change special
+ *  case is needed: `pairRelationsBase` already reads the current blocAff
+ *  every tick, so a regime change organically drags `rel` down over the
+ *  following months and this ramp picks it up exactly like any other decay. */
+export const ALLIANCE_DISSOLUTION_RAMP_START = 0;
+export const ALLIANCE_DISSOLUTION_RATE = 0.03;
 /** An overseas trade pact needs genuinely warm ties; neighbours bloc at the
  *  historical bar. Climate coalitions stay continent-blind by design — a
  *  planetary threat unites across oceans. */
@@ -2393,7 +2439,7 @@ const RIVAL_ORIGINS = [
   'a federation of farming communes that grew into a national power',
   'forged by a visionary who united warring clans under one banner',
 ];
-const COMPASS_FLAVOR: Record<RivalNation['compass'], string> = {
+export const COMPASS_FLAVOR: Record<RivalNation['compass'], string> = {
   north: 'beyond the northern ranges',
   east: 'across the eastern marches',
   south: 'down the southern coast',
@@ -10019,11 +10065,7 @@ export class RegionSim {
     for (const other of this.rivals) {
       const ob = this.regimeOf(other).bloc;
       const blocAff = blocAffinity(regime.bloc, ob);
-      const rel =
-        (rv.weights.commerce + other.weights.commerce) * 1.2 -
-        (rv.weights.expansion + other.weights.expansion) * 1.5 +
-        blocAff + continentTerm(rv, other, blocAff) +
-        this.rng.int(21) - 10;
+      const rel = pairRelationsBase(rv, other, blocAff) + this.rng.int(21) - 10;
       this.rivalPairs[this.pairKey(rv.id, other.id)] = this.clampRel(Math.max(-60, Math.min(40, rel)));
     }
     this.rivals.push(rv);

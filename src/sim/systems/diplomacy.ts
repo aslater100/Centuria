@@ -20,8 +20,14 @@ import type { RegionSim } from '../region';
 import type { ForeignWar, RivalNation, CasusBelli, WarScar } from '../region';
 import {
   blocAffinity,
-  continentTerm,
   sameContinent,
+  pairRelationsBase,
+  ALLIANCE_RAMP_START,
+  ALLIANCE_RATE,
+  ALLIANCE_DISSOLUTION_RAMP_START,
+  ALLIANCE_DISSOLUTION_RATE,
+  FOREIGN_WAR_RAMP_START,
+  FOREIGN_WAR_RATE,
   CONTINENT_WAR_MULT,
   OVERSEAS_WAR_MULT,
   BLOC_RELATIONS_NEIGHBOR,
@@ -182,10 +188,7 @@ export function tickForeignRelations(r: RegionSim): void {
         // geography — neighbours beyond the same horizon feel each other's
         // ideology harder than powers an ocean apart (continentTerm).
         const blocAff = blocAffinity(r.regimeOf(a).bloc, r.regimeOf(b).bloc);
-        let base =
-          (a.weights.commerce + b.weights.commerce) * 1.2 -
-          (a.weights.expansion + b.weights.expansion) * 1.5 +
-          blocAff + continentTerm(a, b, blocAff);
+        let base = pairRelationsBase(a, b, blocAff);
         // Existential climate response: whichever of the pair is more cornered
         // by warming urgency sours the relationship faster (mirrors the
         // rival→player drift above).
@@ -193,11 +196,38 @@ export function tickForeignRelations(r: RegionSim): void {
           base -= Math.max(rivalClimateUrgency(r, a), rivalClimateUrgency(r, b)) * URGENCY_RELATIONS_DRAG;
         }
         if (allied) base += 25;
-        let rel = (r.rivalPairs[key] ?? 0) + (base - (r.rivalPairs[key] ?? 0)) * 0.03;
+        // Ease toward the baseline, then a small monthly shock — border
+        // incidents, summits, spy scandals the log never itemises. The ease
+        // (3%/mo) against ±3 noise gives a stationary spread of ~7 points
+        // around the baseline, so relations WANDER: a cold pair can slide into
+        // war-depth hostility over a bad decade, a warm one can climb to a
+        // pact — the excursions the frozen static-baseline world never had.
+        let rel = (r.rivalPairs[key] ?? 0) + (base - (r.rivalPairs[key] ?? 0)) * 0.03 + (r.rng.int(7) - 3);
         if (atWar) rel = Math.min(rel, -50);
         r.rivalPairs[key] = r.clampRel(rel);
         if (atWar) continue;
-        if (!allied && rel > 45 && a.weights.honor + b.weights.honor >= 10 && r.rng.chance(0.05)) {
+        // Alliance dissolution: a pact can outlive the warmth that formed it.
+        // Wide dead zone (0..ALLIANCE_RAMP_START) below the formation bar so
+        // ordinary wander never flickers a healthy alliance; a regime change
+        // or a sustained cold spell drags rel here organically (no special
+        // case — pairRelationsBase already reads the live blocAff).
+        if (allied) {
+          const dissolveChance =
+            (ALLIANCE_DISSOLUTION_RATE * Math.max(0, ALLIANCE_DISSOLUTION_RAMP_START - rel)) /
+            (100 + ALLIANCE_DISSOLUTION_RAMP_START);
+          if (dissolveChance > 0 && r.rng.chance(dissolveChance)) {
+            r.alliances = r.alliances.filter((k) => k !== key);
+            r.noteHistory(a, `Alliance with ${b.name} collapses, ${r.year}.`);
+            r.noteHistory(b, `Alliance with ${a.name} collapses, ${r.year}.`);
+            r.addLog(`ALLIANCE COLLAPSES: ${a.name} and ${b.name} let their pact lapse — the old warmth is gone.`, 'info');
+          }
+        }
+        // Warmth ramp: above ALLIANCE_RAMP_START the pact chance scales with
+        // how deep the friendship runs (no cliff — a knife-edge bar the drift
+        // could never cross is what kept the world frozen; see PAIR_* dials).
+        const allyChance =
+          (ALLIANCE_RATE * Math.max(0, rel - ALLIANCE_RAMP_START)) / (100 - ALLIANCE_RAMP_START);
+        if (!allied && allyChance > 0 && a.weights.honor + b.weights.honor >= 10 && r.rng.chance(allyChance)) {
           r.alliances.push(key);
           r.noteHistory(a, `Allied with ${b.name}, ${r.year}.`);
           r.noteHistory(b, `Allied with ${a.name}, ${r.year}.`);
@@ -220,7 +250,15 @@ export function tickForeignRelations(r: RegionSim): void {
         // Wars cluster on shared ground: neighbours can march on each other,
         // an overseas expedition is a rarer, harder undertaking.
         const geoWarMult = sameContinent(a, b) ? CONTINENT_WAR_MULT : OVERSEAS_WAR_MULT;
-        if (!allied && rel < -50 && r.rng.chance((0.03 + (a.weights.risk + b.weights.risk) * 0.003) * foreignUrgencyMult * geoWarMult)) {
+        // Hostility ramp: below FOREIGN_WAR_RAMP_START the war chance scales
+        // with depth, so a pair at the −45 baseline floor wars every few
+        // decades while an excursion to −60 (post-war grudge, ultimatum
+        // spiral) runs genuinely hot until the ease pulls it back up.
+        const warChance =
+          ((FOREIGN_WAR_RATE * Math.max(0, FOREIGN_WAR_RAMP_START - rel)) / (100 + FOREIGN_WAR_RAMP_START)) *
+          (0.7 + (a.weights.risk + b.weights.risk) * 0.03) *
+          foreignUrgencyMult * geoWarMult;
+        if (!allied && warChance > 0 && r.rng.chance(warChance)) {
           r.startForeignWar(a.id, b.id);
         }
       }
@@ -342,7 +380,7 @@ export function tickRivalTradeBlocActivity(r: RegionSim): void {
         const together = r.rivalTradeBlocs.some(
           (bl) => bl.memberRivalIds.includes(a.id) && bl.memberRivalIds.includes(b.id),
         );
-        if (together || !r.rng.chance(0.025)) continue;
+        if (together || !r.rng.chance(0.05)) continue;
         const aBloc = r.rivalTradeBlocs.find((bl) => bl.memberRivalIds.includes(a.id));
         const bBloc = r.rivalTradeBlocs.find((bl) => bl.memberRivalIds.includes(b.id));
         if (aBloc && !aBloc.memberRivalIds.includes(b.id)) {
