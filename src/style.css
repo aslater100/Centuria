@@ -48,12 +48,23 @@
   /* Shape */
   --radius: 6px;
   --radius-lg: 10px;
+  /* Accessibility: text-scale multiplier (U7b), small/normal/large — set on
+     document.documentElement by titlescreen.ts, persisted to localStorage. */
+  --ui-scale: 1;
 }
 
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+html {
+  /* Root font-size drives every rem/em-based measurement and the default
+     size any element inherits without its own explicit font-size — the
+     --ui-scale custom property (small/normal/large, U7b) scales all of it
+     from a single knob. */
+  font-size: calc(16px * var(--ui-scale, 1));
 }
 
 html,
@@ -289,7 +300,14 @@ input[type='range']::-moz-range-thumb {
   background: linear-gradient(90deg, var(--gold-600), var(--gold-400));
 }
 .meter.m-good > i { background: linear-gradient(90deg, #2f9e63, var(--good)); }
-.meter.m-bad > i { background: linear-gradient(90deg, #b23c34, var(--bad)); }
+/* U7c: bad meters also carry a diagonal hazard-stripe pattern so the
+   good/bad distinction doesn't rely on red-vs-green hue alone. */
+.meter.m-bad > i {
+  background-color: var(--bad);
+  background-image:
+    repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.3) 0 5px, transparent 5px 10px),
+    linear-gradient(90deg, #b23c34, var(--bad));
+}
 .meter.m-info > i { background: linear-gradient(90deg, #2a6ea8, var(--info)); }
 
 /* ---- Top bar: the gilded command rail ---- */
@@ -434,7 +452,10 @@ input[type='range']::-moz-range-thumb {
 
 .log-info  { color: var(--info); border-left-color: var(--info) !important; }
 .log-good  { color: var(--good); border-left-color: var(--good) !important; }
-.log-bad   { color: var(--bad); border-left-color: var(--bad) !important; }
+/* U7c: weight + icon cue alongside color — don't rely on red vs. green hue alone. */
+.log-bad   { color: var(--bad); border-left-color: var(--bad) !important; font-weight: 600; }
+.log-good::before { content: '\2713\0020'; }
+.log-bad::before   { content: '\26A0\0020'; }
 
 
 /* ---- Event modal (popup for event choices) ---- */
@@ -1872,6 +1893,54 @@ input[type='range']::-moz-range-thumb {
 .ts-on  { color: var(--good); border-color: rgba(110, 231, 160, 0.45) !important; }
 .ts-off { color: var(--muted-2); }
 
+/* ---- Options: SFX/Music/Ambience volume sliders (U7a) ---- */
+.ts-audio-row { margin: 4px 0; }
+.ts-audio-row .ts-btn { margin-bottom: 2px; }
+.ts-vol-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 16px 6px;
+}
+.ts-vol-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.65), var(--navy-800));
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+}
+.ts-vol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--gold-face);
+  border: 1px solid #8a6620;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+.ts-vol-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--gold-500);
+  border: 1px solid #8a6620;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+}
+.ts-vol-slider:disabled { opacity: 0.4; cursor: not-allowed; }
+.ts-vol-label {
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
 /* ---- Game over ---- */
 .gameover {
   position: fixed;
@@ -1968,7 +2037,8 @@ input[type='range']::-moz-range-thumb {
   font-variant-numeric: tabular-nums;
 }
 .cv-log .log-good { color: var(--good); }
-.cv-log .log-bad  { color: var(--bad); }
+/* U7c: same weight + icon cue as the main event log — see .log-bad above. */
+.cv-log .log-bad  { color: var(--bad); font-weight: 600; }
 .cv-log .log-info { color: var(--info); }
 
 /* ---- "Path to Nationhood" objectives panel (4X shell) ---- */
@@ -2036,8 +2106,11 @@ input[type='range']::-moz-range-thumb {
   animation: cv-toast-in 0.28s ease-out;
   transition: opacity 0.5s ease, transform 0.5s ease;
 }
+/* U7c: icon + heavier border on the bad toast — not just a red-vs-green hue swap. */
 .cv-toast-good { border-left-color: var(--good); }
-.cv-toast-bad  { border-left-color: var(--bad); }
+.cv-toast-bad  { border-left-color: var(--bad); border-left-width: 5px; font-weight: 600; }
+.cv-toast-good::before { content: '\2713\0020'; color: var(--good); }
+.cv-toast-bad::before  { content: '\26A0\0020'; color: var(--bad); }
 .cv-toast-out  { opacity: 0; transform: translateY(-8px); }
 @keyframes cv-toast-in {
   from { opacity: 0; transform: translateY(-10px); }
@@ -2799,4 +2872,78 @@ input[type='range']::-moz-range-thumb {
 #app[data-era="drowned"] .palette h3,
 #app[data-era="drowned"] .inspector h3 {
   color: var(--era-accent);
+}
+
+/* ============================================================
+   RESPONSIVE (U8) — the play-view HUD is a cluster of fixed,
+   draggable panels sized off px min-widths; below ~1280px they
+   start to crowd, and below ~1024px several no longer fit
+   side-by-side. Two breakpoints step font/padding/panel-width
+   down together. WindowManager.ts clamps drag-persisted panel
+   positions to the viewport on resize so a step down never
+   strands a panel off-screen.
+   ============================================================ */
+@media (max-width: 1280px) {
+  html { font-size: calc(15px * var(--ui-scale, 1)); }
+
+  .topbar { padding: 6px 12px; gap: 8px; }
+  .tb-item { padding: 3px 8px; }
+
+  .palette {
+    min-width: 220px;
+    max-width: min(44vw, 560px);
+    padding: 10px 12px;
+    font-size: 11.5px;
+  }
+  .inspector {
+    min-width: 260px;
+    max-width: min(42vw, 520px);
+    padding: 10px 12px;
+    font-size: 11.5px;
+  }
+  .research-panel { min-width: 400px; }
+  .central-bank-panel { min-width: 280px; }
+  .buildbar-submenu { max-width: 88vw; }
+  .wiki-panel { min-width: 360px; }
+  .menu-box { min-width: 320px; }
+  .pause-menu-content { min-width: 320px; }
+  .cv-objectives { min-width: 260px; max-width: min(44vw, 380px); font-size: 11.5px; }
+  .win-modal-box { min-width: 480px; }
+  .gameover-box { min-width: 480px; }
+  .ts-panel { width: 280px; }
+}
+
+@media (max-width: 1024px) {
+  html { font-size: calc(14px * var(--ui-scale, 1)); }
+
+  .topbar { padding: 5px 10px; gap: 6px; font-size: 11px; }
+  .tb-item { padding: 3px 6px; }
+  .tb-resources, .tb-population { font-size: 10px; }
+
+  .palette {
+    min-width: 190px;
+    max-width: min(50vw, 440px);
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+  .inspector {
+    min-width: 220px;
+    max-width: min(48vw, 400px);
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+  .research-panel { min-width: 320px; left: 8px; }
+  .central-bank-panel { min-width: 240px; }
+  .buildbar-submenu { max-width: 94vw; }
+  .buildbar-tabs { flex-wrap: wrap; }
+  .wiki-panel { min-width: 280px; max-width: 92vw; }
+  .menu-box { min-width: 260px; }
+  .pause-menu-content { min-width: 260px; }
+  .cv-objectives { min-width: 200px; max-width: min(50vw, 320px); font-size: 11px; }
+  .win-modal-box { min-width: 320px; padding: 20px; }
+  .gameover-box { min-width: 320px; padding: 20px; }
+  .evt-box { min-width: 280px; }
+  .ts-panel { width: 240px; }
+  .ts-left { padding: 48px 6% 36px; }
+  .ts-title { font-size: 40px; }
 }

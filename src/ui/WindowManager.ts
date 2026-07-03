@@ -34,6 +34,10 @@ export class WindowManager {
     document.addEventListener('mousedown', (e) => this.onDown(e), true);
     document.addEventListener('mousemove', (e) => this.onMove(e));
     document.addEventListener('mouseup', () => this.onUp());
+    // U8: a responsive breakpoint (or the OS window itself) shrinking the
+    // viewport can strand an already-persisted panel position off-screen —
+    // pull every registered window back into view when that happens.
+    window.addEventListener('resize', () => this.clampAll());
   }
 
   /** Make a panel draggable. Safe to call after construction (region panels). */
@@ -43,7 +47,40 @@ export class WindowManager {
     cfg.element.style.zIndex = String(cfg.baseZ);
     // Restore a saved drag position; otherwise leave the CSS anchor alone.
     const pos = this.positions[cfg.id];
-    if (pos) this.placeAt(cfg.element, pos.x, pos.y);
+    if (pos) this.placeAt(cfg.element, this.clampX(cfg.element, pos.x), this.clampY(cfg.element, pos.y));
+  }
+
+  /** Clamp an x so at least a grabbable sliver of the panel stays on-screen —
+   *  same margin `onMove` uses while dragging. */
+  private clampX(el: HTMLElement, x: number): number {
+    const w = el.offsetWidth;
+    return Math.max(0, Math.min(x, window.innerWidth - Math.min(w, 80)));
+  }
+
+  private clampY(el: HTMLElement, y: number): number {
+    const h = el.offsetHeight;
+    return Math.max(0, Math.min(y, window.innerHeight - Math.min(h, 40)));
+  }
+
+  /** Re-clamp every registered window's current on-screen position — called
+   *  on viewport resize so a breakpoint step (or OS window resize) never
+   *  leaves a drag-positioned panel unreachable off-screen. */
+  private clampAll(): void {
+    let changed = false;
+    for (const cfg of this.windows.values()) {
+      // Only touch panels that were actually drag-positioned (left/top
+      // anchored) — untouched ones stay on their CSS anchor as designed.
+      if (!this.positions[cfg.id]) continue;
+      const rect = cfg.element.getBoundingClientRect();
+      const x = this.clampX(cfg.element, rect.left);
+      const y = this.clampY(cfg.element, rect.top);
+      if (x !== rect.left || y !== rect.top) {
+        this.placeAt(cfg.element, x, y);
+        this.positions[cfg.id] = { x, y };
+        changed = true;
+      }
+    }
+    if (changed) this.save();
   }
 
   /** Convert a panel to left/top anchoring at a screen position. */

@@ -3,13 +3,24 @@
  * The context is created lazily on the first user gesture (browser policy),
  * and the mute preference persists across sessions.
  */
+
+/** Clamp a volume input to the valid [0, 1] gain range, falling back to full
+ *  volume for non-finite input (e.g. a corrupted localStorage value). */
+function clampVolume(v: number): number {
+  if (!Number.isFinite(v)) return 1;
+  return Math.min(1, Math.max(0, v));
+}
 export class Sfx {
   private ctx: AudioContext | null = null;
   muted = false;
+  /** Master gain multiplier for every SFX note, 0 (silent) to 1 (full). */
+  volume = 1;
 
   constructor() {
     try {
       this.muted = localStorage.getItem('centuria-muted') === '1';
+      const stored = localStorage.getItem('centuria-sfx-volume');
+      if (stored !== null) this.volume = clampVolume(Number(stored));
     } catch {
       // storage unavailable (private mode etc.) — default to sound on
     }
@@ -19,6 +30,16 @@ export class Sfx {
     this.muted = !this.muted;
     try {
       localStorage.setItem('centuria-muted', this.muted ? '1' : '0');
+    } catch {
+      // preference just won't persist
+    }
+  }
+
+  /** Set the SFX master volume (0–1); clamps and persists like `toggleMuted`. */
+  setVolume(v: number): void {
+    this.volume = clampVolume(v);
+    try {
+      localStorage.setItem('centuria-sfx-volume', String(this.volume));
     } catch {
       // preference just won't persist
     }
@@ -47,7 +68,7 @@ export class Sfx {
     freq: number, durS: number, type: OscillatorType, vol: number,
     glideTo?: number, delayS = 0,
   ): void {
-    if (this.muted) return;
+    if (this.muted || this.volume <= 0) return;
     const ctx = this.ensure();
     if (!ctx) return;
     const t0 = ctx.currentTime + delayS;
@@ -57,7 +78,7 @@ export class Sfx {
     osc.frequency.setValueAtTime(freq, t0);
     if (glideTo) osc.frequency.exponentialRampToValueAtTime(glideTo, t0 + durS);
     gain.gain.setValueAtTime(0, t0);
-    gain.gain.linearRampToValueAtTime(vol, t0 + 0.008);
+    gain.gain.linearRampToValueAtTime(vol * this.volume, t0 + 0.008);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + durS);
     osc.connect(gain).connect(ctx.destination);
     osc.start(t0);

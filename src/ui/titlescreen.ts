@@ -1,13 +1,46 @@
 import './screens.css';
 import { SCENARIOS } from '../sim/region';
+import { DIFFICULTY_TAGS, type DifficultyTag } from './designscreen';
 
 interface AudioHandles {
-  sfx: { muted: boolean; toggleMuted(): void } | null;
-  music: { enabled: boolean; toggle(): void; unlock(): void } | null;
-  soundscape: { enabled: boolean; toggle(): void; unlock(): void } | null;
+  sfx: { muted: boolean; toggleMuted(): void; volume: number; setVolume(v: number): void } | null;
+  music: { enabled: boolean; toggle(): void; unlock(): void; volume: number; setVolume(v: number): void } | null;
+  // Soundscape (ambience) has no setVolume yet — see the ts-ambience-vol slider
+  // handler below for why the call is optional-chained.
+  soundscape: { enabled: boolean; toggle(): void; unlock(): void; setVolume?(v: number): void } | null;
 }
 
 interface Cloud { x: number; y: number; r: number; speed: number; }
+
+/** Accessibility text-scale steps (U7b): multiply the root font-size, driven
+ *  by the `--ui-scale` custom property (see style.css). */
+type UiScale = 'small' | 'normal' | 'large';
+const UI_SCALE_MULTIPLIER: Record<UiScale, number> = { small: 0.875, normal: 1, large: 1.15 };
+const UI_SCALE_LABEL: Record<UiScale, string> = { small: 'Small', normal: 'Normal', large: 'Large' };
+const UI_SCALE_ORDER: UiScale[] = ['small', 'normal', 'large'];
+const UI_SCALE_STORAGE_KEY = 'centuria-ui-scale';
+
+/** Read the persisted UI scale, defaulting to 'normal' for anything unset or invalid. */
+function loadUiScale(): UiScale {
+  try {
+    const stored = localStorage.getItem(UI_SCALE_STORAGE_KEY);
+    if (stored === 'small' || stored === 'normal' || stored === 'large') return stored;
+  } catch {
+    // storage unavailable — default to normal
+  }
+  return 'normal';
+}
+
+/** Apply a UI scale to the document root so it takes effect everywhere, not
+ *  just while the title screen is mounted, and persist the choice. */
+function applyUiScale(scale: UiScale): void {
+  document.documentElement.style.setProperty('--ui-scale', String(UI_SCALE_MULTIPLIER[scale]));
+  try {
+    localStorage.setItem(UI_SCALE_STORAGE_KEY, scale);
+  } catch {
+    // preference just won't persist
+  }
+}
 
 /** World Dynamism campaign options: opt-in sim behaviors chosen at new game. */
 export interface DynamismSelection {
@@ -23,10 +56,12 @@ export interface ScenarioSelection {
   dynamism: DynamismSelection;
 }
 
-/** Pure HTML renderer for the scenario selection panel (can also be used headlessly). */
-export function scenarioSelectHtml(selectedId: string | null): string {
+/** Pure HTML renderer for the scenario selection panel (can also be used headlessly).
+ *  `sandboxDifficulty` (U11) reflects the player's live Sandbox difficulty pick — it
+ *  used to be hardcoded to 'standard'; defaults to 'standard' for headless callers. */
+export function scenarioSelectHtml(selectedId: string | null, sandboxDifficulty: DifficultyTag = 'standard'): string {
   const entries = [
-    { id: null, name: 'Sandbox', desc: '1919 — free play, no goals', era: '1919' as const, diff: 'standard' as const },
+    { id: null, name: 'Sandbox', desc: '1919 — free play, no goals', era: '1919' as const, diff: sandboxDifficulty },
     ...SCENARIOS.map((s) => ({ id: s.id, name: s.name, desc: `${s.eraStart} — ${s.description.slice(0, 60)}...`, era: s.eraStart, diff: s.difficulty })),
   ];
   const rows = entries.map((e) => {
@@ -53,6 +88,15 @@ export class TitleScreen {
   private selectedScenario: string | null = null; // null = sandbox
   /** World Dynamism toggles (scenario screen). Both default OFF. */
   private dynamism: DynamismSelection = { consumerDemand: false, rivalClimateResponse: false };
+  /** Ambience (Soundscape) volume, 0–1. Soundscape has no setVolume of its own
+   *  yet, so this preference is held and persisted here until it does. */
+  private ambienceVolume = 1;
+  /** Accessibility text-scale preference (U7b). Applied to the document root
+   *  immediately on construction so it's in effect before any screen renders. */
+  private uiScale: UiScale = loadUiScale();
+  /** Sandbox difficulty (U11) — used to be hardcoded to 'standard'; now the
+   *  same standard/hard/brutal tag set the Scenario flow already carries. */
+  private sandboxDifficulty: DifficultyTag = 'standard';
 
   onNewColony: (() => void) | null = null;
   /** Called when the player begins a scenario campaign. */
@@ -65,6 +109,19 @@ export class TitleScreen {
     this.el.className = 'title-screen hidden';
     root.appendChild(this.el);
     this.el.addEventListener('mousedown', (e) => this.handleClick(e));
+    this.el.addEventListener('input', (e) => this.handleInput(e));
+    try {
+      const stored = localStorage.getItem('centuria-ambience-volume');
+      if (stored !== null) {
+        const v = Number(stored);
+        if (Number.isFinite(v)) this.ambienceVolume = Math.min(1, Math.max(0, v));
+      }
+    } catch {
+      // storage unavailable — default to full ambience volume
+    }
+    // Apply the persisted text-scale immediately — it must hold even if the
+    // player never opens Options this session (e.g. resuming via Continue).
+    applyUiScale(this.uiScale);
   }
 
   show(hasSave: boolean): void {
@@ -443,7 +500,7 @@ export class TitleScreen {
     const sel = this.selectedScenario;
     const scenario = sel ? SCENARIOS.find((s) => s.id === sel) : null;
     const eraLabel = scenario ? scenario.eraStart : '1919';
-    const diffLabel = scenario ? scenario.difficulty : 'standard';
+    const diffLabel = scenario ? scenario.difficulty : this.sandboxDifficulty;
     return `
       <div class="ts-layout">
         <div class="ts-left">
@@ -460,13 +517,32 @@ export class TitleScreen {
           <nav class="ts-nav">
             <button class="ts-btn ts-btn-back" id="ts-back">‹ &nbsp;Back</button>
             <div class="ts-sep"></div>
-            ${scenarioSelectHtml(sel)}
+            ${scenarioSelectHtml(sel, this.sandboxDifficulty)}
+            ${sel === null ? `<div class="ts-sep"></div>${this.sandboxDifficultyHtml()}` : ''}
             <div class="ts-sep"></div>
             ${this.dynamismHtml()}
             <div class="ts-sep"></div>
             <button class="ts-btn ts-btn-primary btn-gold" id="ts-begin-scenario">&#9654; Begin Campaign</button>
           </nav>
         </div>
+      </div>`;
+  }
+
+  /** SANDBOX DIFFICULTY (U11): the same standard/hard/brutal tag picker markup
+   *  as `DesignScreen.choiceRow` (`.design-row`/`.design-choices`/`.design-choice`),
+   *  reusing `DIFFICULTY_TAGS` from designscreen.ts rather than rebuilding the
+   *  scenario flow's difficulty concept. Only shown while Sandbox is selected —
+   *  historical scenarios carry their own fixed difficulty. */
+  private sandboxDifficultyHtml(): string {
+    const buttons = DIFFICULTY_TAGS.map((tag) =>
+      `<button type="button" class="design-choice${tag.value === this.sandboxDifficulty ? ' design-choice-on' : ''}" data-difficulty="${tag.value}">${tag.label}</button>`,
+    ).join('');
+    const current = DIFFICULTY_TAGS.find((tag) => tag.value === this.sandboxDifficulty);
+    return `
+      <div class="design-row">
+        <p class="design-row-title"><strong>Sandbox Difficulty</strong></p>
+        <div class="design-choices">${buttons}</div>
+        <p class="design-desc">${current ? current.desc : ''}</p>
       </div>`;
   }
 
@@ -493,6 +569,25 @@ export class TitleScreen {
       </div>`;
   }
 
+  /** One SFX/Music/Ambience row: an on/off toggle plus a 0–100 volume slider.
+   *  `vol` is 0–1; the slider is disabled while the channel is off. `key`
+   *  matches the `data-vol` the `input` handler reads. */
+  private audioRowHtml(key: 'sfx' | 'music' | 'ambience', label: string, id: string, on: boolean, vol: number): string {
+    const pct = Math.round(Math.min(1, Math.max(0, vol)) * 100);
+    return `
+      <div class="ts-audio-row">
+        <button class="ts-btn ts-toggle" id="${id}">
+          <span>${label}</span>
+          <span class="ts-val ${on ? 'ts-on' : 'ts-off'}">${on ? 'ON' : 'OFF'}</span>
+        </button>
+        <div class="ts-vol-row">
+          <input type="range" class="ts-vol-slider" data-vol="${key}" min="0" max="100"
+            value="${pct}" ${on ? '' : 'disabled'} aria-label="${label} volume">
+          <span class="ts-vol-label">${pct}%</span>
+        </div>
+      </div>`;
+  }
+
   private optionsHtml(): string {
     const { sfx, music, soundscape } = this.audio;
     const isFullscreen = !!document.fullscreenElement;
@@ -508,17 +603,13 @@ export class TitleScreen {
           <nav class="ts-nav">
             <button class="ts-btn ts-btn-back" id="ts-back">‹ &nbsp;Back</button>
             <div class="ts-sep"></div>
-            <button class="ts-btn ts-toggle" id="ts-sound">
-              <span>Sound Effects</span>
-              <span class="ts-val ${sfx?.muted ? 'ts-off' : 'ts-on'}">${sfx?.muted ? 'OFF' : 'ON'}</span>
-            </button>
-            <button class="ts-btn ts-toggle" id="ts-music">
-              <span>Music</span>
-              <span class="ts-val ${music?.enabled ? 'ts-on' : 'ts-off'}">${music?.enabled ? 'ON' : 'OFF'}</span>
-            </button>
-            <button class="ts-btn ts-toggle" id="ts-ambience">
-              <span>Ambience</span>
-              <span class="ts-val ${soundscape?.enabled ? 'ts-on' : 'ts-off'}">${soundscape?.enabled ? 'ON' : 'OFF'}</span>
+            ${this.audioRowHtml('sfx', 'Sound Effects', 'ts-sound', !sfx?.muted, sfx?.volume ?? 1)}
+            ${this.audioRowHtml('music', 'Music', 'ts-music', !!music?.enabled, music?.volume ?? 1)}
+            ${this.audioRowHtml('ambience', 'Ambience', 'ts-ambience', !!soundscape?.enabled, this.ambienceVolume)}
+            <div class="ts-sep"></div>
+            <button class="ts-btn ts-toggle" id="ts-scale">
+              <span>Text Size</span>
+              <span class="ts-val">${UI_SCALE_LABEL[this.uiScale]}</span>
             </button>
             <div class="ts-sep"></div>
             <button class="ts-btn ts-toggle" id="ts-fullscreen">
@@ -551,6 +642,16 @@ export class TitleScreen {
       return;
     }
 
+    // Sandbox difficulty picker (U11) — same data-attribute delegation pattern
+    // as the World Dynamism rows above.
+    const diffBtn = (e.target as HTMLElement).closest<HTMLElement>('[data-difficulty]');
+    if (diffBtn) {
+      e.preventDefault();
+      this.sandboxDifficulty = diffBtn.dataset.difficulty as DifficultyTag;
+      this.render();
+      return;
+    }
+
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
     if (!btn || btn.disabled) return;
     switch (btn.id) {
@@ -565,7 +666,7 @@ export class TitleScreen {
         const sel: ScenarioSelection = {
           scenarioId: this.selectedScenario,
           eraStart: scenario ? scenario.eraStart : '1919',
-          difficulty: scenario ? scenario.difficulty : 'standard',
+          difficulty: scenario ? scenario.difficulty : this.sandboxDifficulty,
           dynamism: { ...this.dynamism },
         };
         this.onBeginScenario?.(sel);
@@ -577,11 +678,42 @@ export class TitleScreen {
         this.audio.music?.toggle(); this.audio.music?.unlock(); this.render(); break;
       case 'ts-ambience':
         this.audio.soundscape?.toggle(); this.audio.soundscape?.unlock(); this.render(); break;
+      case 'ts-scale': {
+        const next = UI_SCALE_ORDER[(UI_SCALE_ORDER.indexOf(this.uiScale) + 1) % UI_SCALE_ORDER.length];
+        this.uiScale = next;
+        applyUiScale(next);
+        this.render();
+        break;
+      }
       case 'ts-fullscreen':
         if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
         else document.exitFullscreen?.().catch(() => {});
         this.render();
         break;
     }
+  }
+
+  /** Live volume-slider drag handling. Deliberately does *not* call `render()`
+   *  (which rebuilds innerHTML and would drop the slider mid-drag) — it pokes
+   *  the engine directly and patches the adjacent `%` label in place. */
+  private handleInput(e: Event): void {
+    const slider = (e.target as HTMLElement).closest<HTMLInputElement>('input.ts-vol-slider[data-vol]');
+    if (!slider) return;
+    const v = Math.min(1, Math.max(0, Number(slider.value) / 100));
+    switch (slider.dataset.vol) {
+      case 'sfx':      this.audio.sfx?.setVolume(v); break;
+      case 'music':    this.audio.music?.setVolume(v); break;
+      case 'ambience':
+        this.ambienceVolume = v;
+        try {
+          localStorage.setItem('centuria-ambience-volume', String(v));
+        } catch {
+          // preference just won't persist
+        }
+        this.audio.soundscape?.setVolume?.(v);
+        break;
+    }
+    const label = slider.parentElement?.querySelector<HTMLElement>('.ts-vol-label');
+    if (label) label.textContent = `${Math.round(v * 100)}%`;
   }
 }
