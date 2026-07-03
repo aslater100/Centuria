@@ -1,6 +1,7 @@
 import './screens.css';
 import { SCENARIOS } from '../sim/region';
 import { DIFFICULTY_TAGS, type DifficultyTag } from './designscreen';
+import { WikiPanel } from './WikiPanel';
 
 interface AudioHandles {
   sfx: { muted: boolean; toggleMuted(): void; volume: number; setVolume(v: number): void } | null;
@@ -97,6 +98,9 @@ export class TitleScreen {
   /** Sandbox difficulty (U11) — used to be hardcoded to 'standard'; now the
    *  same standard/hard/brutal tag set the Scenario flow already carries. */
   private sandboxDifficulty: DifficultyTag = 'standard';
+
+  /** U3: help/wiki reachable from the title screen, created lazily on first open. */
+  private wiki: WikiPanel | null = null;
 
   onNewColony: (() => void) | null = null;
   /** Called when the player begins a scenario campaign. */
@@ -489,6 +493,7 @@ export class TitleScreen {
             <button class="ts-btn" id="ts-continue" ${this.hasSave ? '' : 'disabled'}>Continue</button>
             <div class="ts-sep"></div>
             <button class="ts-btn" id="ts-options">Options &nbsp;<span class="ts-arrow">›</span></button>
+            <button class="ts-btn" id="ts-help">? &nbsp;Help</button>
             <div class="ts-sep"></div>
             <button class="ts-btn ts-btn-quit" id="ts-quit">Quit to Desktop</button>
           </nav>
@@ -660,6 +665,7 @@ export class TitleScreen {
       case 'ts-quit':     this.onQuit?.();       break;
       case 'ts-scenarios': this.view = 'scenario'; this.render(); break;
       case 'ts-options':  this.view = 'options'; this.render(); break;
+      case 'ts-help':     (this.wiki ??= new WikiPanel(this.el.parentElement ?? document.body)).toggle(); break;
       case 'ts-back':     this.view = 'main';    this.render(); break;
       case 'ts-begin-scenario': {
         const scenario = this.selectedScenario ? SCENARIOS.find((s) => s.id === this.selectedScenario) : null;

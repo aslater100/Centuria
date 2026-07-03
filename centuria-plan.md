@@ -11,8 +11,10 @@ Source: audit delivered 2026-07-03 (see session-log.md when created). Baseline s
 | Lore depth | 3.5/10 | 9/10 |
 | UI/UX (added 2026-07-03) | 4/10 (5 core / 3 meta, weighted 60/40) | 9/10 |
 
-**Status: PLAN ONLY. Nothing below has been dispatched or implemented.** Per CLAUDE.md this is a
-multi-step, cross-cutting change set — it needs an explicit "go" before any task is delegated.
+**Status: EXECUTED 2026-07-03 (PR #346)** — 20 of 23 tasks landed. Still open: **D1, D2**
+(spec'd in `docs/specs/09-audit-nine.md`, awaiting Hard-Stop schema sign-off) and **G1**
+(blocked: no live art-generation channel in the dev env). Follow-ups and unblock paths in
+`session-log.md`.
 
 ## How to read a task card
 
