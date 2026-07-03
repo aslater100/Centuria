@@ -28,9 +28,11 @@ const autoExpandPlayer = process.env.SIM_PLAYER_MANUAL !== '1';
 // reads the flow signal and `wMkt%` shows live tightness instead of the structural 0.
 const consumerDemand = process.env.SIM_CONSUMER_DEMAND === '1';
 // Autoplay STATEHOOD/governance director (charter → research spine → central bank) —
-// OPT-IN (SIM_AUTOPLAY_STATEHOOD=1). Kept off the default sweep because state-tier
-// income-tax revenue currently outruns the autoplayer's development spend (unbounded
-// treasury); turn it on to study the monetary layer / measurable cost-push inflation.
+// OPT-IN (SIM_AUTOPLAY_STATEHOOD=1). Kept off the default sweep so the legacy no-tech
+// baseline stays comparable (flipping it re-baselines every seed). Bounded on both
+// axes now: the autoplay state sink holds treas/GDP ~20mo, and the session-23
+// sector-productivity re-normalization holds full-tree GDP to a sane scale (~30–60M
+// by 2100, was 2–4B). Turn it on to study the monetary layer / cost-push inflation.
 const autoplayStatehood = process.env.SIM_AUTOPLAY_STATEHOOD === '1';
 // Existential climate response — OPT-IN (SIM_RIVAL_CLIMATE_RESPONSE=1). Rivals
 // scramble to avoid the Drowned branch: fossil-locked archetypes get more

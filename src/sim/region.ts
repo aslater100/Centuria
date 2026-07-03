@@ -482,6 +482,67 @@ const SECTOR_BASE_OUTPUT: Record<SectorId, number> = {
   agriculture: 10.0, industry: 14.0, services: 13.0, information: 30.0,
 };
 
+/** Per-tech productivity boosts on output per worker, by sector. Each value is a
+ *  RELATIVE weight, not a literal multiplier: the stack is log-normalized below so
+ *  the FULL tree lands exactly on `SECTOR_TECH_CEILING`. (The raw products had
+ *  crept to ×47 / ×160 / ×114 / ×1200 as sessions added techs to the table without
+ *  re-normalizing — the autoplay-statehood GDP runaway, ~1500× baseline by 2100.) */
+const SECTOR_TECH_BOOSTS: Record<SectorId, ReadonlyArray<readonly [string, number]>> = {
+  agriculture: [
+    ['electrical_grid', 1.5],     // electrified irrigation and tools
+    ['combustion_engine', 2.5],   // tractors replace the horse
+    ['mass_production', 3.5],     // industrialised farming at scale
+    ['green_revolution', 1.8],    // high-yield cultivars and synthetic inputs
+    ['renewables', 2.0],          // precision agriculture, sustainable yields
+  ],
+  industry: [
+    ['steel_industry', 2.0],      // steel mills and heavy equipment
+    ['chemical_industry', 1.6],   // synthetics, fertilizer, process chemistry
+    ['electrical_grid', 2.0],     // electrified factories
+    ['mass_production', 4.0],     // assembly lines, Fordism
+    ['atomic_age', 2.5],          // nuclear power drives heavy industry
+    ['automated_logistics', 2.5], // robotic supply chains
+  ],
+  services: [
+    ['free_press', 1.5],          // literacy drives commerce
+    ['labor_law', 1.3],           // protected workers are productive workers
+    ['electrical_grid', 2.0],     // electrified retail, refrigeration
+    ['aviation', 1.4],            // air mobility multiplies trade and travel
+    ['asphalt', 2.0],             // road mobility multiplies trade
+    ['smart_grid', 1.3],          // sensors and demand-response trim waste
+    ['computing', 8.0],           // the productivity leap of the office PC
+  ],
+  information: [
+    ['free_press', 2.0],          // free information accelerates learning
+    ['telecommunications', 2.0],  // exchanges and broadcast knit the region
+    ['computing', 10.0],          // digital revolution, internet economy
+    ['internet', 3.0],            // packet-switched networks at scale
+    ['automated_logistics', 5.0], // global information networks
+    ['maglev', 2.0],              // ultra-fast connectivity
+  ],
+};
+
+/** Cumulative maximums: the productivity multiplier with the ENTIRE sector stack
+ *  researched — the wage-calibration anchor (2000s knowledge-economy wages sit at
+ *  roughly 8–12× the 1900 frontier base, per the `sectorProductivity` doc). */
+export const SECTOR_TECH_CEILING: Record<SectorId, number> = {
+  agriculture: 4, industry: 9, services: 7, information: 12,
+};
+
+/** ln(ceiling) / ln(full raw product) per sector — the exponent that maps a raw
+ *  boost stack onto the documented ceiling while preserving every tech's relative
+ *  (log) weight. Derived from the tables at load, so adding a tech to the boosts
+ *  re-normalizes the whole curve automatically instead of inflating the century's
+ *  endpoint again. */
+const SECTOR_TECH_CURVE: Record<SectorId, number> = (() => {
+  const curve = {} as Record<SectorId, number>;
+  for (const id of SECTOR_IDS) {
+    const full = SECTOR_TECH_BOOSTS[id].reduce((p, [, m]) => p * m, 1);
+    curve[id] = Math.log(SECTOR_TECH_CEILING[id]) / Math.log(full);
+  }
+  return curve;
+})();
+
 export function defaultSectors(): Sectors {
   const s = {} as Sectors;
   for (const id of SECTOR_IDS) {
@@ -7144,53 +7205,24 @@ export class RegionSim {
       (this.has('maglev') ? 0.15 : 0);
   }
 
-  /** Tech multipliers on output per worker, by sector.
+  /** Tech multiplier on output per worker for a sector — the researched slice of
+   *  `SECTOR_TECH_BOOSTS`, log-normalized (`SECTOR_TECH_CURVE`) so the full tree
+   *  lands on `SECTOR_TECH_CEILING`: agri ~4x, industry ~9x, services ~7x, info ~12x.
    *
    *  Calibrated so wages feel right for each era:
    *    1900 (base):    £10–18/mo  ≈ £0.33–0.60/day  (frontier subsistence)
-   *    1930 (steel+e): £25–50/mo  ≈ £0.83–1.67/day  (early industrial)
-   *    1960 (mass):    £55–130/mo ≈ £1.83–4.33/day  (post-war boom)
+   *    1930 (steel+e): £18–35/mo  ≈ £0.60–1.17/day  (early industrial)
+   *    1960 (mass):    £35–90/mo  ≈ £1.17–3.00/day  (post-war boom)
    *    2000+ (info):   £80–220/mo ≈ £2.67–7.33/day  (knowledge economy)
    *
-   *  Cumulative maximums: agri ~4x, industry ~9x, services ~7x, info ~12x. */
-  private sectorProductivity(id: SectorId): number {
+   *  Exactly 1 with nothing researched (the no-tech autoplay sweep stays
+   *  byte-identical), and monotone: every researched tech still adds output. */
+  sectorProductivity(id: SectorId): number {
     let m = 1;
-    const boost = (node: string, mult: number) => { if (this.has(node)) m *= mult; };
-    switch (id) {
-      case 'agriculture':
-        boost('electrical_grid', 1.5);     // electrified irrigation and tools
-        boost('combustion_engine', 2.5);   // tractors replace the horse
-        boost('mass_production', 3.5);     // industrialised farming at scale
-        boost('green_revolution', 1.8);    // high-yield cultivars and synthetic inputs
-        boost('renewables', 2.0);          // precision agriculture, sustainable yields
-        break;
-      case 'industry':
-        boost('steel_industry', 2.0);      // steel mills and heavy equipment
-        boost('chemical_industry', 1.6);   // synthetics, fertilizer, process chemistry
-        boost('electrical_grid', 2.0);     // electrified factories
-        boost('mass_production', 4.0);     // assembly lines, Fordism
-        boost('atomic_age', 2.5);          // nuclear power drives heavy industry
-        boost('automated_logistics', 2.5); // robotic supply chains
-        break;
-      case 'services':
-        boost('free_press', 1.5);          // literacy drives commerce
-        boost('labor_law', 1.3);           // protected workers are productive workers
-        boost('electrical_grid', 2.0);     // electrified retail, refrigeration
-        boost('aviation', 1.4);            // air mobility multiplies trade and travel
-        boost('asphalt', 2.0);             // road mobility multiplies trade
-        boost('smart_grid', 1.3);          // sensors and demand-response trim waste
-        boost('computing', 8.0);           // the productivity leap of the office PC
-        break;
-      case 'information':
-        boost('free_press', 2.0);          // free information accelerates learning
-        boost('telecommunications', 2.0);  // exchanges and broadcast knit the region
-        boost('computing', 10.0);          // digital revolution, internet economy
-        boost('internet', 3.0);            // packet-switched networks at scale
-        boost('automated_logistics', 5.0); // global information networks
-        boost('maglev', 2.0);              // ultra-fast connectivity
-        break;
+    for (const [node, mult] of SECTOR_TECH_BOOSTS[id]) {
+      if (this.has(node)) m *= mult;
     }
-    return m;
+    return m === 1 ? 1 : Math.pow(m, SECTOR_TECH_CURVE[id]);
   }
 
   private cacheSectorProductivity(): void {
