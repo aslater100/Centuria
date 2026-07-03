@@ -1588,6 +1588,126 @@ export const RIVAL_ARCHETYPES: Record<RivalArchetype, { name: string; desc: stri
   },
 };
 
+/** A rival's diplomatic register (docs/lore-bible.md §Voice), used to flavor
+ *  treaty-offer and war-declaration log lines without touching any numbers. */
+export type RivalVoiceTone = 'mercantile' | 'face_saving' | 'sermonic' | 'clipped' | 'pragmatic';
+
+/** Reads a rival's voice register straight off the personality weights already
+ *  on the record — no new RNG draw, so the deterministic stream is untouched.
+ *  The first qualifying "-heavy" weight (>=7) wins, checked commerce -> honor
+ *  -> ideology -> expansion (GDD §6.3 order); below that bar on all four the
+ *  rival reads as pragmatic. Exported so systems/diplomacy.ts can share it. */
+export function rivalVoiceTone(rival: Pick<RivalNation, 'weights'>): RivalVoiceTone {
+  const w = rival.weights;
+  if (w.commerce >= 7) return 'mercantile';
+  if (w.honor >= 7) return 'face_saving';
+  if (w.ideology >= 7) return 'sermonic';
+  if (w.expansion >= 7) return 'clipped';
+  return 'pragmatic';
+}
+
+/** DIPLOMATIC OVERTURE line (rivalDiplomaticRound), voiced by archetype. */
+function diplomaticOvertureLine(rival: RivalNation, treatyName: string): string {
+  switch (rivalVoiceTone(rival)) {
+    case 'mercantile':
+      return `DIPLOMATIC OVERTURE: ${rival.name}'s envoys arrive with ledgers open — they propose a ${treatyName}, terms attached.`;
+    case 'face_saving':
+      return `DIPLOMATIC OVERTURE: ${rival.name} extends, with due ceremony, an offer of a ${treatyName}.`;
+    case 'sermonic':
+      return `DIPLOMATIC OVERTURE: ${rival.name} calls it a moral necessity and proposes a ${treatyName}.`;
+    case 'clipped':
+      return `DIPLOMATIC OVERTURE: ${rival.name} proposes a ${treatyName}. Terms are non-negotiable.`;
+    case 'pragmatic':
+      return `DIPLOMATIC OVERTURE: ${rival.name} proposes a ${treatyName}.`;
+  }
+}
+
+/** ALLIANCE PROPOSAL line (checkRivalSpecialEvents), voiced by archetype. */
+function allianceProposalLine(rival: RivalNation, hostileName: string): string {
+  switch (rivalVoiceTone(rival)) {
+    case 'mercantile':
+      return `ALLIANCE PROPOSAL: ${rival.name} floats a pact against ${hostileName} — shared enemies, they note, are good for business.`;
+    case 'face_saving':
+      return `ALLIANCE PROPOSAL: ${rival.name} proposes, delicately, a pact against ${hostileName} — mutual enmity draws you together.`;
+    case 'sermonic':
+      return `ALLIANCE PROPOSAL: ${rival.name} names ${hostileName} a common sin and calls for a pact against it.`;
+    case 'clipped':
+      return `ALLIANCE PROPOSAL: ${rival.name} proposes a pact against ${hostileName}. Sign or don't.`;
+    case 'pragmatic':
+      return `ALLIANCE PROPOSAL: ${rival.name} proposes a pact against ${hostileName} — their mutual enmity draws you together.`;
+  }
+}
+
+/** ULTIMATUM line (checkRivalSpecialEvents), voiced by archetype. `tributeText`
+ *  is the already-formatted currency string (formatCurrency), so this stays a
+ *  pure string composer. */
+function ultimatumLine(rival: RivalNation, tributeText: string): string {
+  switch (rivalVoiceTone(rival)) {
+    case 'mercantile':
+      return `ULTIMATUM: ${rival.name} presents an invoice dressed as diplomacy — ${tributeText} in tribute, or the accounts close. ` +
+        `${rival.leader} calls it a regrettable tariff.`;
+    case 'face_saving':
+      return `ULTIMATUM: ${rival.name} demands, with wounded formality, ${tributeText} in tribute. ` +
+        `${rival.leader} warns refusal will not be forgotten.`;
+    case 'sermonic':
+      return `ULTIMATUM: ${rival.name} declares ${tributeText} in tribute a debt owed to justice. ` +
+        `${rival.leader} promises reckoning for refusal.`;
+    case 'clipped':
+      return `ULTIMATUM: ${rival.name} demands ${tributeText} in tribute. ${rival.leader}: pay, or face the consequences.`;
+    case 'pragmatic':
+      return `ULTIMATUM: ${rival.name}, emboldened by power, demands ${tributeText} in tribute. ` +
+        `${rival.leader} threatens grave consequences for refusal.`;
+  }
+}
+
+/** HONOR UPHELD line (checkRivalSpecialEvents), voiced by archetype. */
+function honorUpheldLine(rival: RivalNation): string {
+  switch (rivalVoiceTone(rival)) {
+    case 'mercantile':
+      return `HONOR UPHELD: ${rival.name} settles an old account to the last coin. The envoys call ${rival.leader} a fair trader.`;
+    case 'face_saving':
+      return `HONOR UPHELD: ${rival.name} fulfills an ancient agreement precisely as sworn. The envoys speak of ${rival.leader}'s legendary word.`;
+    case 'sermonic':
+      return `HONOR UPHELD: ${rival.name} keeps a promise it calls sacred. The envoys praise ${rival.leader}'s faithfulness.`;
+    case 'clipped':
+      return `HONOR UPHELD: ${rival.name} keeps its word. No ceremony — ${rival.leader} simply delivers.`;
+    case 'pragmatic':
+      return `HONOR UPHELD: ${rival.name} fulfills an ancient agreement with surprising integrity. The envoys speak of ${rival.leader}'s legendary word.`;
+  }
+}
+
+/** WAR (revanchism) declaration line (startPlayerWar), voiced by archetype. */
+function revanchismWarLine(rival: RivalNation, support: number): string {
+  switch (rivalVoiceTone(rival)) {
+    case 'mercantile':
+      return `WAR: ${rival.name} calls in an old debt at gunpoint — they have not forgiven their defeat. The home front rallies (support ${support}).`;
+    case 'face_saving':
+      return `WAR: ${rival.name} marches to erase the shame of an old defeat. The home front rallies (support ${support}).`;
+    case 'sermonic':
+      return `WAR: ${rival.name} names the old defeat a wound unhealed and marches to close it. The home front rallies (support ${support}).`;
+    case 'clipped':
+      return `WAR: ${rival.name} marches for revenge. No warning, no terms. The home front rallies (support ${support}).`;
+    case 'pragmatic':
+      return `WAR: ${rival.name} marches for revenge — they have not forgiven their defeat. The home front rallies (support ${support}).`;
+  }
+}
+
+/** WAR (defensive, non-revanchism) declaration line (startPlayerWar), voiced by archetype. */
+function defensiveWarLine(rival: RivalNation, nation: string, support: number): string {
+  switch (rivalVoiceTone(rival)) {
+    case 'mercantile':
+      return `WAR: ${rival.name} declares war on ${nation} — the old arrangement no longer pays. The home front rallies (support ${support}).`;
+    case 'face_saving':
+      return `WAR: ${rival.name} declares war on ${nation}, honor demanding no less. The home front rallies (support ${support}).`;
+    case 'sermonic':
+      return `WAR: ${rival.name} declares war on ${nation}, naming it a righteous cause. The home front rallies (support ${support}).`;
+    case 'clipped':
+      return `WAR: ${rival.name} declares war on ${nation}. No terms offered. The home front rallies (support ${support}).`;
+    case 'pragmatic':
+      return `WAR: ${rival.name} declares war on ${nation}! A defensive war — the home front rallies (support ${support}).`;
+  }
+}
+
 export type TreatyKind = 'non_aggression' | 'trade_agreement' | 'defensive_pact' | 'climate_accord';
 
 // ---- Monetary system types (GDD §5.1) ----
@@ -11097,9 +11217,9 @@ export class RegionSim {
     this.noteHistory(rv, defensive ? `Declared war on ${nation}, ${this.year}.` : `Attacked by ${nation}, ${this.year}.`);
     let warMsg: string;
     if (defensive && cb === 'revanchism') {
-      warMsg = `WAR: ${rv.name} marches for revenge — they have not forgiven their defeat. The home front rallies (support ${this.playerWar.support}).`;
+      warMsg = revanchismWarLine(rv, this.playerWar.support);
     } else if (defensive) {
-      warMsg = `WAR: ${rv.name} declares war on ${nation}! A defensive war — the home front rallies (support ${this.playerWar.support}).`;
+      warMsg = defensiveWarLine(rv, nation, this.playerWar.support);
     } else {
       warMsg = `WAR DECLARED on ${rv.name} — casus belli: ${CASUS_BELLI_DEFS[cb].name.toLowerCase()} (support ${this.playerWar.support}).`;
     }
@@ -13749,10 +13869,7 @@ export class RegionSim {
           kind: chosen,
           expiresDay: this.day + 180, // 6-month expiration
         });
-        this.addLog(
-          `DIPLOMATIC OVERTURE: ${rival.name} proposes a ${TREATY_DEFS[chosen].name}.`,
-          'info',
-        );
+        this.addLog(diplomaticOvertureLine(rival, TREATY_DEFS[chosen].name), 'info');
       }
     }
 
@@ -13791,11 +13908,7 @@ export class RegionSim {
           kind: 'defensive_pact',
           expiresDay: this.day + 180,
         });
-        this.addLog(
-          `ALLIANCE PROPOSAL: ${rival.name} proposes a pact against ${hostile.name} ` +
-          `— their mutual enmity draws you together.`,
-          'info',
-        );
+        this.addLog(allianceProposalLine(rival, hostile.name), 'info');
         this.noteHistory(rival, `Sought defensive pact against ${hostile.name}, ${this.year}.`);
       }
     }
@@ -13807,11 +13920,7 @@ export class RegionSim {
       !this.playerWar && this.aiRng.chance(this.aggroChance(0.012))
     ) {
       const tributeDemand = Math.round(this.treasury * 0.1);
-      this.addLog(
-        `ULTIMATUM: ${rival.name}, emboldened by power, demands ` + formatCurrency(tributeDemand) + ` in tribute. ` +
-        `${rival.leader} threatens grave consequences for refusal.`,
-        'bad',
-      );
+      this.addLog(ultimatumLine(rival, formatCurrency(tributeDemand)), 'bad');
       this.noteHistory(rival, `Demanded tribute from ${this.stateName || 'the State'}, ${this.year}.`);
     }
 
@@ -13824,11 +13933,7 @@ export class RegionSim {
     ) {
       const bonus = 5 + rival.weights.honor;
       rival.relations = this.clampRel(rival.relations + bonus);
-      this.addLog(
-        `HONOR UPHELD: ${rival.name} fulfills an ancient agreement with surprising integrity. ` +
-        `The envoys speak of ${rival.leader}'s legendary word.`,
-        'good',
-      );
+      this.addLog(honorUpheldLine(rival), 'good');
       this.noteHistory(rival, `Displayed honor in dealings with ${this.stateName || 'the State'}, ${this.year}.`);
     }
   }

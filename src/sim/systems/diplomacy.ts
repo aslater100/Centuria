@@ -38,6 +38,7 @@ import {
   ARCHETYPE_WAR_FREQ_MULT,
   rivalClimateUrgency,
   rivalArmsCapacity,
+  rivalVoiceTone,
   ARMAMENTS_WARPOWER_FLOOR,
   URGENCY_AGGRESSION_LIFT,
   URGENCY_RELATIONS_DRAG,
@@ -47,6 +48,60 @@ import {
 } from '../region';
 import { formatCurrency } from '../defs';
 import { tickPlayerWar } from './military';
+
+/** Envoy-arrival line for an AI-initiated Trade Agreement offer, voiced by
+ *  archetype (docs/lore-bible.md §Voice). Text-only — no RNG, no logic change. */
+function tradeEnvoyLine(rv: RivalNation): string {
+  switch (rivalVoiceTone(rv)) {
+    case 'mercantile':
+      return `Envoys from ${rv.name} arrive with ledgers and samples: they offer a Trade Agreement.`;
+    case 'face_saving':
+      return `Envoys from ${rv.name} arrive bearing formal compliments and the offer of a Trade Agreement.`;
+    case 'sermonic':
+      return `Envoys from ${rv.name} arrive preaching mutual prosperity — they offer a Trade Agreement.`;
+    case 'clipped':
+      return `Envoys from ${rv.name} arrive with a Trade Agreement on the table. No preamble.`;
+    case 'pragmatic':
+      return `Envoys from ${rv.name} arrive with ledgers and samples: they offer a Trade Agreement.`;
+  }
+}
+
+/** AI-initiated Non-Aggression Pact proposal line, voiced by archetype. */
+function nonAggressionProposalLine(rv: RivalNation): string {
+  switch (rivalVoiceTone(rv)) {
+    case 'mercantile':
+      return `${rv.name} proposes a Non-Aggression Pact — good fences, they say, make good customers.`;
+    case 'face_saving':
+      return `${rv.name} proposes a Non-Aggression Pact, correctly and without warmth — cold neighbors, fenced borders.`;
+    case 'sermonic':
+      return `${rv.name} proposes a Non-Aggression Pact as a matter of principle — cold neighbors, fenced borders.`;
+    case 'clipped':
+      return `${rv.name} proposes a Non-Aggression Pact. Fenced borders, no further discussion.`;
+    case 'pragmatic':
+      return `${rv.name} proposes a Non-Aggression Pact — cold neighbors, fenced borders.`;
+  }
+}
+
+/** AI-initiated Climate Accord invitation line, voiced by archetype. */
+function climateAccordInviteLine(rv: RivalNation, warmingC: number): string {
+  const warmingText = `warming is past +${warmingC.toFixed(1)}°C`;
+  switch (rivalVoiceTone(rv)) {
+    case 'mercantile':
+      return `${rv.name} extends a Climate Accord invitation as a hedge against the balance sheet — ` +
+        `${warmingText} and the losses are mounting.`;
+    case 'face_saving':
+      return `${rv.name} extends, with due ceremony, a formal invitation to the Climate Accord — ` +
+        `${warmingText} and they call for collective action.`;
+    case 'sermonic':
+      return `${rv.name} calls the Climate Accord a moral reckoning and extends a formal invitation — ` +
+        `${warmingText} and they call for collective action.`;
+    case 'clipped':
+      return `${rv.name} extends a Climate Accord invitation. ${warmingText}. Sign or don't.`;
+    case 'pragmatic':
+      return `${rv.name} extends a formal invitation to the Climate Accord — ` +
+        `${warmingText} and they call for collective action.`;
+  }
+}
 
   /** Monthly diplomacy tick: emergence, relations drift, AI offers,
    *  hostile mischief, regime change abroad, and foreign wars. */
@@ -84,10 +139,10 @@ export function updateDiplomacy(r: RegionSim): void {
       if (r.stateProclaimed && !r.offers.some((o) => o.rivalId === rv.id)) {
         if (!rv.treaties.includes('trade_agreement') && rv.weights.commerce >= 5 && rv.relations > 30 && r.rng.chance(0.12)) {
           r.offers.push({ rivalId: rv.id, kind: 'trade_agreement', expiresDay: r.day + 90 });
-          r.addLog(`Envoys from ${rv.name} arrive with ledgers and samples: they offer a Trade Agreement.`, 'info');
+          r.addLog(tradeEnvoyLine(rv), 'info');
         } else if (!rv.treaties.includes('non_aggression') && rv.relations < -10 && rv.relations > -50 && rv.weights.risk <= 5 && r.rng.chance(0.08)) {
           r.offers.push({ rivalId: rv.id, kind: 'non_aggression', expiresDay: r.day + 90 });
-          r.addLog(`${rv.name} proposes a Non-Aggression Pact — cold neighbors, fenced borders.`, 'info');
+          r.addLog(nonAggressionProposalLine(rv), 'info');
         } else if (
           !rv.treaties.includes('climate_accord') &&
           r.accordUnlocked() &&
@@ -98,11 +153,7 @@ export function updateDiplomacy(r: RegionSim): void {
         ) {
           // High-propensity rival (trading republic or crusader) invites player to the Climate Accord
           r.offers.push({ rivalId: rv.id, kind: 'climate_accord', expiresDay: r.day + 180 });
-          r.addLog(
-            `${rv.name} extends a formal invitation to the Climate Accord — ` +
-            `warming is past +${r.warmingC.toFixed(1)}°C and they call for collective action.`,
-            'info',
-          );
+          r.addLog(climateAccordInviteLine(rv, r.warmingC), 'info');
         }
       }
       // Hostile mischief (GDD §6.4): town-scale friction, deniable and cheap.
