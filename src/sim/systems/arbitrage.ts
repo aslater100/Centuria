@@ -16,7 +16,7 @@
  */
 import type { RegionSim, Settlement, Route } from '../region';
 import { INTERMEDIATE_GOODS } from '../region';
-import { localGoodPrice } from './goods';
+import { buildGoodPriceScan } from './goods';
 import { DAYS_PER_MONTH, formatCurrency } from '../defs';
 
 /** PR-3 slice 3 — profit scale for a price-driven shipment: pendingIncome =
@@ -161,6 +161,12 @@ export function tickPriceArbitrage(r: RegionSim): void {
   // cheap→dear whose per-unit price gap clears the per-unit congestion friction.
   type Opp = { goodId: string; source: Settlement; market: Settlement; gap: number; tariff: number };
   const opps: Opp[] = [];
+  // The scan below is read-only (dispatch mutates AFTER it), so every price input
+  // is loop-invariant: memoize world scarcity / sector totals / per-town demand
+  // once for the whole scan instead of re-deriving them per pair (the hottest
+  // path in the sim per profiling — see buildGoodPriceScan). Byte-identical
+  // prices; the memo dies with this call.
+  const priceOf = buildGoodPriceScan(r, goodIds);
   for (let i = 0; i < allSettlements.length; i++) {
     for (let j = i + 1; j < allSettlements.length; j++) {
       const a = allSettlements[i];
@@ -168,8 +174,8 @@ export function tickPriceArbitrage(r: RegionSim): void {
       const tariff = computeCongestionTariff(r, a.id, b.id, routeIndex);
       if (tariff >= 0.3) continue; // no route
       for (const goodId of goodIds) {
-        const priceA = localGoodPrice(r, a, goodId);
-        const priceB = localGoodPrice(r, b, goodId);
+        const priceA = priceOf(a, goodId);
+        const priceB = priceOf(b, goodId);
         if (priceA === priceB) continue;
         const source = priceA < priceB ? a : b; // lower price — abundant
         const market = priceA < priceB ? b : a; // higher price — short

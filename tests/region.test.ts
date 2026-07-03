@@ -55,11 +55,14 @@ describe('RegionSim (aggregate model)', () => {
     // Set age to ancient so risk fires on first monthly check (annualRisk/12 = 0.01).
     // Drive the RNG to a state where the check fires by calling ageNotables many times.
     mayor.age = 90;
+    const originalId = mayor.id;
     // Call the private tickNotableLifecycle() 200 times directly: P(survive) = 0.99^200 < 14%
     for (let i = 0; i < 200; i++) tickNotableLifecycle(r);
+    // A successor was minted: a living Mayor exists that is NOT the original.
+    // (The original, once dead and childless, is pruned as an unreferenced notable,
+    // so we assert on the successor's identity rather than a raw count.)
     const mayors = r.notables.filter((n) => n.role === 'Mayor');
-    expect(mayors.length).toBeGreaterThan(1); // a successor was minted
-    expect(mayors.some((n) => n.alive)).toBe(true);
+    expect(mayors.some((n) => n.alive && n.id !== originalId)).toBe(true);
   });
 
   function toStatehood(r: RegionSim): void {

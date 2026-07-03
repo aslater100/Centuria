@@ -35,10 +35,51 @@ const BUDGET_MS = 8;
 const TICKS = Number(process.argv[2]) > 0 ? Number(process.argv[2]) : 12000;
 
 const SEED = 12345;
+
+// Every stage above tops out around 5-6 settlements, so none of them ever exercise
+// the O(N²·G) all-pairs arbitrage price scan (tickPriceArbitrage → localGoodPrice,
+// src/sim/systems/arbitrage.ts / systems/goods.ts) at any real settlement count — a
+// profiler found that path at ~13% of sim CPU at 22 settlements, invisible to the
+// gate above. `MAX_SETTLEMENTS` (region.ts) hard-caps the whole map at 24, so that's
+// the ceiling to aim for, not an arbitrary pick.
+const HUGE_NATION_TOWNS = 24;
+
+/**
+ * Grow a real, fully-initialized late-era nation up to the settlement cap using
+ * ONLY the public RegionSim API — no hand-pushed partial settlements. Starts from
+ * the 2000 era start (so goods are already all unlocked — the latest `eraUnlock` in
+ * INTERMEDIATE_GOODS is 1955) and turns on the two autoplay flags
+ * (`autoDevelopPlayer`/`autoExpandPlayer`, the same pair `src/sim/headless.ts` flips
+ * for the balance sweep) so BOTH the player faction and its on-map rival
+ * `RegionalFaction`s found new settlements through the game's own
+ * `maybeExpandFaction` → `foundSettlement` path (staggered monthly AI updates,
+ * `updateRivalAI` in systems/rival-ai.ts). The player faction alone caps at 5
+ * (`PLAYER_TOWN_CAP`), so the rest of the growth to the 24-town ceiling comes from
+ * the 2-3 on-map rival factions (each capped at 12 on normal difficulty).
+ *
+ * Reaching the cap is probabilistic (staggered `expandChance` rolls), so this ticks
+ * until either the target is hit or a safety cap is reached. Empirically (seed
+ * 12345) the cap is hit at ~609k ticks — a few seconds of wall time, paid once here
+ * in `build()`, not in the timed loop below.
+ */
+function buildHugeNation(): RegionSim {
+  const r = RegionSim.fromEraStart('2000', { seed: SEED });
+  r.autoDevelopPlayer = true;
+  r.autoExpandPlayer = true;
+  const TICK_CAP = 1_500_000; // safety stop well above the ~609k ticks seed 12345 needs
+  let ticks = 0;
+  while (r.settlements.length < HUGE_NATION_TOWNS && ticks < TICK_CAP) {
+    r.tick();
+    ticks++;
+  }
+  return r;
+}
+
 const STAGES: { name: string; build: () => RegionSim }[] = [
   { name: 'early colony 1919', build: () => RegionSim.create(SEED) },
   { name: 'mid nation 1950', build: () => RegionSim.fromEraStart('1950', { seed: SEED }) },
   { name: 'late nation 2000', build: () => RegionSim.fromEraStart('2000', { seed: SEED }) },
+  { name: `huge nation (${HUGE_NATION_TOWNS})`, build: buildHugeNation },
 ];
 
 console.log(`frame ${FRAME_MS}ms @60fps; sim catch-up budget ~${BUDGET_MS}ms/frame (main.ts runCatchUp)`);

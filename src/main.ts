@@ -11,20 +11,14 @@ import { TitleScreen } from './ui/titlescreen';
 import { PauseMenu } from './ui/pausemenu';
 import { TICKS_PER_SECOND } from './sim/defs';
 import { runCatchUp } from './ui/simLoop';
+import { FramePacer } from './ui/framePacer';
+import { displayScale } from './ui/dpr';
 import type { ScenarioSelection } from './ui/titlescreen';
 
 const root = document.getElementById('app')!;
 const canvas = document.createElement('canvas');
 canvas.id = 'game';
 root.appendChild(canvas);
-
-const MINIMAP_W = 160;
-const MINIMAP_H = 120;
-const minimapCanvas = document.createElement('canvas');
-minimapCanvas.id = 'minimap';
-minimapCanvas.width = MINIMAP_W;
-minimapCanvas.height = MINIMAP_H;
-root.appendChild(minimapCanvas);
 
 const SAVE_KEY = 'centuria-save';
 
@@ -47,10 +41,17 @@ function bootSim(): RegionSim | null {
   return null;
 }
 
+// Backing store at device resolution (capped 2×) for crisp HiDPI rendering;
+// game logic stays in CSS pixels — RegionView applies the base DPR transform.
+// `alpha: false`: the scene fully repaints every frame, so an opaque canvas
+// skips per-frame alpha compositing against the page background.
 function resize(): void {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  const g = canvas.getContext('2d')!;
+  const dpr = displayScale();
+  canvas.width = Math.round(window.innerWidth * dpr);
+  canvas.height = Math.round(window.innerHeight * dpr);
+  canvas.style.width = `${window.innerWidth}px`;
+  canvas.style.height = `${window.innerHeight}px`;
+  const g = canvas.getContext('2d', { alpha: false })!;
   g.imageSmoothingEnabled = false;
 }
 resize();
@@ -212,8 +213,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === '1') { speed = 1; updateUIState(); }
   if (e.key === '2') { speed = 3; updateUIState(); }
   if (e.key === '3') { speed = 8; updateUIState(); }
-  if ((e.key === '+' || e.key === '=') && regionView) { regionView.zoomAt(canvas.width / 2, canvas.height / 2, 1); e.preventDefault(); return; }
-  if (e.key === '-' && regionView) { regionView.zoomAt(canvas.width / 2, canvas.height / 2, -1); e.preventDefault(); return; }
+  if ((e.key === '+' || e.key === '=') && regionView) { regionView.zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1); e.preventDefault(); return; }
+  if (e.key === '-' && regionView) { regionView.zoomAt(window.innerWidth / 2, window.innerHeight / 2, -1); e.preventDefault(); return; }
   if (e.key === 's' && e.ctrlKey) { save(); e.preventDefault(); return; }
   if (e.key === 'Escape') {
     if (pauseMenuOpen) {
@@ -291,15 +292,23 @@ canvas.addEventListener('wheel', (e) => {
 
 // ---- main loop ----
 let acc = 0;
-let last = performance.now();
+let lastCallback = performance.now();
+let lastRender = lastCallback;
 let frameMsEma = 16.7;
+let fpsShown = '';
+let fpsNextUpdate = 0;
+const pacer = new FramePacer();
 
 function loop(now: number): void {
-  const rawMs = now - last;
-  // Soft-cap at ~70 FPS: skip render if frame arrived too soon (120 Hz+).
-  if (rawMs < 14) { requestAnimationFrame(loop); return; }
-  const dt = Math.min(0.25, rawMs / 1000);
-  last = now;
+  // Render every Nth vsync (N locked to the display's refresh rate) instead of
+  // the old `<14ms → skip` timestamp gate: even cadence on 120/144 Hz panels
+  // and immune to timer jitter turning one 60 Hz frame into a 33 ms hitch.
+  const cbMs = now - lastCallback;
+  lastCallback = now;
+  if (!pacer.step(cbMs)) { requestAnimationFrame(loop); return; }
+  const rawMs = now - lastRender;
+  lastRender = now;
+  const dt = Math.min(0.25, Math.max(0, rawMs / 1000));
   if (rawMs > 0 && rawMs < 1000) frameMsEma += (rawMs - frameMsEma) * 0.1;
 
   // Arrow/WASD pan
@@ -324,9 +333,11 @@ function loop(now: number): void {
 
   if (region && regionView) {
     regionView.draw();
-    minimapCanvas.classList.add('hidden');
-    // Era skin: mirror eraBranch onto #app[data-era] so CSS can theme per branch.
-    root.dataset.era = region.eraBranch ?? '';
+    // Era skin: mirror eraBranch onto #app[data-era] so CSS can theme per
+    // branch. Write-guarded — an unconditional set forces a style recalc
+    // against every [data-era] selector each frame.
+    const era = region.eraBranch ?? '';
+    if (root.dataset.era !== era) root.dataset.era = era;
   }
 
   const year = region?.year ?? 1900;
@@ -345,8 +356,14 @@ function loop(now: number): void {
     tension,
   });
 
-  const fps = Math.round(1000 / frameMsEma);
-  fpsDiv.textContent = `${fps} fps`;
+  if (now >= fpsNextUpdate) {
+    fpsNextUpdate = now + 250;
+    const fps = `${Math.round(1000 / frameMsEma)} fps`;
+    if (fps !== fpsShown) {
+      fpsShown = fps;
+      fpsDiv.textContent = fps;
+    }
+  }
 
   requestAnimationFrame(loop);
 }

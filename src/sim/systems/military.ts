@@ -338,9 +338,8 @@ export function resolveArmyGroupBattle(r: RegionSim, provinceId: number): void {
 
   /** Monthly tick: supply line decay for Army Groups (Phase 16). */
 export function tickSupplyLines(r: RegionSim): void {
-    const playerProvinces = new Set(
-      r.settlements.filter((s) => s.factionId === r.playerFactionId).map((s) => s.id)
-    );
+    const playerSettlements = r.settlements.filter((s) => s.factionId === r.playerFactionId);
+    const playerProvinces = new Set(playerSettlements.map((s) => s.id));
     for (const army of r.armyGroups) {
       const atPlayerProvince = playerProvinces.has(army.provinceId);
       if (atPlayerProvince) {
@@ -350,8 +349,7 @@ export function tickSupplyLines(r: RegionSim): void {
         // Check distance: more than 2 hexes from nearest player province
         const prov = r.settlement(army.provinceId);
         if (prov) {
-          const minDist = r.settlements
-            .filter((s) => s.factionId === r.playerFactionId)
+          const minDist = playerSettlements
             .reduce((minD, ps) => Math.min(minD, Math.hypot(prov.x - ps.x, prov.y - ps.y)), Infinity);
           if (minDist > 20) { // ~2 hexes in 0–100 coord space
             army.supply = Math.max(0, army.supply - 0.08);

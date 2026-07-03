@@ -252,6 +252,8 @@ interface BandStrip {
 export class Backdrop {
   private strips: BandStrip[] = [];
   private sig = '';
+  private glowCanvas: HTMLCanvasElement | null = null;
+  private glowSig = '';
 
   /** Re-paint the per-band strips only when the palette key or size changes. */
   private ensure(W: number, H: number, pal: BackdropPalette): void {
@@ -319,6 +321,32 @@ export class Backdrop {
     }
   }
 
+  /** Re-render the glow's radial gradient (at a fixed local origin, not the
+   *  live screen position) only when its shape or colour changes. Position
+   *  drifts continuously with camera pan, so it is deliberately left out of
+   *  the signature — baking it in would defeat the cache every frame; instead
+   *  `drawGlow` blits this canvas at the live centre each frame. */
+  private ensureGlow(radius: number, color: RGB, intensity: number): void {
+    const ir = Math.round(intensity * 100) / 100;
+    const sig = `${radius}|${color[0]},${color[1]},${color[2]}|${ir}`;
+    if (this.glowSig === sig && this.glowCanvas) return;
+    const size = Math.max(1, Math.ceil(radius * 2));
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const c = canvas.getContext('2d');
+    if (c) {
+      const [r, gg, bb] = color;
+      const grad = c.createRadialGradient(radius, radius, 0, radius, radius, radius);
+      grad.addColorStop(0, `rgba(${clamp8(r)},${clamp8(gg)},${clamp8(bb)},${ir})`);
+      grad.addColorStop(1, `rgba(${clamp8(r)},${clamp8(gg)},${clamp8(bb)},0)`);
+      c.fillStyle = grad;
+      c.fillRect(0, 0, size, size);
+    }
+    this.glowCanvas = canvas;
+    this.glowSig = sig;
+  }
+
   /** Additive ember bloom centred on the horizon — the stat band made bright. */
   private drawGlow(
     g: CanvasRenderingContext2D,
@@ -334,14 +362,11 @@ export class Backdrop {
     const cx = W / 2 + ox * 0.5;
     const cy = glow.y * H + oy;
     const radius = Math.max(W, H) * 0.72;
-    const [r, gg, bb] = glow.color;
-    const grad = g.createRadialGradient(cx, cy, 0, cx, cy, radius);
-    grad.addColorStop(0, `rgba(${clamp8(r)},${clamp8(gg)},${clamp8(bb)},${glow.intensity})`);
-    grad.addColorStop(1, `rgba(${clamp8(r)},${clamp8(gg)},${clamp8(bb)},0)`);
+    this.ensureGlow(radius, glow.color, glow.intensity);
+    if (!this.glowCanvas) return;
     g.save();
     g.globalCompositeOperation = 'lighter';
-    g.fillStyle = grad;
-    g.fillRect(0, 0, W, H);
+    g.drawImage(this.glowCanvas, cx - radius, cy - radius);
     g.restore();
   }
 }

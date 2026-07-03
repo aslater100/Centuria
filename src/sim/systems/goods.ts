@@ -332,6 +332,73 @@ export function localGoodPrice(r: RegionSim, t: Settlement, goodId: string): num
 }
 
 /**
+ * Read-only price memo for one arbitrage scan (perf audit 2026-07). The O(N²·G)
+ * all-pairs scan in `tickPriceArbitrage` queries `localGoodPrice` for every
+ * (town, good) up to N−1 times, and each call re-derived the town-independent
+ * world scarcity (itself an O(N·C) walk) — profiling showed `worldGoodDemand`
+ * alone at ~13% of total sim CPU. Nothing mutates stocks/sectors during the
+ * scan, so all of that is loop-invariant:
+ *  - world scarcity is computed ONCE per good via the same `worldGoodScarcity`;
+ *  - sector totals are summed once, in `sectorShare`'s exact accumulation order;
+ *  - each (town, good) demand is computed once, with `localGoodDemand`'s exact
+ *    term order.
+ * The returned price function is therefore byte-identical to `localGoodPrice`
+ * for every query inside a mutation-free scan — same floats, same results —
+ * just without the redundant recomputation. Do NOT use it across mutations
+ * (`shipGoodFrom`/`addGoodStock` invalidate it).
+ */
+export function buildGoodPriceScan(
+  r: RegionSim,
+  goodIds: string[],
+): (t: Settlement, goodId: string) => number {
+  const worldScar = new Map<string, number>();
+  for (const id of goodIds) worldScar.set(id, worldGoodScarcity(r, id));
+  const sectorTotal = { industry: 0, agriculture: 0 };
+  for (const sector of ['industry', 'agriculture'] as const) {
+    let total = 0;
+    for (const s of r.settlements) total += Math.max(0, s.sectors?.[sector]?.output ?? 0);
+    sectorTotal[sector] = total;
+  }
+  const shareOf = (t: Settlement, sector: 'industry' | 'agriculture'): number => {
+    const total = sectorTotal[sector];
+    if (total <= 0) return 0;
+    return Math.max(0, t.sectors?.[sector]?.output ?? 0) / total;
+  };
+  const inter = intermediateIds();
+  const year = r.year;
+  const demandMemo = new Map<number, Map<string, number>>();
+  const demandOf = (t: Settlement, goodId: string): number => {
+    let byGood = demandMemo.get(t.id);
+    if (byGood === undefined) {
+      byGood = new Map();
+      demandMemo.set(t.id, byGood);
+    }
+    let d = byGood.get(goodId);
+    if (d === undefined) {
+      d = 0;
+      if (inter.has(goodId)) {
+        for (const c of INTERMEDIATE_GOODS) {
+          if (year < c.eraUnlock) continue;
+          if (!c.inputs.includes(goodId)) continue;
+          d += shareOf(t, goodProducingSector(c.id));
+        }
+      }
+      d += localFinalGoodDemand(r, t, goodId);
+      byGood.set(goodId, d);
+    }
+    return d;
+  };
+  return (t, goodId) => {
+    const demand = demandOf(t, goodId);
+    const stock = t.goodStocks?.[goodId] ?? 0;
+    const localScar = stockScarcity(stock, demand);
+    const ws = worldScar.get(goodId) ?? 0;
+    const eff = localScar + WORLD_PRICE_ANCHOR * Math.max(0, ws - localScar);
+    return goodBasePrice(goodId) * (1 + eff * LOCAL_GOODS_PRICE_GAIN);
+  };
+}
+
+/**
  * LEG 1 of the global-world arc — the WORLD MARKET reference price.
  *
  * Until now every price was per-town and the only market that ever cleared was

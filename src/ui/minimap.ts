@@ -28,6 +28,14 @@ export class Minimap {
   private config: MinimapConfig;
   private region: RegionSim;
 
+  // Cached static layers (terrain grid, legend). Rebuilt only when the map
+  // identity or pixel size changes — invalidation key is (cacheKeyMap, cacheKeySize),
+  // compared by reference, not deep equality.
+  private terrainLayer: HTMLCanvasElement | null = null;
+  private legendLayer: HTMLCanvasElement | null = null;
+  private cacheKeyMap: RegionSim['map'] | null = null;
+  private cacheKeySize = -1;
+
   constructor(region: RegionSim, parentElement: HTMLElement, config: Partial<MinimapConfig> = {}) {
     this.region = region;
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -78,49 +86,26 @@ export class Minimap {
     const mapW = 100; // Region spans 0..100 in logical coords
     const mapH = 100;
 
-    // Background
-    ctx.fillStyle = 'rgba(20, 28, 40, 0.9)';
-    ctx.fillRect(0, 0, size, size);
+    // Terrain is static after worldgen: rebuild the cached layers only when
+    // the map identity or pixel size changes (reference comparison).
+    if (this.terrainLayer === null || this.cacheKeyMap !== region.map || this.cacheKeySize !== size) {
+      this.rebuildStaticLayers(region, size);
+    }
+    ctx.drawImage(this.terrainLayer!, 0, 0);
 
     // Scale factor to fit the map into the minimap canvas
     const scaleX = size / mapW;
     const scaleY = size / mapH;
     const scale = Math.min(scaleX, scaleY);
 
-    // Draw terrain & settlements
-    ctx.save();
-    ctx.translate((size - mapW * scale) / 2, (size - mapH * scale) / 2);
-    ctx.scale(scale, scale);
-
-    // Real terrain: sample the region map per logical cell so the continents,
-    // islands, and the seas between them read at a glance. Sea is dark; land is
-    // tinted by biome (green lowland, grey peaks, tan hills, blue rivers).
-    ctx.fillStyle = '#1c2a3c'; // open sea
-    ctx.fillRect(0, 0, mapW, mapH);
-    const map = region.map;
-    for (let y = 0; y < mapH; y++) {
-      for (let x = 0; x < mapW; x++) {
-        const c = map.atCoord(x, y);
-        let col: string | null = null;
-        switch (c.biome) {
-          case 'sea': col = c.elevation < 0.16 ? null : '#22384f'; break; // shallows shade
-          case 'lake': col = '#2e4a5c'; break;
-          case 'river': col = '#3a5f78'; break;
-          case 'marsh': col = '#4a5340'; break;
-          case 'forest': col = '#2e4826'; break;
-          case 'hills': col = '#5a5742'; break;
-          case 'mountains': col = c.elevation > 0.82 ? '#b8b4ac' : '#7a7060'; break;
-          default: col = '#4e5e40'; break; // plains
-        }
-        if (col) { ctx.fillStyle = col; ctx.fillRect(x, y, 1, 1); }
-      }
-    }
-
-    // Draw settlements as small squares — gold for the player's own towns,
+    // Draw settlements — gold for the player's own towns,
     // muted blue-grey for rivals. Any settlement currently in a crisis/alert
     // state (same condition the settlement-alert list reads in regionview.ts
     // drawSettlementListPanel: low food, high grievance, or an active strike)
     // gets a thin red ring around it.
+    ctx.save();
+    ctx.translate((size - mapW * scale) / 2, (size - mapH * scale) / 2);
+    ctx.scale(scale, scale);
     for (const settlement of region.settlements) {
       const x = Math.floor((settlement.x / 100) * mapW);
       const y = Math.floor((settlement.y / 100) * mapH);
@@ -156,7 +141,79 @@ export class Minimap {
     ctx.strokeRect(0.5, 0.5, size - 1, size - 1);
 
     // Static legend, drawn last so it sits on top of everything else.
-    this.drawLegend();
+    ctx.drawImage(this.legendLayer!, 0, 0);
+  }
+
+  /** (Re)builds the cached terrain-grid and legend canvases. Called only from
+   *  draw() when the invalidation key (map identity, pixel size) changes. */
+  private rebuildStaticLayers(region: RegionSim, size: number): void {
+    this.terrainLayer = this.buildTerrainLayer(region, size);
+    this.legendLayer = this.buildLegendLayer(size);
+    this.cacheKeyMap = region.map;
+    this.cacheKeySize = size;
+  }
+
+  /** Renders the sea background and the per-cell terrain grid (continents,
+   *  islands, biome tint) into an offscreen canvas once, so draw() can blit
+   *  it with a single drawImage instead of re-rasterizing 100x100 cells
+   *  every frame. */
+  private buildTerrainLayer(region: RegionSim, size: number): HTMLCanvasElement {
+    const mapW = 100;
+    const mapH = 100;
+    const layer = document.createElement('canvas');
+    layer.width = size;
+    layer.height = size;
+    const ctx = layer.getContext('2d')!;
+
+    // Background
+    ctx.fillStyle = 'rgba(20, 28, 40, 0.9)';
+    ctx.fillRect(0, 0, size, size);
+
+    const scaleX = size / mapW;
+    const scaleY = size / mapH;
+    const scale = Math.min(scaleX, scaleY);
+
+    ctx.save();
+    ctx.translate((size - mapW * scale) / 2, (size - mapH * scale) / 2);
+    ctx.scale(scale, scale);
+
+    // Real terrain: sample the region map per logical cell so the continents,
+    // islands, and the seas between them read at a glance. Sea is dark; land is
+    // tinted by biome (green lowland, grey peaks, tan hills, blue rivers).
+    ctx.fillStyle = '#1c2a3c'; // open sea
+    ctx.fillRect(0, 0, mapW, mapH);
+    const map = region.map;
+    for (let y = 0; y < mapH; y++) {
+      for (let x = 0; x < mapW; x++) {
+        const c = map.atCoord(x, y);
+        let col: string | null = null;
+        switch (c.biome) {
+          case 'sea': col = c.elevation < 0.16 ? null : '#22384f'; break; // shallows shade
+          case 'lake': col = '#2e4a5c'; break;
+          case 'river': col = '#3a5f78'; break;
+          case 'marsh': col = '#4a5340'; break;
+          case 'forest': col = '#2e4826'; break;
+          case 'hills': col = '#5a5742'; break;
+          case 'mountains': col = c.elevation > 0.82 ? '#b8b4ac' : '#7a7060'; break;
+          default: col = '#4e5e40'; break; // plains
+        }
+        if (col) { ctx.fillStyle = col; ctx.fillRect(x, y, 1, 1); }
+      }
+    }
+    ctx.restore();
+
+    return layer;
+  }
+
+  /** Renders the static legend box into its own offscreen canvas so draw()
+   *  can blit it on top of the dynamic overlays with a single drawImage. */
+  private buildLegendLayer(size: number): HTMLCanvasElement {
+    const layer = document.createElement('canvas');
+    layer.width = size;
+    layer.height = size;
+    const ctx = layer.getContext('2d')!;
+    this.drawLegend(ctx);
+    return layer;
   }
 
   /** Same crisis/alert condition the settlement-alert list reads in
@@ -172,8 +229,7 @@ export class Minimap {
    *  terrain, ownership, and crisis-pin markup. Fog-of-war is deliberately
    *  absent from this map (see exploration.ts) — the legend must not imply
    *  any masking/visibility mechanic. */
-  private drawLegend(): void {
-    const { ctx } = this;
+  private drawLegend(ctx: CanvasRenderingContext2D): void {
     const rows: { draw: () => void; label: string }[] = [
       { draw: () => { ctx.fillStyle = '#4e5e40'; ctx.fillRect(0, 0, 5, 5); }, label: 'Land' },
       { draw: () => { ctx.fillStyle = '#1c2a3c'; ctx.fillRect(0, 0, 5, 5); }, label: 'Sea' },

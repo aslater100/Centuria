@@ -1,5 +1,83 @@
 # Session log
 
+## 2026-07-03 — performance & visual audit + fixes (branch `claude/performance-visual-audit-prxo5b`)
+
+Four parallel audits (regionview draw path, sprites/backdrop/minimap caching, sim tick
+hotspots, visual/stutter/DPR) → fixes applied. Verified: build + full suite 105/1581 +
+bench-region gate PASS + Playwright visual smoke (title + region screenshots at DPR 2,
+zero page errors).
+
+### Frame pacing & main loop (`src/main.ts`, new `src/ui/framePacer.ts` + tests)
+- Replaced the `<14ms → skip` soft-cap with `FramePacer`: renders every Nth vsync
+  (N locked to the display's refresh via debounced EMA). Even cadence on 120/144 Hz
+  (60/72 fps vs the old 48), immune to timer jitter turning one 60 Hz frame into a
+  33 ms hitch. Unit-tested like `runCatchUp` (7 tests, fake deltas).
+- Per-frame DOM writes removed: dead `#minimap` canvas deleted, `dataset.era`
+  write-guarded (was forcing style recalc vs 34 `[data-era]` selectors every frame),
+  fps counter throttled to 4 Hz.
+- Canvases now opaque (`alpha:false`) — skips per-frame alpha compositing.
+
+### HiDPI (new `src/ui/dpr.ts`)
+- Backing store scaled by `devicePixelRatio` capped at 2×; game logic stays in CSS px
+  (`RegionView.viewW/viewH` + one base `setTransform` per frame). Text/lines/sprites
+  now crisp on HiDPI; cached bitmap layers (terrain) render exactly as before.
+
+### Renderer (`src/ui/regionview.ts`, minimap, backdrop, titlescreen)
+- `this.frame` is now a wall-clock animation counter (60 fps units, advanced by dt,
+  clamped): pulses/waves/vehicles/cadence throttles run at the same real speed at any
+  render rate. All comparisons were already inequality-based (audited) — safe as float.
+- Minimap: 100×100 terrain grid + legend were re-rasterized EVERY frame (~700k
+  cells/s) → now offscreen-cached, invalidated on map identity/size change.
+- Routes/cargo dots/trade arrows: had zero viewport culling → cached per-route bbox
+  (`routeBBoxCache`) culls whole polylines against `vb`.
+- Statehood/nation banner: ~13 `measureText` calls per frame → memoized (`textW`).
+- Backdrop horizon glow: `createRadialGradient` per frame → signature-cached canvas
+  (mirrors the band-strip `sig` pattern).
+- Dead memory-fog layer deleted (fog retired 2026-07; it blitted a fully transparent
+  full-screen canvas every frame).
+- Hoisted per-frame color-table literals (`CARGO_RGB`/`SECTOR_RGB`/`SECTOR_HEX`),
+  `DISTRICT_DEF_BY_ID`/`REGION_BUILDING_BY_ID` Maps replace `.find` per placed item
+  per frame, draw-path `hexLayoutParams` calls routed through the cached layout.
+- Titlescreen: cloud drift dt-scaled (was 2.4× fast at 144 Hz), gradients cached by
+  (w,h), per-frame `clientWidth` layout reads replaced with a ResizeObserver.
+
+### Sim (`src/sim/`) — byte-identical perf fixes
+- **Arbitrage scan memo** (`buildGoodPriceScan` in systems/goods.ts): profiling showed
+  `worldGoodDemand` at ~13% of ALL sim CPU — the O(N²·G) all-pairs scan re-derived
+  world scarcity + sector totals + per-town demand per pair. The scan is read-only
+  (dispatch mutates after), so these are loop-invariant: memoized once per scan with
+  identical float arithmetic. Serialize-determinism suite confirms byte-identical.
+- `roleMult` no longer allocates a filtered array per call (runs 3×/settlement/day;
+  `notables` keeps dead entries as dynasty history so the array only grows).
+- `tickSupplyLines`: player-settlement list hoisted out of the per-army loop.
+
+### Follow-ups the user approved and landed (second pass)
+- **Dead-notable pruning**: `tickNotableLifecycle` now prunes dead notables that no
+  dynasty (parent/children) or sitting minister references. Reference-safe by
+  construction (every id in a children/parentId link belongs to a kept notable);
+  runs only on the monthly tick, never on deserialize, so a serialize round-trip is
+  an exact identity. Updated the "dead Notables are replaced" test to assert the
+  minted successor's identity, not a count that assumed the corpse lingered.
+- **`settlement(id)` Map index**: id→Settlement map rebuilt lazily, invalidated on
+  (array ref, length) — a complete key since membership only changes via push or a
+  whole-array reassignment (deserialize, `abandonGhostTowns`) and ids are immutable.
+  No mutation site instrumented; private/transient, not serialized. Verified
+  consistent across a 6000-tick founding/abandonment run.
+- **CSS `transition: all`** (21 sites): each scoped to the exact properties that
+  element animates across its state rules, same timing — visually identical, no more
+  layout-triggered transitions. `backdrop-filter` blur left as a deliberate design
+  choice (user chose transitions-only scope).
+- **Bench gap**: added a `huge nation (24)` stage growing to `MAX_SETTLEMENTS` via the
+  real autoplay-expansion path; the gate now covers the O(N²·G) arbitrage scaling
+  (mean tick ~2× the 6-town figure, still PASS under the frame budget).
+
+### Still deliberately not done
+- 17 `backdrop-filter: blur()` panels over the live canvas: real compositor cost but a
+  visible design change — out of scope for a transitions-only pass.
+- `warScars` uncapped (one per war — dozens over a full run), trade-season sort
+  (2 goods), BFS `shift()` in `computeRoutePath` (memoized per tick): all negligible
+  at real scale.
+
 ## 2026-07-03 — audit-to-9 execution (PR #346, branch `claude/game-audit-score-8ggzeu`)
 
 Executed `centuria-plan.md`. 20 of 23 tasks landed; per-task commits on the PR branch, each

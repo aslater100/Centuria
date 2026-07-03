@@ -4286,8 +4286,29 @@ export class RegionSim {
     return t.cohorts.bands[1] + t.cohorts.bands[2] + t.cohorts.bands[3] * 0.6;
   }
 
+  /** id → Settlement index, rebuilt lazily when the settlement set changes.
+   *  Membership changes only via a `push` (length grows) or a whole-array
+   *  reassignment (deserialize, `abandonGhostTowns` filters into a new array),
+   *  and ids are immutable once assigned — so (array reference, length) is a
+   *  complete invalidation key and no mutation site needs to touch the index.
+   *  Transient/private: not serialized. */
+  private _settlementIndex: Map<number, Settlement> | null = null;
+  private _settlementIndexRef: Settlement[] | null = null;
+  private _settlementIndexLen = -1;
+
   settlement(id: number): Settlement | undefined {
-    return this.settlements.find((s) => s.id === id);
+    if (
+      this._settlementIndex === null ||
+      this._settlementIndexRef !== this.settlements ||
+      this._settlementIndexLen !== this.settlements.length
+    ) {
+      const idx = new Map<number, Settlement>();
+      for (const s of this.settlements) idx.set(s.id, s);
+      this._settlementIndex = idx;
+      this._settlementIndexRef = this.settlements;
+      this._settlementIndexLen = this.settlements.length;
+    }
+    return this._settlementIndex.get(id);
   }
 
   notablesAt(id: number): Notable[] {
@@ -4295,7 +4316,13 @@ export class RegionSim {
   }
 
   private roleMult(t: Settlement, role: NotableRole): number {
-    return this.notablesAt(t.id).some((n) => n.role === role) ? 1 : 0;
+    // Direct scan, no intermediate array: this runs several times per settlement
+    // per sim-day, and `notables` keeps dead entries as dynasty history, so the
+    // old filter-then-some allocated a growing array just to test membership.
+    for (const n of this.notables) {
+      if (n.alive && n.settlementId === t.id && n.role === role) return 1;
+    }
+    return 0;
   }
 
   // ---- Phase 0: Exploration & Fog of War ----
