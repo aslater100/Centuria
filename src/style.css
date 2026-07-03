@@ -406,7 +406,7 @@ input[type='range']::-moz-range-thumb {
   font-size: 12px;
   padding: 5px 12px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .tb-btn:hover {
@@ -570,7 +570,7 @@ input[type='range']::-moz-range-thumb {
   font-size: 12px;
   padding: 6px 12px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 .rbb-btn:hover, .rbb-speed-btn:hover {
   border-color: var(--gold-400);
@@ -628,7 +628,7 @@ input[type='range']::-moz-range-thumb {
   cursor: pointer;
   white-space: nowrap;
   pointer-events: all;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .build-item-btn:hover {
@@ -676,7 +676,7 @@ input[type='range']::-moz-range-thumb {
   font-size: 10px;
   cursor: pointer;
   min-width: 60px;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .build-cat-btn .cat-icon {
@@ -766,7 +766,7 @@ input[type='range']::-moz-range-thumb {
   margin: 0 8px;
   font-weight: 700;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 .win-modal-btn:hover {
   background: var(--gold-face-hover);
@@ -1198,7 +1198,7 @@ input[type='range']::-moz-range-thumb {
   font-size: 11px;
   padding: 5px 10px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   box-shadow: 0 1px 0 var(--border-inner) inset, 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 .route-network-panel button:hover:not(:disabled) {
@@ -1260,7 +1260,7 @@ input[type='range']::-moz-range-thumb {
   font-size: 11px;
   padding: 5px 10px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   box-shadow: 0 1px 0 var(--border-inner) inset, 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 .settlement-list-panel button:hover:not(:disabled),
@@ -1449,7 +1449,7 @@ input[type='range']::-moz-range-thumb {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
 }
 
@@ -1539,7 +1539,7 @@ input[type='range']::-moz-range-thumb {
   padding: 8px 12px;
   text-align: center;
   margin-bottom: 14px;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .ceremony-box input[type='text']:focus {
@@ -1558,7 +1558,7 @@ input[type='range']::-moz-range-thumb {
   font-size: 12px;
   text-align: left;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   box-shadow: 0 1px 0 var(--border-inner) inset, 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 .lean-card:has(input:checked) {
@@ -1575,7 +1575,7 @@ input[type='range']::-moz-range-thumb {
   padding: 10px 28px;
   border-radius: var(--radius);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 #proclaim-btn:hover {
@@ -1648,7 +1648,7 @@ input[type='range']::-moz-range-thumb {
   cursor: pointer;
   text-align: left;
   letter-spacing: 0.3px;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-left-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .menu-box button:hover:not(:disabled) {
@@ -1821,7 +1821,7 @@ input[type='range']::-moz-range-thumb {
   cursor: pointer;
   text-align: left;
   letter-spacing: 0.4px;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, border-left-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   box-shadow: 0 1px 0 var(--border-inner) inset, 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
@@ -1991,7 +1991,7 @@ input[type='range']::-moz-range-thumb {
   cursor: pointer;
   font-weight: 700;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 #go-restart:hover {
@@ -2237,7 +2237,7 @@ input[type='range']::-moz-range-thumb {
   font-family: var(--sans);
   font-size: 14px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   font-weight: 500;
   letter-spacing: 0.3px;
 }
@@ -2306,7 +2306,7 @@ input[type='range']::-moz-range-thumb {
   border: 1px solid var(--border-gold-soft);
   border-radius: var(--radius);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   background: var(--surface-raised);
   box-shadow: 0 1px 0 var(--border-inner) inset, 0 2px 6px rgba(0, 0, 0, 0.35);
 }
@@ -2431,7 +2431,7 @@ input[type='range']::-moz-range-thumb {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease, transform 0.15s ease;
 }
 
 .wiki-close:hover {
@@ -2468,7 +2468,7 @@ input[type='range']::-moz-range-thumb {
   cursor: pointer;
   text-align: left;
   border-radius: var(--radius);
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2511,7 +2511,7 @@ input[type='range']::-moz-range-thumb {
   cursor: pointer;
   text-align: left;
   border-left: 3px solid transparent;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-left-color 0.15s ease, color 0.15s ease;
 }
 
 .wiki-article-btn:hover {
@@ -2722,7 +2722,7 @@ input[type='range']::-moz-range-thumb {
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
   padding: 12px 20px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
 }
 
 .pause-btn:hover {
@@ -2761,7 +2761,7 @@ input[type='range']::-moz-range-thumb {
   font-size: 13px;
   padding: 12px 16px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   text-align: left;
   box-shadow: 0 1px 0 var(--border-inner) inset, 0 2px 6px rgba(0, 0, 0, 0.35);
 }
