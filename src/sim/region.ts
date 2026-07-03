@@ -64,6 +64,31 @@ import { traders, caravans } from './systems/trade-season';
 import techTreeJson from '../data/techtree.json';
 import regionBuildingsJson from '../data/region_buildings.json';
 import rivalNationsJson from '../data/rival_nations.json';
+import namesJson from '../data/names.json';
+import traitsJson from '../data/traits.json';
+
+/** Generic name pool (L1) plus per-rival-nation pools (L2, keyed by the
+ *  named-rival slug id in `rival_nations.json`). Kept as a direct JSON
+ *  import — `defs.ts`'s FIRST_NAMES/LAST_NAMES only expose the generic
+ *  pool, not the per-nation sections. */
+const NATION_NAME_POOLS: Record<string, { first: string[]; last: string[] }> =
+  (namesJson as { nations?: Record<string, { first: string[]; last: string[] }> }).nations ?? {};
+/** Named-rival display name → slug id, so a spawned RivalNation (which only
+ *  keeps `name`, not the slug) can be traced back to its name pool. */
+const NATION_ID_BY_RIVAL_NAME: Record<string, string> = Object.fromEntries(
+  (rivalNationsJson as unknown as RivalNationDef[]).map((n) => [n.name, n.id]),
+);
+
+interface TraitJsonEntry { id: string; notableOnly?: boolean }
+/** Trait ids reserved for Notables (GDD §2.4 / spec §L3) — never rolled for
+ *  ordinary colonists. Nothing currently iterates TRAIT_DEFS to assign
+ *  colonist traits at random (verified: only `traitDef()` look-ups by id are
+ *  used elsewhere), so no consumer needs a notableOnly guard today; this
+ *  filter exists so the guard is enforced at the one call site that does
+ *  roll from the list (mintNotable) even if that changes later. */
+const NOTABLE_TRAIT_IDS: string[] = (traitsJson.traits as TraitJsonEntry[])
+  .filter((t) => t.notableOnly)
+  .map((t) => t.id);
 
 export interface TechNode {
   id: string;
@@ -8787,13 +8812,28 @@ export class RegionSim {
     },
   ): Notable {
     const t = this.settlement(settlementId);
-    const first = ['Edda', 'Tomas', 'Sela', 'Bruno', 'Petra', 'Anders', 'Ivy', 'Casimir'][this.rng.int(8)];
-    const last = ['Weller', 'Stroud', 'Halvorsen', 'Quint', 'Mercer', 'Dunmore'][this.rng.int(6)];
+    // L2: a Notable born to a rival-owned settlement draws from that nation's
+    // name pool (matched by display name, since RivalNation keeps no slug id);
+    // player-owned or unmapped settlements fall back to the generic pool.
+    const owner = t && t.factionId !== this.playerFactionId ? this.rival(t.factionId) : undefined;
+    const nationId = owner ? NATION_ID_BY_RIVAL_NAME[owner.name] : undefined;
+    const namePool = (nationId && NATION_NAME_POOLS[nationId]) || { first: namesJson.first, last: namesJson.last };
+    const first = namePool.first[this.rng.int(namePool.first.length)];
+    const last = namePool.last[this.rng.int(namePool.last.length)];
+    // L3(b): every Notable gets one flavor trait, with a 25% chance of a second.
+    const traits: string[] = [];
+    if (NOTABLE_TRAIT_IDS.length > 0) {
+      traits.push(NOTABLE_TRAIT_IDS[this.rng.int(NOTABLE_TRAIT_IDS.length)]);
+      if (NOTABLE_TRAIT_IDS.length > 1 && this.rng.chance(0.25)) {
+        const remaining = NOTABLE_TRAIT_IDS.filter((id) => id !== traits[0]);
+        traits.push(remaining[this.rng.int(remaining.length)]);
+      }
+    }
     const n: Notable = {
       id: this.nextId++,
       name: overrides?.name ?? `${first} ${last}`,
       age: overrides?.age ?? (25 + this.rng.int(20)),
-      traits: [],
+      traits,
       role,
       settlementId,
       bio: t ? [`Rose to ${role} of ${t.name}, ${this.year}.`] : [`Rose to ${role}, ${this.year}.`],
@@ -8936,41 +8976,183 @@ export class RegionSim {
     this.addLog(`Highwaymen prey on the ${worst.kind} to ${otherName} — ${Math.round(toll)} food taken from ${t.name}'s wagons.`, 'bad');
   }
 
-  /** A Notable's small hour: the attachment engine accrues bio beats (GDD §2.4). */
+  /** A Notable's small hour: the attachment engine accrues bio beats (GDD §2.4,
+   *  archetype sketches per docs/lore-bible.md §Notable archetypes). Each role
+   *  keeps its original neutral, ungated beat plus flaw- and virtue-gated
+   *  archetypes (spec §L3c): a beat alleging corruption/laziness/recklessness
+   *  requires a matching flaw trait (corrupt, reclusive, cautious); a beat of
+   *  exceptional diligence, boldness, or charm requires a matching virtue
+   *  trait (diligent, bold, charismatic). Neutral civic beats stay ungated. */
   private eventNotableBeat(t: Settlement): void {
     const locals = this.notablesAt(t.id);
     if (locals.length === 0) return this.eventFair(t);
     const n = locals[this.rng.int(locals.length)];
-    const beat: Record<NotableRole, { text: string; apply: () => void }> = {
-      Mayor: {
-        text: `${n.name} settles a boundary feud on the courthouse steps of ${t.name}.`,
-        apply: () => { t.grievance = Math.max(0, t.grievance - 8); t.satisfaction += 3; },
-      },
-      Doctor: {
-        text: `${n.name} rides three days vaccinating the outlying farms of ${t.name}.`,
-        apply: () => { t.satisfaction += 3; },
-      },
-      Captain: {
-        text: `${n.name} drills ${t.name}'s militia on the green till dusk.`,
-        apply: () => { t.lastRaidDay = Math.min(t.lastRaidDay, this.day - 10); },
-      },
-      Granger: {
-        text: `${n.name} takes the county prize for winter wheat — ${t.name}'s granary swells.`,
-        apply: () => { t.food += this.workersOf(t) * 2; },
-      },
-      Forewoman: {
-        text: `${n.name} fells the giant deadfall above ${t.name} — a season's lumber in a week.`,
-        apply: () => { t.wood += this.workersOf(t) * 1.5; },
-      },
-      Reeve: {
-        text: `${n.name} writes home glowing letters about ${t.name}; they get printed back east.`,
-        apply: () => { t.cohorts.bands[1] += 2; },
-      },
+    type Beat = { text: string; apply: () => void; requiresAny?: string[]; tone?: 'good' | 'bad' };
+    const beatsByRole: Record<NotableRole, Beat[]> = {
+      Mayor: [
+        {
+          // the Fixer — neutral, ungated
+          text: `${n.name} settles a boundary feud on the courthouse steps of ${t.name}.`,
+          apply: () => { t.grievance = Math.max(0, t.grievance - 8); t.satisfaction += 3; },
+        },
+        {
+          // the Orator — virtue: charismatic
+          text: `${n.name} delivers a stem-winder from the courthouse steps of ${t.name} — long on hope, short on arithmetic.`,
+          apply: () => { t.satisfaction += 5; },
+          requiresAny: ['charismatic'],
+        },
+        {
+          // the Grafter — flaw: corrupt (scandal fodder)
+          text: `${n.name} skims the road fund and stands a round at the tavern in ${t.name}.`,
+          apply: () => { t.grievance += 6; t.satisfaction -= 2; },
+          requiresAny: ['corrupt'],
+          tone: 'bad',
+        },
+        {
+          // the Builder — virtue: diligent
+          text: `${n.name} breaks ground on one great public work in ${t.name}, and won't rest till it's framed.`,
+          apply: () => { t.housing += 2; },
+          requiresAny: ['diligent'],
+        },
+      ],
+      Doctor: [
+        {
+          // the Circuit Rider — neutral, ungated
+          text: `${n.name} rides three days vaccinating the outlying farms of ${t.name}.`,
+          apply: () => { t.satisfaction += 3; },
+        },
+        {
+          // the Modernist — virtue: diligent
+          text: `${n.name} orders new instruments from the catalogue for ${t.name}, and feuds with the midwives over method.`,
+          apply: () => { t.satisfaction += 4; },
+          requiresAny: ['diligent'],
+        },
+        {
+          // the Haunted Veteran — flaw: reclusive
+          text: `${n.name} sits alone with the fever ward through the night at ${t.name}, and says little after.`,
+          apply: () => { n.health = Math.max(0, n.health - 3); t.satisfaction += 1; },
+          requiresAny: ['reclusive'],
+        },
+        {
+          // the Quack-adjacent — flaw: corrupt (scandal fodder)
+          text: `${n.name} sells tonics of dubious provenance off a wagon outside ${t.name}.`,
+          apply: () => { t.satisfaction -= 3; t.grievance += 4; },
+          requiresAny: ['corrupt'],
+          tone: 'bad',
+        },
+      ],
+      Captain: [
+        {
+          // the Drillmaster — neutral, ungated
+          text: `${n.name} drills ${t.name}'s militia on the green till dusk.`,
+          apply: () => { t.lastRaidDay = Math.min(t.lastRaidDay, this.day - 10); },
+        },
+        {
+          // the Old Campaigner — neutral, ungated
+          text: `${n.name} spins war stories on ${t.name}'s green that grow a foot with every winter.`,
+          apply: () => { t.satisfaction += 2; },
+        },
+        {
+          // the Martinet — flaw: cautious (grievance beat)
+          text: `${n.name} drills discipline into ${t.name}'s militia at the cost of every friendship in town.`,
+          apply: () => { t.grievance += 5; t.satisfaction -= 2; },
+          requiresAny: ['cautious'],
+          tone: 'bad',
+        },
+        {
+          // the Reluctant Hero — virtue: bold
+          text: `${n.name} hates the drill and hates the marching, and turns out anyway when ${t.name}'s alarm bell rings.`,
+          apply: () => { t.lastRaidDay = Math.min(t.lastRaidDay, this.day - 15); t.satisfaction += 3; },
+          requiresAny: ['bold'],
+        },
+      ],
+      Granger: [
+        {
+          // the Prize-Grower — neutral, ungated
+          text: `${n.name} takes the county prize for winter wheat — ${t.name}'s granary swells.`,
+          apply: () => { t.food += this.workersOf(t) * 2; },
+        },
+        {
+          // the Land-Hungry — flaw: corrupt
+          text: `${n.name} buys up every failing farm near ${t.name} at half price; the tenants grumble at the terms.`,
+          apply: () => { t.grievance += 5; t.food += this.workersOf(t); },
+          requiresAny: ['corrupt'],
+          tone: 'bad',
+        },
+        {
+          // the Almanac Sage — virtue: diligent
+          text: `${n.name} reads the weather in bird-flight over ${t.name} — right often enough to matter.`,
+          apply: () => { t.food += this.workersOf(t); },
+          requiresAny: ['diligent'],
+        },
+        {
+          // the Cooperative Organizer — virtue: charismatic
+          text: `${n.name} pools the grain into shared silos at ${t.name}, spreading a lean season thin enough to survive.`,
+          apply: () => { t.satisfaction += 3; t.food += this.workersOf(t) * 0.5; },
+          requiresAny: ['charismatic'],
+        },
+      ],
+      Forewoman: [
+        {
+          // the Timber Boss — neutral, ungated
+          text: `${n.name} fells the giant deadfall above ${t.name} — a season's lumber in a week.`,
+          apply: () => { t.wood += this.workersOf(t) * 1.5; },
+        },
+        {
+          // the Safety Crusader — virtue: diligent
+          text: `${n.name} posts new rules at ${t.name} after the accident — the crews grumble, then comply.`,
+          apply: () => { t.satisfaction += 3; },
+          requiresAny: ['diligent'],
+        },
+        {
+          // the Speed Artist — flaw: corrupt (scandal/accident fodder)
+          text: `${n.name} cuts corners for the record book at ${t.name}'s mill.`,
+          apply: () => { t.wood += this.workersOf(t); t.satisfaction -= 3; t.grievance += 3; },
+          requiresAny: ['corrupt'],
+          tone: 'bad',
+        },
+        {
+          // the Union Voice — virtue: charismatic
+          text: `${n.name} speaks for the crews to the owners at ${t.name}, and the owners, this once, listen.`,
+          apply: () => { t.satisfaction += 4; },
+          requiresAny: ['charismatic'],
+        },
+      ],
+      Reeve: [
+        {
+          // the Booster — neutral, ungated
+          text: `${n.name} writes home glowing letters about ${t.name}; they get printed back east.`,
+          apply: () => { t.cohorts.bands[1] += 2; },
+        },
+        {
+          // the Meticulous Clerk — virtue: diligent
+          text: `${n.name} finds the missing shillings in ${t.name}'s ledger, and makes exactly the enemies you'd expect.`,
+          apply: () => { t.satisfaction += 2; t.grievance = Math.max(0, t.grievance - 3); },
+          requiresAny: ['diligent'],
+        },
+        {
+          // the Social Climber — virtue: charismatic
+          text: `${n.name} dines with anyone bearing a title, and ${t.name} basks in the reflected shine.`,
+          apply: () => { t.satisfaction += 2; },
+          requiresAny: ['charismatic'],
+        },
+        {
+          // the Quiet Fixer — flaw: corrupt (scandal fodder)
+          text: `${n.name}'s paperwork goes missing from ${t.name}'s office, and problems vanish with it — until they don't.`,
+          apply: () => { t.grievance += 5; t.satisfaction -= 2; },
+          requiresAny: ['corrupt'],
+          tone: 'bad',
+        },
+      ],
     };
-    const b = beat[n.role];
+    const eligible = beatsByRole[n.role].filter(
+      (beat) => !beat.requiresAny || beat.requiresAny.some((tr) => n.traits.includes(tr)),
+    );
+    if (eligible.length === 0) return; // every role keeps an ungated beat, so this shouldn't happen
+    const b = eligible[this.rng.int(eligible.length)];
     b.apply();
     n.bio.push(`${b.text.replace(`${n.name} `, '')} (${this.year})`);
-    this.addLog(b.text, 'good');
+    this.addLog(b.text, b.tone ?? 'good');
   }
 
   /** Fire: wood-built towns burn; a funded State has a brigade. */
@@ -10474,6 +10656,33 @@ export class RegionSim {
     rv.relations = this.clampRel(rv.relations - 4);
     this.addLog(`${rv.name}'s offer is declined. Their envoys withdraw, noting the hour.`, 'info');
     return true;
+  }
+
+  /** Counter an offered treaty by asking for a signing gift before accepting (spec §M2).
+   *  One-shot, no persisted negotiation state: resolves accept/reject inside this call. */
+  counterOffer(rivalId: number): { accepted: boolean; gift: number } {
+    const o = this.offerFor(rivalId);
+    const rv = this.rival(rivalId);
+    if (!o || !rv) return { accepted: false, gift: 0 };
+    const gift = Math.round(50 + rv.pop * 0.01);
+    const p = Math.max(0.05, Math.min(0.9,
+      0.35 + rv.relations / 200 + rv.weights.commerce * 0.03 + rv.weights.honor * 0.02 - rv.weights.grudge * 0.02,
+    ));
+    const accepted = this.aiRng.chance(p);
+    this.offers = this.offers.filter((x) => x !== o);
+    if (accepted) {
+      if (!rv.treaties.includes(o.kind)) {
+        rv.treaties.push(o.kind);
+        this.onSignTreaty(rv, o.kind);
+      }
+      this.treasury += gift;
+      rv.relations = this.clampRel(rv.relations + 2);
+      this.addLog(`${rv.name} agrees to sweeten the accord — ${formatCurrency(gift)} changes hands.`, 'good');
+    } else {
+      rv.relations = this.clampRel(rv.relations - 3);
+      this.addLog(`${rv.name} takes the haggling as an insult and withdraws the offer.`, 'bad');
+    }
+    return { accepted, gift };
   }
 
   // ---- Espionage (GDD §5.5): the covert track parallel to open diplomacy ----

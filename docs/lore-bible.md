@@ -88,7 +88,7 @@ ibn Sallum. **Voice:** courtly, layered; a refusal arrives wrapped as a complime
 ### The Iron Republics — the hammer concordat
 City-states fused by wartime production boards into one industrial junta. Chief Magistrate
 Petra Eisenmann's magistracy publishes output figures the way churches publish scripture.
-**Name flavor:** industrial-Germanic — Petra, Konrad, Use, Emil; surnames Eisenmann,
+**Name flavor:** industrial-Germanic — Petra, Konrad, Ute, Emil; surnames Eisenmann,
 Schacht, Werfel, Gruber. **Voice:** statistical; grievances are itemized, wars are
 "corrections."
 
