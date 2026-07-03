@@ -51,20 +51,32 @@ zero page errors).
   `notables` keeps dead entries as dynasty history so the array only grows).
 - `tickSupplyLines`: player-settlement list hoisted out of the per-army loop.
 
-### Deliberately NOT done (flagged, needs a decision)
-- **Dead-notable pruning**: `r.notables` grows forever (audit HIGH), but dead entries
-  are dynasty history (children ids, UI family tree) — pruning would delete serialized
-  game state. Needs a design call (e.g. cap dead-entry bios, or index alive-by-town).
-- `settlement(id)` O(n) `.find` (~99 sites): N ≤ ~25 today; a Map index adds
-  invalidation risk across founding/annexation for negligible current gain.
-- CSS `transition: all` (21 sites) and 17 `backdrop-filter: blur()` panels over the
-  live canvas: latent paint-storm/compositor costs, but changing them alters visual
-  design — left for a deliberate UI pass.
+### Follow-ups the user approved and landed (second pass)
+- **Dead-notable pruning**: `tickNotableLifecycle` now prunes dead notables that no
+  dynasty (parent/children) or sitting minister references. Reference-safe by
+  construction (every id in a children/parentId link belongs to a kept notable);
+  runs only on the monthly tick, never on deserialize, so a serialize round-trip is
+  an exact identity. Updated the "dead Notables are replaced" test to assert the
+  minted successor's identity, not a count that assumed the corpse lingered.
+- **`settlement(id)` Map index**: id→Settlement map rebuilt lazily, invalidated on
+  (array ref, length) — a complete key since membership only changes via push or a
+  whole-array reassignment (deserialize, `abandonGhostTowns`) and ids are immutable.
+  No mutation site instrumented; private/transient, not serialized. Verified
+  consistent across a 6000-tick founding/abandonment run.
+- **CSS `transition: all`** (21 sites): each scoped to the exact properties that
+  element animates across its state rules, same timing — visually identical, no more
+  layout-triggered transitions. `backdrop-filter` blur left as a deliberate design
+  choice (user chose transitions-only scope).
+- **Bench gap**: added a `huge nation (24)` stage growing to `MAX_SETTLEMENTS` via the
+  real autoplay-expansion path; the gate now covers the O(N²·G) arbitrage scaling
+  (mean tick ~2× the 6-town figure, still PASS under the frame budget).
+
+### Still deliberately not done
+- 17 `backdrop-filter: blur()` panels over the live canvas: real compositor cost but a
+  visible design change — out of scope for a transitions-only pass.
 - `warScars` uncapped (one per war — dozens over a full run), trade-season sort
   (2 goods), BFS `shift()` in `computeRoutePath` (memoized per tick): all negligible
   at real scale.
-- Bench gap: `bench-region.ts` tops out at 6 towns, so it can't see the O(N²·G)
-  arbitrage scaling the profiler caught at 22 settlements — worth extending stages.
 
 ## 2026-07-03 — audit-to-9 execution (PR #346, branch `claude/game-audit-score-8ggzeu`)
 
