@@ -49,14 +49,28 @@ export class Soundscape {
   private bedSource: AudioBufferSourceNode | null = null;
   private bedGain: GainNode | null = null;
 
+  /** User ambience level 0–1, multiplied into the master ease (mirrors music.ts). */
+  private volume = 1;
+
   constructor() {
     let on = true;
     try {
       on = localStorage.getItem('centuria-soundscape') !== '0';
+      const v = parseFloat(localStorage.getItem('centuria-ambience-volume') ?? '1');
+      if (Number.isFinite(v)) this.volume = Math.max(0, Math.min(1, v));
     } catch {
       // storage unavailable — default to on
     }
     this.enabled = on;
+  }
+
+  setVolume(v: number): void {
+    this.volume = Math.max(0, Math.min(1, v));
+    try {
+      localStorage.setItem('centuria-ambience-volume', String(this.volume));
+    } catch {
+      // preference won't persist
+    }
   }
 
   toggle(): void {
@@ -228,7 +242,7 @@ export class Soundscape {
     if (!ctx || !this.masterGain) return;
 
     // Ease master volume: silent when paused, gently present when playing.
-    const targetVol = c.paused ? 0 : 0.38;
+    const targetVol = c.paused ? 0 : 0.38 * this.volume;
     this.masterGain.gain.value += (targetVol - this.masterGain.gain.value) * 0.04;
 
     // Recorded ambience bed (procedural-only by default). Managed every frame so
