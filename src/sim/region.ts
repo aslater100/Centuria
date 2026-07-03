@@ -4295,7 +4295,13 @@ export class RegionSim {
   }
 
   private roleMult(t: Settlement, role: NotableRole): number {
-    return this.notablesAt(t.id).some((n) => n.role === role) ? 1 : 0;
+    // Direct scan, no intermediate array: this runs several times per settlement
+    // per sim-day, and `notables` keeps dead entries as dynasty history, so the
+    // old filter-then-some allocated a growing array just to test membership.
+    for (const n of this.notables) {
+      if (n.alive && n.settlementId === t.id && n.role === role) return 1;
+    }
+    return 0;
   }
 
   // ---- Phase 0: Exploration & Fog of War ----
