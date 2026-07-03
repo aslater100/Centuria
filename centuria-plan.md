@@ -9,6 +9,7 @@ Source: audit delivered 2026-07-03 (see session-log.md when created). Baseline s
 | Graphics | 7/10 | 9/10 |
 | Difficulty | 6/10 | 9/10 |
 | Lore depth | 3.5/10 | 9/10 |
+| UI/UX (added 2026-07-03) | 4/10 (5 core / 3 meta, weighted 60/40) | 9/10 |
 
 **Status: PLAN ONLY. Nothing below has been dispatched or implemented.** Per CLAUDE.md this is a
 multi-step, cross-cutting change set — it needs an explicit "go" before any task is delegated.
@@ -243,16 +244,156 @@ consistent canon instead of drifting.
 
 ---
 
+## 6. UI/UX (4 → 9)
+
+Added 2026-07-03, scored separately from "Graphics" (art/rendering pipeline, 7/10 — unaffected
+by this section). Two sub-audits: **core gameplay UI** (the main play view, `regionview.ts` and
+satellites) scored **5/10**; **meta UI / onboarding / accessibility** (menus, tutorial, input,
+save/load) scored **3/10**. Weighted 60/40 toward core (where players spend nearly all their
+time) → **4/10 overall**.
+
+The good news: most of the gap is **wiring dead/unused code back in**, not new design work.
+`src/ui/components/` (Modal, Button, AsyncContent, Spinner, EmptyState, ErrorState) is a
+genuinely well-built, accessible component library — confirmed unused anywhere in
+`regionview.ts`. `WikiPanel.ts` is a complete 331-line in-game tutorial/help system — confirmed
+never imported or instantiated anywhere in the app. `mainmenu.ts` is a dead, stale-premise
+screen never reached from `titlescreen.ts`. This makes UI/UX the **highest Fable-5-suitability**
+category in this plan: most tasks are bounded integration/bugfixes, not balance math or
+schema design.
+
+### U1 — Replace raw `alert()`/`confirm()` with the existing Modal/ErrorState components
+- **Orchestrator pre-work:** none — this is a direct swap using components that already exist
+  and already handle focus-trap/keyboard/aria correctly.
+- **Fable 5 task:** *"In `src/ui/regionview.ts`, replace all 9 `alert()` call sites
+  (~lines 5197-5864, per the UI audit) and the `confirm()` at line 5189 with the existing
+  `Modal`/`ErrorState` components from `src/ui/components/` (do not build new ones — import and
+  reuse). Preserve the exact message text and control flow (blocking confirm before a
+  destructive action must still block). Verify visually via `npm run dev` that insufficient-funds
+  and currency-switch flows still work."*
+
+### U2 — Fix the top bar to match GDD §11's own spec
+- **Orchestrator pre-work:** the GDD (§11, line ~433-440) already specifies what belongs at
+  glance-altitude: date/season/pop/treasury/**approval**/**inline crisis warnings**. The shipped
+  `updateTopBar()` (`regionview.ts:4377-4413`) omits legitimacy and crisis warnings even though
+  both already exist elsewhere (State→Politics tab at 3844-3869; `crisis-banner` at 3944). This
+  is a straightforward "surface existing state" task, not new mechanics — no design judgment
+  needed beyond confirming layout doesn't overflow at min window width (check against U8 below).
+- **Fable 5 task:** *"Extend `updateTopBar()` (`regionview.ts:4377-4413`) to also render the
+  existing legitimacy value (already computed, read from the same state `State→Politics` reads
+  at line 3844) and surface the existing `crisis-banner` condition (line 3944) as a compact
+  glance-level warning icon/badge, not just deep in a sub-panel. Do not add any new sim state —
+  read-only display of values that already exist."*
+
+### U3 — Wire `WikiPanel.ts` into the game (the single highest-leverage onboarding fix)
+- **Orchestrator pre-work:** none — the panel is fully built (`WikiPanel.ts:20-53` already has
+  "Getting Started"/"First Steps" content). It just has no entry point.
+- **Fable 5 task:** *"Import and instantiate `WikiPanel` (currently dead code, never referenced
+  outside its own file) from `src/ui/regionview.ts` and `src/ui/titlescreen.ts`. Add a '?' Help
+  button to the play-view top bar and the title screen that opens it. Add a `localStorage`
+  first-run flag that auto-opens it once on a player's first game. Verify via `npm run dev` that
+  it opens, closes, and the first-run flag persists across a page reload."*
+
+### U4 — Resolve `mainmenu.ts` (dead, stale-premise screen)
+- **Orchestrator pre-work:** this is a product call, not a technical one — delete it (simplest;
+  `titlescreen.ts` already covers the full launch flow) or repurpose it. **Recommend delete.**
+  Confirm preference before dispatch (cheap either way, but worth one line of sign-off since it's
+  a whole screen concept being cut).
+- **Fable 5 task (once confirmed):** *"Delete `src/ui/mainmenu.ts` and remove any references to
+  it (there should be none reachable — confirm via grep before deleting). Run the full test
+  suite and `npm run build` to confirm nothing imports it."*
+
+### U5 — Fix the save-slot bug
+- **Orchestrator pre-work:** none — this is a confirmed bug, not a design question.
+  `renderSaveMenu` (`pausemenu.ts:154-169`) shows 3 distinct clickable save slots, but every
+  click routes to the same generic `save()` (`main.ts:171,89-97` → `pausemenu.ts:62-76`), which
+  ignores which slot was clicked and always overwrites the oldest.
+- **Fable 5 task:** *"Fix `renderSaveMenu`/`onSave` (`pausemenu.ts`) so each of the 3 slot
+  buttons saves to its own clicked slot index instead of always routing to the same generic
+  save. Add an overwrite confirmation (using the Modal component from U1, not a raw `confirm()`)
+  when saving over a non-empty slot. Add `tests/` coverage if a save-slot unit test file exists,
+  otherwise verify manually via `npm run dev`."*
+
+### U6 — Keyboard shortcuts for gameplay panels + a keybindings reference
+- **Orchestrator pre-work:** define the shortcut scheme before dispatch — extend the existing
+  meta-key convention already in `main.ts:195-236` (Space=pause, 1/2/3=speed, +/-=zoom,
+  Ctrl+S=save, Esc=pause menu, T/P/B=panel toggles) with number-key shortcuts for the main
+  gameplay tab groups found in the UI audit (Province/State/Economy/Research panels). Exact key
+  mapping is a small design call — draft it as a short table before handoff so Fable isn't
+  choosing bindings itself.
+- **Fable 5 task (once the key-map spec exists):** *"Add the keydown bindings specified in
+  `centuria-plan.md §U6` to `src/ui/regionview.ts`, following the existing handler pattern in
+  `main.ts:195-236`. Add a keybindings reference view (reuse the `WikiPanel` from U3, add a
+  'Keybindings' section — don't build a separate screen)."*
+
+### U7 — Accessibility pass
+- **Orchestrator pre-work:** scope to 3 concrete, bounded items (avoid open-ended "make it
+  accessible"): (a) volume sliders — `audio.ts`/`music.ts` currently have no `setVolume` API at
+  all, only on/off toggles; (b) a UI text-scale option via a single CSS custom property
+  multiplier; (c) a palette contrast check on the specific colors the sim actually uses to signal
+  danger/safety (crisis red vs. healthy green in `regionview.ts`/`style.css`) — verify they're
+  distinguishable by lightness/pattern, not hue alone, not a full design-system rebuild.
+- **Fable 5 task:** *"(a) Add a `setVolume(0-1)` method to `src/ui/audio/audioRegistry.ts` and
+  `music.ts`, and wire slider controls into the existing SFX/Music/Ambience toggles in
+  `titlescreen.ts:496-531` (replace on-off with slider + on-off). (b) Add a `--ui-scale` CSS
+  custom property to `style.css` driving root font-size, with a 3-step (small/normal/large)
+  control in the same options screen. (c) Audit crisis-red vs. healthy-green usage in
+  `regionview.ts`/`style.css` for hue-only distinction; where found, add an icon/pattern
+  alongside color (do not just recolor). Verify each control visually via `npm run dev`."*
+
+### U8 — Responsive layout pass
+- **Orchestrator pre-work:** none — `src/style.css` has zero `@media` queries for the actual
+  play view (only the unused `components.css` has 2). Define 2 target breakpoints (e.g.
+  ≤1280px and ≤1024px) before dispatch so Fable isn't guessing thresholds.
+- **Fable 5 task:** *"Add `@media` rules to `src/style.css` for the two breakpoints specified in
+  `centuria-plan.md §U8`, and confirm `WindowManager.ts`-positioned panels (drag-anywhere,
+  localStorage-persisted coordinates) clamp to the visible viewport instead of drifting
+  off-screen at the smaller breakpoint. Verify by resizing the dev-server window."*
+
+### U9 — Minimap enhancements (verify scope first — do not blindly restore cut features)
+- **Orchestrator pre-work:** GDD promises a fog-of-war overlay on the minimap, but
+  `exploration.ts` confirms fog was **deliberately retired** — the map now starts fully
+  revealed. Restoring a fog overlay on the minimap would contradict that design decision, so
+  **do not build fog-of-war back in** without confirming that reversal first. Scope this task to
+  the parts that don't conflict: crisis pins and a legend, both of which read existing state
+  (`crisis-banner` condition, settlement alert list) with no fog dependency.
+- **Fable 5 task:** *"Add crisis pins (reuse the same `crisis-banner`/settlement-alert condition
+  as U2) and a static legend to `src/ui/minimap.ts`. Do not add fog-of-war — confirmed cut by
+  design, out of scope for this task."*
+
+### U10 — Standalone "plot any variable" graph screen
+- **Orchestrator pre-work:** none — `centuryGraph.ts` already renders a solid 4-series
+  sparkline; GDD §8.5.3 calls for it being reachable any time, not just inside the Century
+  Report modal. This is a wiring task (add an entry point), not a new chart component.
+- **Fable 5 task:** *"Add a menu entry (from the existing panel tab strip in `regionview.ts`)
+  that opens `centuryGraph.ts`'s existing chart standalone, at any point in a run, not just from
+  the Century Report modal (`regionview.ts:2623`) or Economy panel (`5278`). Reuse the existing
+  component — do not build a new charting path."*
+
+### U11 — Sandbox difficulty selector
+- **Orchestrator pre-work:** none — `titlescreen.ts:29` hardcodes Sandbox mode to
+  `'standard'` difficulty despite the same `standard`/`hard`/`brutal` tags already existing and
+  already being surfaced in the Scenario flow (see D3 in §4 above, which covers
+  `designscreen.ts` specifically — this is the parallel gap in `titlescreen.ts`'s Sandbox path).
+- **Fable 5 task:** *"In `titlescreen.ts`'s Sandbox setup flow, replace the hardcoded
+  `'standard'` difficulty (line 29) with the same difficulty-tag selector already built for the
+  Scenario flow — reuse that component, don't rebuild it."*
+
+---
+
 ## Sequencing
 
 1. **L0 lore bible** — orchestrator drafts first, blocks L1–L5.
-2. **Quick wins in parallel** (no cross-dependency, no Hard Stops): L1, D3, R1, G2.
+2. **Quick wins in parallel** (no cross-dependency, no Hard Stops): L1, D3, R1, G2, **U1, U3,
+   U4, U5, U11** — the UI quick wins are mostly wiring/bugfixes and are safe to run alongside
+   everything else in this batch.
 3. **G1** (asset generation) — dispatch the asset-generator agent any time a channel is
    confirmed live; fully independent of everything else.
 4. **Design passes** (orchestrator + Opus adversarial verification, before any Fable dispatch):
-   M1, M2, D1, D2, R2.
+   M1, M2, D1, D2, R2, **U6 (key-map spec), U7 (accessibility scope), U8 (breakpoints), U9
+   (confirm fog-of-war stays cut)** — all small, bounded pre-work, none touching sim balance.
 5. **Content tasks depending on L0**: L2, L3, L4, L5 — dispatch once L0 lands.
-6. **Hard Stop sign-offs** — D1 and D2 need explicit approval on the schema/state change
+6. **U2, U10** — dispatch any time after their (trivial) pre-work; no dependencies on other work.
+7. **Hard Stop sign-offs** — D1 and D2 need explicit approval on the schema/state change
    *separately*, even after this plan is approved, per CLAUDE.md.
 
 ## Definition of done (per task, before marking complete)
