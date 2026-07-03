@@ -95,4 +95,25 @@ export function tickNotableLifecycle(r: RegionSim): void {
         }
       }
     }
+
+    // --- prune unreferenced dead notables (bounds the list over a long run) ---
+    // Role-fillers who die childless and were never a minister accumulate forever
+    // (memory + a growing per-day scan), yet reference nothing. This removal is
+    // provably reference-safe: a dead notable is kept if it belongs to a dynasty
+    // (has a parent or children — exactly what buildDynastyTree surfaces) or is a
+    // sitting minister. And every id inside a `children`/`parentId` link belongs to
+    // a kept notable (a child always has parentId set; a parent always has that
+    // child in `children`), so no surviving reference can dangle. Runs only during
+    // the (monthly) lifecycle tick, never on deserialize, so a serialize round-trip
+    // stays an exact identity.
+    const ministerIds = new Set(
+      r.ministers.map((m) => m.notableId).filter((id): id is number => id !== null),
+    );
+    let pruned = false;
+    const kept = r.notables.filter((n) => {
+      const keep = n.alive || n.parentId !== undefined || n.children.length > 0 || ministerIds.has(n.id);
+      if (!keep) pruned = true;
+      return keep;
+    });
+    if (pruned) r.notables = kept;
   }
