@@ -2,6 +2,7 @@
  * Pause Menu — shown when ESC is pressed during gameplay.
  * Allows saving, loading, and returning to title screen.
  */
+import { Modal } from './components';
 
 export interface SaveSlot {
   slot: number;
@@ -37,7 +38,7 @@ export class PauseMenu {
   private view: 'main' | 'save' | 'load' = 'main';
 
   onResume: (() => void) | null = null;
-  onSave: (() => void) | null = null;
+  onSave: ((slot: number) => void) | null = null;
   onQuit: (() => void) | null = null;
   onLoadGame: ((regionJson: string) => void) | null = null;
 
@@ -59,19 +60,15 @@ export class PauseMenu {
     this.el.classList.add('hidden');
   }
 
-  saveGame(regionJson: string, description: string): boolean {
+  /** Save into a specific slot index (0-based), overwriting whatever was there. */
+  saveGame(slotIndex: number, regionJson: string, description: string): boolean {
     const slots = getSaveSlots();
-    const slot: SaveSlot = {
-      slot: slots.length < MAX_SLOTS ? slots.length : 0,
+    slots[slotIndex] = {
+      slot: slotIndex,
       timestamp: Date.now(),
       regionJson,
       description,
     };
-
-    if (slots.length >= MAX_SLOTS) {
-      slots.shift(); // remove oldest
-    }
-    slots.push(slot);
     return saveSaveSlots(slots);
   }
 
@@ -100,11 +97,13 @@ export class PauseMenu {
         break;
       case 'save-slot': {
         const btn = target as HTMLButtonElement;
-        btn.disabled = true;
-        btn.textContent = 'Saving…';
-        this.onSave?.();
-        btn.textContent = 'Saved ✓';
-        setTimeout(() => { this.view = 'main'; this.render(); }, 800);
+        const slotIndex = parseInt(target.dataset.slot || '0');
+        const existing = getSaveSlots()[slotIndex];
+        if (existing) {
+          this.confirmOverwrite(slotIndex, () => this.commitSave(slotIndex, btn));
+        } else {
+          this.commitSave(slotIndex, btn);
+        }
         break;
       }
       case 'load-slot': {
@@ -123,6 +122,29 @@ export class PauseMenu {
     }
   }
 
+  /** Actually perform the save into `slotIndex`, driving the button's busy state. */
+  private commitSave(slotIndex: number, btn: HTMLButtonElement): void {
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    this.onSave?.(slotIndex);
+    btn.textContent = 'Saved ✓';
+    setTimeout(() => { this.view = 'main'; this.render(); }, 800);
+  }
+
+  /** Blocking confirmation before clobbering a non-empty slot. `onConfirm` only
+   *  runs if the user accepts; dismissing the dialog leaves the save untouched. */
+  private confirmOverwrite(slotIndex: number, onConfirm: () => void): void {
+    const modal = new Modal({
+      title: 'Overwrite save?',
+      content: `Slot ${slotIndex + 1} already has a save. Overwriting it cannot be undone.`,
+      actions: [
+        { label: 'Cancel', variant: 'ghost', onClick: () => modal.close() },
+        { label: 'Overwrite', variant: 'danger', onClick: () => { modal.close(); onConfirm(); } },
+      ],
+    });
+    modal.show();
+  }
+
   private render(): void {
     this.el.innerHTML = '';
 
@@ -136,7 +158,7 @@ export class PauseMenu {
   }
 
   private renderMainMenu(): void {
-    const hasSaves = this.slots.length > 0;
+    const hasSaves = this.slots.some((s) => s != null);
     this.el.innerHTML = `
       <div class="pause-menu-content">
         <h1>Paused</h1>
@@ -181,13 +203,14 @@ export class PauseMenu {
 
   private renderLoadMenu(): void {
     const slotsList = this.slots.map((slot, i) => {
+      if (!slot) return '';
       const date = new Date(slot.timestamp).toLocaleString();
       return `<div class="save-slot">
         <button data-action="load-slot" data-slot="${i}" class="slot-btn">
           Slot ${slot.slot + 1}: ${date}<br><small>${slot.description}</small>
         </button>
       </div>`;
-    }).join('');
+    }).filter(Boolean).join('');
 
     this.el.innerHTML = `
       <div class="pause-menu-content">
