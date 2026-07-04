@@ -103,6 +103,89 @@ function climateAccordInviteLine(rv: RivalNation, warmingC: number): string {
   }
 }
 
+/** Spec 10 §NEG — voice-toned table talk (docs/lore-bible.md §Voice). Text only. */
+function negotiationAcceptLine(rv: RivalNation): string {
+  switch (rivalVoiceTone(rv)) {
+    case 'mercantile': return `${rv.name} runs the figures once more and extends a hand — "A fair margin for us both."`;
+    case 'face_saving': return `${rv.name} accepts your terms, framing them, naturally, as their own idea.`;
+    case 'sermonic': return `${rv.name} declares the accord a triumph of principle, and signs.`;
+    case 'clipped': return `${rv.name}: "Acceptable. Done."`;
+    default: return `${rv.name} weighs your terms and takes them.`;
+  }
+}
+function negotiationCounterLine(rv: RivalNation, gift: number): string {
+  switch (rivalVoiceTone(rv)) {
+    case 'mercantile': return `${rv.name} slides a revised figure across the table — ${formatCurrency(gift)} — "Meet us halfway."`;
+    case 'face_saving': return `${rv.name} counters at ${formatCurrency(gift)}, insisting the adjustment was always intended.`;
+    case 'sermonic': return `${rv.name} counters at ${formatCurrency(gift)} and calls the number a matter of justice.`;
+    case 'clipped': return `${rv.name} counters: ${formatCurrency(gift)}. "Final soon."`;
+    default: return `${rv.name} counters at ${formatCurrency(gift)}.`;
+  }
+}
+function negotiationWalkLine(rv: RivalNation): string {
+  switch (rivalVoiceTone(rv)) {
+    case 'mercantile': return `${rv.name} closes the ledger — "There is no deal here worth the ink."`;
+    case 'face_saving': return `${rv.name} withdraws from the table, citing pressing matters at home. The slight is noted anyway.`;
+    case 'sermonic': return `${rv.name} pronounces the talks corrupted by greed and departs.`;
+    case 'clipped': return `${rv.name} stands, nods once, and leaves.`;
+    default: return `${rv.name} sees no path to agreement and withdraws.`;
+  }
+}
+
+/** Spec 10 §NEG — the rival side of the table, once a month. For each open
+ *  negotiation where the player moved last: accept / counter-back / walk away,
+ *  weighted by personality and relations, patience decaying by round (at round
+ *  4+ the rival settles — accepts or walks, never counters). Player-court
+ *  negotiations only expire. All draws on aiRng (the rival-decision stream). */
+export function tickNegotiations(r: RegionSim): void {
+  for (const neg of [...r.negotiations]) {
+    const rv = r.rival(neg.rivalId);
+    if (!rv) {
+      r.negotiations = r.negotiations.filter((n) => n.id !== neg.id);
+      continue;
+    }
+    if (neg.lastMoveBy === 'rival') {
+      // Ball in the player's court: rival waits, then withdraws at the deadline.
+      if (r.day >= neg.expiresDay) {
+        r.negotiations = r.negotiations.filter((n) => n.id !== neg.id);
+        rv.relations = r.clampRel(rv.relations - 2);
+        r.addLog(`${rv.name} tires of waiting — the offer is withdrawn.`, 'bad');
+      }
+      continue;
+    }
+    // Rival responds to the player's terms.
+    const base = r.negotiationBaseGift(rv);
+    // How far above the fair anchor the player is asking, as a fraction (can be negative).
+    const ask = base > 0 ? (neg.gift - base) / base : 0;
+    const sweet = neg.sweetener === 'goodwill' ? 0.08 : 0;
+    const acceptP = Math.max(0.10, Math.min(0.90,
+      0.32 + rv.relations / 200 + rv.weights.commerce * 0.03 - rv.weights.grudge * 0.02
+      - Math.max(0, ask) * 0.45 + sweet,
+    ));
+    if (r.aiRng.chance(acceptP)) {
+      r.settleNegotiation(neg, rv);
+      r.addLog(negotiationAcceptLine(rv), 'good');
+      continue;
+    }
+    const mustSettle = neg.round >= 4;
+    const walkP = Math.max(0.10, Math.min(0.85,
+      0.12 + neg.round * 0.12 + (ask > 0.5 ? rv.weights.honor * 0.03 : 0) + rv.weights.grudge * 0.015,
+    ));
+    if (mustSettle || r.aiRng.chance(walkP)) {
+      r.negotiations = r.negotiations.filter((n) => n.id !== neg.id);
+      rv.relations = r.clampRel(rv.relations - 4);
+      r.addLog(negotiationWalkLine(rv), 'bad');
+      continue;
+    }
+    // Counter-back: meet between the fair anchor and the player's ask.
+    neg.gift = Math.round((neg.gift + base) / 2);
+    neg.round++;
+    neg.lastMoveBy = 'rival';
+    neg.expiresDay = r.day + 90;
+    r.addLog(negotiationCounterLine(rv, neg.gift), 'info');
+  }
+}
+
   /** Monthly diplomacy tick: emergence, relations drift, AI offers,
    *  hostile mischief, regime change abroad, and foreign wars. */
 export function updateDiplomacy(r: RegionSim): void {
@@ -114,6 +197,7 @@ export function updateDiplomacy(r: RegionSim): void {
     }
     r.offers = r.offers.filter((o) => o.expiresDay > r.day && r.rival(o.rivalId));
     r.counters = r.counters.filter((c) => c.expiresDay > r.day && r.rival(c.rivalId));
+    tickNegotiations(r);
     const myBloc = r.playerBloc();
     for (const rv of r.rivals) {
       rv.pop *= 1.0015; // they grow whether you watch or not

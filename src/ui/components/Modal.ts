@@ -56,6 +56,9 @@ export class Modal extends Component<ModalProps> {
   /** Build markup and show. Returns `this` for chaining. */
   show(parent: Node = document.body): this {
     if (this.open) return this;
+    // A rapid re-show can land while the previous close's exit animation is
+    // still playing — clear the closing state so the dialog is interactive.
+    this.el.classList.remove('c-modal-backdrop--closing');
     this.previouslyFocused = document.activeElement;
     this.mount(parent);
     document.body.classList.add('c-modal-open');
@@ -71,7 +74,26 @@ export class Modal extends Component<ModalProps> {
     this.open = false;
     document.removeEventListener('keydown', this.onKeydown, true);
     document.body.classList.remove('c-modal-open');
-    this.destroy();
+    // Close semantics stay synchronous (focus restore, onClose); only the DOM
+    // teardown waits for the ~130ms exit fade. The closing backdrop is
+    // pointer-events: none, so the lingering node can't swallow clicks.
+    // Reduced motion (or no matchMedia, e.g. tests) tears down immediately.
+    const reduceMotion = typeof window.matchMedia !== 'function'
+      || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) {
+      this.destroy();
+    } else {
+      const backdrop = this.el;
+      backdrop.classList.add('c-modal-backdrop--closing');
+      let torndown = false;
+      const teardown = (): void => {
+        if (torndown || this.open) return;
+        torndown = true;
+        this.destroy();
+      };
+      backdrop.addEventListener('animationend', teardown, { once: true });
+      window.setTimeout(teardown, 250);
+    }
     (this.previouslyFocused as HTMLElement | null)?.focus?.();
     this.props.onClose?.();
   };

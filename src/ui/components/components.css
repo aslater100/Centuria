@@ -208,6 +208,19 @@
 @keyframes c-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes c-pop { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
 
+/* Exit: Modal.close() adds the closing class, then tears the node down on
+   animationend. `forwards` holds the faded-out end state; pointer-events off
+   so the departing backdrop never intercepts a click. */
+.c-modal-backdrop--closing {
+  animation: c-fade-out 0.13s ease forwards;
+  pointer-events: none;
+}
+.c-modal-backdrop--closing .c-modal {
+  animation: c-pop-out 0.13s ease forwards;
+}
+@keyframes c-fade-out { to { opacity: 0; } }
+@keyframes c-pop-out { to { opacity: 0; transform: translateY(6px) scale(0.97); } }
+
 /* ---- Responsive --------------------------------------------------------- */
 @media (max-width: 600px) {
   .c-modal-backdrop { padding: 0; align-items: flex-end; }
@@ -223,6 +236,7 @@
 /* ---- Reduced motion ----------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   .c-spinner__ring { animation: c-pulse 1.2s ease-in-out infinite; }
-  .c-modal, .c-modal-backdrop, .c-btn { animation: none; transition: none; }
+  .c-modal, .c-modal-backdrop, .c-btn,
+  .c-modal-backdrop--closing, .c-modal-backdrop--closing .c-modal { animation: none; transition: none; }
   @keyframes c-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 }

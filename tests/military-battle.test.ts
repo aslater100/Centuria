@@ -9,9 +9,10 @@
  * manpower and −8 morale, the winner ×0.95 and −3 morale, and a rout (either side's
  * power below 30% of its round-1 value) ends the battle immediately with an extra
  * −10 morale for the routed side. Best-of-3 rounds decides the battle; a tie holds for
- * the defender. No walls/fort/citadel building ids exist in src/data/buildings.json or
- * region_buildings.json today, so the fortification modifier never fires — only the
- * flat home-ground ×1.10 applies (well under the ×1.25 cap).
+ * the defender. §FORT (docs/specs/10-chase-the-nines.md) has since activated the
+ * fortification axis (`fortress` in region_buildings.json — see tests/fortress.test.ts);
+ * these trials use a province with no settlement, so no fortress applies and only the
+ * flat home-ground ×1.10 fires (well under the ×1.25 cap).
  *
  * These trials use a province id that matches no real settlement, so
  * `r.settlement(provinceId)` is undefined and the side ownership check is ambiguous —

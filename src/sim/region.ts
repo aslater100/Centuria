@@ -79,7 +79,7 @@ const NATION_ID_BY_RIVAL_NAME: Record<string, string> = Object.fromEntries(
   (rivalNationsJson as unknown as RivalNationDef[]).map((n) => [n.name, n.id]),
 );
 
-interface TraitJsonEntry { id: string; notableOnly?: boolean }
+interface TraitJsonEntry { id: string; notableOnly?: boolean; arcOnly?: boolean }
 /** Trait ids reserved for Notables (GDD §2.4 / spec §L3) — never rolled for
  *  ordinary colonists. Nothing currently iterates TRAIT_DEFS to assign
  *  colonist traits at random (verified: only `traitDef()` look-ups by id are
@@ -87,7 +87,7 @@ interface TraitJsonEntry { id: string; notableOnly?: boolean }
  *  filter exists so the guard is enforced at the one call site that does
  *  roll from the list (mintNotable) even if that changes later. */
 const NOTABLE_TRAIT_IDS: string[] = (traitsJson.traits as TraitJsonEntry[])
-  .filter((t) => t.notableOnly)
+  .filter((t) => t.notableOnly && !t.arcOnly) // arcOnly traits (e.g. 'disgraced') are earned through arcs, never rolled at mint
   .map((t) => t.id);
 
 export interface TechNode {
@@ -613,6 +613,7 @@ export interface RegionalBuildingDef {
   research?: number;     // research rate multiplier add
   satisfaction?: number; // flat satisfaction-target bonus
   sight?: number;        // survey radius bonus for this town
+  garrisonBonus?: number; // flat garrison-strength add (§FORT: fortress)
   coastal_only?: boolean; // if true, only buildable in coastal settlements
   // Spatial-4X Phase D — Wonders: one-per-EMPIRE placements with a global effect.
   unique?: boolean;                 // empire-wide cap of one (not per-city)
@@ -1821,7 +1822,10 @@ export const LEVERAGE_FRAGILITY = TUNING.leverageFragility;
 export const LEVERAGE_FRAGILE   = TUNING.leverageFragile;
 export const FRAGILITY_GAIN     = TUNING.fragilityGain;
 export const MIN_POLICY_RATE = 0.01;
-export const MAX_POLICY_RATE = 0.15;
+// 0.20 ceiling: calibration memo — US federal funds peaked ~19-20% in 1980-81 (Volcker
+// disinflation), and the D1 hyperinflation loss state needs the full historical tail
+// available as an escape tool. Was 0.15, which cut the real-world policy range short.
+export const MAX_POLICY_RATE = 0.20;
 /** Credit spreads over policy rate by rating tier. */
 export const CREDIT_RATING_SPREADS: Record<CreditRating, number> = {
   AAA: 0, AA: 0.005, A: 0.01, BBB: 0.02, BB: 0.04, B: 0.07, CCC: 0.12, D: 0.25,
@@ -2093,6 +2097,29 @@ export interface RivalNationDef {
 export interface TreatyOffer {
   rivalId: number;
   kind: TreatyKind;
+  expiresDay: number;
+}
+
+/** Spec 10 §NEG — a persistent multi-round haggle over a standing treaty offer.
+ *  Opened when the player counters with terms instead of taking the one-shot
+ *  `counterOffer` settle; the rival replies on its monthly diplomacy tick
+ *  (accept / counter-back / walk away), so a negotiation spans months and
+ *  survives save/load (schema v3). Terms haggle the signing gift plus an
+ *  optional goodwill sweetener — treaty durations don't exist in the treaty
+ *  model, so they are deliberately not negotiable. */
+export interface Negotiation {
+  id: number;
+  rivalId: number;
+  kind: TreatyKind;
+  /** Exchanges consumed. Player open = 1; each rival counter and player re-counter +1. At 4 the rival settles it: accept or walk, never counter. */
+  round: number;
+  /** Gift paid to the player on signing (the axis being haggled). */
+  gift: number;
+  /** 'goodwill' adds +4 relations on signing in place of part of the gift. */
+  sweetener: 'none' | 'goodwill';
+  lastMoveBy: 'player' | 'rival';
+  openedDay: number;
+  /** Rival withdraws past this (relations −2) if the ball is in the player's court. */
   expiresDay: number;
 }
 
@@ -3123,6 +3150,22 @@ export interface Notable {
   backstory?: string;     // founding backstory blurb
   yearEnteredRole?: number; // year they entered their current role
   monthsIgnored?: number; // months portfolio has been neglected (for loyalty decay)
+  /** Spec 10 §ARC — active narrative arc, if any. Rides the wholesale notables dump (schema v3). */
+  arc?: NotableArc | null;
+}
+
+/** Spec 10 §ARC — a multi-stage personal storyline. Stages fire beats into the
+ *  notable's bio chronicle and the main log 2-6 months apart; each stage rolls
+ *  escalate-vs-fizzle (trait-weighted), and stage 3 applies a real mechanical
+ *  consequence through existing machinery (loyalty, legitimacy, skill, capital). */
+export interface NotableArc {
+  kind: 'scandal' | 'ambition' | 'feud' | 'redemption';
+  stage: 0 | 1 | 2 | 3;
+  startedDay: number;
+  nextBeatDay: number;
+  /** Feud only: the notable on the other side. */
+  targetNotableId?: number;
+  resolved: boolean;
 }
 
 export interface DynastyNode {
@@ -3531,6 +3574,15 @@ export interface DifficultySettings {
   aiAggression: number;         // 0.5–2.0 multiplier on rival expansion chance
   economicVolatility: number;   // 0.5–2.0 multiplier on boom/bust amplitude
   historicalAnchors: 'on' | 'emergent' | 'off';
+  /** Spec 10 §DIFF — multiplier on the post-2050 aging-crisis pension burden.
+   *  Optional (old serialized objects lack it); consumers read `?? 1`. */
+  pensionMult?: number;
+  /** Spec 10 §DIFF — multiplier on misery-driven grievance pressure (the immiseration→
+   *  revolt chain). This is the knob that gates "real teeth": easy = 0 (misery vents but
+   *  never revolts, preserving the legacy coast-to-2100 feel), standard = 1 (misery reaches
+   *  the revolt line over years), hard/brutal escalate. Optional; consumers read `?? 1` so
+   *  the misery chain is fully live by default (tests, default RegionSim). */
+  unrestPressure?: number;
 }
 
 export const DEFAULT_DIFFICULTY_SETTINGS: DifficultySettings = {
@@ -3538,7 +3590,36 @@ export const DEFAULT_DIFFICULTY_SETTINGS: DifficultySettings = {
   aiAggression: 1.0,
   economicVolatility: 1.0,
   historicalAnchors: 'on',
+  pensionMult: 1.0,
+  // Legacy baseline = easy: the immiseration→revolt chain is dialed to zero so the
+  // pre-rebalance coast-to-2100 behavior (what every old balance test was tuned against)
+  // is preserved exactly. The repaired chain is live at standard+ (the new-game default).
+  unrestPressure: 0.0,
 };
+
+/** Spec 10 §DIFF — the real-teeth difficulty ladder (owner-approved 2026-07-04).
+ *  `easy` IS the pre-rebalance game: every 1.0 multiplier preserved so the old
+ *  coast-to-2100 experience remains selectable (and stays pinned by the tests
+ *  that exercise DEFAULT_DIFFICULTY_SETTINGS). `standard` is tuned so crises
+ *  genuinely bite in normal play — the headless gate targets 2-4 of 20 autoplay
+ *  seeds ending badly (dystopia / collapse), all survivable with active play. */
+export type DifficultyTier = 'easy' | 'standard' | 'hard' | 'brutal';
+export const DIFFICULTY_PRESETS: Record<DifficultyTier, DifficultySettings> = {
+  // pensionMult: calibration-memo arithmetic at the 2-ticks-per-game-year cadence —
+  // ×1 (easy/legacy) drains ~0.6% of the tax take per year (token, unfelt); ×12
+  // (standard) ≈ 7-8%, a real late-game squeeze approaching the memo's OECD ~10%
+  // reference; hard/brutal push past it into genuine crisis territory.
+  easy:     { crisisFrequency: 1.0,  aiAggression: 1.0,  economicVolatility: 1.0,  historicalAnchors: 'on', pensionMult: 1.0,  unrestPressure: 0.0 },
+  standard: { crisisFrequency: 1.15, aiAggression: 1.25, economicVolatility: 1.15, historicalAnchors: 'on', pensionMult: 12.0, unrestPressure: 1.0 },
+  hard:     { crisisFrequency: 1.6,  aiAggression: 1.6,  economicVolatility: 1.5,  historicalAnchors: 'on', pensionMult: 20.0, unrestPressure: 1.5 },
+  brutal:   { crisisFrequency: 2.0,  aiAggression: 2.0,  economicVolatility: 2.0,  historicalAnchors: 'on', pensionMult: 30.0, unrestPressure: 2.0 },
+};
+
+/** Apply a difficulty tier's preset onto a live sim (scenario start, sandbox
+ *  start, or the headless harness's SIM_DIFFICULTY sweep). */
+export function applyDifficultyPreset(r: RegionSim, tier: DifficultyTier): void {
+  r.difficultySettings = { ...DIFFICULTY_PRESETS[tier] };
+}
 
 const TOWN_NAMES = [
   // Original names
@@ -3612,6 +3693,21 @@ export const MAX_SETTLEMENTS = 24;
  *  Founding is rejected within this radius of any existing town so cities don't
  *  pile on top of each other. Used by both player expeditions and AI expansion. */
 export const MIN_SETTLEMENT_SPACING = 8;
+
+/** Save-blob schema version. v2 added the D1/D2 persisted counters
+ *  (hyperinflationMonths, postRevoltGrievanceMonths); v3 (spec 10) adds persistent
+ *  diplomacy negotiations and notable narrative-arc state. Saves below this are a hard
+ *  cutover — `deserialize` rejects them via IncompatibleSaveError rather than migrating. */
+export const SAVE_SCHEMA_VERSION = 3;
+
+/** Thrown by `RegionSim.deserialize` when a save blob predates SAVE_SCHEMA_VERSION.
+ *  Callers (load menu, boot) catch this and offer delete-only rather than crashing. */
+export class IncompatibleSaveError extends Error {
+  constructor(public readonly foundVersion: number) {
+    super(`Incompatible save (v${foundVersion}); current schema is v${SAVE_SCHEMA_VERSION}.`);
+    this.name = 'IncompatibleSaveError';
+  }
+}
 
 export class RegionSim {
   rng: Rng;
@@ -3746,6 +3842,8 @@ export class RegionSim {
   usedNamedRivals: Set<string> = new Set();
   /** AI-initiated treaty offers awaiting the player's signature. */
   offers: TreatyOffer[] = [];
+  /** Spec 10 §NEG — open multi-round negotiations (persisted, schema v3). Max 2 at once. */
+  negotiations: Negotiation[] = [];
   /** Counter-offers from the bargaining table, awaiting signature (§6.3). */
   counters: DealCounter[] = [];
   /** Treaties the player has torn up — priced into every future ask. */
@@ -4171,6 +4269,15 @@ export class RegionSim {
   unrestLevel: 0 | 1 | 2 | 3 | 4 | 5 = 0;
   /** Months the nation has been at the current unrest level. */
   unrestMonthsAtLevel = 0;
+  /** D1: consecutive months the hyperinflation-collapse trigger has held (persisted). */
+  hyperinflationMonths = 0;
+  /** §DIFF sweep diagnostics — lifetime counts of revolutions fired and settlements lost to
+   *  secession. Deliberately NOT serialized (reset on load): they exist so the headless
+   *  difficulty gate can count real failure-chain events instead of proxying on satisfaction. */
+  revolutionsFired = 0;
+  secessionsFired = 0;
+  /** D2: per-settlement consecutive post-revolution months at critical grievance (persisted, keyed by settlement id). */
+  postRevoltGrievanceMonths: Record<number, number> = {};
   /** Generational ideology drift accumulator (0–1). */
   generationalDrift = 0;
   /** True once the 1968-analog youthquake event has fired. */
@@ -4401,13 +4508,18 @@ export class RegionSim {
     return Math.max(0, Math.min(1, p * this.difficultySettings.aiAggression));
   }
 
-  /** Get garrison strength of a settlement, including stationed units (GDD §7.1). */
+  /** Get garrison strength of a settlement, including stationed units (GDD §7.1)
+   *  and fortification buildings (§FORT — declarative `garrisonBonus`, consumed
+   *  here the same way `buildingSatisfaction`/`buildingSight` consume theirs). */
   garrisonOf(settlement: Settlement): number {
     let strength = settlement.garrisonStrength || 0;
     // Add contribution from stationed units: each unit contributes power proportional to its type
     for (const unit of settlement.stationedUnits) {
       const unitDef = UNIT_TYPES[unit.type];
       strength += unit.count * unitDef.powerPerUnit;
+    }
+    for (const id of settlement.buildings) {
+      strength += REGION_BUILDINGS_MAP.get(id)?.garrisonBonus ?? 0;
     }
     return strength;
   }
@@ -4564,6 +4676,40 @@ export class RegionSim {
     return Math.min(1, total);
   }
 
+  /** D2 — a settlement fractures away from the player after a failed revolution, handed to
+   *  the nearest hostile regional faction (nearest of any faction if none is hostile). Mirrors
+   *  assaultSettlement's ownership bookkeeping in reverse and invalidates the territory cache
+   *  so victory.ts's control checks pick it up. No-op returning false if the player is the only
+   *  faction on the map (nowhere to secede to). */
+  secedeSettlement(t: Settlement): boolean {
+    const player = this.faction(this.playerFactionId);
+    if (!player) return false;
+    const candidates = this.regionalFactions.filter(
+      (f) => f.id !== this.playerFactionId && f.overlordId !== this.playerFactionId && f.settlementIds.length > 0,
+    );
+    if (candidates.length === 0) return false;
+    const nearestDist = (f: RegionalFaction): number => {
+      const dists = f.settlementIds
+        .map((id) => this.settlement(id))
+        .filter((s): s is Settlement => !!s)
+        .map((s) => Math.hypot(s.x - t.x, s.y - t.y));
+      return dists.length ? Math.min(...dists) : Infinity;
+    };
+    const hostile = candidates.filter((f) => this.playerRegionalWars.has(f.id) || f.aggressiveness > 60);
+    const pool = hostile.length > 0 ? hostile : candidates;
+    const target = pool.reduce((a, b) => (nearestDist(a) <= nearestDist(b) ? a : b));
+    player.settlementIds = player.settlementIds.filter((id) => id !== t.id);
+    t.factionId = target.id;
+    target.settlementIds.push(t.id);
+    if (player.capital === t.id) player.capital = player.settlementIds[0] ?? -1;
+    t.loyaltyToFaction = 50;
+    t.grievance = Math.max(0, t.grievance - 40); // leaving is itself a release valve
+    this._territoryCache = null;
+    this.secessionsFired++;
+    this.addLog(`SECESSION: ${t.name} breaks from the state and throws in with ${target.name}.`, 'bad');
+    return true;
+  }
+
   /** Classify a settlement's three headline goods as surplus / balanced /
    *  deficit, for the at-a-glance resource icons on the map. */
   getSettlementResourceStatus(t: Settlement): SettlementResourceStatus {
@@ -4684,9 +4830,20 @@ export class RegionSim {
 
   /** Throughput a route can actually carry: capacity scales with condition. A
    *  sea lane carries its shipping capacity, not the mule-train trail figure. */
+  /** M3 — wartime sea-lane blockade factor (exactly 1 in peacetime, no RNG). An active
+   *  player war runs a blockade gauntlet on the sea lanes; a larger escorting fleet contests
+   *  it. Shared by naval trade income and sea-lane throughput below so both squeeze together. */
+  blockadeMultiplier(): number {
+    if (!this.playerWar) return 1;
+    const warships = this.playerWar.units.find((u) => u.type === 'warship')?.count ?? 0;
+    return 0.65 + 0.35 * Math.min(1, warships / 6);
+  }
+
   effectiveCapacity(r: Route): number {
     const base = r.sea ? SEA_LANE_CAPACITY : ROUTE_SPECS[r.kind].capacity;
-    return base * (r.condition / 100);
+    // M3: a blockade throttles physical throughput on sea lanes, not just the income they earn.
+    const blockade = r.sea ? this.blockadeMultiplier() : 1;
+    return base * (r.condition / 100) * blockade;
   }
 
   /** Spare capacity on the tightest leg of a path — the bottleneck a caravan
@@ -5750,28 +5907,15 @@ export class RegionSim {
     const extraCount = Math.max(0, 4 - region.notables.length); // ensure at least 4 notables total
     for (let i = 0; i < extraCount; i++) {
       const role = extraRoles[i % extraRoles.length];
-      region.notables.push({
-        id: region.nextId++,
-        name: (() => {
-          const first = ['Edda', 'Tomas', 'Sela', 'Bruno', 'Petra', 'Anders', 'Ivy', 'Casimir'][region.rng.int(8)];
-          const last = ['Weller', 'Stroud', 'Halvorsen', 'Quint', 'Mercer', 'Dunmore'][region.rng.int(6)];
-          return `${first} ${last}`;
-        })(),
+      const founder = region.mintNotable(role, home.id, {
         age: 28 + region.rng.int(28),
-        traits: [],
-        role,
-        settlementId: home.id,
-        bio: [`Founding settler, 1900.`, `Named ${role} at the founding.`],
-        alive: true,
         skill: 40 + region.rng.int(36),
         health: 80 + region.rng.int(21),
-        children: [],
-        loyalty: 90,
         factionAlignment: extraFactions[i % extraFactions.length],
         backstory: extraBackstories[i % extraBackstories.length],
-        yearEnteredRole: region.year,
-        monthsIgnored: 0,
       });
+      founder.loyalty = 90;
+      founder.bio = [`Founding settler, 1900.`, `Named ${role} at the founding.`];
     }
 
     const mayor = region.notables.find((n) => n.role === 'Mayor' && n.alive);
@@ -6012,17 +6156,13 @@ export class RegionSim {
       r.difficultySettings = { ...DEFAULT_DIFFICULTY_SETTINGS, ...opts.difficultySettings };
     }
 
-    // Apply difficulty from scenario
+    // Apply difficulty from scenario — routed through the §DIFF preset ladder.
+    // 'standard' now applies the real-teeth standard preset (it used to be a
+    // no-op that left the easy-equivalent 1.0 defaults in place).
     const scenario = SCENARIOS.find((s) => s.id === r.activeScenario);
     if (scenario) {
-      if (scenario.difficulty === 'hard') {
-        r.difficultySettings.crisisFrequency = 1.5;
-        r.difficultySettings.aiAggression = 1.5;
-        r.difficultySettings.economicVolatility = 1.5;
-      } else if (scenario.difficulty === 'brutal') {
-        r.difficultySettings.crisisFrequency = 2.0;
-        r.difficultySettings.aiAggression = 2.0;
-        r.difficultySettings.economicVolatility = 2.0;
+      applyDifficultyPreset(r, scenario.difficulty);
+      if (scenario.difficulty === 'brutal') {
         // Climate emergency: CO₂ already at 400ppm
         if (scenario.id === 'climate_emergency') {
           r.co2ppm = 400;
@@ -6290,7 +6430,23 @@ export class RegionSim {
           (this.policyActive('civic_pride') ? 0.8 : 1);
         // Apply reduction factors only to positive (building) pressure, not to negative
         // (recovering) pressure — otherwise labor_law would slow grievance recovery.
-        const basePressure = Math.max(0, this.taxRate - 0.15) * 35 - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05;
+        // Misery term (spec 10 §DIFF adversarial finding b): satisfaction used to be a
+        // one-way valve — contentment vented grievance but misery added NOTHING, so a
+        // 0-satisfaction society could never reach the revolt line and the whole
+        // unrest→revolution→partition chain was unreachable from immiseration alone.
+        // Below sat 35 misery now builds pressure. Coefficient 0.12 was tuned empirically
+        // (probe seed 1063): at 0.05 the many homeostatic vents (services, laws, event
+        // reliefs, the unrest ladder's own release valves) capped deep-misery grievance
+        // near 30 — far short of the 90 revolt line — leaving revolution unreachable even
+        // at 0% satisfaction. At 0.12, sustained misery (sat ≤ ~15) escapes equilibrium
+        // and climbs to revolt over years, while sat 25+ still nets negative.
+        // The chain repair itself is difficulty-independent (the coupling should exist), but
+        // its MAGNITUDE is the §DIFF teeth knob: unrestPressure gates whether immiseration
+        // actually reaches the revolt line. easy = 0 → misery never revolts (legacy coast);
+        // standard = 1 → reaches revolt over years; hard/brutal escalate. Default (no preset,
+        // e.g. tests) reads `?? 1`, so the chain is fully live outside the difficulty menu.
+        const miseryPressure = Math.max(0, 35 - t.satisfaction) * 0.12 * (this.difficultySettings.unrestPressure ?? 1);
+        const basePressure = Math.max(0, this.taxRate - 0.15) * 35 + miseryPressure - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05;
         const pressure =
           Math.max(0, basePressure) * laborFactor * constabFactor +
           Math.min(0, basePressure) +
@@ -8976,6 +9132,38 @@ export class RegionSim {
         traits.push(remaining[this.rng.int(remaining.length)]);
       }
     }
+    // §ARC: every Notable gets a generated two-beat backstory — an origin and a
+    // trait-shaded formative note — unless the caller supplies one (founders, heirs).
+    const ORIGINS = [
+      'Raised among market stalls and freight ledgers',
+      'The child of tenant farmers who never owned the field they worked',
+      'Schooled by a village priest who taught letters and little mercy',
+      'Grew up dockside, first paid in fish and later in favors',
+      'Born in the back room of a boarding house during a hard winter',
+      'Apprenticed young to a trade that left ink, or soot, on every cuff',
+      'Ran errands for a survey crew and learned the country a chain-length at a time',
+      'Orphaned in the fever year and raised by an aunt who wasted neither words nor bread',
+      'Grew up over a print shop, reading the week\'s news backwards off the plates',
+      'The last of a rail-camp family that followed the line until the line gave out',
+      'Raised in a mining camp where the pay came as scrip and the lessons came hard',
+      'Brought up by a widowed schoolteacher on grammar, hymns, and thin soup',
+    ];
+    const FORMATIVE: Record<string, string> = {
+      corrupt: 'learned early that every rule has a price, and most collectors take installments.',
+      diligent: 'kept the accounts when no one else would, and never forgot a debt owed or paid.',
+      bold: 'once crossed a flooded ford at night on a dare, and has told the story ever since.',
+      cautious: 'watched a neighbor lose everything on one confident bet, and never forgot it.',
+      charismatic: 'could talk a room into anything by sixteen, and mostly out of trouble by twenty.',
+      reclusive: 'buried two siblings in one fever season and has kept the world at a distance since.',
+    };
+    const FORMATIVE_FALLBACK = [
+      'came of age between hard seasons and long roads.',
+      'learned a dozen trades to journeyman grade and settled on none of them.',
+      'left home at sixteen with one good coat and a letter of introduction, and wore both out within the year.',
+    ];
+    const originLine = ORIGINS[this.rng.int(ORIGINS.length)];
+    const formativeLine = FORMATIVE[traits[0]] ?? FORMATIVE_FALLBACK[this.rng.int(FORMATIVE_FALLBACK.length)];
+    const generatedBackstory = `${originLine}${t ? ` near ${t.name}` : ''}; ${formativeLine}`;
     const n: Notable = {
       id: this.nextId++,
       name: overrides?.name ?? `${first} ${last}`,
@@ -8990,10 +9178,11 @@ export class RegionSim {
       children: [],
       loyalty: 80,
       factionAlignment: overrides?.factionAlignment,
-      backstory: overrides?.backstory,
+      backstory: overrides?.backstory ?? generatedBackstory,
       yearEnteredRole: this.year,
       monthsIgnored: 0,
       parentId: overrides?.parentId,
+      arc: null,
     };
     this.notables.push(n);
     if (t) {
@@ -10832,6 +11021,87 @@ export class RegionSim {
     return { accepted, gift };
   }
 
+  // ---- Spec 10 §NEG: persistent multi-round negotiation ----
+
+  /** The gift a rival considers fair for this treaty — the anchor the haggle moves around. */
+  negotiationBaseGift(rv: RivalNation): number {
+    return Math.round(50 + rv.pop * 0.01);
+  }
+
+  /** Player counters a standing offer with terms instead of the one-shot settle.
+   *  Consumes the offer and opens a Negotiation; the rival replies on its monthly
+   *  diplomacy tick. Returns null if no offer stands or 2 negotiations are already open. */
+  openNegotiation(rivalId: number, gift: number, sweetener: 'none' | 'goodwill' = 'none'): Negotiation | null {
+    const o = this.offerFor(rivalId);
+    const rv = this.rival(rivalId);
+    if (!o || !rv) return null;
+    if (this.negotiations.length >= 2) return null;
+    this.offers = this.offers.filter((x) => x !== o);
+    const neg: Negotiation = {
+      id: this.nextId++,
+      rivalId,
+      kind: o.kind,
+      round: 1,
+      gift: Math.max(0, Math.round(gift)),
+      sweetener,
+      lastMoveBy: 'player',
+      openedDay: this.day,
+      expiresDay: this.day + 90,
+    };
+    this.negotiations.push(neg);
+    this.addLog(`Envoys sit down with ${rv.name} — your terms are on the table.`, 'info');
+    return neg;
+  }
+
+  /** Player re-counters a rival counter (ball returns to the rival's court). */
+  recounterNegotiation(id: number, gift: number, sweetener?: 'none' | 'goodwill'): boolean {
+    const neg = this.negotiations.find((n) => n.id === id);
+    if (!neg || neg.lastMoveBy !== 'rival') return false;
+    neg.gift = Math.max(0, Math.round(gift));
+    if (sweetener) neg.sweetener = sweetener;
+    neg.round++;
+    neg.lastMoveBy = 'player';
+    neg.expiresDay = this.day + 90;
+    return true;
+  }
+
+  /** Player accepts the terms currently on the table (only valid after a rival counter). */
+  acceptNegotiation(id: number): boolean {
+    const neg = this.negotiations.find((n) => n.id === id);
+    const rv = neg ? this.rival(neg.rivalId) : undefined;
+    if (!neg || !rv || neg.lastMoveBy !== 'rival') return false;
+    this.settleNegotiation(neg, rv);
+    return true;
+  }
+
+  /** Player walks away from the table. Milder than the rival storming off. */
+  abandonNegotiation(id: number): void {
+    const neg = this.negotiations.find((n) => n.id === id);
+    if (!neg) return;
+    const rv = this.rival(neg.rivalId);
+    this.negotiations = this.negotiations.filter((n) => n.id !== id);
+    if (rv) {
+      rv.relations = this.clampRel(rv.relations - 1);
+      this.addLog(`Talks with ${rv.name} end without agreement.`, 'info');
+    }
+  }
+
+  /** Sign the treaty on the negotiated terms. Shared by player-accept and rival-accept. */
+  settleNegotiation(neg: Negotiation, rv: RivalNation): void {
+    this.negotiations = this.negotiations.filter((n) => n.id !== neg.id);
+    if (!rv.treaties.includes(neg.kind)) {
+      rv.treaties.push(neg.kind);
+      this.onSignTreaty(rv, neg.kind);
+    }
+    this.treasury += neg.gift;
+    rv.relations = this.clampRel(rv.relations + (neg.sweetener === 'goodwill' ? 6 : 2));
+    this.addLog(
+      `Accord signed with ${rv.name} on negotiated terms — ${formatCurrency(neg.gift)} changes hands` +
+      (neg.sweetener === 'goodwill' ? ', and goodwill besides.' : '.'),
+      'good',
+    );
+  }
+
   // ---- Espionage (GDD §5.5): the covert track parallel to open diplomacy ----
 
   /** The player's current intelligence penetration of a rival, 0..1. */
@@ -12274,7 +12544,7 @@ export class RegionSim {
    */
   serialize(): string {
     return JSON.stringify({
-      v: 1,
+      v: SAVE_SCHEMA_VERSION,
       mapSeed: this.map.seed,
       rng: this.rng.getState(),
       aiRng: this.aiRng.getState(),
@@ -12491,6 +12761,9 @@ export class RegionSim {
       shareholderPatience: this.shareholderPatience,
       transitionChain: this.transitionChain,
       policySlots9: this.policySlots,
+      hyperinflationMonths: this.hyperinflationMonths,
+      negotiations: this.negotiations,
+      postRevoltGrievanceMonths: this.postRevoltGrievanceMonths,
     });
   }
 
@@ -12498,6 +12771,7 @@ export class RegionSim {
    *  from the stored seed; all mutable state is restored from the JSON. */
   static deserialize(json: string): RegionSim {
     const d = JSON.parse(json);
+    if ((d.v ?? 0) < SAVE_SCHEMA_VERSION) throw new IncompatibleSaveError(d.v ?? 0);
     const seed = d.mapSeed ?? 42;
     const rng = new Rng(0);
     const map = new RegionMap(seed);
@@ -12838,6 +13112,9 @@ export class RegionSim {
     r.shareholderPatience = d.shareholderPatience ?? 80;
     r.transitionChain = d.transitionChain ?? null;
     r.policySlots = d.policySlots9 ?? [];
+    r.hyperinflationMonths = d.hyperinflationMonths ?? 0;
+    r.negotiations = d.negotiations ?? [];
+    r.postRevoltGrievanceMonths = d.postRevoltGrievanceMonths ?? {};
     // Recompute cached perf fields after full restore.
     r.activeRailRoutes = r.routes.filter((rt) => rt.kind === 'rail' && rt.condition > 50).length;
     let tf = 0, tw = 0, mg = 0;
@@ -13426,6 +13703,10 @@ export class RegionSim {
     // (which holds the hoard near 1.5mo, leaving no surplus a 1.5mo gate could see)
     // yet still ~50× the actual grain draw, so it builds freely without risk.
     const reserve = output * RIVAL_DEV_RESERVE_MONTHS;
+    // §FORT — a fortify-minded faction hardens its capital before spreading
+    // economic buildout (deterministic priority branch behind the same
+    // RIVAL_BUILD_CHANCE roll above; no extra RNG draw).
+    if (this.tryBuildRivalFortress(faction, reserve)) return;
     // Develop the LEAST-built idle town the faction holds (spreads growth across
     // the realm), tie-broken by id — fully deterministic, no RNG.
     let town: Settlement | null = null, fewest = Infinity;
@@ -13470,6 +13751,28 @@ export class RegionSim {
     // A belligerent power runs a war economy — extra weight on industry.
     if (faction.aggressiveness >= BUILD_LEAN_AGGR_THRESHOLD) lean.industry += BUILD_LEAN_AGGR;
     return lean;
+  }
+
+  /** §FORT — a fortify-minded faction (low aggression hunkering down, or the
+   *  'fortress_realm' goal) raises ONE fortress in its CAPITAL when the purse
+   *  allows: the same era gate (`prereqEraYear`), the same surplus-above-reserve
+   *  purse, and the same placement-preview seam `tryBuildRivalBuilding` uses. */
+  private tryBuildRivalFortress(faction: RegionalFaction, reserve: number): boolean {
+    const fortifyMinded = faction.aggressiveness < 30 || faction.currentGoal?.id === 'fortress_realm';
+    if (!fortifyMinded) return false;
+    const def = REGION_BUILDINGS_MAP.get('fortress');
+    if (!def) return false;
+    const t = this.settlement(faction.capital);
+    if (!t || t.factionId !== faction.id || t.construction) return false;
+    if (this.buildingCount(t, def.id) >= def.max) return false;
+    if (def.prereq && this.year < this.prereqEraYear(def.prereq)) return false;
+    if (this.factionDevPurse(faction) - this.cityBuildCost(def) < reserve) return false;
+    const cell = this.bestPlacementCell(t, (c) => this.placementPreview(t.id, c, def.id)?.total ?? -Infinity);
+    if (cell < 0) return false;
+    this.spendFactionDev(faction, this.cityBuildCost(def));
+    t.construction = { id: def.id, doneDay: this.day + def.days, cell };
+    this.addLog(`${faction.name} breaks ground on a ${def.name} at ${t.name}.`, 'info');
+    return true;
   }
 
   /** Pick the era-ready, under-max, affordable building that best fits a rival

@@ -119,3 +119,46 @@ Lore canon: `docs/lore-bible.md`.
   at ≤1024px remains possible.
 - Audio (out of plan scope): still blocked on missing ffmpeg/encoder — external-tool
   approval required.
+
+## 2026-07-04 — audit-to-9 remainder: D1/D2 loss states + save v2 (branch `claude/game-audit-score-8ggzeu`)
+
+Landed the owner-approved remainder of the audit-to-9 plan — the two Hard-Stop-deferred loss
+states, the schema bump they required, and the queued M2/M3/U7 follow-ups. Spec: `docs/specs/09-audit-nine.md`.
+Gate: build ✓, full suite 105 files / 1584 tests ✓, new `tests/audit-nine-losses.test.ts` (10
+tests). Commits: f9376a4 (core), 52e0e14 (D1 tests+fix), d17e44d (save mgmt), cc88d66 (M2+U7),
+spec 2bd6af4.
+
+### D1 — hyperinflation loss state
+New persisted `hyperinflationMonths` counter on `RegionSim`. Currency-collapse game-over after
+12 consecutive months of `inflationRate >= 0.45` (same game-over path as depopulation). The
+spec's original `confidence < 20` co-condition was **dropped**: a headless probe showed sustained
+max inflation floors confidence near 55 (via `tickMonetary`'s `inflPressure` term), making the
+AND-condition unreachable — D1 would have been a phantom. Trigger is now inflation-only and
+escapable any month inflation recovers below 0.45; reachable only under a sustained print-regime
+supply cascade (~3 game-years). Default 20-seed × 100-year sweep: zero collapses.
+
+### D2 — revolution → partition
+New persisted `postRevoltGrievanceMonths: Record<number,number>` (per-settlement). After a
+revolution fires, a player town holding grievance ≥ 75 for 3+ consecutive months secedes at
+8% × crisisFrequency / month via new `RegionSim.secedeSettlement()` — reassigns `factionId` to
+the nearest hostile rival, updates both factions' `settlementIds`, invalidates the territory
+cache (feeds `victory.ts`). No-op if no other faction exists.
+
+### Save schema v2 (owner-approved Hard Stop)
+`SAVE_SCHEMA_VERSION = 2`, new `IncompatibleSaveError`, hard-cutover version gate in `deserialize`
+(old saves rejected, not migrated — owner deemed them disposable). Wrapper version 4→5 in
+`main.ts`. Save management: per-slot delete with Modal confirm, incompatible-save labeling
+(delete-only), once-per-in-game-year autosave into the separate quicksave key (3 manual slots
+unchanged), standalone Autosave load entry.
+
+### M3 blockade capacity
+`blockadeMultiplier()` now also throttles sea-lane throughput via `effectiveCapacity`, not just
+naval income; peacetime returns 1 with no RNG (determinism preserved).
+
+### M2 + U7
+M2: the 'Counter' button on rival offers is wired to `counterOffer()`. U7: remaining hue-only
+danger/safety sites got non-hue glyphs (checkmark/warn/cross, direction arrows) —
+legitimacy/happiness/satisfaction/finance/press-freedom/credibility-gap/epilogue-beats.
+
+### Not done
+- **G1 art-override generation** stays deferred — owner chose "stay procedural".

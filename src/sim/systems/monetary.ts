@@ -41,9 +41,13 @@ export function tickMonetary(r: RegionSim): void {
   // 0.08 credit-to-inflation pass-through: design-intent citation, not a data source — evokes the partial,
   // lagged pass-through of credit expansion into prices found in monetary-transmission studies (not 1:1).
   const leverageInflation = Math.max(0, dLeverage) * 0.08;
-  // 0.010/month (~12%/yr) print-regime inflation: design-intent citation, not a data source — evokes
-  // moderate money-financed-deficit inflation (Cagan-style seigniorage), well short of hyperinflation.
-  const printInflation = r.monetaryRegime === 'print' ? 0.010 : 0;
+  // Print-regime inflation lift. inflationRate is the ANNUALIZED rate and this term enters the
+  // TARGET level (not a per-tick accrual), so +0.08 pins the print-regime steady state near 10%/yr —
+  // matching the "moderate money-financed-deficit inflation" intent this constant always claimed.
+  // Calibration memo: the old +0.010 produced a ~3%/yr steady state, 4-10x below both its own
+  // comment and historical seigniorage episodes. Default play never adopts 'print' (20-seed sweep
+  // flat at 2%), so this bites only the regime that chooses the printing press.
+  const printInflation = r.monetaryRegime === 'print' ? 0.08 : 0;
   // Cost-push (GDD §5.2): a real supply-chain shock makes goods dearer, not just
   // scarcer — the stagflation half of the 1973 oil embargo (output already drags
   // via supplyShockMult). `supplyShockSeverity()` reads last month's cached
@@ -115,8 +119,12 @@ export function tickMonetary(r: RegionSim): void {
   // confidence<30 trigger and 0.05 base contraction: design-intent citation, not a data source — evoke a
   // "Minsky moment" where credit markets seize once sentiment breaks decisively, echoing the abrupt bank
   // lending contraction seen in the acute phase of the 2008 credit crunch.
+  // §DIFF: economicVolatility scales the bust amplitude — this is the knob's live consumer
+  // (it was advertised in the difficulty UI but consumed nowhere). At 1.0 the arithmetic is
+  // exactly the legacy contraction, so the easy tier and every pinned test are byte-stable.
+  const volatility = r.difficultySettings.economicVolatility;
   if (r.confidence < 30 && r.privateLeverage > 0.5) {
-    r.privateLeverage *= (1 - (0.05 + (30 - r.confidence) * 0.002));
+    r.privateLeverage *= (1 - (0.05 + (30 - r.confidence) * 0.002) * volatility);
     // rng.chance(0.2): design-intent citation, not a data source — evokes that a credit freeze headline is a
     // lumpy, episodic event, not guaranteed every month confidence is low.
     if (r.rng.chance(0.2)) {
@@ -237,6 +245,29 @@ export function tickMonetary(r: RegionSim): void {
       pf.centralBank.interestRate = r.policyRate;
       pf.centralBank.inflationRate = r.inflationRate;
     }
+  }
+
+  // 15. D1 — hyperinflation collapse. inflationRate is hard-clamped at 0.50 (line 78), so the
+  // plan's "200% annualized" is unreachable; the collapse line lives inside the clamp. Twelve
+  // consecutive months of inflation >= 0.45 ends the run. (The spec's original confidence < 20
+  // co-condition was dropped after verification: sustained max inflation floors confidence near
+  // 55 via the inflPressure term above, so < 20 is unreachable from inflation alone and made the
+  // loss state a phantom. Sustained near-ceiling inflation IS the death spiral on its own.)
+  // Reaching 0.45 requires the structural inflation target to hold ~0.50 for many months — a full
+  // supply-chain cascade under a money-printing regime — so normal play never approaches it. Any
+  // month the player tames inflation (rate hikes, regime switch, fixing the cascade) pulls the rate
+  // back under 0.45 and resets the counter, so the collapse is always escapable until the 12th month.
+  if (r.inflationRate >= 0.45) {
+    r.hyperinflationMonths++;
+    if (r.hyperinflationMonths >= 12 && !r.gameOver) {
+      r.gameOver = true;
+      r.addLog(
+        'Prices double by the week and the currency is worthless — the economy collapses. (Failure state: hyperinflation.)',
+        'bad',
+      );
+    }
+  } else {
+    r.hyperinflationMonths = 0;
   }
 }
 

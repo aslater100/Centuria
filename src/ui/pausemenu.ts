@@ -3,12 +3,16 @@
  * Allows saving, loading, and returning to title screen.
  */
 import { Modal } from './components';
+import { SAVE_SCHEMA_VERSION } from '../sim/region';
 
 export interface SaveSlot {
   slot: number;
   timestamp: number;
   regionJson: string;
   description: string;
+  /** Schema version the blob was written under. Absent on pre-cutover saves;
+   *  a value !== SAVE_SCHEMA_VERSION marks the slot incompatible (delete-only). */
+  schemaVersion?: number;
 }
 
 const SAVE_SLOTS_KEY = 'centuria-save-slots';
@@ -41,6 +45,12 @@ export class PauseMenu {
   onSave: ((slot: number) => void) | null = null;
   onQuit: (() => void) | null = null;
   onLoadGame: ((regionJson: string) => void) | null = null;
+  onLoadAutosave: (() => void) | null = null;
+  onDeleteAutosave: (() => void) | null = null;
+
+  /** Autosave/quicksave summary, set by main.ts before `show()`. Rendered as a
+   *  standalone "Autosave (auto)" row in the Load menu, separate from the 3 slots. */
+  autosaveInfo: { description: string; timestamp: number; incompatible: boolean } | null = null;
 
   constructor(root: HTMLElement) {
     this.el = document.createElement('div');
@@ -68,8 +78,23 @@ export class PauseMenu {
       timestamp: Date.now(),
       regionJson,
       description,
+      schemaVersion: SAVE_SCHEMA_VERSION,
     };
     return saveSaveSlots(slots);
+  }
+
+  /** Remove the save at `index`, leaving a hole so remaining slot positions stay put. */
+  deleteSaveSlot(index: number): boolean {
+    const slots = getSaveSlots();
+    if (index < 0 || index >= slots.length) return false;
+    delete slots[index];
+    return saveSaveSlots(slots);
+  }
+
+  /** A slot written before the schema cutover (no stamp, or a stale version) can
+   *  no longer be deserialized — it is offered for deletion only. */
+  private isIncompatible(slot: SaveSlot): boolean {
+    return slot.schemaVersion === undefined || slot.schemaVersion !== SAVE_SCHEMA_VERSION;
   }
 
   private handleClick(e: MouseEvent): void {
@@ -109,12 +134,33 @@ export class PauseMenu {
       case 'load-slot': {
         const slotIndex = parseInt(target.dataset.slot || '0');
         const slots = getSaveSlots();
-        if (slots[slotIndex]) {
-          this.onLoadGame?.(slots[slotIndex].regionJson);
+        const slot = slots[slotIndex];
+        if (slot && !this.isIncompatible(slot)) {
+          this.onLoadGame?.(slot.regionJson);
           this.hide();
         }
         break;
       }
+      case 'delete-slot': {
+        const slotIndex = parseInt(target.dataset.slot || '0');
+        this.confirmDelete(`Slot ${slotIndex + 1} will be permanently deleted.`, () => {
+          this.deleteSaveSlot(slotIndex);
+          this.slots = getSaveSlots();
+          this.render();
+        });
+        break;
+      }
+      case 'load-autosave':
+        this.hide();
+        this.onLoadAutosave?.();
+        break;
+      case 'delete-autosave':
+        this.confirmDelete('The autosave will be permanently deleted.', () => {
+          this.onDeleteAutosave?.();
+          this.autosaveInfo = null;
+          this.render();
+        });
+        break;
       case 'back':
         this.view = 'main';
         this.render();
@@ -145,6 +191,19 @@ export class PauseMenu {
     modal.show();
   }
 
+  /** Blocking confirmation before deleting a save. `onConfirm` runs only on accept. */
+  private confirmDelete(message: string, onConfirm: () => void): void {
+    const modal = new Modal({
+      title: 'Delete save?',
+      content: message,
+      actions: [
+        { label: 'Cancel', variant: 'ghost', onClick: () => modal.close() },
+        { label: 'Delete', variant: 'danger', onClick: () => { modal.close(); onConfirm(); } },
+      ],
+    });
+    modal.show();
+  }
+
   private render(): void {
     this.el.innerHTML = '';
 
@@ -158,7 +217,7 @@ export class PauseMenu {
   }
 
   private renderMainMenu(): void {
-    const hasSaves = this.slots.some((s) => s != null);
+    const hasSaves = this.slots.some((s) => s != null) || this.autosaveInfo != null;
     this.el.innerHTML = `
       <div class="pause-menu-content">
         <h1>Paused</h1>
@@ -179,10 +238,12 @@ export class PauseMenu {
       const existing = slots[i];
       if (existing) {
         const date = new Date(existing.timestamp).toLocaleString();
+        const badge = this.isIncompatible(existing) ? '⚠ Incompatible. ' : '';
         return `<div class="save-slot">
           <button data-action="save-slot" data-slot="${i}" class="slot-btn">
-            Slot ${i + 1}: ${date}<br><small>${existing.description}</small>
+            Slot ${i + 1}: ${date}<br><small>${badge}${existing.description}</small>
           </button>
+          <button data-action="delete-slot" data-slot="${i}" class="slot-delete" title="Delete save" aria-label="Delete save">✕</button>
         </div>`;
       }
       return `<div class="save-slot">
@@ -202,21 +263,40 @@ export class PauseMenu {
   }
 
   private renderLoadMenu(): void {
+    const auto = this.autosaveInfo;
+    let autoHtml = '';
+    if (auto) {
+      const date = auto.timestamp ? new Date(auto.timestamp).toLocaleString() : '';
+      const label = auto.incompatible
+        ? '⚠ Incompatible — delete only'
+        : auto.description;
+      autoHtml = `<div class="save-slot">
+        <button data-action="load-autosave" class="slot-btn" ${auto.incompatible ? 'disabled' : ''}>
+          Autosave (auto)${date ? ': ' + date : ''}<br><small>${label}</small>
+        </button>
+        <button data-action="delete-autosave" class="slot-delete" title="Delete autosave" aria-label="Delete autosave">✕</button>
+      </div>`;
+    }
+
     const slotsList = this.slots.map((slot, i) => {
       if (!slot) return '';
       const date = new Date(slot.timestamp).toLocaleString();
+      const incompatible = this.isIncompatible(slot);
+      const label = incompatible ? '⚠ Incompatible — delete only' : slot.description;
       return `<div class="save-slot">
-        <button data-action="load-slot" data-slot="${i}" class="slot-btn">
-          Slot ${slot.slot + 1}: ${date}<br><small>${slot.description}</small>
+        <button data-action="load-slot" data-slot="${i}" class="slot-btn" ${incompatible ? 'disabled' : ''}>
+          Slot ${slot.slot + 1}: ${date}<br><small>${label}</small>
         </button>
+        <button data-action="delete-slot" data-slot="${i}" class="slot-delete" title="Delete save" aria-label="Delete save">✕</button>
       </div>`;
     }).filter(Boolean).join('');
 
+    const body = autoHtml + slotsList;
     this.el.innerHTML = `
       <div class="pause-menu-content">
         <h1>Load Game</h1>
         <div class="save-slots">
-          ${slotsList || '<p>No saves found</p>'}
+          ${body || '<p>No saves found</p>'}
         </div>
         <button data-action="back" class="pause-btn back-btn">Back</button>
       </div>

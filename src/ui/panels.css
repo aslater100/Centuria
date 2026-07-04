@@ -108,6 +108,9 @@
 }
 .ep-beat-good { border-left-color: var(--good); }
 .ep-beat-bad { border-left-color: var(--bad); }
+/* U7c: a leading glyph so the verdict reads without relying on the rule's hue. */
+.ep-beat-good::before { content: "✓ "; font-weight: 700; }
+.ep-beat-bad::before { content: "⚠ "; font-weight: 700; }
 
 /* ---- Advisor briefs: an inset navy well ---- */
 .brief-box {
@@ -180,6 +183,29 @@
   color: var(--info);
   margin: 8px 0 2px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* ---- Spec 10 §NEG: inline negotiation terms + re-counter inputs ---- */
+.neg-terms-row input[type='number'],
+.neg-regift-input {
+  width: 56px;
+  padding: 1px 4px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.neg-terms-row label { margin-left: 4px; }
+
+/* ---- Spec 10 §ARC: notable arc badge (glyph carries the meaning — U7) ---- */
+.arc-badge {
+  display: inline-block;
+  padding: 0 5px;
+  margin-left: 4px;
+  border: 1px solid var(--border-gold-soft);
+  border-radius: 8px;
+  background: var(--surface-inset);
+  color: var(--gold-300);
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 /* ---- Panel titles: keep the close button on the nameplate's right ---- */

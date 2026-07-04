@@ -47,20 +47,19 @@ const NATION_ALLIANCE: Choice<NationDesign['allianceStance']>[] = [
   { value: 'coalition-builder', label: 'Coalition Builder', desc: 'Easier treaties, shared obligations.' },
 ];
 
-export type DifficultyTag = 'standard' | 'hard' | 'brutal';
+export type DifficultyTag = 'easy' | 'standard' | 'hard' | 'brutal';
 
 /**
- * One-line summaries of what each scenario difficulty tag scales. These mirror the multipliers
- * `RegionSim` applies to the base `DifficultySettings` (`crisisFrequency` / `aiAggression` /
- * `economicVolatility`, defined at src/sim/region.ts:3384-3394, defaulting to 1.0 each — see
- * also the `AI_DIFFICULTY` rival-AI knobs at src/sim/defs.ts:138-142) when a scenario starts
- * (src/sim/region.ts:5846-5853). Display-only: the multipliers themselves live in the sim and
- * are not duplicated as logic here.
+ * One-line summaries of what each difficulty tier scales. These mirror the §DIFF preset
+ * ladder (`DIFFICULTY_PRESETS`, src/sim/region.ts — spec 10 §DIFF): Easy preserves the
+ * pre-rebalance 1x game exactly; Standard is the tuned real-teeth default. Display-only:
+ * the multipliers themselves live in the sim and are not duplicated as logic here.
  */
 export const DIFFICULTY_TAGS: Choice<DifficultyTag>[] = [
-  { value: 'standard', label: 'Standard', desc: 'Baseline crisis frequency, AI aggression, and economic volatility (1x).' },
-  { value: 'hard', label: 'Hard', desc: '1.5x crisis frequency, AI aggression, and economic volatility.' },
-  { value: 'brutal', label: 'Brutal', desc: '2x crisis frequency, AI aggression, and economic volatility.' },
+  { value: 'easy', label: 'Easy', desc: 'The gentle game — crises are rare, rivals patient, pensions cheap (1x everything).' },
+  { value: 'standard', label: 'Standard', desc: 'Crises bite: 1.15x crisis frequency and volatility, 1.25x AI aggression, pensions strain the late game.' },
+  { value: 'hard', label: 'Hard', desc: '1.6x crises and AI aggression, 1.5x volatility, heavier pension burden.' },
+  { value: 'brutal', label: 'Brutal', desc: '2x crisis frequency, AI aggression, and economic volatility; pensions crush.' },
 ];
 
 /**

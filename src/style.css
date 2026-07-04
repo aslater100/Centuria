@@ -136,6 +136,7 @@ button {
   border-color: var(--border-gold);
   box-shadow: 0 1px 0 var(--border-inner) inset, var(--glow-gold);
   color: var(--text-bright);
+  transform: translateY(-1px);
 }
 .topbar button:active, .palette button:active, .inspector button:active, .ceremony button:active,
 .menu-box button:active, .pause-menu button:active, .wiki-panel button:active, .event-modal button:active,
@@ -148,6 +149,7 @@ button {
   opacity: 0.45;
   cursor: not-allowed;
   box-shadow: none;
+  transform: none;
 }
 /* Primary action: the gilded plate */
 .btn-gold, #proclaim-btn, .menu-btn-primary {
@@ -797,6 +799,7 @@ input[type='range']::-moz-range-thumb {
   user-select: none;
   box-shadow: var(--shadow-panel);
   backdrop-filter: blur(10px);
+  animation: cv-fade-in 0.18s ease;
 }
 
 /* Flowing prose wraps at a readable measure; stat lines stay whole. */
@@ -1092,6 +1095,9 @@ input[type='range']::-moz-range-thumb {
   max-height: calc(100vh - 140px);
   overflow-y: auto;
   overflow-x: hidden;
+  /* Opacity-only fade on open — restarts when `.hidden` (display:none) is
+     removed, so every panel gets the same entrance as the overlays. */
+  animation: cv-fade-in 0.18s ease;
 }
 
 .research-panel {
@@ -1449,13 +1455,18 @@ input[type='range']::-moz-range-thumb {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease, transform 0.08s ease;
   white-space: nowrap;
 }
 
 .pal-tab:hover {
   color: var(--gold-300) !important;
   border-color: var(--border-gold) !important;
+  transform: translateY(-1px);
+}
+
+.pal-tab:active {
+  transform: translateY(1px);
 }
 
 .pal-tab.active {
@@ -1485,11 +1496,17 @@ input[type='range']::-moz-range-thumb {
   font-family: inherit;
   font-size: 9px;
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.08s ease;
 }
 
 .pal-subtab:hover {
   color: var(--gold-300);
   border-color: var(--border-gold);
+  transform: translateY(-1px);
+}
+
+.pal-subtab:active {
+  transform: translateY(1px);
 }
 
 .pal-subtab.active {
@@ -1508,6 +1525,7 @@ input[type='range']::-moz-range-thumb {
   align-items: center;
   justify-content: center;
   z-index: 30;
+  animation: cv-fade-in 0.18s ease;
 }
 
 .ceremony-box {
@@ -2375,6 +2393,13 @@ input[type='range']::-moz-range-thumb {
 
 @keyframes cv-fade-in { from { opacity: 0; } to { opacity: 1; } }
 
+/* Every full-screen overlay gets the same opacity-only entrance as .cv-help /
+   .cv-main-menu. The animation restarts when `.hidden` (display:none) comes
+   off, so it plays exactly once per open — no per-frame cost while visible. */
+.event-modal, .win-modal, .gameover, .pause-menu, .wiki-panel {
+  animation: cv-fade-in 0.18s ease;
+}
+
 /* ═════════════════════════════════════════════════════════════════════════
    IN-GAME WIKI PANEL — Collapsible, floating documentation of game mechanics
    ═════════════════════════════════════════════════════════════════════════ */
@@ -2946,4 +2971,26 @@ input[type='range']::-moz-range-thumb {
   .ts-panel { width: 240px; }
   .ts-left { padding: 48px 6% 36px; }
   .ts-title { font-size: 40px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   REDUCED MOTION — strip the decorative entrances and hover lifts for users
+   who ask for it. Scoped to the exact selectors that animate (no `*` rule —
+   mirrors the PR #347 pass that scoped each element's transition properties).
+   The wireTabs tab-switch fade checks the same media query in TS.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .palette, .inspector, .ceremony,
+  .event-modal, .win-modal, .gameover, .pause-menu, .wiki-panel,
+  .cv-help, .cv-main-menu, .cv-toast {
+    animation: none;
+  }
+  .pal-tab, .pal-subtab { transition: none; }
+  .pal-tab:hover, .pal-tab:active,
+  .pal-subtab:hover, .pal-subtab:active { transform: none; }
+  .topbar button:hover, .palette button:hover, .inspector button:hover, .ceremony button:hover,
+  .menu-box button:hover, .pause-menu button:hover, .wiki-panel button:hover, .event-modal button:hover,
+  .win-modal button:hover, .gameover button:hover, .buildbar button:hover, .region-bottombar button:hover {
+    transform: none;
+  }
 }

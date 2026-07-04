@@ -1,20 +1,59 @@
 # Centuria — Path to 9/10 per Category
 
-Source: audit delivered 2026-07-03 (see session-log.md when created). Baseline scores:
+Source: audit delivered 2026-07-03. Baseline → two re-audits (each 3 independent skeptical
+code-verified passes):
 
-| Category | Current | Target |
-|---|---|---|
-| Mechanical depth | 8/10 | 9/10 |
-| Realism | 7/10 | 9/10 |
-| Graphics | 7/10 | 9/10 |
-| Difficulty | 6/10 | 9/10 |
-| Lore depth | 3.5/10 | 9/10 |
-| UI/UX (added 2026-07-03) | 4/10 (5 core / 3 meta, weighted 60/40) | 9/10 |
+| Category | Baseline (07-03) | Re-audit AM (07-04) | Re-audit PM (07-04, post chase-9s) | Target |
+|---|---|---|---|---|
+| Mechanical depth | 8/10 | 8.5/10 | **8.5/10** | 9/10 |
+| Realism | 7/10 | 8/10 | **8.5/10** | 9/10 |
+| Graphics | 7/10 | 8/10 | **8.5/10** | 9/10 |
+| Difficulty | 6/10 | 7/10 | **7.5/10** | 9/10 |
+| Lore depth | 3.5/10 | 6/10 | **7/10** | 9/10 |
+| UI/UX | 4/10 | 7.5/10 | **8/10** | 9/10 |
+| **Overall (6-cat avg /100)** | **~63** | **~75** | **~80** | — |
 
-**Status: EXECUTED 2026-07-03 (PR #346)** — 20 of 23 tasks landed. Still open: **D1, D2**
-(spec'd in `docs/specs/09-audit-nine.md`, awaiting Hard-Stop schema sign-off) and **G1**
-(blocked: no live art-generation channel in the dev env). Follow-ups and unblock paths in
-`session-log.md`.
+**"Chase the 9s" push (PR #348, spec 10):** §NEG persistent multi-round diplomacy, §ARC notable
+narrative arcs, §FORT fortifications, §DIFF real-teeth standard tier (all 5 adversarial-review
+findings fixed — incl. the broken misery→grievance chain), calibration corrections, UI feel pass.
+All code-verified LANDED by the PM re-audit. Nothing hit 9 — the remaining gaps are structural,
+not wiring (see below).
+
+**Why the 9s didn't fall (re-auditors' honest blockers):**
+- *Mechanics 8.5→9:* needs a genuinely new depth axis — a positional/tactical combat layer
+  (combat is still aggregate attrition rolls) or a second diplomacy axis (haggling is gift-only).
+- *Difficulty 7.5→9:* revolution/secession are mid-game shocks, not run-enders; all standard
+  autoplay seeds still end 'drowned' (climate dominates). Needs a genuine second loss route.
+- *Lore 7→9:* arcs are multi-stage + well-written but mechanically shallow (one-shot scalar
+  terminals, no succession/coup triggers, no player agency) and still fairly sparse; a 10 needs
+  authored campaign-scale narrative, not templated recombination.
+- *Realism 8.5→9:* the 6× tick-cadence compression is documented but unfixed; some fixes are
+  difficulty-gated so baseline play doesn't feel them; a 10 needs backtesting vs real time-series.
+- *Graphics/UI 8.5/8→9:* runtime *feel* is unverifiable by static code audit; panels rebuild on
+  timers (jank risk); a 10 in graphics is capped by the owner's deliberate procedural-only choice.
+
+**Verdict:** external skeptical audits rarely grant 9-10 without either large new systems
+(tactical combat, authored narrative, a real second loss route) or things a code audit can't
+certify (runtime feel, playtested balance). 8-8.5 across five of six categories is a strong,
+defensible state. Remaining 9→10 items are milestone-scale projects, listed for a future call.
+
+**Status: EXECUTED** — PR #346 (20 of 23 tasks) + PR #348 (D1, D2, save schema v2 +
+management, M2/M3/U7 follow-ups). G1 formally dropped (owner chose "stay procedural").
+Re-audit 2026-07-04 (three independent skeptical passes, code-verified with counts) confirmed
+every shipped item real and tested; scores above are theirs, not aspirational.
+
+**Remaining gap-to-9 (per the re-auditors' own docking reasons):**
+- *Mechanics (8.5→9):* diplomacy still one non-persistent counter-round; no positional combat
+  layer; fortification modifier wired but dormant (no fort building ids).
+- *Realism (8→9):* constants documented + envelope-tested but still not calibrated to data.
+- *Graphics (8→9):* single-panel animation pilot; runtime feel unassessed by code audit.
+- *Difficulty (7→9):* hyperinflation is reachable but "normal play never approaches it";
+  partition pressures rather than ends a run; standard-tier moment-to-moment challenge mild.
+- *Lore (6→9):* notables still stat-blocks, not characters with arcs — no beat escalation,
+  no scandal chains or rivalries, no generated backstories; bio chronicle exists in state but
+  UI shows only the last line (`regionview.ts:5827`); one residual inline name list bypasses
+  the pools (`region.ts:5818-5819`).
+- *UI (7.5→9):* G3 transition is a one-panel pilot; needs a runtime/feel pass, not more wiring.
 
 ## How to read a task card
 
