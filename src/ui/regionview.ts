@@ -8,7 +8,8 @@ import type { Settlement, Scout, GovLean, GovType, MinisterRoleId, TreatyKind, C
 import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, DISTRICT_DEFS, INTERMEDIATE_GOODS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES, BRANCH_YEAR, UNIT_TYPES, ESPIONAGE_OPS, BLOC_RELATIONS_FLOOR, DEPRESSION_MEASURES, SUPPLY_SHOCK_INFLATION, SUPPLY_SHOCK_EXPORT_DRAG, AGRI_CLIMATE_THRESHOLD, INDUSTRY_BROWNOUT_THRESHOLD, FRONT_PEAK_LEVERAGE_SCALE, FRONT_OCCUPY_THRESHOLD, GOV_OUTLAY_RESERVE_MONTHS, frontPhase, FRONT_PHASE_LABEL, AGENDA_PEACE_RESISTANCE, AGENDA_TABLE_COST, rivalAgendaKind } from '../sim/region';
 import type { EspionageOp } from '../sim/region';
 import { rivalArmsCapacity, rivalContinent, sameContinent, COMPASS_FLAVOR } from '../sim/region';
-import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS } from '../sim/defs';
+import type { NotableArc } from '../sim/region';
+import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS, MONTHS, DAYS_PER_MONTH, DAYS_PER_YEAR, START_YEAR } from '../sim/defs';
 import type { CurrencySymbol } from '../sim/defs';
 import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
 import { REGION_N } from '../sim/worldgen';
@@ -26,6 +27,11 @@ import { WikiPanel } from './WikiPanel';
 
 /** localStorage flag (U3): the in-game wiki auto-opens once on a player's first game. */
 const WIKI_FIRST_RUN_KEY = 'centuria-wiki-seen';
+
+/** Spec 10 §ARC badge glyphs — the glyph carries the meaning, not hue (U7). */
+const ARC_GLYPH: Record<NotableArc['kind'], string> = {
+  scandal: '⚖', ambition: '▲', feud: '⚔', redemption: '☀',
+};
 
 // Hoisted draw-path color tables — the per-frame loops that use these run
 // every frame, so the literals must not be rebuilt inside them.
@@ -155,6 +161,13 @@ export class RegionView {
   private statePanelTab: 'finance' | 'politics' | 'diplomacy' = 'finance';
   /** Sub-tab within Finance: Treasury (dashboard + controls) vs Credit (lenders/monetary/freight). */
   private financeSubTab: 'treasury' | 'credit' = 'treasury';
+  /** Spec 10 §NEG: rival id whose inline "open talks" terms row is revealed. */
+  private negTermsFor: number | null = null;
+  /** Draft gift typed in the terms row (survives the ~1s panel rebuild); null → prefill base gift. */
+  private negDraftGift: number | null = null;
+  private negDraftSweeten = false;
+  /** Draft re-counter gifts keyed `negId:round`, so a fresh rival counter re-anchors the prefill. */
+  private negRecounterDraft = new Map<string, number>();
   private researchPanel: HTMLElement;
   researchOpen = false;
   private lastResearchBuildFrame = -999;
@@ -3302,6 +3315,58 @@ export class RegionView {
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-counter-decline-btn')) {
       btn.onclick = () => r.declineCounter(Number(btn.dataset.rival));
     }
+    // Spec 10 §NEG: persistent negotiation verbs (rival replies on the monthly tick)
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-neg-btn')) {
+      btn.onclick = () => {
+        const id = Number(btn.dataset.rival);
+        this.negTermsFor = this.negTermsFor === id ? null : id;
+        this.negDraftGift = null;
+        this.negDraftSweeten = false;
+        forceRebuild();
+      };
+    }
+    this.statePanel.querySelector<HTMLInputElement>('#neg-gift-input')?.addEventListener('input', (e) => {
+      this.negDraftGift = Number((e.target as HTMLInputElement).value);
+    });
+    this.statePanel.querySelector<HTMLInputElement>('#neg-sweeten-input')?.addEventListener('change', (e) => {
+      this.negDraftSweeten = (e.target as HTMLInputElement).checked;
+    });
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.neg-open-btn')) {
+      btn.onclick = () => {
+        const rivalId = Number(btn.dataset.rival);
+        const rv = r.rival(rivalId);
+        if (!rv) return;
+        const typed = Number(this.statePanel.querySelector<HTMLInputElement>('#neg-gift-input')?.value);
+        const gift = Number.isFinite(typed) ? typed : this.negDraftGift ?? r.negotiationBaseGift(rv);
+        const sweeten = this.statePanel.querySelector<HTMLInputElement>('#neg-sweeten-input')?.checked ?? this.negDraftSweeten;
+        r.openNegotiation(rivalId, gift, sweeten ? 'goodwill' : 'none');
+        this.negTermsFor = null;
+        this.negDraftGift = null;
+        this.negDraftSweeten = false;
+        forceRebuild();
+      };
+    }
+    for (const input of this.statePanel.querySelectorAll<HTMLInputElement>('.neg-regift-input')) {
+      input.oninput = () => this.negRecounterDraft.set(`${input.dataset.neg}:${input.dataset.round}`, Number(input.value));
+    }
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.neg-accept-btn')) {
+      btn.onclick = () => { r.acceptNegotiation(Number(btn.dataset.neg)); this.negRecounterDraft.clear(); forceRebuild(); };
+    }
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.neg-recounter-btn')) {
+      btn.onclick = () => {
+        const id = Number(btn.dataset.neg);
+        const neg = r.negotiations.find((n) => n.id === id);
+        if (!neg) return;
+        const typed = Number(this.statePanel.querySelector<HTMLInputElement>(`.neg-regift-input[data-neg="${id}"]`)?.value);
+        const gift = Number.isFinite(typed) ? typed : this.negRecounterDraft.get(`${id}:${neg.round}`) ?? neg.gift;
+        r.recounterNegotiation(id, gift);
+        this.negRecounterDraft.clear();
+        forceRebuild();
+      };
+    }
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.neg-walk-btn')) {
+      btn.onclick = () => { r.abandonNegotiation(Number(btn.dataset.neg)); this.negRecounterDraft.clear(); forceRebuild(); };
+    }
     // Espionage verbs (GDD §5.5)
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-spy-btn')) {
       btn.onclick = () => {
@@ -3471,12 +3536,24 @@ export class RegionView {
           }).join(' · ')
         : 'no treaties';
       const offer = r.offerFor(rv.id);
+      // Spec 10 §NEG: the persistent alternative to the one-shot counter roll.
+      const negCapped = r.negotiations.length >= 2;
+      const negBtnTitle = negCapped
+        ? 'Two negotiations are already open — settle or walk away from one before opening more talks.'
+        : 'Sit down to haggle terms: name your signing gift; they answer on their monthly diplomacy tick.';
+      const negTermsRow = offer && this.negTermsFor === rv.id && !negCapped
+        ? `<p class="neg-terms-row">your terms — gift ` +
+          `<input type="number" id="neg-gift-input" class="num-input-sm" min="0" step="5" value="${this.negDraftGift ?? r.negotiationBaseGift(rv)}"> ` +
+          `<label title="Trade part of the gift for +4 relations on signing"><input type="checkbox" id="neg-sweeten-input" ${this.negDraftSweeten ? 'checked' : ''}> goodwill</label> ` +
+          `<button class="mini neg-open-btn" data-rival="${rv.id}" title="Put these terms on the table — they reply on their monthly diplomacy tick">open talks</button></p>`
+        : '';
       const offerRow = offer
         ? `<p>offers <b>${TREATY_DEFS[offer.kind].name}</b> ` +
           `<button class="mini dip-accept-btn" data-rival="${rv.id}">sign</button>` +
           `<button class="mini dip-counter-offer-btn" data-rival="${rv.id}" ` +
           `title="Haggle before signing: ask for a signing gift. They may agree and pay — or take insult and withdraw the offer.">counter</button>` +
-          `<button class="mini dip-decline-btn" data-rival="${rv.id}">decline</button></p>`
+          `<button class="mini dip-neg-btn" data-rival="${rv.id}" ${negCapped ? 'disabled' : ''} title="${negBtnTitle}">negotiate</button>` +
+          `<button class="mini dip-decline-btn" data-rival="${rv.id}">decline</button></p>` + negTermsRow
         : '';
       // their counter from the bargaining table, if one is on offer (§6.3)
       const counter = r.counterFor(rv.id);
@@ -3608,7 +3685,37 @@ export class RegionView {
     const world = wars || pacts ? `<p class="insp-skills">WORLD AFFAIRS</p>` + wars + pacts : '';
     const boom = r.day < r.warBoomUntil ? `<p class="insp-skills">WAR ABROAD — export prices booming</p>` : '';
     const exports = r.exportEarningsLastMonth > 0 ? `<p>exports ` + formatCurrency(Math.floor(r.exportEarningsLastMonth)) + `/mo</p>` : '';
-    return provinceToggleHtml + claimLandHtml + `<p class="insp-skills">DIPLOMACY (relations −100..+100)</p>` + this.warHtml() + boom + exports + this.tradeBlocHtml() + this.sanctionsHtml() + this.rivalBlocsHtml() + rows + world;
+    return provinceToggleHtml + claimLandHtml + `<p class="insp-skills">DIPLOMACY (relations −100..+100)</p>` + this.warHtml() + boom + exports + this.tradeBlocHtml() + this.sanctionsHtml() + this.rivalBlocsHtml() + this.negotiationsHtml() + rows + world;
+  }
+
+  /** Spec 10 §NEG: the open-negotiations ledger — each haggle, whose move it is,
+   *  and the player verbs when the rival's counter is on the table. */
+  private negotiationsHtml(): string {
+    const r = this.region;
+    if (r.negotiations.length === 0) return '';
+    const rows = r.negotiations.map((neg) => {
+      const rv = r.rival(neg.rivalId);
+      if (!rv) return '';
+      const sweet = neg.sweetener === 'goodwill' ? ' + goodwill' : '';
+      const head = `<p class="insp-skills">🤝 <b>${rv.name}</b> · ${TREATY_DEFS[neg.kind].name} · round ${neg.round}/4 · ` +
+        `on the table: ${formatCurrency(neg.gift)}${sweet}</p>`;
+      if (neg.lastMoveBy === 'rival') {
+        const draft = this.negRecounterDraft.get(`${neg.id}:${neg.round}`) ?? neg.gift;
+        return head + `<p>their counter awaits ` +
+          `<button class="mini neg-accept-btn" data-neg="${neg.id}" title="Sign on the terms now on the table">accept</button>` +
+          `<input type="number" class="num-input-sm neg-regift-input" data-neg="${neg.id}" data-round="${neg.round}" min="0" step="5" value="${draft}">` +
+          `<button class="mini neg-recounter-btn" data-neg="${neg.id}" title="Send back your own figure — they answer on their monthly diplomacy tick">re-counter</button>` +
+          `<button class="mini neg-walk-btn" data-neg="${neg.id}" title="End the talks. A failed haggle is not a betrayal — a mild relations dip, nothing remembered.">walk away</button></p>`;
+      }
+      return head + `<p class="c-dim">your terms sent — awaiting their reply (they withdraw ${this.dateOfDay(neg.expiresDay)})</p>`;
+    }).join('');
+    return `<p class="insp-skills">OPEN NEGOTIATIONS (${r.negotiations.length}/2)</p>` + rows;
+  }
+
+  /** Calendar label for an arbitrary sim day (mirrors RegionSim.dateLabel). */
+  private dateOfDay(day: number): string {
+    const month = MONTHS[Math.floor((day % DAYS_PER_YEAR) / DAYS_PER_MONTH)];
+    return `${month} ${(day % DAYS_PER_MONTH) + 1}, ${START_YEAR + Math.floor(day / DAYS_PER_YEAR)}`;
   }
 
   /** Trade bloc panel (GDD §6.5): found, grow, tune, or dissolve the economic union. */
@@ -5831,7 +5938,12 @@ export class RegionView {
     const notables = r.notablesAt(t.id)
       .map((n) => {
         const chronicle = n.bio.slice().reverse().map((line) => `<li>${line}</li>`).join('');
-        return `<li><b>${n.name}</b>, ${Math.floor(n.age)} — <abbr title="${ROLE_BONUS_DESC[n.role]}">${n.role}</abbr>` +
+        // Spec 10 §ARC: a live storyline badge — glyph carries the meaning (U7),
+        // tooltip carries the latest beat from the bio chronicle.
+        const arcBadge = n.arc && !n.arc.resolved
+          ? ` <span class="arc-badge" title="${this.escapeAttr(n.bio[n.bio.length - 1] ?? 'The story is only beginning.')}">${ARC_GLYPH[n.arc.kind]} ${n.arc.kind}</span>`
+          : '';
+        return `<li><b>${n.name}</b>, ${Math.floor(n.age)} — <abbr title="${ROLE_BONUS_DESC[n.role]}">${n.role}</abbr>${arcBadge}` +
           `<ul class="thoughts insp-skills" style="max-height:64px;overflow-y:auto;margin:2px 0 4px">${chronicle}</ul></li>`;
       })
       .join('');
