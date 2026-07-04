@@ -241,10 +241,15 @@ export function tickMonetary(r: RegionSim): void {
 
   // 15. D1 — hyperinflation collapse. inflationRate is hard-clamped at 0.50 (line 78), so the
   // plan's "200% annualized" is unreachable; the collapse line lives inside the clamp. Twelve
-  // consecutive months of inflation >= 0.45 with confidence < 20 ends the run. Any month the
-  // trigger breaks — a rate hike, regime switch, or devaluation pulling either variable back
-  // across the line — resets the counter, so the collapse is always escapable until the 12th month.
-  if (r.inflationRate >= 0.45 && r.confidence < 20) {
+  // consecutive months of inflation >= 0.45 ends the run. (The spec's original confidence < 20
+  // co-condition was dropped after verification: sustained max inflation floors confidence near
+  // 55 via the inflPressure term above, so < 20 is unreachable from inflation alone and made the
+  // loss state a phantom. Sustained near-ceiling inflation IS the death spiral on its own.)
+  // Reaching 0.45 requires the structural inflation target to hold ~0.50 for many months — a full
+  // supply-chain cascade under a money-printing regime — so normal play never approaches it. Any
+  // month the player tames inflation (rate hikes, regime switch, fixing the cascade) pulls the rate
+  // back under 0.45 and resets the counter, so the collapse is always escapable until the 12th month.
+  if (r.inflationRate >= 0.45) {
     r.hyperinflationMonths++;
     if (r.hyperinflationMonths >= 12 && !r.gameOver) {
       r.gameOver = true;

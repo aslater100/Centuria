@@ -162,7 +162,12 @@ table (existing + new).
 Design (adapted to the actual model — `inflationRate` is hard-clamped at 0.50, so the plan's
 "200% annualized" is unreachable; the collapse threshold must live inside the clamp):
 
-- Trigger: `inflationRate >= 0.45` **and** `confidence < 20` at the monthly check.
+- Trigger: `inflationRate >= 0.45` at the monthly check. (The originally-planned `confidence < 20`
+  co-condition was **dropped after implementation-time verification**: a headless probe showed that
+  sustained max inflation floors confidence near 55 via the tick's own inflPressure term, so
+  `confidence < 20` is unreachable from inflation alone and made the loss state a phantom. Sustained
+  near-ceiling inflation is the death spiral on its own; reaching 0.45 already requires the
+  structural inflation target to hold ~0.50 for months under a print-regime supply cascade.)
 - Persisted counter `hyperinflationMonths` on `RegionSim` (+ serialize/deserialize +
   save-version bump): increments when the trigger holds, resets to 0 otherwise.
 - At 12 consecutive months → currency collapse: game over via the same path as the
