@@ -41,6 +41,13 @@ beats militia (bombardment). warship = neutral on land (naval handled elsewhere)
 - Applied to each side's power in `resolveProvinceBattle` (both the round-1 and post-round
   recomputes go through the same `sidePower`, so it's automatic). Pure function of state — **no
   new RNG**, peacetime/no-battle ticks byte-identical, determinism preserved.
+- **Player-war extension (post-re-audit):** the same matchup now also drives `tickPlayerWar`
+  (the main player-facing combat path, not just spatial province battles). Rivals field an
+  era-appropriate notional composition (`rivalWarComposition`: pre-1920 infantry+horse →
+  interwar/atomic infantry+guns → modern combined arms); the player's real `w.units` are
+  matched against it, scaling `P` and `R` in the war-score delta. Empty player units → ×1
+  (abstract war unchanged). Now 2 of 3 combat resolvers carry the composition axis; the
+  spatial army-group resolver (aggregate manpower, no unit types) remains aggregate by design.
 - Tests (`tests/combat-composition.test.ts`): hard-counter army wins a 1:1-power battle
   meaningfully more (seeded, banded); mirror match ≈ 50/50; combined-arms beats mono at equal
   power; multiplier clamped [0.5,1.5]; terrain shifts the expected winner on rough vs open.

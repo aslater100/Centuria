@@ -27,6 +27,7 @@ import {
   COMP_SWING,
   COMBINED_ARMS_BONUS,
   resolveProvinceBattle,
+  rivalWarComposition,
 } from '../src/sim/systems/military';
 import { tickUnrestLadder } from '../src/sim/systems/demographics';
 
@@ -292,5 +293,30 @@ describe('§STATE-COLLAPSE terminal revolution', () => {
     }
     expect(r.revolutionsFired).toBeGreaterThanOrEqual(1);
     expect(r.gameOverCause).toBeNull();
+  });
+});
+
+describe('§COMBAT-COMP — player-war composition (the main combat path)', () => {
+  const mk = (type: ArmyUnitType, count: number): ArmyUnit => ({ type, count, morale: 100, suppliedDays: 60 });
+
+  it('rivals field an era-appropriate composition (infantry+horse → +guns → combined arms)', () => {
+    const types = (yr: number) => new Set(rivalWarComposition(yr).map((u) => u.type));
+    expect(types(1910)).toEqual(new Set(['militia', 'cavalry']));
+    expect(types(1945)).toEqual(new Set(['militia', 'artillery']));
+    expect(types(1990)).toEqual(new Set(['militia', 'cavalry', 'artillery']));
+  });
+
+  it('countering the era threat beats fielding the countered arm, vs the same rival', () => {
+    // 1945 rival = militia + artillery. Cavalry counters artillery; a mono-militia army is
+    // itself countered by that artillery. The counter must out-multiply the countered force.
+    const rival = rivalWarComposition(1945);
+    const counterArmy = compositionMult([mk('cavalry', 100)], rival, undefined);
+    const counteredArmy = compositionMult([mk('militia', 100)], rival, undefined);
+    expect(counterArmy).toBeGreaterThan(counteredArmy);
+    expect(counteredArmy).toBeLessThan(1); // the rival's artillery hard-counters mono-militia
+  });
+
+  it('empty player units → neutral multiplier (a pre-unit / abstract war is unchanged)', () => {
+    expect(compositionMult([], rivalWarComposition(1945), undefined)).toBe(1);
   });
 });

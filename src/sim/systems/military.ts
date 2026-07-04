@@ -109,6 +109,17 @@ import {
     return clamped * combinedArmsBonus(a);
   }
 
+  /** §COMBAT-COMP (player-war extension): rivals field an era-appropriate notional composition,
+   *  so the player's own unit-mix decision matters in their wars (the main combat path), not just
+   *  in spatial province battles. Pre-1920 = infantry + horse; interwar/atomic = infantry + guns
+   *  (industrial war); modern = combined arms. The player scouts the era threat and counters it. */
+  export function rivalWarComposition(year: number): ArmyUnit[] {
+    const u = (type: ArmyUnitType, count: number): ArmyUnit => ({ type, count, morale: 100, suppliedDays: 60 });
+    if (year < 1920) return [u('militia', 60), u('cavalry', 40)];
+    if (year < 1960) return [u('militia', 55), u('artillery', 45)];
+    return [u('militia', 40), u('cavalry', 30), u('artillery', 30)];
+  }
+
   const BATTLE_MAX_ROUNDS = 3;
   export const BATTLE_HOME_GROUND_MULT = 1.10;
   export const BATTLE_DEFENDER_BONUS_CAP = 1.25;
@@ -652,8 +663,13 @@ export function tickPlayerWar(r: RegionSim): void {
       return;
     }
     const mob = MOBILIZATION_DEFS[w.mobilization];
-    const P = r.warPower();
-    const R = r.rivalWarPower(rv);
+    // §COMBAT-COMP (player war): the player's real unit composition vs the rival's era-appropriate
+    // force. A player who scouts and hard-counters (or fields balanced combined arms) shifts the
+    // war in their favor; a mono-army that the era's threat counters is punished. Empty player
+    // units → compositionMult returns 1, so a pre-unit or abstract war is unchanged. No new RNG.
+    const rivalComp = rivalWarComposition(r.year);
+    const P = r.warPower() * compositionMult(w.units, rivalComp, undefined);
+    const R = r.rivalWarPower(rv) * compositionMult(rivalComp, w.units, undefined);
     const delta = 16 * ((P - R) / (P + R)) + r.rng.int(9) - 4;
     w.score = Math.max(-100, Math.min(100, w.score + delta));
     if (w.blockade) {
