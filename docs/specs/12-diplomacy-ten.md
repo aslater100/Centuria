@@ -86,8 +86,14 @@ on either early-return → easy/passive-standard byte-identical.
 ### B2 — Ultimatum → war
 - cohesion ≥ `COHESION_ULTIMATUM (60)`, no ultimatum yet → issue `demand` (tribute if treasury
   healthy, else disarm), set `ultimatumDay`, log the demand + the escape (yield or split them).
-- Player may `yieldToCoalition()`: tribute = pay `round(treasury*0.15)` + relations balm; disarm =
-  scrap a mobilization step / army. Dissolves the coalition, relations partial recover, legitimacy −5.
+- Player may `yieldToCoalition()`: tribute = pay `max(0, round(treasury*0.15))` (never pays a
+  player in debt) + legitimacy −5; disarm (issued when the treasury is thin) = a public climb-down,
+  legitimacy −12 — a real, potentially run-threatening humiliation for the struggling nation it
+  targets (there is no standing peacetime army to physically scrap in this model). Either
+  dissolves the coalition and thaws member relations +15.
+- A coalition whose war ends by any path other than capitulation (win / negotiated peace / lead
+  vanished) is cleared on the next `tickCoalition`, so a survived war can never leave a `warDeclared`
+  zombie that fires a chain-less encirclement on a later, unrelated capitulation.
 - Window `COALITION_ULTIMATUM_DAYS (180)` elapses unmet AND cohesion still ≥ ULTIMATUM AND no
   `playerWar` → **coalition war**: strongest member = `playerWar.rivalId`, the rest → `enemyAllies`;
   `startPlayerWar(..., 'encirclement', defensive=true)`; `coalition.warDeclared = true`.

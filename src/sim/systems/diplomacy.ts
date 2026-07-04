@@ -202,6 +202,15 @@ export function tickNegotiations(r: RegionSim): void {
  *  the ultimatum, or win the war. Teeth-gated: on easy (unrestPressure 0) the world
  *  never coalesces and no RNG is drawn, so the default sweep stays byte-identical. */
 export function tickCoalition(r: RegionSim): void {
+  // A coalition whose war is over — the player WON it, negotiated a peace, or the
+  // bloc's lead vanished — is spent. Clear it here (capitulation to the bloc is the
+  // terminal path and clears it in capitulate()). Without this a survived coalition
+  // war leaves a `warDeclared` zombie that never dissolves, and a later, unrelated
+  // capitulation would read as it and fire a chain-less encirclement game-over.
+  if (r.coalition?.warDeclared && (!r.playerWar || !r.coalition.memberIds.includes(r.playerWar.rivalId))) {
+    r.coalition = null;
+    r.addLog('The coalition’s war is spent — the bloc breaks up.', 'good');
+  }
   const teeth = (r.difficultySettings.unrestPressure ?? 1) > 0;
   if (!teeth) {
     // Difficulty softened mid-run: let a coalition that hasn't marched yet lapse.

@@ -691,9 +691,12 @@ export function tickPlayerWar(r: RegionSim): void {
     const delta = 16 * ((P - R) / (P + R)) + r.rng.int(9) - 4;
     w.score = Math.max(-100, Math.min(100, w.score + delta));
     // Multi-front overwhelm (Spec 12 §B): a coalition presses more fronts than one
-    // army can hold. No enemy co-belligerents → no drag → ordinary wars byte-identical.
-    if (w.enemyAllies.length >= 2) {
-      w.score = Math.max(-100, w.score - (w.enemyAllies.length - 1) * COALITION_FRONT_DRAG);
+    // army can hold. Only LIVING enemy co-belligerents count — a bloc member ground
+    // out mid-war stops adding a front. No enemy co-belligerents → no drag → ordinary
+    // wars byte-identical.
+    const liveEnemyFronts = w.enemyAllies.filter((id) => r.rival(id)).length;
+    if (liveEnemyFronts >= 2) {
+      w.score = Math.max(-100, w.score - (liveEnemyFronts - 1) * COALITION_FRONT_DRAG);
     }
     if (w.blockade) {
       rv.pop *= 0.997; // the quays starve before the trenches do

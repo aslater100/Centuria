@@ -12442,7 +12442,7 @@ export class RegionSim {
     const c = this.coalition;
     if (!c || c.demand == null || c.warDeclared) return false;
     if (c.demand === 'tribute') {
-      const pay = Math.round(this.treasury * 0.15);
+      const pay = Math.max(0, Math.round(this.treasury * 0.15)); // never pays the player in debt
       this.treasury -= pay;
       this.legitimacy = Math.max(0, this.legitimacy - 5);
       this.addLog(`You buy off the coalition — ${formatCurrency(pay)} in tribute, and the bloc disperses. (Legitimacy −5.)`, 'bad');

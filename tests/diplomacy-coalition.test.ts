@@ -167,6 +167,25 @@ describe('§B — encirclement coalition', () => {
     expect(r.coalition).toBeNull();
   });
 
+  it('a survived coalition war clears the bloc — no stale encirclement on a later, unrelated defeat', () => {
+    const r = makeRegion(11);
+    r.difficultySettings = { ...r.difficultySettings, unrestPressure: 1 };
+    const members = spawnRivals(r, 3);
+    for (const m of members) m.relations = -60;
+    // Seat a marched coalition + its active war, then have the player SURVIVE it
+    // (war ends by any path other than capitulation → playerWar cleared elsewhere).
+    r.coalition = seatCoalition(members.map((m) => m.id), { cohesion: 80, warDeclared: true });
+    r.startPlayerWar(members[0], 'encirclement', true);
+    r.playerWar = null;
+    tickCoalition(r);
+    expect(r.coalition).toBeNull(); // the zombie is gone
+    // A later ordinary 1v1 defeat against a former member must NOT read as encirclement.
+    r.startPlayerWar(members[0], 'fabricated', false);
+    r.capitulate();
+    expect(r.gameOverCause).not.toBe('encirclement');
+    expect(r.gameOver).toBe(false);
+  });
+
   it('yielding to the ultimatum disperses the bloc before it marches', () => {
     const r = makeRegion(8);
     r.difficultySettings = { ...r.difficultySettings, unrestPressure: 1 };
