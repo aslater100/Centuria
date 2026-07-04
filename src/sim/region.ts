@@ -5812,28 +5812,15 @@ export class RegionSim {
     const extraCount = Math.max(0, 4 - region.notables.length); // ensure at least 4 notables total
     for (let i = 0; i < extraCount; i++) {
       const role = extraRoles[i % extraRoles.length];
-      region.notables.push({
-        id: region.nextId++,
-        name: (() => {
-          const first = ['Edda', 'Tomas', 'Sela', 'Bruno', 'Petra', 'Anders', 'Ivy', 'Casimir'][region.rng.int(8)];
-          const last = ['Weller', 'Stroud', 'Halvorsen', 'Quint', 'Mercer', 'Dunmore'][region.rng.int(6)];
-          return `${first} ${last}`;
-        })(),
+      const founder = region.mintNotable(role, home.id, {
         age: 28 + region.rng.int(28),
-        traits: [],
-        role,
-        settlementId: home.id,
-        bio: [`Founding settler, 1900.`, `Named ${role} at the founding.`],
-        alive: true,
         skill: 40 + region.rng.int(36),
         health: 80 + region.rng.int(21),
-        children: [],
-        loyalty: 90,
         factionAlignment: extraFactions[i % extraFactions.length],
         backstory: extraBackstories[i % extraBackstories.length],
-        yearEnteredRole: region.year,
-        monthsIgnored: 0,
       });
+      founder.loyalty = 90;
+      founder.bio = [`Founding settler, 1900.`, `Named ${role} at the founding.`];
     }
 
     const mayor = region.notables.find((n) => n.role === 'Mayor' && n.alive);
