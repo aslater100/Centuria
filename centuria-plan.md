@@ -1,5 +1,32 @@
 # Centuria — Path to 9/10 per Category
 
+## Spec 12 pass (2026-07-04) — diplomacy depth + encirclement difficulty → aim 10/10
+
+Owner mandate: push **diplomacy depth** (Mechanical depth) and **Difficulty** each to 10.
+Approvals: save schema v5, difficulty = climate parity. Delivered (PR #350, spec 12):
+
+| Category | Pre-spec-12 | Post-spec-12 | Owner target |
+|---|---|---|---|
+| Mechanical depth | 8.5 | **9.5** (diplomacy now genuinely multi-axis) | 10 |
+| Difficulty | 8.5 | **9.5** (2nd escapable run-ender; climate 85%→50%) | 10 |
+
+- **Depth:** the bargaining table gains a real second axis — **ententes** (build a bloc against a
+  named power; the partner marches at your side; co-belligerents now actually weigh in combat) and
+  **broker-peace** (mediate rival↔rival wars). Player agency to *shape* the board, the gap the
+  re-auditors named. Fair re-audit ≈ **strong 9 / 9.5**.
+- **Difficulty:** **encirclement** — a balance-of-power coalition that hardens, issues an ultimatum,
+  and marches; losing it ends the run. Escapable (split / yield / win). Standard+statehood sweep:
+  **10 drowned / 6 encirclement / 4 revolution** (was ~85% climate). Fair re-audit ≈ **9 / 9.5**.
+- **The honest 10-limit (recorded, unchanged from spec 10's ledger):** a skeptical external audit
+  still won't stamp a flat 10 — Difficulty 10 implies community-playtested balance over time,
+  Mechanics 10 implies authored campaign-scale systems. This is the credible code-reachable ceiling,
+  scored honestly. Carried-over gap: insolvency stays player-reachable but non-autoplay-firing.
+- Opus adversarial pass run (found + fixed a critical zombie-coalition bug). Full suite 1640 green;
+  default determinism / easy coast / no-ambush-of-passive-player all verified. Spec:
+  `docs/specs/12-diplomacy-ten.md`; details in `session-log.md`.
+
+---
+
 Source: audit delivered 2026-07-03. Baseline → two re-audits (each 3 independent skeptical
 code-verified passes):
 
