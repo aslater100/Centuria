@@ -1,5 +1,5 @@
 import './style.css';
-import { RegionSim } from './sim/region';
+import { RegionSim, SAVE_SCHEMA_VERSION, IncompatibleSaveError } from './sim/region';
 import { RegionView } from './ui/regionview';
 import { WindowManager } from './ui/WindowManager';
 import { Sfx } from './ui/audio';
@@ -21,6 +21,10 @@ canvas.id = 'game';
 root.appendChild(canvas);
 
 const SAVE_KEY = 'centuria-save';
+// Quicksave/autosave wrapper version. Bumped 4→5 at the schema cutover so stale
+// wrappers are ignored on boot rather than half-loading into a mismatched sim.
+// Distinct from the region blob's own SAVE_SCHEMA_VERSION (nested in `region`).
+const SAVE_WRAPPER_VERSION = 5;
 
 function bootSim(): RegionSim | null {
   try {
@@ -30,13 +34,19 @@ function bootSim(): RegionSim | null {
       const data = localStorage.getItem(SAVE_KEY);
       if (data) {
         const d = JSON.parse(data);
-        if (d.v === 4 && d.region) {
+        if (d.v === SAVE_WRAPPER_VERSION && d.region) {
           return RegionSim.deserialize(d.region);
         }
       }
     }
   } catch (err) {
-    console.error('load failed, starting fresh:', err);
+    // IncompatibleSaveError (or any parse failure) must not crash boot — the
+    // stale autosave stays in storage and surfaces as a delete-only Load entry.
+    if (err instanceof IncompatibleSaveError) {
+      console.warn('autosave is from an older schema; starting fresh:', err.message);
+    } else {
+      console.error('load failed, starting fresh:', err);
+    }
   }
   return null;
 }
@@ -70,6 +80,10 @@ window.addEventListener('keydown', () => { sfx.unlock(); music.unlock(); soundsc
 
 let region: RegionSim | null = bootSim();
 let regionView: RegionView | null = null;
+// Tracks the in-game year of the last autosave, so the tick loop writes the
+// quicksave exactly once per YEAR rollover (not every tick). Seeded on entry so
+// loading a save doesn't immediately re-autosave.
+let lastAutosaveYear = region?.year ?? 0;
 let paused = false;
 let speed = 1;
 let pauseMenuOpen = false;
@@ -95,7 +109,7 @@ function save(slot?: number): boolean {
   if (!region) return false;
   try {
     const regionJson = region.serialize();
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: 4, region: regionJson }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ v: SAVE_WRAPPER_VERSION, region: regionJson }));
     if (slot !== undefined) {
       const year = region.minute / (60 * 24 * 365);
       const description = `Year ${Math.floor(year)}, ${region.settlements.length} settlements`;
@@ -110,6 +124,7 @@ function save(slot?: number): boolean {
 
 function enterRegionMode(r: RegionSim): void {
   region = r;
+  lastAutosaveYear = r.year;
   (window as any).region = r;
   regionView = new RegionView(canvas, r, root);
   new WindowManager(regionView.draggablePanels);
@@ -185,9 +200,60 @@ pauseMenu.onLoadGame = (regionJson: string) => {
     pauseMenuOpen = false;
     enterRegionMode(loaded);
   } catch (err) {
-    console.error('failed to load game:', err);
+    // Incompatible slots are disabled in the UI, but guard the load path anyway
+    // so a stale blob can never crash the game — leave the menu open.
+    if (err instanceof IncompatibleSaveError) {
+      console.warn('slot is from an older schema and cannot be loaded:', err.message);
+    } else {
+      console.error('failed to load game:', err);
+    }
   }
 };
+pauseMenu.onLoadAutosave = () => {
+  const data = localStorage.getItem(SAVE_KEY);
+  if (!data) return;
+  try {
+    const d = JSON.parse(data);
+    if (d.v !== SAVE_WRAPPER_VERSION || !d.region) return;
+    const loaded = RegionSim.deserialize(d.region);
+    pauseMenuOpen = false;
+    enterRegionMode(loaded);
+  } catch (err) {
+    if (err instanceof IncompatibleSaveError) {
+      console.warn('autosave is from an older schema and cannot be loaded:', err.message);
+    } else {
+      console.error('failed to load autosave:', err);
+    }
+  }
+};
+pauseMenu.onDeleteAutosave = () => {
+  localStorage.removeItem(SAVE_KEY);
+};
+
+// Summarize the quicksave/autosave for the Load menu without deserializing it:
+// read the wrapper, then compare the region blob's own schema version to detect
+// an incompatible (delete-only) autosave.
+function readAutosaveInfo(): { description: string; timestamp: number; incompatible: boolean } | null {
+  const data = localStorage.getItem(SAVE_KEY);
+  if (!data) return null;
+  try {
+    const d = JSON.parse(data);
+    if (d.v !== SAVE_WRAPPER_VERSION || typeof d.region !== 'string') {
+      return { description: 'Autosave', timestamp: 0, incompatible: true };
+    }
+    const inner = JSON.parse(d.region);
+    const incompatible = (inner.v ?? 0) !== SAVE_SCHEMA_VERSION;
+    const year = typeof inner.minute === 'number' ? Math.floor(inner.minute / (60 * 24 * 365)) : 0;
+    return { description: `Year ${year}`, timestamp: 0, incompatible };
+  } catch {
+    return { description: 'Autosave', timestamp: 0, incompatible: true };
+  }
+}
+
+function openPauseMenu(): void {
+  pauseMenu.autosaveInfo = readAutosaveInfo();
+  pauseMenu.show();
+}
 
 if (region) {
   enterRegionMode(region);
@@ -226,7 +292,7 @@ window.addEventListener('keydown', (e) => {
       pauseMenuOpen = true;
       paused = true;
       updateUIState();
-      pauseMenu.show();
+      openPauseMenu();
     }
     e.preventDefault();
     return;
@@ -329,6 +395,13 @@ function loop(now: number): void {
       { budgetMs: 8, maxTicks: 240, maxBacklog: 240 },
     );
     acc = res.acc;
+
+    // Autosave once per in-game year. `region.year` is a monotonic integer, so a
+    // strict inequality fires exactly once on each new year — never per tick.
+    if (region.year !== lastAutosaveYear) {
+      lastAutosaveYear = region.year;
+      save();
+    }
   }
 
   if (region && regionView) {
