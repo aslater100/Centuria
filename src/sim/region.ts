@@ -1821,6 +1821,11 @@ export const NEUTRAL_RATE = 0.05;
 export const LEVERAGE_FRAGILITY = TUNING.leverageFragility;
 export const LEVERAGE_FRAGILE   = TUNING.leverageFragile;
 export const FRAGILITY_GAIN     = TUNING.fragilityGain;
+/** §ECON-COLLAPSE (spec 11) — consecutive insolvent months before the government falls.
+ *  Mirrors D1's 12-month escapable window. */
+export const INSOLVENCY_COLLAPSE_MONTHS = 12;
+/** §STATE-COLLAPSE (spec 11) — a revolution that fires below this legitimacy is terminal. */
+export const STATE_COLLAPSE_LEGITIMACY = 15;
 export const MIN_POLICY_RATE = 0.01;
 // 0.20 ceiling: calibration memo — US federal funds peaked ~19-20% in 1980-81 (Volcker
 // disinflation), and the D1 hyperinflation loss state needs the full historical tail
@@ -3696,9 +3701,10 @@ export const MIN_SETTLEMENT_SPACING = 8;
 
 /** Save-blob schema version. v2 added the D1/D2 persisted counters
  *  (hyperinflationMonths, postRevoltGrievanceMonths); v3 (spec 10) adds persistent
- *  diplomacy negotiations and notable narrative-arc state. Saves below this are a hard
+ *  diplomacy negotiations and notable narrative-arc state; v4 (spec 11) adds
+ *  `insolvencyMonths` (the §ECON-COLLAPSE counter). Saves below this are a hard
  *  cutover — `deserialize` rejects them via IncompatibleSaveError rather than migrating. */
-export const SAVE_SCHEMA_VERSION = 3;
+export const SAVE_SCHEMA_VERSION = 4;
 
 /** Thrown by `RegionSim.deserialize` when a save blob predates SAVE_SCHEMA_VERSION.
  *  Callers (load menu, boot) catch this and offer delete-only rather than crashing. */
@@ -4271,6 +4277,11 @@ export class RegionSim {
   unrestMonthsAtLevel = 0;
   /** D1: consecutive months the hyperinflation-collapse trigger has held (persisted). */
   hyperinflationMonths = 0;
+  /** §ECON-COLLAPSE (spec 11): consecutive months the nation has been insolvent (persisted). */
+  insolvencyMonths = 0;
+  /** Which failure chain ended the run (set alongside gameOver; not persisted). Labels the
+   *  ending for the headless sweep-variety gate: depopulation/hyperinflation/insolvency/revolution. */
+  gameOverCause: string | null = null;
   /** §DIFF sweep diagnostics — lifetime counts of revolutions fired and settlements lost to
    *  secession. Deliberately NOT serialized (reset on load): they exist so the headless
    *  difficulty gate can count real failure-chain events instead of proxying on satisfaction. */
@@ -6571,6 +6582,7 @@ export class RegionSim {
     updateExploration(this); // Phase 0: Update fog of war based on scouts and settlements (systems/exploration.ts)
     if (this.totalPop() <= 0) {
       this.gameOver = true;
+      this.gameOverCause = 'depopulation';
       this.addLog('The last settlement is empty. (Failure state: depopulation.)', 'bad');
     }
   }
@@ -6689,6 +6701,7 @@ export class RegionSim {
     this.tickMedia(); // Phase 12: media reach, press freedom, misinformation era
     checkScenarioGoals(this);   // Phase 17: check active scenario goals monthly (systems/scenarios.ts)
     updateLoans(this); // process loan interest and check for defaults (systems/loans.ts)
+    this.tickSolvency(); // §ECON-COLLAPSE: sovereign-default death spiral (spec 11)
     if (this.stateProclaimed) collectVassalTribute(this);
     checkProclamationGate(this);
     checkWinConditions(this);
@@ -7141,6 +7154,39 @@ export class RegionSim {
     if (this.nationProclaimed && this.legitimacy < 25) score--;
     const ratings: CreditRating[] = ['D', 'CCC', 'B', 'BB', 'BBB', 'A', 'AA', 'AAA'];
     return ratings[Math.max(0, Math.min(7, score))];
+  }
+
+  /** True when the state is in a sovereign-default death spiral: rating cratered to 'D',
+   *  debt over twice annual GDP, and the treasury drained below a month of GDP. */
+  isInsolvent(): boolean {
+    const annualGdp = Math.max(1, this.gdpLastMonth * 12);
+    return this.nationProclaimed
+      && this.creditRating === 'D'
+      && this.nationalDebt > annualGdp * 2
+      && this.treasury < this.gdpLastMonth;
+  }
+
+  /** §ECON-COLLAPSE (spec 11) — the sovereign-default loss route. Monthly, after the
+   *  monetary/loan ticks refresh debt/treasury/rating. 12 consecutive insolvent months
+   *  collapse the government. Escapable every month (austerity / tax hikes / spending cuts
+   *  that pull the rating off 'D' or debt under the ceiling reset the counter). Terminal only
+   *  when difficulty teeth are on (unrestPressure > 0); easy (=0) coasts, matching §DIFF. */
+  tickSolvency(): void {
+    if (this.gameOver) return;
+    if (this.isInsolvent()) {
+      this.insolvencyMonths++;
+      const teeth = (this.difficultySettings.unrestPressure ?? 1) > 0;
+      if (this.insolvencyMonths >= INSOLVENCY_COLLAPSE_MONTHS && teeth) {
+        this.gameOver = true;
+        this.gameOverCause = 'insolvency';
+        this.addLog(
+          'Sovereign default — creditors seize the state and the government falls. (Failure state: insolvency.)',
+          'bad',
+        );
+      }
+    } else {
+      this.insolvencyMonths = 0;
+    }
   }
 
   // ---- Phase 15: Intermediate Goods, Supply Chains, Arbitrage & FX (GDD §5.2) ----
@@ -12762,6 +12808,7 @@ export class RegionSim {
       transitionChain: this.transitionChain,
       policySlots9: this.policySlots,
       hyperinflationMonths: this.hyperinflationMonths,
+      insolvencyMonths: this.insolvencyMonths,
       negotiations: this.negotiations,
       postRevoltGrievanceMonths: this.postRevoltGrievanceMonths,
     });
@@ -13113,6 +13160,7 @@ export class RegionSim {
     r.transitionChain = d.transitionChain ?? null;
     r.policySlots = d.policySlots9 ?? [];
     r.hyperinflationMonths = d.hyperinflationMonths ?? 0;
+    r.insolvencyMonths = d.insolvencyMonths ?? 0;
     r.negotiations = d.negotiations ?? [];
     r.postRevoltGrievanceMonths = d.postRevoltGrievanceMonths ?? {};
     // Recompute cached perf fields after full restore.

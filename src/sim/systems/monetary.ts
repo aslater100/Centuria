@@ -261,6 +261,7 @@ export function tickMonetary(r: RegionSim): void {
     r.hyperinflationMonths++;
     if (r.hyperinflationMonths >= 12 && !r.gameOver) {
       r.gameOver = true;
+      r.gameOverCause = 'hyperinflation';
       r.addLog(
         'Prices double by the week and the currency is worthless — the economy collapses. (Failure state: hyperinflation.)',
         'bad',

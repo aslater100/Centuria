@@ -109,6 +109,17 @@ export function tickLegitimacy(r: RegionSim): void {
   const infoBonus = r.ministerFor('press') ? 0.75 : 1.0;
   const decayRate = 0.5 * regimeModifier * pressBonus * infoBonus;
   r.legitimacy = Math.max(0, r.legitimacy - decayRate);
+  // §STATE-COLLAPSE (spec 11): sustained unrest erodes legitimacy — a government presiding over
+  // protests, riots, and revolution loses its mandate. Previously legitimacy was uncoupled from
+  // unrest (a state could ride out rung-5 revolutions at 100 legitimacy), which is both
+  // unrealistic and left the terminal-revolution loss route unreachable. Scaled by unrestPressure
+  // so it bites on standard+ and leaves easy's legacy coast (unrestPressure 0) untouched. At
+  // unrest 5 / teeth 1 this is ~2.4/mo on top of baseline — years of revolt drag legitimacy to
+  // the collapse line, where a further revolution becomes terminal.
+  const teeth = r.difficultySettings.unrestPressure ?? 1;
+  if (r.unrestLevel >= 3 && teeth > 0) {
+    r.legitimacy = Math.max(0, r.legitimacy - (r.unrestLevel - 2) * 0.8 * teeth);
+  }
   if (r.govType === 'junta') {
     const ws = r.factions.find((f) => f.id === 'workers')?.support ?? 50;
     const ls = r.factions.find((f) => f.id === 'landowners')?.support ?? 50;

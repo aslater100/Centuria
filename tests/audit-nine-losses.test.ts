@@ -35,8 +35,8 @@ function ensureRivalHasSettlement(r: RegionSim): number {
 // ---------------------------------------------------------------------------
 
 describe('Save schema v2', () => {
-  it('SAVE_SCHEMA_VERSION is 3 (v2: D1/D2 counters; v3: negotiations + notable arcs)', () => {
-    expect(SAVE_SCHEMA_VERSION).toBe(3);
+  it('SAVE_SCHEMA_VERSION is 4 (v2: D1/D2; v3: negotiations + arcs; v4: insolvencyMonths)', () => {
+    expect(SAVE_SCHEMA_VERSION).toBe(4);
   });
 
   it('a fresh RegionSim round-trips through serialize → deserialize', () => {

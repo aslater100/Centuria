@@ -14,7 +14,7 @@
  * (computeCombatPower / computeWarScore) stay on RegionSim — the moved bodies reach
  * them, and the war state, through `r`.
  */
-import type { RegionSim, ProvincialArmy, ArmyGroup } from '../region';
+import type { RegionSim, ProvincialArmy, ArmyGroup, ArmyUnit, ArmyUnitType } from '../region';
 import {
   UNIT_TYPES,
   MOBILIZATION_DEFS,
@@ -42,6 +42,73 @@ import {
    *  activates the fortification axis: a `fortress` region building in the defending
    *  settlement multiplies defender power by BATTLE_FORT_MULT on top of home ground
    *  (1.10 × 1.15 = 1.265), clamped by BATTLE_DEFENDER_BONUS_CAP to 1.25. */
+  // ---- §COMBAT-COMP (spec 11): combined-arms counter matrix + terrain ----
+  // The counter triangle: militia (massed infantry) beats cavalry (formation/pikes),
+  // cavalry (shock/mobility) beats artillery (overruns unprotected guns), artillery
+  // (bombardment) beats militia. warship is neutral on land. Composition mix is now a
+  // real decision — scout the enemy, field the counter or a balanced combined-arms force.
+  export const COMP_SWING = 0.5;            // perfect hard-counter → ±0.5 (×1.5 / ×0.5)
+  export const COMBINED_ARMS_BONUS = 1.08;  // ≥2 land arms each ≥15% of land power
+  const COMP_MULT_MIN = 0.5;
+  const COMP_MULT_MAX = 1.5;
+
+  type LandComp = { militia: number; cavalry: number; artillery: number };
+
+  /** Rough ground (forest/hills/mountains/marsh) favors infantry and blunts guns/horse;
+   *  open ground (plains) favors cavalry. Per-type weight on effective power. Neutral = 1. */
+  export function terrainWeight(type: ArmyUnitType, biome: string | undefined): number {
+    const rough = biome === 'forest' || biome === 'hills' || biome === 'mountains' || biome === 'marsh';
+    const open = biome === 'plains';
+    if (rough) {
+      if (type === 'militia') return 1.1;
+      if (type === 'cavalry' || type === 'artillery') return 0.9;
+    } else if (open) {
+      if (type === 'cavalry') return 1.1;
+    }
+    return 1;
+  }
+
+  /** Terrain-weighted land power of one unit (warship excluded — naval, neutral on land). */
+  function unitLandPower(u: ArmyUnit, biome: string | undefined): number {
+    if (u.type === 'warship') return 0;
+    return u.count * UNIT_TYPES[u.type].powerPerUnit * (u.morale / 100) * terrainWeight(u.type, biome);
+  }
+
+  /** Power-weighted land composition (fractions summing to 1, or all-0 if no land power). */
+  function landComposition(units: ArmyUnit[], biome: string | undefined): LandComp {
+    let m = 0, c = 0, a = 0;
+    for (const u of units) {
+      const p = unitLandPower(u, biome);
+      if (u.type === 'militia') m += p;
+      else if (u.type === 'cavalry') c += p;
+      else if (u.type === 'artillery') a += p;
+    }
+    const total = m + c + a;
+    if (total <= 0) return { militia: 0, cavalry: 0, artillery: 0 };
+    return { militia: m / total, cavalry: c / total, artillery: a / total };
+  }
+
+  /** How well composition A counters composition B ∈ [0,1] (the winning-matchup mass). */
+  function counterScore(a: LandComp, b: LandComp): number {
+    return a.militia * b.cavalry + a.cavalry * b.artillery + a.artillery * b.militia;
+  }
+
+  function combinedArmsBonus(comp: LandComp): number {
+    const arms = [comp.militia, comp.cavalry, comp.artillery].filter((f) => f >= 0.15).length;
+    return arms >= 2 ? COMBINED_ARMS_BONUS : 1;
+  }
+
+  /** The constant per-side power multiplier from composition vs the enemy's composition,
+   *  plus a combined-arms bonus. Round-invariant (round results scale all units equally, so
+   *  the fractions never move), so it is computed once and applied as a fixed factor. */
+  export function compositionMult(mine: ArmyUnit[], enemy: ArmyUnit[], biome: string | undefined): number {
+    const a = landComposition(mine, biome);
+    const b = landComposition(enemy, biome);
+    const swing = 1 + (counterScore(a, b) - counterScore(b, a)) * COMP_SWING;
+    const clamped = Math.max(COMP_MULT_MIN, Math.min(COMP_MULT_MAX, swing));
+    return clamped * combinedArmsBonus(a);
+  }
+
   const BATTLE_MAX_ROUNDS = 3;
   export const BATTLE_HOME_GROUND_MULT = 1.10;
   export const BATTLE_DEFENDER_BONUS_CAP = 1.25;
@@ -114,17 +181,28 @@ export function resolveProvinceBattle(r: RegionSim, provinceId: number): void {
     const playerUndersupplied = playerArmies.some((a) => a.supply <= 0);
     const rivalUndersupplied = rivalArmies.some((a) => a.supply <= 0);
 
+    // §COMBAT-COMP: terrain of the contested settlement, and the constant per-side
+    // composition multipliers (round-invariant — computed once). Land units are
+    // terrain-weighted; warships add flat power (naval, neutral on land).
+    const st = r.settlement(provinceId);
+    const biome = st ? r.map.at(st.x, st.y)?.biome : undefined;
+    const playerUnits = playerArmies.flatMap((a) => a.units);
+    const rivalUnits = rivalArmies.flatMap((a) => a.units);
+    const playerCompMult = compositionMult(playerUnits, rivalUnits, biome);
+    const rivalCompMult = compositionMult(rivalUnits, playerUnits, biome);
     const rawPower = (armies: ProvincialArmy[]) =>
       armies.reduce((sum, a) => sum + a.units.reduce((s, u) =>
-        s + u.count * UNIT_TYPES[u.type].powerPerUnit * (u.morale / 100), 0), 0);
+        u.type === 'warship'
+          ? s + u.count * UNIT_TYPES.warship.powerPerUnit * (u.morale / 100)
+          : s + unitLandPower(u, biome), 0), 0);
     const playerSidePower = () => {
-      let p = rawPower(playerArmies);
+      let p = rawPower(playerArmies) * playerCompMult;
       if (defenderIsPlayer) p *= defenderMult;
       if (playerUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
       return p;
     };
     const rivalSidePower = () => {
-      let p = rawPower(rivalArmies) * rivalBoost;
+      let p = rawPower(rivalArmies) * rivalBoost * rivalCompMult;
       if (!defenderIsPlayer) p *= defenderMult;
       if (rivalUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
       return p;

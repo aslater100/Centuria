@@ -14,6 +14,7 @@
  * (the bodies call them directly); the rest of the surface was already public.
  */
 import type { RegionSim } from '../region';
+import { STATE_COLLAPSE_LEGITIMACY } from '../region';
 
 /** Tick the demographic transition: apply era-based natural population growth to
  *  EVERY settlement (rival or player), with a mid-century baby-boom multiplier, and
@@ -192,6 +193,20 @@ export function tickUnrestLadder(r: RegionSim): void {
       if (r.rng.chance(revolChance)) {
         const capital = playerSettlements[0];
         r.revolutionsFired++;
+        // §STATE-COLLAPSE (spec 11): a revolution against an already-failing state (legitimacy
+        // below the collapse line) is TERMINAL — the government falls and does not rise again.
+        // Only when difficulty teeth are on (unrestPressure > 0); easy coasts. A legitimate,
+        // stable-ish state survives the revolt as before (the non-terminal shock below).
+        const teeth = (r.difficultySettings.unrestPressure ?? 1) > 0;
+        if (teeth && r.nationProclaimed && r.legitimacy < STATE_COLLAPSE_LEGITIMACY && !r.gameOver) {
+          r.gameOver = true;
+          r.gameOverCause = 'revolution';
+          r.addLog(
+            `Revolution consumes the state — ${capital?.name ?? 'the capital'} falls and the government does not rise again. (Failure state: revolution.)`,
+            'bad',
+          );
+          break;
+        }
         r.addLog(
           `Revolutionary movement seizes ${capital?.name ?? 'the capital'}! The government is overthrown — a successor faction rises. Regime change event pending.`,
           'bad',
