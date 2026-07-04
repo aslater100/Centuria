@@ -5943,7 +5943,13 @@ export class RegionView {
         const arcBadge = n.arc && !n.arc.resolved
           ? ` <span class="arc-badge" title="${this.escapeAttr(n.bio[n.bio.length - 1] ?? 'The story is only beginning.')}">${ARC_GLYPH[n.arc.kind]} ${n.arc.kind}</span>`
           : '';
+        // Spec 10 §ARC: the generated backstory (origin + formative note) opens the dossier —
+        // it was stored on every Notable but never rendered anywhere until now.
+        const backstory = n.backstory
+          ? `<div class="notable-backstory" style="font-size:0.85em;opacity:0.7;font-style:italic;margin:1px 0 2px">${this.escapeAttr(n.backstory)}</div>`
+          : '';
         return `<li><b>${n.name}</b>, ${Math.floor(n.age)} — <abbr title="${ROLE_BONUS_DESC[n.role]}">${n.role}</abbr>${arcBadge}` +
+          backstory +
           `<ul class="thoughts insp-skills" style="max-height:64px;overflow-y:auto;margin:2px 0 4px">${chronicle}</ul></li>`;
       })
       .join('');

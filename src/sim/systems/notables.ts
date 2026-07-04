@@ -127,8 +127,9 @@ export function tickNotableLifecycle(r: RegionSim): void {
 // that already exists (loyalty, legitimacy, skill, political capital).
 // ---------------------------------------------------------------------------
 
-const ARC_GLOBAL_CAP = 3;          // readable log > saturated log
-const ARC_SEED_CHANCE = 0.015;     // per eligible notable per month
+const ARC_GLOBAL_CAP = 4;          // readable log > saturated log; 4 keeps ~1-2 live at a time
+const ARC_SEED_CHANCE = 0.03;      // per eligible notable per month — tuned to ~1 arc/7-8yr (a
+                                   // regular texture, not a rarity), still short of log saturation
 const ARC_MIN_AGE = 21;
 
 /** Beat decks: [stage0, stage1, stage2, stage3] per kind, 3 variants per stage

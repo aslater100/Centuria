@@ -228,20 +228,21 @@ describe('§ARC notable arcs', () => {
     expect(n.arc!.resolved).toBe(true);
   });
 
-  it('the global cap holds: with 3 arcs active, no fourth is seeded', () => {
+  it('the global cap holds: active arcs never exceed the cap (ARC_GLOBAL_CAP=4)', () => {
+    const CAP = 4;
     const r = makeRegion(9);
     quietWorld(r);
     const pool = livingNotables(r);
     // Guarantee enough notables, all maximally seed-prone.
     for (const n of pool) n.traits = ['corrupt', 'bold'];
-    const [a, b, c] = pool;
-    for (const n of [a, b, c].filter(Boolean)) {
+    // Pre-seed the cap with long-running (never-due) arcs so only over-cap seeding could grow it.
+    for (const n of pool.slice(0, CAP)) {
       n.arc = { kind: 'scandal', stage: 0, startedDay: r.day, nextBeatDay: r.day + 100000, resolved: false };
     }
-    if (pool.length > 3) {
+    if (pool.length > CAP) {
       for (let m = 0; m < 120; m++) tickNotableArcs(r);
       const active = livingNotables(r).filter((n) => n.arc && !n.arc.resolved).length;
-      expect(active).toBeLessThanOrEqual(3);
+      expect(active).toBeLessThanOrEqual(CAP);
     }
   });
 
