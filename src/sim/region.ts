@@ -7160,9 +7160,12 @@ export class RegionSim {
    *  debt over twice annual GDP, and the treasury drained below a month of GDP. */
   isInsolvent(): boolean {
     const annualGdp = Math.max(1, this.gdpLastMonth * 12);
+    // Debt threshold 1.8× annual GDP sits BELOW the issueBonds ceiling (2×), so the trigger is
+    // reachable via borrowing + interest compounding, not only via GDP contraction past a
+    // coincident wall (adversarial-review #3). Rating 'D' + drained treasury confirm the spiral.
     return this.nationProclaimed
       && this.creditRating === 'D'
-      && this.nationalDebt > annualGdp * 2
+      && this.nationalDebt > annualGdp * 1.8
       && this.treasury < this.gdpLastMonth;
   }
 

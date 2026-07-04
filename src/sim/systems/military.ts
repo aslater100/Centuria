@@ -98,9 +98,9 @@ import {
     return arms >= 2 ? COMBINED_ARMS_BONUS : 1;
   }
 
-  /** The constant per-side power multiplier from composition vs the enemy's composition,
-   *  plus a combined-arms bonus. Round-invariant (round results scale all units equally, so
-   *  the fractions never move), so it is computed once and applied as a fixed factor. */
+  /** Per-side land-power multiplier from this composition vs the enemy's, plus a combined-arms
+   *  bonus. Recomputed each round from live unit state so per-round morale shifts on a
+   *  heterogeneous force are reflected (count-scaling cancels in the fractions; morale does not). */
   export function compositionMult(mine: ArmyUnit[], enemy: ArmyUnit[], biome: string | undefined): number {
     const a = landComposition(mine, biome);
     const b = landComposition(enemy, biome);
@@ -181,28 +181,28 @@ export function resolveProvinceBattle(r: RegionSim, provinceId: number): void {
     const playerUndersupplied = playerArmies.some((a) => a.supply <= 0);
     const rivalUndersupplied = rivalArmies.some((a) => a.supply <= 0);
 
-    // §COMBAT-COMP: terrain of the contested settlement, and the constant per-side
-    // composition multipliers (round-invariant — computed once). Land units are
-    // terrain-weighted; warships add flat power (naval, neutral on land).
+    // §COMBAT-COMP: terrain of the contested settlement. Land power is terrain-weighted and
+    // scaled by the combined-arms composition matchup vs the enemy; warships add FLAT power
+    // (naval, neutral on land — they get neither the terrain weight nor the composition mult).
+    // Composition is recomputed each round from live unit state, so per-round morale shifts on
+    // a heterogeneous force are reflected (adversarial-review #4 — not merely "round-invariant").
     const st = r.settlement(provinceId);
     const biome = st ? r.map.at(st.x, st.y)?.biome : undefined;
     const playerUnits = playerArmies.flatMap((a) => a.units);
     const rivalUnits = rivalArmies.flatMap((a) => a.units);
-    const playerCompMult = compositionMult(playerUnits, rivalUnits, biome);
-    const rivalCompMult = compositionMult(rivalUnits, playerUnits, biome);
-    const rawPower = (armies: ProvincialArmy[]) =>
-      armies.reduce((sum, a) => sum + a.units.reduce((s, u) =>
-        u.type === 'warship'
-          ? s + u.count * UNIT_TYPES.warship.powerPerUnit * (u.morale / 100)
-          : s + unitLandPower(u, biome), 0), 0);
+    const navalPower = (units: ArmyUnit[]) =>
+      units.reduce((s, u) => u.type === 'warship'
+        ? s + u.count * UNIT_TYPES.warship.powerPerUnit * (u.morale / 100) : s, 0);
+    const landPower = (units: ArmyUnit[]) =>
+      units.reduce((s, u) => s + unitLandPower(u, biome), 0);
     const playerSidePower = () => {
-      let p = rawPower(playerArmies) * playerCompMult;
+      let p = landPower(playerUnits) * compositionMult(playerUnits, rivalUnits, biome) + navalPower(playerUnits);
       if (defenderIsPlayer) p *= defenderMult;
       if (playerUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
       return p;
     };
     const rivalSidePower = () => {
-      let p = rawPower(rivalArmies) * rivalBoost * rivalCompMult;
+      let p = (landPower(rivalUnits) * compositionMult(rivalUnits, playerUnits, biome) + navalPower(rivalUnits)) * rivalBoost;
       if (!defenderIsPlayer) p *= defenderMult;
       if (rivalUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
       return p;
