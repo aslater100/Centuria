@@ -113,4 +113,13 @@ export function advanceAutoplayStatehood(r: RegionSim): void {
   ) {
     r.enactLaw('central_bank_charter');
   }
+  // 4. NATIONHOOD (spec 11). The autoplayer never reaches the 50%-territory convention gate,
+  //    so nation-tier systems — legitimacy and the §STATE-COLLAPSE / §ECON-COLLAPSE loss routes —
+  //    used to lie dormant in headless play, making difficulty impossible to DEMONSTRATE in a
+  //    sweep (only human-reachable). A time+capacity gate lets a mature state proclaim so the
+  //    difficulty teeth are exercised across the run's second half. 'democracy' has no maxYear,
+  //    so proclaimNation never no-ops on the regime window.
+  if (r.stateProclaimed && !r.nationProclaimed && r.hasCentralBank() && r.year >= 1965) {
+    r.proclaimNation('The Republic', 'democracy', {});
+  }
 }

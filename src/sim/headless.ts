@@ -65,7 +65,9 @@ for (let run = 0; run < runs; run++) {
   const last = r.monthlyHistory[r.monthlyHistory.length - 1];
   const gdp = last ? last.gdp : 0;
   const treasOverGdpMonths = gdp > 0 ? r.treasury / (gdp / 12) : 0; // treasury in "months of GDP"
-  const outcome = r.winCondition ? `WIN:${r.winCondition.path}` : (r.eraBranch ?? (r.nationProclaimed ? 'nation' : 'colony'));
+  const outcome = r.winCondition ? `WIN:${r.winCondition.path}`
+    : r.gameOverCause ? `LOSS:${r.gameOverCause}`
+    : (r.eraBranch ?? (r.nationProclaimed ? 'nation' : 'colony'));
   // Player spatial buildout (placed buildings + zoned districts) — proves the
   // player's own spatial path is being exercised when autoDevelopPlayer is on.
   const playerTowns = r.settlements.filter((t) => t.factionId === r.playerFactionId);

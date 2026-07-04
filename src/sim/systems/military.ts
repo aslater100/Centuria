@@ -14,7 +14,7 @@
  * (computeCombatPower / computeWarScore) stay on RegionSim — the moved bodies reach
  * them, and the war state, through `r`.
  */
-import type { RegionSim, ProvincialArmy, ArmyGroup } from '../region';
+import type { RegionSim, ProvincialArmy, ArmyGroup, ArmyUnit, ArmyUnitType } from '../region';
 import {
   UNIT_TYPES,
   MOBILIZATION_DEFS,
@@ -42,6 +42,84 @@ import {
    *  activates the fortification axis: a `fortress` region building in the defending
    *  settlement multiplies defender power by BATTLE_FORT_MULT on top of home ground
    *  (1.10 × 1.15 = 1.265), clamped by BATTLE_DEFENDER_BONUS_CAP to 1.25. */
+  // ---- §COMBAT-COMP (spec 11): combined-arms counter matrix + terrain ----
+  // The counter triangle: militia (massed infantry) beats cavalry (formation/pikes),
+  // cavalry (shock/mobility) beats artillery (overruns unprotected guns), artillery
+  // (bombardment) beats militia. warship is neutral on land. Composition mix is now a
+  // real decision — scout the enemy, field the counter or a balanced combined-arms force.
+  export const COMP_SWING = 0.5;            // perfect hard-counter → ±0.5 (×1.5 / ×0.5)
+  export const COMBINED_ARMS_BONUS = 1.08;  // ≥2 land arms each ≥15% of land power
+  const COMP_MULT_MIN = 0.5;
+  const COMP_MULT_MAX = 1.5;
+
+  type LandComp = { militia: number; cavalry: number; artillery: number };
+
+  /** Rough ground (forest/hills/mountains/marsh) favors infantry and blunts guns/horse;
+   *  open ground (plains) favors cavalry. Per-type weight on effective power. Neutral = 1. */
+  export function terrainWeight(type: ArmyUnitType, biome: string | undefined): number {
+    const rough = biome === 'forest' || biome === 'hills' || biome === 'mountains' || biome === 'marsh';
+    const open = biome === 'plains';
+    if (rough) {
+      if (type === 'militia') return 1.1;
+      if (type === 'cavalry' || type === 'artillery') return 0.9;
+    } else if (open) {
+      if (type === 'cavalry') return 1.1;
+    }
+    return 1;
+  }
+
+  /** Terrain-weighted land power of one unit (warship excluded — naval, neutral on land). */
+  function unitLandPower(u: ArmyUnit, biome: string | undefined): number {
+    if (u.type === 'warship') return 0;
+    return u.count * UNIT_TYPES[u.type].powerPerUnit * (u.morale / 100) * terrainWeight(u.type, biome);
+  }
+
+  /** Power-weighted land composition (fractions summing to 1, or all-0 if no land power). */
+  function landComposition(units: ArmyUnit[], biome: string | undefined): LandComp {
+    let m = 0, c = 0, a = 0;
+    for (const u of units) {
+      const p = unitLandPower(u, biome);
+      if (u.type === 'militia') m += p;
+      else if (u.type === 'cavalry') c += p;
+      else if (u.type === 'artillery') a += p;
+    }
+    const total = m + c + a;
+    if (total <= 0) return { militia: 0, cavalry: 0, artillery: 0 };
+    return { militia: m / total, cavalry: c / total, artillery: a / total };
+  }
+
+  /** How well composition A counters composition B ∈ [0,1] (the winning-matchup mass). */
+  function counterScore(a: LandComp, b: LandComp): number {
+    return a.militia * b.cavalry + a.cavalry * b.artillery + a.artillery * b.militia;
+  }
+
+  function combinedArmsBonus(comp: LandComp): number {
+    const arms = [comp.militia, comp.cavalry, comp.artillery].filter((f) => f >= 0.15).length;
+    return arms >= 2 ? COMBINED_ARMS_BONUS : 1;
+  }
+
+  /** Per-side land-power multiplier from this composition vs the enemy's, plus a combined-arms
+   *  bonus. Recomputed each round from live unit state so per-round morale shifts on a
+   *  heterogeneous force are reflected (count-scaling cancels in the fractions; morale does not). */
+  export function compositionMult(mine: ArmyUnit[], enemy: ArmyUnit[], biome: string | undefined): number {
+    const a = landComposition(mine, biome);
+    const b = landComposition(enemy, biome);
+    const swing = 1 + (counterScore(a, b) - counterScore(b, a)) * COMP_SWING;
+    const clamped = Math.max(COMP_MULT_MIN, Math.min(COMP_MULT_MAX, swing));
+    return clamped * combinedArmsBonus(a);
+  }
+
+  /** §COMBAT-COMP (player-war extension): rivals field an era-appropriate notional composition,
+   *  so the player's own unit-mix decision matters in their wars (the main combat path), not just
+   *  in spatial province battles. Pre-1920 = infantry + horse; interwar/atomic = infantry + guns
+   *  (industrial war); modern = combined arms. The player scouts the era threat and counters it. */
+  export function rivalWarComposition(year: number): ArmyUnit[] {
+    const u = (type: ArmyUnitType, count: number): ArmyUnit => ({ type, count, morale: 100, suppliedDays: 60 });
+    if (year < 1920) return [u('militia', 60), u('cavalry', 40)];
+    if (year < 1960) return [u('militia', 55), u('artillery', 45)];
+    return [u('militia', 40), u('cavalry', 30), u('artillery', 30)];
+  }
+
   const BATTLE_MAX_ROUNDS = 3;
   export const BATTLE_HOME_GROUND_MULT = 1.10;
   export const BATTLE_DEFENDER_BONUS_CAP = 1.25;
@@ -114,17 +192,28 @@ export function resolveProvinceBattle(r: RegionSim, provinceId: number): void {
     const playerUndersupplied = playerArmies.some((a) => a.supply <= 0);
     const rivalUndersupplied = rivalArmies.some((a) => a.supply <= 0);
 
-    const rawPower = (armies: ProvincialArmy[]) =>
-      armies.reduce((sum, a) => sum + a.units.reduce((s, u) =>
-        s + u.count * UNIT_TYPES[u.type].powerPerUnit * (u.morale / 100), 0), 0);
+    // §COMBAT-COMP: terrain of the contested settlement. Land power is terrain-weighted and
+    // scaled by the combined-arms composition matchup vs the enemy; warships add FLAT power
+    // (naval, neutral on land — they get neither the terrain weight nor the composition mult).
+    // Composition is recomputed each round from live unit state, so per-round morale shifts on
+    // a heterogeneous force are reflected (adversarial-review #4 — not merely "round-invariant").
+    const st = r.settlement(provinceId);
+    const biome = st ? r.map.at(st.x, st.y)?.biome : undefined;
+    const playerUnits = playerArmies.flatMap((a) => a.units);
+    const rivalUnits = rivalArmies.flatMap((a) => a.units);
+    const navalPower = (units: ArmyUnit[]) =>
+      units.reduce((s, u) => u.type === 'warship'
+        ? s + u.count * UNIT_TYPES.warship.powerPerUnit * (u.morale / 100) : s, 0);
+    const landPower = (units: ArmyUnit[]) =>
+      units.reduce((s, u) => s + unitLandPower(u, biome), 0);
     const playerSidePower = () => {
-      let p = rawPower(playerArmies);
+      let p = landPower(playerUnits) * compositionMult(playerUnits, rivalUnits, biome) + navalPower(playerUnits);
       if (defenderIsPlayer) p *= defenderMult;
       if (playerUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
       return p;
     };
     const rivalSidePower = () => {
-      let p = rawPower(rivalArmies) * rivalBoost;
+      let p = (landPower(rivalUnits) * compositionMult(rivalUnits, playerUnits, biome) + navalPower(rivalUnits)) * rivalBoost;
       if (!defenderIsPlayer) p *= defenderMult;
       if (rivalUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
       return p;
@@ -574,8 +663,13 @@ export function tickPlayerWar(r: RegionSim): void {
       return;
     }
     const mob = MOBILIZATION_DEFS[w.mobilization];
-    const P = r.warPower();
-    const R = r.rivalWarPower(rv);
+    // §COMBAT-COMP (player war): the player's real unit composition vs the rival's era-appropriate
+    // force. A player who scouts and hard-counters (or fields balanced combined arms) shifts the
+    // war in their favor; a mono-army that the era's threat counters is punished. Empty player
+    // units → compositionMult returns 1, so a pre-unit or abstract war is unchanged. No new RNG.
+    const rivalComp = rivalWarComposition(r.year);
+    const P = r.warPower() * compositionMult(w.units, rivalComp, undefined);
+    const R = r.rivalWarPower(rv) * compositionMult(rivalComp, w.units, undefined);
     const delta = 16 * ((P - R) / (P + R)) + r.rng.int(9) - 4;
     w.score = Math.max(-100, Math.min(100, w.score + delta));
     if (w.blockade) {
