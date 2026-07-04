@@ -37,6 +37,32 @@ not wiring (see below).
 certify (runtime feel, playtested balance). 8-8.5 across five of six categories is a strong,
 defensible state. Remaining 9→10 items are milestone-scale projects, listed for a future call.
 
+---
+
+## Spec 11 pass (2026-07-04 PM) — combat depth + difficulty loss routes
+
+Targeted Mechanics + Difficulty to 9. Focused re-audit (code + sweeps, honest):
+
+| Category | Pre-spec-11 | Post-spec-11 |
+|---|---|---|
+| Mechanical depth | 8.5 | **8.5** (new combat axis landed but only 1 of 3 resolvers) |
+| Difficulty | 7.5 | **8.5** (real terminal revolution route; 3/20 sweep variety; easy coasts) |
+
+- **§COMBAT-COMP** (Mechanics): combined-arms counter triangle + terrain in the *province*
+  battle resolver — proven to flip a numerically-inferior force to >60% wins. GENUINE new
+  tactical axis, but `resolveArmyGroupBattle` and `tickPlayerWar` still run aggregate power,
+  and diplomacy (the co-named blocker) is untouched → held at 8.5, short of 9.
+- **§ECON-COLLAPSE** + **§STATE-COLLAPSE** (Difficulty): sovereign-default and terminal-revolution
+  run-enders (save schema v4). Adversarial review caught both unreachable in-sweep (autoplay
+  never proclaimed a nation); fixed → autoplay nationhood → standard sweep now **3/20
+  LOSS:revolution + 17 drowned** (was 20/20 drowned), easy **20/20 coast**. Plus a realism fix:
+  unrest now erodes legitimacy. Insolvency is player-reachable + test-proven but doesn't fire in
+  autoplay (never borrows) — one *demonstrated* second route (revolution), not two.
+
+**Remaining to 9 (both):** Mechanics — extend composition to `tickPlayerWar` (the main
+player-facing combat path) and/or deepen diplomacy. Difficulty — climate still ~85% of endings
+(variety, not parity); make insolvency autoplay-reachable or add climate-ending variety.
+
 **Status: EXECUTED** — PR #346 (20 of 23 tasks) + PR #348 (D1, D2, save schema v2 +
 management, M2/M3/U7 follow-ups). G1 formally dropped (owner chose "stay procedural").
 Re-audit 2026-07-04 (three independent skeptical passes, code-verified with counts) confirmed
