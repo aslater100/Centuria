@@ -96,6 +96,10 @@ export function tickEducationLag(r: RegionSim): void {
   if (r.educationLag.length > 25) r.educationLag.pop();
 }
 
+/** D2 — per-settlement grievance at/above which the post-revolution separatism counter
+ *  accrues. Set to the riots (rung-4) line: a single town this aggrieved is in severe unrest. */
+const REVOLT_CRITICAL_GRIEVANCE = 75;
+
 /** Tick the unrest ladder — escalate or de-escalate based on grievance. Six rungs
  *  (calm → petitions → strikes → protests → riots → revolution); escalation is capped
  *  at one rung/month, de-escalation needs grievance 15+ below threshold, and rung 5
@@ -197,8 +201,38 @@ export function tickUnrestLadder(r: RegionSim): void {
           t.grievance = Math.max(0, t.grievance - 30);
           t.satisfaction = Math.max(0, t.satisfaction - 15);
         }
+        // D2: open the post-revolution separatism window for every settlement that shared in
+        // the upheaval. From here, any town whose grievance climbs back to the revolt-critical
+        // line and holds it for 3+ months can fracture away (see the D2 block below).
+        for (const t of playerSettlements) r.postRevoltGrievanceMonths[t.id] = 0;
       }
       break;
+    }
+  }
+
+  // D2 — revolution → partition. The window is only open once a revolution has seeded
+  // postRevoltGrievanceMonths (above). While open, a player settlement whose grievance holds at
+  // or above the revolt-critical line for 3+ consecutive months can secede: 8% × crisisFrequency
+  // per month it defects to the nearest hostile rival, feeding victory.ts territory checks. Any
+  // month grievance falls back below the line resets that settlement's counter.
+  for (const key of Object.keys(r.postRevoltGrievanceMonths)) {
+    const id = Number(key);
+    const t = r.settlements.find((s) => s.id === id);
+    // Drop settlements that are gone or no longer ours from tracking (keeps the record bounded).
+    if (!t || t.factionId !== r.playerFactionId) {
+      delete r.postRevoltGrievanceMonths[id];
+      continue;
+    }
+    if (t.grievance >= REVOLT_CRITICAL_GRIEVANCE) {
+      r.postRevoltGrievanceMonths[id]++;
+      if (r.postRevoltGrievanceMonths[id] >= 3) {
+        const secedeChance = 0.08 * (r.difficultySettings?.crisisFrequency ?? 1);
+        if (r.rng.chance(secedeChance) && r.secedeSettlement(t)) {
+          delete r.postRevoltGrievanceMonths[id];
+        }
+      }
+    } else {
+      r.postRevoltGrievanceMonths[id] = 0;
     }
   }
 }

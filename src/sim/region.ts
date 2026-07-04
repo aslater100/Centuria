@@ -3613,6 +3613,20 @@ export const MAX_SETTLEMENTS = 24;
  *  pile on top of each other. Used by both player expeditions and AI expansion. */
 export const MIN_SETTLEMENT_SPACING = 8;
 
+/** Save-blob schema version. Bumped to 2 for the D1/D2 persisted counters
+ *  (hyperinflationMonths, postRevoltGrievanceMonths). Saves below this are a hard
+ *  cutover — `deserialize` rejects them via IncompatibleSaveError rather than migrating. */
+export const SAVE_SCHEMA_VERSION = 2;
+
+/** Thrown by `RegionSim.deserialize` when a save blob predates SAVE_SCHEMA_VERSION.
+ *  Callers (load menu, boot) catch this and offer delete-only rather than crashing. */
+export class IncompatibleSaveError extends Error {
+  constructor(public readonly foundVersion: number) {
+    super(`Incompatible save (v${foundVersion}); current schema is v${SAVE_SCHEMA_VERSION}.`);
+    this.name = 'IncompatibleSaveError';
+  }
+}
+
 export class RegionSim {
   rng: Rng;
   /** Per-tick memo of `routePath` BFS results (key `from:to:mode`). Transient —
@@ -4171,6 +4185,10 @@ export class RegionSim {
   unrestLevel: 0 | 1 | 2 | 3 | 4 | 5 = 0;
   /** Months the nation has been at the current unrest level. */
   unrestMonthsAtLevel = 0;
+  /** D1: consecutive months the hyperinflation-collapse trigger has held (persisted). */
+  hyperinflationMonths = 0;
+  /** D2: per-settlement consecutive post-revolution months at critical grievance (persisted, keyed by settlement id). */
+  postRevoltGrievanceMonths: Record<number, number> = {};
   /** Generational ideology drift accumulator (0–1). */
   generationalDrift = 0;
   /** True once the 1968-analog youthquake event has fired. */
@@ -4564,6 +4582,39 @@ export class RegionSim {
     return Math.min(1, total);
   }
 
+  /** D2 — a settlement fractures away from the player after a failed revolution, handed to
+   *  the nearest hostile regional faction (nearest of any faction if none is hostile). Mirrors
+   *  assaultSettlement's ownership bookkeeping in reverse and invalidates the territory cache
+   *  so victory.ts's control checks pick it up. No-op returning false if the player is the only
+   *  faction on the map (nowhere to secede to). */
+  secedeSettlement(t: Settlement): boolean {
+    const player = this.faction(this.playerFactionId);
+    if (!player) return false;
+    const candidates = this.regionalFactions.filter(
+      (f) => f.id !== this.playerFactionId && f.overlordId !== this.playerFactionId && f.settlementIds.length > 0,
+    );
+    if (candidates.length === 0) return false;
+    const nearestDist = (f: RegionalFaction): number => {
+      const dists = f.settlementIds
+        .map((id) => this.settlement(id))
+        .filter((s): s is Settlement => !!s)
+        .map((s) => Math.hypot(s.x - t.x, s.y - t.y));
+      return dists.length ? Math.min(...dists) : Infinity;
+    };
+    const hostile = candidates.filter((f) => this.playerRegionalWars.has(f.id) || f.aggressiveness > 60);
+    const pool = hostile.length > 0 ? hostile : candidates;
+    const target = pool.reduce((a, b) => (nearestDist(a) <= nearestDist(b) ? a : b));
+    player.settlementIds = player.settlementIds.filter((id) => id !== t.id);
+    t.factionId = target.id;
+    target.settlementIds.push(t.id);
+    if (player.capital === t.id) player.capital = player.settlementIds[0] ?? -1;
+    t.loyaltyToFaction = 50;
+    t.grievance = Math.max(0, t.grievance - 40); // leaving is itself a release valve
+    this._territoryCache = null;
+    this.addLog(`SECESSION: ${t.name} breaks from the state and throws in with ${target.name}.`, 'bad');
+    return true;
+  }
+
   /** Classify a settlement's three headline goods as surplus / balanced /
    *  deficit, for the at-a-glance resource icons on the map. */
   getSettlementResourceStatus(t: Settlement): SettlementResourceStatus {
@@ -4684,9 +4735,20 @@ export class RegionSim {
 
   /** Throughput a route can actually carry: capacity scales with condition. A
    *  sea lane carries its shipping capacity, not the mule-train trail figure. */
+  /** M3 — wartime sea-lane blockade factor (exactly 1 in peacetime, no RNG). An active
+   *  player war runs a blockade gauntlet on the sea lanes; a larger escorting fleet contests
+   *  it. Shared by naval trade income and sea-lane throughput below so both squeeze together. */
+  blockadeMultiplier(): number {
+    if (!this.playerWar) return 1;
+    const warships = this.playerWar.units.find((u) => u.type === 'warship')?.count ?? 0;
+    return 0.65 + 0.35 * Math.min(1, warships / 6);
+  }
+
   effectiveCapacity(r: Route): number {
     const base = r.sea ? SEA_LANE_CAPACITY : ROUTE_SPECS[r.kind].capacity;
-    return base * (r.condition / 100);
+    // M3: a blockade throttles physical throughput on sea lanes, not just the income they earn.
+    const blockade = r.sea ? this.blockadeMultiplier() : 1;
+    return base * (r.condition / 100) * blockade;
   }
 
   /** Spare capacity on the tightest leg of a path — the bottleneck a caravan
@@ -12274,7 +12336,7 @@ export class RegionSim {
    */
   serialize(): string {
     return JSON.stringify({
-      v: 1,
+      v: SAVE_SCHEMA_VERSION,
       mapSeed: this.map.seed,
       rng: this.rng.getState(),
       aiRng: this.aiRng.getState(),
@@ -12491,6 +12553,8 @@ export class RegionSim {
       shareholderPatience: this.shareholderPatience,
       transitionChain: this.transitionChain,
       policySlots9: this.policySlots,
+      hyperinflationMonths: this.hyperinflationMonths,
+      postRevoltGrievanceMonths: this.postRevoltGrievanceMonths,
     });
   }
 
@@ -12498,6 +12562,7 @@ export class RegionSim {
    *  from the stored seed; all mutable state is restored from the JSON. */
   static deserialize(json: string): RegionSim {
     const d = JSON.parse(json);
+    if ((d.v ?? 0) < SAVE_SCHEMA_VERSION) throw new IncompatibleSaveError(d.v ?? 0);
     const seed = d.mapSeed ?? 42;
     const rng = new Rng(0);
     const map = new RegionMap(seed);
@@ -12838,6 +12903,8 @@ export class RegionSim {
     r.shareholderPatience = d.shareholderPatience ?? 80;
     r.transitionChain = d.transitionChain ?? null;
     r.policySlots = d.policySlots9 ?? [];
+    r.hyperinflationMonths = d.hyperinflationMonths ?? 0;
+    r.postRevoltGrievanceMonths = d.postRevoltGrievanceMonths ?? {};
     // Recompute cached perf fields after full restore.
     r.activeRailRoutes = r.routes.filter((rt) => rt.kind === 'rail' && rt.condition > 50).length;
     let tf = 0, tw = 0, mg = 0;

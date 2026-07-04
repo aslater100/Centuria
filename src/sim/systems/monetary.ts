@@ -238,6 +238,24 @@ export function tickMonetary(r: RegionSim): void {
       pf.centralBank.inflationRate = r.inflationRate;
     }
   }
+
+  // 15. D1 — hyperinflation collapse. inflationRate is hard-clamped at 0.50 (line 78), so the
+  // plan's "200% annualized" is unreachable; the collapse line lives inside the clamp. Twelve
+  // consecutive months of inflation >= 0.45 with confidence < 20 ends the run. Any month the
+  // trigger breaks — a rate hike, regime switch, or devaluation pulling either variable back
+  // across the line — resets the counter, so the collapse is always escapable until the 12th month.
+  if (r.inflationRate >= 0.45 && r.confidence < 20) {
+    r.hyperinflationMonths++;
+    if (r.hyperinflationMonths >= 12 && !r.gameOver) {
+      r.gameOver = true;
+      r.addLog(
+        'Prices double by the week and the currency is worthless — the economy collapses. (Failure state: hyperinflation.)',
+        'bad',
+      );
+    }
+  } else {
+    r.hyperinflationMonths = 0;
+  }
 }
 
 /** Monthly FX tick: recompute exchange rate, decay fxBoost, handle regime crises. */
