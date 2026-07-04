@@ -1821,7 +1821,10 @@ export const LEVERAGE_FRAGILITY = TUNING.leverageFragility;
 export const LEVERAGE_FRAGILE   = TUNING.leverageFragile;
 export const FRAGILITY_GAIN     = TUNING.fragilityGain;
 export const MIN_POLICY_RATE = 0.01;
-export const MAX_POLICY_RATE = 0.15;
+// 0.20 ceiling: calibration memo — US federal funds peaked ~19-20% in 1980-81 (Volcker
+// disinflation), and the D1 hyperinflation loss state needs the full historical tail
+// available as an escape tool. Was 0.15, which cut the real-world policy range short.
+export const MAX_POLICY_RATE = 0.20;
 /** Credit spreads over policy rate by rating tier. */
 export const CREDIT_RATING_SPREADS: Record<CreditRating, number> = {
   AAA: 0, AA: 0.005, A: 0.01, BBB: 0.02, BB: 0.04, B: 0.07, CCC: 0.12, D: 0.25,
@@ -9076,6 +9079,12 @@ export class RegionSim {
       'Grew up dockside, first paid in fish and later in favors',
       'Born in the back room of a boarding house during a hard winter',
       'Apprenticed young to a trade that left ink, or soot, on every cuff',
+      'Ran errands for a survey crew and learned the country a chain-length at a time',
+      'Orphaned in the fever year and raised by an aunt who wasted neither words nor bread',
+      'Grew up over a print shop, reading the week\'s news backwards off the plates',
+      'The last of a rail-camp family that followed the line until the line gave out',
+      'Raised in a mining camp where the pay came as scrip and the lessons came hard',
+      'Brought up by a widowed schoolteacher on grammar, hymns, and thin soup',
     ];
     const FORMATIVE: Record<string, string> = {
       corrupt: 'learned early that every rule has a price, and most collectors take installments.',
@@ -9085,8 +9094,13 @@ export class RegionSim {
       charismatic: 'could talk a room into anything by sixteen, and mostly out of trouble by twenty.',
       reclusive: 'buried two siblings in one fever season and has kept the world at a distance since.',
     };
+    const FORMATIVE_FALLBACK = [
+      'came of age between hard seasons and long roads.',
+      'learned a dozen trades to journeyman grade and settled on none of them.',
+      'left home at sixteen with one good coat and a letter of introduction, and wore both out within the year.',
+    ];
     const originLine = ORIGINS[this.rng.int(ORIGINS.length)];
-    const formativeLine = FORMATIVE[traits[0]] ?? 'came of age between hard seasons and long roads.';
+    const formativeLine = FORMATIVE[traits[0]] ?? FORMATIVE_FALLBACK[this.rng.int(FORMATIVE_FALLBACK.length)];
     const generatedBackstory = `${originLine}${t ? ` near ${t.name}` : ''}; ${formativeLine}`;
     const n: Notable = {
       id: this.nextId++,

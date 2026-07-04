@@ -131,41 +131,118 @@ const ARC_GLOBAL_CAP = 3;          // readable log > saturated log
 const ARC_SEED_CHANCE = 0.015;     // per eligible notable per month
 const ARC_MIN_AGE = 21;
 
-/** Beat decks: [stage0, stage1, stage2, stage3] per kind. {name}/{town}/{target}
- *  interpolated. One variant per stage in the engine core; the content pass
- *  expands each slot to 3 variants (spec 10 §ARC). */
-const ARC_BEATS: Record<NotableArc['kind'], string[]> = {
+/** Beat decks: [stage0, stage1, stage2, stage3] per kind, 3 variants per stage
+ *  (spec 10 §ARC content pass). {name}/{town} interpolated everywhere; {target}
+ *  appears in the feud deck only. Variant picked with r.rng.int(3) at fire time. */
+const ARC_BEATS: Record<NotableArc['kind'], string[][]> = {
   scandal: [
-    'Whispers follow {name} through {town} — sums unaccounted for, favors unexplained.',
-    'A clerk comes forward: ledgers touched by {name} do not balance, and never have.',
-    'The affair around {name} breaks into the open; allies begin standing carefully apart.',
-    'The full weight of the scandal lands on {name} — there is no walking this back.',
+    [
+      'Whispers follow {name} through {town} — sums unaccounted for, favors unexplained.',
+      'A contract in {town} went to a firm nobody has heard of, and {name} signed the order twice.',
+      'Questions gather around {name}: receipts gone missing, and a new coat no salary explains.',
+    ],
+    [
+      'A clerk comes forward: ledgers touched by {name} do not balance, and never have.',
+      'An auditor spends a week in {town} and leaves with a valise heavier than he came with; every page concerns {name}.',
+      'The paper trail behind {name} runs through three names, and two of them are dead.',
+    ],
+    [
+      'The affair around {name} breaks into the open; allies begin standing carefully apart.',
+      'The {town} paper prints the figures in full; {name} calls it slander, and hires a lawyer anyway.',
+      '{name} spends more evenings explaining than working, and even paid friends have begun charging more.',
+    ],
+    [
+      'The full weight of the scandal lands on {name} — there is no walking this back.',
+      'The inquiry closes and names {name} plainly; the verdict travels faster than the wire.',
+      'What {name} took is tallied at last, and {town} learns the number by heart.',
+    ],
   ],
   ambition: [
-    '{name} has begun speaking of {town} as "a start," and of themselves in the third person.',
-    '{name} is building a following — favors done quietly, names remembered precisely.',
-    '{name} openly courts the offices above their station; patience wears visibly thin.',
-    '{name} forces the question: advancement — or an exit on their own terms.',
+    [
+      '{name} has begun speaking of {town} as "a start," and of themselves in the third person.',
+      '{name} now arrives first at every meeting in {town} and stays long after the useful part ends.',
+      '{name} sits for a portrait and practices a shorter, grander signature.',
+    ],
+    [
+      '{name} is building a following — favors done quietly, names remembered precisely.',
+      'Half of {town} owes {name} a favor now, and the other half suspects as much.',
+      '{name} keeps a notebook of who said what at which table, and consults it before every handshake.',
+    ],
+    [
+      '{name} openly courts the offices above their station; patience wears visibly thin.',
+      '{name} speaks of "when," no longer "if," and takes care that superiors overhear it.',
+      'Letters over {name}\'s signature reach desks well above {town}; the answers come back polite and slow.',
+    ],
+    [
+      '{name} forces the question: advancement — or an exit on their own terms.',
+      '{name} names a price for staying, and sets a date for the answer.',
+      'The waiting is done — {name} demands the office outright, before witnesses chosen with care.',
+    ],
   ],
   feud: [
-    'A slight at a public table: {name} and {target} no longer speak.',
-    'The quarrel between {name} and {target} pulls in friends, then factions.',
-    'Sabotage, or something near it — the feud between {name} and {target} is now policy by other means.',
-    'The feud breaks: one of them will not recover their standing.',
+    [
+      'A slight at a public table: {name} and {target} no longer speak.',
+      '{name} and {target} bid on the same lot in {town}, and one of them was never after the land.',
+      'A toast misfired, an apology withheld — {name} and {target} now cross the street for each other.',
+    ],
+    [
+      'The quarrel between {name} and {target} pulls in friends, then factions.',
+      'In {town} you buy from {name}\'s people or from {target}\'s, and everyone knows which is which.',
+      '{name} hires away {target}\'s best hand at wages that make no commercial sense.',
+    ],
+    [
+      'Sabotage, or something near it — the feud between {name} and {target} is now policy by other means.',
+      'A cart of {target}\'s goods founders on a road {name}\'s crew mended last week; nobody calls it an accident twice.',
+      'Lawyers carry the quarrel between {name} and {target} now, at rates that will beggar them both.',
+    ],
+    [
+      'The feud breaks: one of them will not recover their standing.',
+      'The reckoning between {name} and {target} arrives at last, and {town} gathers to watch it land.',
+      'After years of it, {name} and {target} settle the matter in the open, and only one walks away whole.',
+    ],
   ],
   redemption: [
-    '{name}, still carrying the old disgrace, takes on work no one else wants.',
-    'Quietly, competently, {name} is rebuilding what the scandal burned down.',
-    'Even old critics concede that {name} has changed — or always was more than the worst day.',
-    '{name} stands redeemed — the old shame recedes into the chronicle.',
+    [
+      '{name}, still carrying the old disgrace, takes on work no one else wants.',
+      '{name} returns to {town} plainly dressed and asks for the hardest post going.',
+      'The old fault goes unmentioned; {name} simply starts arriving first and leaving last.',
+    ],
+    [
+      'Quietly, competently, {name} is rebuilding what the scandal burned down.',
+      'Work speaks where {name} will not: debts paid, roofs mended, no speeches given.',
+      'In {town} they have begun saying "ask {name}" again — a sentence not heard in years.',
+    ],
+    [
+      'Even old critics concede that {name} has changed — or always was more than the worst day.',
+      'Those who once cut {name} in the street now stop to talk of weather and grain.',
+      'A hard season tests {town}, and it is {name} who is found standing at the front of it.',
+    ],
+    [
+      '{name} stands redeemed — the old shame recedes into the chronicle.',
+      '{town} takes {name} back without ceremony, which is the only forgiveness that lasts.',
+      'What {name} lost has been earned again, the slow way, and it holds the better for it.',
+    ],
   ],
 };
 
-const ARC_FIZZLE_BEAT: Record<NotableArc['kind'], string> = {
-  scandal: 'The whispers around {name} fade for want of proof; the ledgers close over it.',
-  ambition: 'The moment passes — {name} settles back into the work at hand, for now.',
-  feud: 'Mutual friends broker a cold but holding peace between {name} and {target}.',
-  redemption: 'The road back proves longer than {name} hoped; the effort quietly stalls.',
+/** Two variants per kind; picked with r.rng.int(2) at fire time. */
+const ARC_FIZZLE_BEAT: Record<NotableArc['kind'], string[]> = {
+  scandal: [
+    'The whispers around {name} fade for want of proof; the ledgers close over it.',
+    'The witness reconsiders, the file thins, and {town} finds fresher things to whisper about than {name}.',
+  ],
+  ambition: [
+    'The moment passes — {name} settles back into the work at hand, for now.',
+    'The offices above stay shut, and {name} decides the view from here will serve a while longer.',
+  ],
+  feud: [
+    'Mutual friends broker a cold but holding peace between {name} and {target}.',
+    'Winter, or weariness — {name} and {target} let the quarrel starve for want of feeding.',
+  ],
+  redemption: [
+    'The road back proves longer than {name} hoped; the effort quietly stalls.',
+    'An old accusation resurfaces at the wrong hour, and the ground {name} regained gives quietly back.',
+  ],
 };
 
 function interpolateBeat(template: string, r: RegionSim, n: Notable, target?: Notable): string {
@@ -277,7 +354,7 @@ export function tickNotableArcs(r: RegionSim): void {
         targetNotableId, resolved: false,
       };
       const target = targetNotableId !== undefined ? r.notables.find((p) => p.id === targetNotableId) : undefined;
-      fireArcBeat(r, n, interpolateBeat(ARC_BEATS[kind][0], r, n, target), kind === 'redemption' ? 'info' : 'bad');
+      fireArcBeat(r, n, interpolateBeat(ARC_BEATS[kind][0][r.rng.int(3)], r, n, target), kind === 'redemption' ? 'info' : 'bad');
       break; // at most one new arc per month keeps the stream readable
     }
   }
@@ -294,12 +371,12 @@ export function tickNotableArcs(r: RegionSim): void {
     }
     const escalateP = 0.55 + arcTraitBias(n, arc.kind);
     if (!r.rng.chance(escalateP)) {
-      fireArcBeat(r, n, interpolateBeat(ARC_FIZZLE_BEAT[arc.kind], r, n, target), 'info');
+      fireArcBeat(r, n, interpolateBeat(ARC_FIZZLE_BEAT[arc.kind][r.rng.int(2)], r, n, target), 'info');
       arc.resolved = true;
       continue;
     }
     arc.stage = (arc.stage + 1) as NotableArc['stage'];
-    fireArcBeat(r, n, interpolateBeat(ARC_BEATS[arc.kind][arc.stage], r, n, target),
+    fireArcBeat(r, n, interpolateBeat(ARC_BEATS[arc.kind][arc.stage][r.rng.int(3)], r, n, target),
       arc.kind === 'redemption' ? (arc.stage === 3 ? 'good' : 'info') : arc.stage === 3 ? 'bad' : 'info');
     if (arc.stage === 3) {
       applyArcTerminal(r, n, arc, target);

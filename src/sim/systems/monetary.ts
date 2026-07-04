@@ -41,9 +41,13 @@ export function tickMonetary(r: RegionSim): void {
   // 0.08 credit-to-inflation pass-through: design-intent citation, not a data source — evokes the partial,
   // lagged pass-through of credit expansion into prices found in monetary-transmission studies (not 1:1).
   const leverageInflation = Math.max(0, dLeverage) * 0.08;
-  // 0.010/month (~12%/yr) print-regime inflation: design-intent citation, not a data source — evokes
-  // moderate money-financed-deficit inflation (Cagan-style seigniorage), well short of hyperinflation.
-  const printInflation = r.monetaryRegime === 'print' ? 0.010 : 0;
+  // Print-regime inflation lift. inflationRate is the ANNUALIZED rate and this term enters the
+  // TARGET level (not a per-tick accrual), so +0.08 pins the print-regime steady state near 10%/yr —
+  // matching the "moderate money-financed-deficit inflation" intent this constant always claimed.
+  // Calibration memo: the old +0.010 produced a ~3%/yr steady state, 4-10x below both its own
+  // comment and historical seigniorage episodes. Default play never adopts 'print' (20-seed sweep
+  // flat at 2%), so this bites only the regime that chooses the printing press.
+  const printInflation = r.monetaryRegime === 'print' ? 0.08 : 0;
   // Cost-push (GDD §5.2): a real supply-chain shock makes goods dearer, not just
   // scarcer — the stagflation half of the 1973 oil embargo (output already drags
   // via supplyShockMult). `supplyShockSeverity()` reads last month's cached
