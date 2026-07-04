@@ -38,13 +38,26 @@ import {
 } from '../region';
 
   /** §M1 — 3-round attrition battle model (docs/specs/09-audit-nine.md). Shared by
-   *  resolveProvinceBattle and resolveArmyGroupBattle. No walls/fort/citadel ids exist
-   *  in src/data/buildings.json or region_buildings.json today, so the fortification
-   *  modifier is omitted per spec — only the home-ground bonus applies, well under the cap. */
+   *  resolveProvinceBattle and resolveArmyGroupBattle. §FORT (docs/specs/10-chase-the-nines.md)
+   *  activates the fortification axis: a `fortress` region building in the defending
+   *  settlement multiplies defender power by BATTLE_FORT_MULT on top of home ground
+   *  (1.10 × 1.15 = 1.265), clamped by BATTLE_DEFENDER_BONUS_CAP to 1.25. */
   const BATTLE_MAX_ROUNDS = 3;
-  const BATTLE_HOME_GROUND_MULT = 1.10;
-  const BATTLE_DEFENDER_BONUS_CAP = 1.25;
-  const BATTLE_DEFENDER_MULT = Math.min(BATTLE_HOME_GROUND_MULT, BATTLE_DEFENDER_BONUS_CAP);
+  export const BATTLE_HOME_GROUND_MULT = 1.10;
+  export const BATTLE_DEFENDER_BONUS_CAP = 1.25;
+  export const BATTLE_FORT_MULT = 1.15;
+
+  /** Effective defender power multiplier: home ground × fort (when fortified), capped. */
+  export function battleDefenderMult(fortified: boolean): number {
+    return Math.min(BATTLE_HOME_GROUND_MULT * (fortified ? BATTLE_FORT_MULT : 1), BATTLE_DEFENDER_BONUS_CAP);
+  }
+
+  /** §FORT — both battle resolvers key on `provinceId`, which IS a settlement id
+   *  (`r.settlement(provinceId)`); the defender is fortified when that settlement
+   *  has raised a `fortress` region building. */
+  function defenderFortified(r: RegionSim, provinceId: number): boolean {
+    return r.settlement(provinceId)?.buildings.includes('fortress') ?? false;
+  }
   const BATTLE_SUPPLY_PENALTY_MULT = 0.90;
   const BATTLE_ROUND_WIN_BASE = 0.85;
   const BATTLE_ROUND_WIN_SPREAD = 0.3;
@@ -97,6 +110,7 @@ export function resolveProvinceBattle(r: RegionSim, provinceId: number): void {
     const rv = r.rival(rvId);
     const rivalBoost = rv ? 0.6 + rv.weights.expansion * 0.04 : 0.6;
     const defenderIsPlayer = isPlayerDefender(r, provinceId);
+    const defenderMult = battleDefenderMult(defenderFortified(r, provinceId));
     const playerUndersupplied = playerArmies.some((a) => a.supply <= 0);
     const rivalUndersupplied = rivalArmies.some((a) => a.supply <= 0);
 
@@ -105,13 +119,13 @@ export function resolveProvinceBattle(r: RegionSim, provinceId: number): void {
         s + u.count * UNIT_TYPES[u.type].powerPerUnit * (u.morale / 100), 0), 0);
     const playerSidePower = () => {
       let p = rawPower(playerArmies);
-      if (defenderIsPlayer) p *= BATTLE_DEFENDER_MULT;
+      if (defenderIsPlayer) p *= defenderMult;
       if (playerUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
       return p;
     };
     const rivalSidePower = () => {
       let p = rawPower(rivalArmies) * rivalBoost;
-      if (!defenderIsPlayer) p *= BATTLE_DEFENDER_MULT;
+      if (!defenderIsPlayer) p *= defenderMult;
       if (rivalUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
       return p;
     };
@@ -246,19 +260,20 @@ export function resolveArmyGroupBattle(r: RegionSim, provinceId: number): void {
     const rv = r.rival(rvId);
     const rvName = rv?.name ?? 'rival forces';
     const defenderIsPlayer = isPlayerDefender(r, provinceId);
+    const defenderMult = battleDefenderMult(defenderFortified(r, provinceId));
     const playerUndersupplied = playerArmies.some((a) => a.supply < 0.4);
     const rivalUndersupplied = rivalArmies.some((a) => a.supply < 0.4);
 
     const rawPower = (armies: ArmyGroup[]) => armies.reduce((s, a) => s + r.computeCombatPower(a), 0);
     const playerSidePower = () => {
       let p = rawPower(playerArmies);
-      if (defenderIsPlayer) p *= BATTLE_DEFENDER_MULT;
+      if (defenderIsPlayer) p *= defenderMult;
       if (playerUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
       return p;
     };
     const rivalSidePower = () => {
       let p = rawPower(rivalArmies);
-      if (!defenderIsPlayer) p *= BATTLE_DEFENDER_MULT;
+      if (!defenderIsPlayer) p *= defenderMult;
       if (rivalUndersupplied) p *= BATTLE_SUPPLY_PENALTY_MULT;
       return p;
     };

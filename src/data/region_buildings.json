@@ -59,6 +59,19 @@
       "desc": "Blast furnaces and rolling mills — the muscle of an industrial town. Industry +20%."
     },
     {
+      "id": "fortress",
+      "name": "Fortress",
+      "cost": 110,
+      "days": 70,
+      "upkeep": 3,
+      "max": 1,
+      "prereq": "steel_industry",
+      "sector": "all",
+      "bonus": 0,
+      "garrisonBonus": 10,
+      "desc": "Concrete casemates, ringed earthworks and a gun that answers first. Garrison +10; defenders of this town fight +15% in battle."
+    },
+    {
       "id": "factory",
       "name": "Factory",
       "cost": 100,

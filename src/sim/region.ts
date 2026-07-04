@@ -613,6 +613,7 @@ export interface RegionalBuildingDef {
   research?: number;     // research rate multiplier add
   satisfaction?: number; // flat satisfaction-target bonus
   sight?: number;        // survey radius bonus for this town
+  garrisonBonus?: number; // flat garrison-strength add (§FORT: fortress)
   coastal_only?: boolean; // if true, only buildable in coastal settlements
   // Spatial-4X Phase D — Wonders: one-per-EMPIRE placements with a global effect.
   unique?: boolean;                 // empire-wide cap of one (not per-city)
@@ -4464,13 +4465,18 @@ export class RegionSim {
     return Math.max(0, Math.min(1, p * this.difficultySettings.aiAggression));
   }
 
-  /** Get garrison strength of a settlement, including stationed units (GDD §7.1). */
+  /** Get garrison strength of a settlement, including stationed units (GDD §7.1)
+   *  and fortification buildings (§FORT — declarative `garrisonBonus`, consumed
+   *  here the same way `buildingSatisfaction`/`buildingSight` consume theirs). */
   garrisonOf(settlement: Settlement): number {
     let strength = settlement.garrisonStrength || 0;
     // Add contribution from stationed units: each unit contributes power proportional to its type
     for (const unit of settlement.stationedUnits) {
       const unitDef = UNIT_TYPES[unit.type];
       strength += unit.count * unitDef.powerPerUnit;
+    }
+    for (const id of settlement.buildings) {
+      strength += REGION_BUILDINGS_MAP.get(id)?.garrisonBonus ?? 0;
     }
     return strength;
   }
@@ -13641,6 +13647,10 @@ export class RegionSim {
     // (which holds the hoard near 1.5mo, leaving no surplus a 1.5mo gate could see)
     // yet still ~50× the actual grain draw, so it builds freely without risk.
     const reserve = output * RIVAL_DEV_RESERVE_MONTHS;
+    // §FORT — a fortify-minded faction hardens its capital before spreading
+    // economic buildout (deterministic priority branch behind the same
+    // RIVAL_BUILD_CHANCE roll above; no extra RNG draw).
+    if (this.tryBuildRivalFortress(faction, reserve)) return;
     // Develop the LEAST-built idle town the faction holds (spreads growth across
     // the realm), tie-broken by id — fully deterministic, no RNG.
     let town: Settlement | null = null, fewest = Infinity;
@@ -13685,6 +13695,28 @@ export class RegionSim {
     // A belligerent power runs a war economy — extra weight on industry.
     if (faction.aggressiveness >= BUILD_LEAN_AGGR_THRESHOLD) lean.industry += BUILD_LEAN_AGGR;
     return lean;
+  }
+
+  /** §FORT — a fortify-minded faction (low aggression hunkering down, or the
+   *  'fortress_realm' goal) raises ONE fortress in its CAPITAL when the purse
+   *  allows: the same era gate (`prereqEraYear`), the same surplus-above-reserve
+   *  purse, and the same placement-preview seam `tryBuildRivalBuilding` uses. */
+  private tryBuildRivalFortress(faction: RegionalFaction, reserve: number): boolean {
+    const fortifyMinded = faction.aggressiveness < 30 || faction.currentGoal?.id === 'fortress_realm';
+    if (!fortifyMinded) return false;
+    const def = REGION_BUILDINGS_MAP.get('fortress');
+    if (!def) return false;
+    const t = this.settlement(faction.capital);
+    if (!t || t.factionId !== faction.id || t.construction) return false;
+    if (this.buildingCount(t, def.id) >= def.max) return false;
+    if (def.prereq && this.year < this.prereqEraYear(def.prereq)) return false;
+    if (this.factionDevPurse(faction) - this.cityBuildCost(def) < reserve) return false;
+    const cell = this.bestPlacementCell(t, (c) => this.placementPreview(t.id, c, def.id)?.total ?? -Infinity);
+    if (cell < 0) return false;
+    this.spendFactionDev(faction, this.cityBuildCost(def));
+    t.construction = { id: def.id, doneDay: this.day + def.days, cell };
+    this.addLog(`${faction.name} breaks ground on a ${def.name} at ${t.name}.`, 'info');
+    return true;
   }
 
   /** Pick the era-ready, under-max, affordable building that best fits a rival
