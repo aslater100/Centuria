@@ -157,7 +157,7 @@ table (existing + new).
 
 ---
 
-## §D1 — Hyperinflation loss state — **DEFERRED (Hard Stop: schema change)**
+## §D1 — Hyperinflation loss state — **APPROVED 2026-07-04 (schema change signed off by owner)**
 
 Design (adapted to the actual model — `inflationRate` is hard-clamped at 0.50, so the plan's
 "200% annualized" is unreachable; the collapse threshold must live inside the clamp):
@@ -172,14 +172,62 @@ Design (adapted to the actual model — `inflationRate` is hard-clamped at 0.50,
 - Tuning gate before merge: 20-seed × 100-year default sweep must show **zero** collapses;
   a scripted print-regime + supply-shock scenario must collapse within ~3 game-years.
 
-**Not implemented in this pass** — needs explicit sign-off on the `RegionSim` schema change.
+**APPROVED 2026-07-04.** Owner signed off on the `RegionSim` schema change; old saves may be
+discarded (see §Save). Field: `hyperinflationMonths: number` (default 0).
 
-## §D2 — Revolution → partition chain — **DEFERRED (Hard Stop: territory/state mutation)**
+## §D2 — Revolution → partition chain — **APPROVED 2026-07-04 (territory/state mutation signed off)**
 
 - After a revolution outcome fires (demographics.ts), if the same settlement's grievance
   stays ≥ the revolt-critical line for 3+ consecutive post-revolution months, roll
   `8% × difficultySettings.crisisFrequency` per month: the settlement secedes (factionId
   reassigned to a rebel faction or the nearest hostile rival), feeding `victory.ts`
   territory checks.
-- Needs a persisted post-revolution counter + territory reassignment — **explicit sign-off
-  required** before implementation.
+- Persisted post-revolution counter + territory reassignment — **signed off 2026-07-04**.
+  Field: `postRevoltGrievanceMonths: Record<number, number>` keyed by settlement id (default `{}`),
+  so a per-settlement counter survives save/load. Secession reassigns `settlement.factionId`
+  to the nearest hostile rival faction (or a rebel faction if none is hostile); this feeds
+  `victory.ts` territory-control checks.
+- Tuning gate before merge: the 20-seed × 100-year default sweep must show partition as
+  **rare** (not zero — unrest is a real pressure), and a scripted high-grievance scenario must
+  reliably partition within a few post-revolution years.
+
+## §Save — schema v2 + save management — **APPROVED 2026-07-04**
+
+Owner decisions: old saves need NOT load; provide delete, load, and a real autosave.
+
+**Schema version (hard cutover, not migration):**
+- Add `export const SAVE_SCHEMA_VERSION = 2` (region.ts). `serialize()` writes `v: 2`
+  (bump the existing hardcoded `v: 1` at region.ts:12277).
+- `deserialize()` (region.ts:12499) gains a gate at the top: if `(d.v ?? 0) < SAVE_SCHEMA_VERSION`,
+  throw a typed `IncompatibleSaveError` (new, exported). Callers catch it and offer delete-only.
+- Bump the boot-quicksave wrapper `v: 4 → 5` (main.ts:98 write / main.ts:33 boot gate) so
+  stale quicksaves are ignored on boot rather than half-loaded.
+- `SaveSlot` (pausemenu.ts:7-12) gains `schemaVersion: number`; the load menu labels any slot
+  whose stored region blob is below `SAVE_SCHEMA_VERSION` as “⚠ Incompatible — delete only”.
+
+**New persisted fields (register in all three places per the serialize map):**
+- Class field decl (near `unrestMonthsAtLevel`): `hyperinflationMonths = 0` and
+  `postRevoltGrievanceMonths: Record<number, number> = {}`.
+- `serialize()` object literal tail (~region.ts:12493): add both.
+- `deserialize()` tail (~region.ts:12840): `r.hyperinflationMonths = d.hyperinflationMonths ?? 0;`
+  and `r.postRevoltGrievanceMonths = d.postRevoltGrievanceMonths ?? {};` (harmless if the gate
+  above is ever relaxed).
+
+**Delete:** `deleteSaveSlot(index)` (pausemenu.ts) removes the slot record; a ✕ control per slot
+opens a Modal confirm (reuse the U1 Modal, not `confirm()`). Also expose a clear-autosave action.
+
+**Autosave (owner defaults, adjustable):**
+- Cadence: once per in-game **year** (hook the year-rollover in the tick loop).
+- Target: the existing `centuria-save` quicksave key — SEPARATE from the 3 manual slots, so the
+  manual slot count stays **3** and an autosave never clobbers a manual save.
+- The Load menu surfaces the autosave as its own “Autosave (auto)” entry alongside the 3 slots.
+- Ctrl+S remains a manual “save now” into the same quicksave key.
+
+**Delegation split:**
+- Inline / orchestrator-owned (game-state integrity, save schema, sim math): D1, D2, the schema
+  version + `IncompatibleSaveError` + serialize/deserialize, the autosave tick hook, and §M3’s
+  blockade-capacity trade effect (economy logic). All in region.ts / monetary.ts /
+  demographics.ts / naval.ts / main.ts.
+- Delegated (UI, after the core lands): save-management UI (delete/load/incompatible labels,
+  autosave load entry) in pausemenu.ts/main.ts; §M2 Counter button in regionview.ts; §U7
+  remaining color cues in panels.css/regionview.ts.
