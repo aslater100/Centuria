@@ -14,6 +14,7 @@
     { "id": "bold", "name": "Bold", "desc": "Acts first, explains later.", "notableOnly": true },
     { "id": "cautious", "name": "Cautious", "desc": "Weighs every risk twice.", "notableOnly": true },
     { "id": "charismatic", "name": "Charismatic", "desc": "A room warms when they walk in.", "notableOnly": true },
-    { "id": "reclusive", "name": "Reclusive", "desc": "Keeps to themselves; the town knows them by reputation, not face.", "notableOnly": true }
+    { "id": "reclusive", "name": "Reclusive", "desc": "Keeps to themselves; the town knows them by reputation, not face.", "notableOnly": true },
+    { "id": "disgraced", "name": "Disgraced", "desc": "A scandal clings to their name; redemption is possible, but earned.", "notableOnly": true, "arcOnly": true }
   ]
 }

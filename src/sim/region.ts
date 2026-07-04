@@ -79,7 +79,7 @@ const NATION_ID_BY_RIVAL_NAME: Record<string, string> = Object.fromEntries(
   (rivalNationsJson as unknown as RivalNationDef[]).map((n) => [n.name, n.id]),
 );
 
-interface TraitJsonEntry { id: string; notableOnly?: boolean }
+interface TraitJsonEntry { id: string; notableOnly?: boolean; arcOnly?: boolean }
 /** Trait ids reserved for Notables (GDD §2.4 / spec §L3) — never rolled for
  *  ordinary colonists. Nothing currently iterates TRAIT_DEFS to assign
  *  colonist traits at random (verified: only `traitDef()` look-ups by id are
@@ -87,7 +87,7 @@ interface TraitJsonEntry { id: string; notableOnly?: boolean }
  *  filter exists so the guard is enforced at the one call site that does
  *  roll from the list (mintNotable) even if that changes later. */
 const NOTABLE_TRAIT_IDS: string[] = (traitsJson.traits as TraitJsonEntry[])
-  .filter((t) => t.notableOnly)
+  .filter((t) => t.notableOnly && !t.arcOnly) // arcOnly traits (e.g. 'disgraced') are earned through arcs, never rolled at mint
   .map((t) => t.id);
 
 export interface TechNode {
@@ -2096,6 +2096,29 @@ export interface TreatyOffer {
   expiresDay: number;
 }
 
+/** Spec 10 §NEG — a persistent multi-round haggle over a standing treaty offer.
+ *  Opened when the player counters with terms instead of taking the one-shot
+ *  `counterOffer` settle; the rival replies on its monthly diplomacy tick
+ *  (accept / counter-back / walk away), so a negotiation spans months and
+ *  survives save/load (schema v3). Terms haggle the signing gift plus an
+ *  optional goodwill sweetener — treaty durations don't exist in the treaty
+ *  model, so they are deliberately not negotiable. */
+export interface Negotiation {
+  id: number;
+  rivalId: number;
+  kind: TreatyKind;
+  /** Exchanges consumed. Player open = 1; each rival counter and player re-counter +1. At 4 the rival settles it: accept or walk, never counter. */
+  round: number;
+  /** Gift paid to the player on signing (the axis being haggled). */
+  gift: number;
+  /** 'goodwill' adds +4 relations on signing in place of part of the gift. */
+  sweetener: 'none' | 'goodwill';
+  lastMoveBy: 'player' | 'rival';
+  openedDay: number;
+  /** Rival withdraws past this (relations −2) if the ball is in the player's court. */
+  expiresDay: number;
+}
+
 export const ENVOY_COST = 15;
 export const GIFT_COST = 40;
 export const ENVOY_COOLDOWN_DAYS = 90;
@@ -3123,6 +3146,22 @@ export interface Notable {
   backstory?: string;     // founding backstory blurb
   yearEnteredRole?: number; // year they entered their current role
   monthsIgnored?: number; // months portfolio has been neglected (for loyalty decay)
+  /** Spec 10 §ARC — active narrative arc, if any. Rides the wholesale notables dump (schema v3). */
+  arc?: NotableArc | null;
+}
+
+/** Spec 10 §ARC — a multi-stage personal storyline. Stages fire beats into the
+ *  notable's bio chronicle and the main log 2-6 months apart; each stage rolls
+ *  escalate-vs-fizzle (trait-weighted), and stage 3 applies a real mechanical
+ *  consequence through existing machinery (loyalty, legitimacy, skill, capital). */
+export interface NotableArc {
+  kind: 'scandal' | 'ambition' | 'feud' | 'redemption';
+  stage: 0 | 1 | 2 | 3;
+  startedDay: number;
+  nextBeatDay: number;
+  /** Feud only: the notable on the other side. */
+  targetNotableId?: number;
+  resolved: boolean;
 }
 
 export interface DynastyNode {
@@ -3613,10 +3652,11 @@ export const MAX_SETTLEMENTS = 24;
  *  pile on top of each other. Used by both player expeditions and AI expansion. */
 export const MIN_SETTLEMENT_SPACING = 8;
 
-/** Save-blob schema version. Bumped to 2 for the D1/D2 persisted counters
- *  (hyperinflationMonths, postRevoltGrievanceMonths). Saves below this are a hard
+/** Save-blob schema version. v2 added the D1/D2 persisted counters
+ *  (hyperinflationMonths, postRevoltGrievanceMonths); v3 (spec 10) adds persistent
+ *  diplomacy negotiations and notable narrative-arc state. Saves below this are a hard
  *  cutover — `deserialize` rejects them via IncompatibleSaveError rather than migrating. */
-export const SAVE_SCHEMA_VERSION = 2;
+export const SAVE_SCHEMA_VERSION = 3;
 
 /** Thrown by `RegionSim.deserialize` when a save blob predates SAVE_SCHEMA_VERSION.
  *  Callers (load menu, boot) catch this and offer delete-only rather than crashing. */
@@ -3760,6 +3800,8 @@ export class RegionSim {
   usedNamedRivals: Set<string> = new Set();
   /** AI-initiated treaty offers awaiting the player's signature. */
   offers: TreatyOffer[] = [];
+  /** Spec 10 §NEG — open multi-round negotiations (persisted, schema v3). Max 2 at once. */
+  negotiations: Negotiation[] = [];
   /** Counter-offers from the bargaining table, awaiting signature (§6.3). */
   counters: DealCounter[] = [];
   /** Treaties the player has torn up — priced into every future ask. */
@@ -9025,6 +9067,27 @@ export class RegionSim {
         traits.push(remaining[this.rng.int(remaining.length)]);
       }
     }
+    // §ARC: every Notable gets a generated two-beat backstory — an origin and a
+    // trait-shaded formative note — unless the caller supplies one (founders, heirs).
+    const ORIGINS = [
+      'Raised among market stalls and freight ledgers',
+      'The child of tenant farmers who never owned the field they worked',
+      'Schooled by a village priest who taught letters and little mercy',
+      'Grew up dockside, first paid in fish and later in favors',
+      'Born in the back room of a boarding house during a hard winter',
+      'Apprenticed young to a trade that left ink, or soot, on every cuff',
+    ];
+    const FORMATIVE: Record<string, string> = {
+      corrupt: 'learned early that every rule has a price, and most collectors take installments.',
+      diligent: 'kept the accounts when no one else would, and never forgot a debt owed or paid.',
+      bold: 'once crossed a flooded ford at night on a dare, and has told the story ever since.',
+      cautious: 'watched a neighbor lose everything on one confident bet, and never forgot it.',
+      charismatic: 'could talk a room into anything by sixteen, and mostly out of trouble by twenty.',
+      reclusive: 'buried two siblings in one fever season and has kept the world at a distance since.',
+    };
+    const originLine = ORIGINS[this.rng.int(ORIGINS.length)];
+    const formativeLine = FORMATIVE[traits[0]] ?? 'came of age between hard seasons and long roads.';
+    const generatedBackstory = `${originLine}${t ? ` near ${t.name}` : ''}; ${formativeLine}`;
     const n: Notable = {
       id: this.nextId++,
       name: overrides?.name ?? `${first} ${last}`,
@@ -9039,10 +9102,11 @@ export class RegionSim {
       children: [],
       loyalty: 80,
       factionAlignment: overrides?.factionAlignment,
-      backstory: overrides?.backstory,
+      backstory: overrides?.backstory ?? generatedBackstory,
       yearEnteredRole: this.year,
       monthsIgnored: 0,
       parentId: overrides?.parentId,
+      arc: null,
     };
     this.notables.push(n);
     if (t) {
@@ -10881,6 +10945,87 @@ export class RegionSim {
     return { accepted, gift };
   }
 
+  // ---- Spec 10 §NEG: persistent multi-round negotiation ----
+
+  /** The gift a rival considers fair for this treaty — the anchor the haggle moves around. */
+  negotiationBaseGift(rv: RivalNation): number {
+    return Math.round(50 + rv.pop * 0.01);
+  }
+
+  /** Player counters a standing offer with terms instead of the one-shot settle.
+   *  Consumes the offer and opens a Negotiation; the rival replies on its monthly
+   *  diplomacy tick. Returns null if no offer stands or 2 negotiations are already open. */
+  openNegotiation(rivalId: number, gift: number, sweetener: 'none' | 'goodwill' = 'none'): Negotiation | null {
+    const o = this.offerFor(rivalId);
+    const rv = this.rival(rivalId);
+    if (!o || !rv) return null;
+    if (this.negotiations.length >= 2) return null;
+    this.offers = this.offers.filter((x) => x !== o);
+    const neg: Negotiation = {
+      id: this.nextId++,
+      rivalId,
+      kind: o.kind,
+      round: 1,
+      gift: Math.max(0, Math.round(gift)),
+      sweetener,
+      lastMoveBy: 'player',
+      openedDay: this.day,
+      expiresDay: this.day + 90,
+    };
+    this.negotiations.push(neg);
+    this.addLog(`Envoys sit down with ${rv.name} — your terms are on the table.`, 'info');
+    return neg;
+  }
+
+  /** Player re-counters a rival counter (ball returns to the rival's court). */
+  recounterNegotiation(id: number, gift: number, sweetener?: 'none' | 'goodwill'): boolean {
+    const neg = this.negotiations.find((n) => n.id === id);
+    if (!neg || neg.lastMoveBy !== 'rival') return false;
+    neg.gift = Math.max(0, Math.round(gift));
+    if (sweetener) neg.sweetener = sweetener;
+    neg.round++;
+    neg.lastMoveBy = 'player';
+    neg.expiresDay = this.day + 90;
+    return true;
+  }
+
+  /** Player accepts the terms currently on the table (only valid after a rival counter). */
+  acceptNegotiation(id: number): boolean {
+    const neg = this.negotiations.find((n) => n.id === id);
+    const rv = neg ? this.rival(neg.rivalId) : undefined;
+    if (!neg || !rv || neg.lastMoveBy !== 'rival') return false;
+    this.settleNegotiation(neg, rv);
+    return true;
+  }
+
+  /** Player walks away from the table. Milder than the rival storming off. */
+  abandonNegotiation(id: number): void {
+    const neg = this.negotiations.find((n) => n.id === id);
+    if (!neg) return;
+    const rv = this.rival(neg.rivalId);
+    this.negotiations = this.negotiations.filter((n) => n.id !== id);
+    if (rv) {
+      rv.relations = this.clampRel(rv.relations - 1);
+      this.addLog(`Talks with ${rv.name} end without agreement.`, 'info');
+    }
+  }
+
+  /** Sign the treaty on the negotiated terms. Shared by player-accept and rival-accept. */
+  settleNegotiation(neg: Negotiation, rv: RivalNation): void {
+    this.negotiations = this.negotiations.filter((n) => n.id !== neg.id);
+    if (!rv.treaties.includes(neg.kind)) {
+      rv.treaties.push(neg.kind);
+      this.onSignTreaty(rv, neg.kind);
+    }
+    this.treasury += neg.gift;
+    rv.relations = this.clampRel(rv.relations + (neg.sweetener === 'goodwill' ? 6 : 2));
+    this.addLog(
+      `Accord signed with ${rv.name} on negotiated terms — ${formatCurrency(neg.gift)} changes hands` +
+      (neg.sweetener === 'goodwill' ? ', and goodwill besides.' : '.'),
+      'good',
+    );
+  }
+
   // ---- Espionage (GDD §5.5): the covert track parallel to open diplomacy ----
 
   /** The player's current intelligence penetration of a rival, 0..1. */
@@ -12541,6 +12686,7 @@ export class RegionSim {
       transitionChain: this.transitionChain,
       policySlots9: this.policySlots,
       hyperinflationMonths: this.hyperinflationMonths,
+      negotiations: this.negotiations,
       postRevoltGrievanceMonths: this.postRevoltGrievanceMonths,
     });
   }
@@ -12891,6 +13037,7 @@ export class RegionSim {
     r.transitionChain = d.transitionChain ?? null;
     r.policySlots = d.policySlots9 ?? [];
     r.hyperinflationMonths = d.hyperinflationMonths ?? 0;
+    r.negotiations = d.negotiations ?? [];
     r.postRevoltGrievanceMonths = d.postRevoltGrievanceMonths ?? {};
     // Recompute cached perf fields after full restore.
     r.activeRailRoutes = r.routes.filter((rt) => rt.kind === 'rail' && rt.condition > 50).length;
