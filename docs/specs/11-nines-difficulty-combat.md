@@ -75,12 +75,17 @@ In the rung-5 revolution branch (`demographics.ts`), when a revolution fires:
 - Net effect: revolution becomes a run-ender only for an already-failing state (low legitimacy),
   which is where the immiseration chain (§DIFF) drives standard-tier runs.
 
-## Sweep-variety gate
+## Sweep-variety gate — ACHIEVED
 
-After tuning, `SIM_DIFFICULTY=standard SIM_AUTOPLAY_STATEHOOD=1 npm run sim -- 181 20` should
-show BAD endings across **more than one cause** (not all `drowned`) — some insolvency/revolution,
-answering the re-audit's "climate dominates every ending." Easy: 0 terminal collapses (coast).
-Every terminal ending must trace to a visible, escapable pressure chain in the log.
+`SIM_DIFFICULTY=standard SIM_AUTOPLAY_STATEHOOD=1 npm run sim -- 181 20`: **3/20 LOSS:revolution
++ 17 drowned** — real ending variety, answering the re-audit's "climate dominates every ending."
+Easy: **20/20 drowned, 0 terminal collapses** (coast preserved). Every terminal ending traces to
+the visible immiseration→legitimacy→revolution chain in the log.
+
+This required the adversarial-review #1 fix: autoplay now proclaims a nation (time+capacity gate),
+so the nation-tier legitimacy chain runs in headless play. Insolvency remains player-only-reachable
+(autoplay never borrows — `nationalDebt` stays 0) and is proven by test, same as D1 hyperinflation;
+it does not contribute sweep endings. Revolution is the demonstrable second loss route.
 
 ## Delegation
 
