@@ -1,20 +1,34 @@
 # Centuria — Path to 9/10 per Category
 
-Source: audit delivered 2026-07-03 (see session-log.md when created). Baseline scores:
+Source: audit delivered 2026-07-03 (see session-log.md when created). Baseline → re-audit:
 
-| Category | Current | Target |
-|---|---|---|
-| Mechanical depth | 8/10 | 9/10 |
-| Realism | 7/10 | 9/10 |
-| Graphics | 7/10 | 9/10 |
-| Difficulty | 6/10 | 9/10 |
-| Lore depth | 3.5/10 | 9/10 |
-| UI/UX (added 2026-07-03) | 4/10 (5 core / 3 meta, weighted 60/40) | 9/10 |
+| Category | Baseline (2026-07-03) | Re-audit (2026-07-04) | Target |
+|---|---|---|---|
+| Mechanical depth | 8/10 | **8.5/10** | 9/10 |
+| Realism | 7/10 | **8/10** | 9/10 |
+| Graphics | 7/10 | **8/10** | 9/10 |
+| Difficulty | 6/10 | **7/10** | 9/10 |
+| Lore depth | 3.5/10 | **6/10** | 9/10 |
+| UI/UX (added 2026-07-03) | 4/10 (5 core / 3 meta) | **7.5/10** | 9/10 |
+| **Overall (5-cat, /100)** | **63** | **75** | — |
 
-**Status: EXECUTED 2026-07-03 (PR #346)** — 20 of 23 tasks landed. Still open: **D1, D2**
-(spec'd in `docs/specs/09-audit-nine.md`, awaiting Hard-Stop schema sign-off) and **G1**
-(blocked: no live art-generation channel in the dev env). Follow-ups and unblock paths in
-`session-log.md`.
+**Status: EXECUTED** — PR #346 (20 of 23 tasks) + PR #348 (D1, D2, save schema v2 +
+management, M2/M3/U7 follow-ups). G1 formally dropped (owner chose "stay procedural").
+Re-audit 2026-07-04 (three independent skeptical passes, code-verified with counts) confirmed
+every shipped item real and tested; scores above are theirs, not aspirational.
+
+**Remaining gap-to-9 (per the re-auditors' own docking reasons):**
+- *Mechanics (8.5→9):* diplomacy still one non-persistent counter-round; no positional combat
+  layer; fortification modifier wired but dormant (no fort building ids).
+- *Realism (8→9):* constants documented + envelope-tested but still not calibrated to data.
+- *Graphics (8→9):* single-panel animation pilot; runtime feel unassessed by code audit.
+- *Difficulty (7→9):* hyperinflation is reachable but "normal play never approaches it";
+  partition pressures rather than ends a run; standard-tier moment-to-moment challenge mild.
+- *Lore (6→9):* notables still stat-blocks, not characters with arcs — no beat escalation,
+  no scandal chains or rivalries, no generated backstories; bio chronicle exists in state but
+  UI shows only the last line (`regionview.ts:5827`); one residual inline name list bypasses
+  the pools (`region.ts:5818-5819`).
+- *UI (7.5→9):* G3 transition is a one-panel pilot; needs a runtime/feel pass, not more wiring.
 
 ## How to read a task card
 
