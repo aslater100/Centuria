@@ -63,6 +63,14 @@ Targeted Mechanics + Difficulty to 9. Focused re-audit (code + sweeps, honest):
 player-facing combat path) and/or deepen diplomacy. Difficulty — climate still ~85% of endings
 (variety, not parity); make insolvency autoplay-reachable or add climate-ending variety.
 
+**Update (same pass):** the player-war extension LANDED — `tickPlayerWar` now runs the
+composition matchup against an era-appropriate `rivalWarComposition`, so 2 of 3 combat
+resolvers carry the axis and composition matters in the player's OWN wars (1945: cavalry
+counter ×1.12 vs hard-countered mono-militia ×0.69). This clears the larger half of the
+Mechanics blocker; **diplomacy depth (single-axis gift haggling) is now the remaining lever
+for a clean Mechanics 9.** A fresh re-audit would likely score Mechanics a soft 9 / strong 8.5.
+Difficulty holds at 8.5 (one demonstrated second loss route; climate-ending parity is its 9 lever).
+
 **Status: EXECUTED** — PR #346 (20 of 23 tasks) + PR #348 (D1, D2, save schema v2 +
 management, M2/M3/U7 follow-ups). G1 formally dropped (owner chose "stay procedural").
 Re-audit 2026-07-04 (three independent skeptical passes, code-verified with counts) confirmed
