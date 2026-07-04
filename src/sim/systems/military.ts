@@ -651,6 +651,16 @@ export function consumeWarMateriel(r: RegionSim): void {
 
   /** Monthly war resolution (GDD §7.3–7.4): the front moves on the power
    *  ratio, attrition bleeds the cohorts, and the home front keeps score. */
+/** Spec 12 §B — the war-power weight of a co-belligerent (ally or enemy-ally):
+ *  half, reflecting partial commitment (they also bleed at half rate). A lone
+ *  nation can beat one rival; a coalition of three or four grinds it down. */
+export const CO_BELLIGERENT_WEIGHT = 0.5;
+/** Multi-front overwhelm: each enemy front beyond the first drags the war score a
+ *  little every month, on top of the raw force ratio. Even a strong industrial
+ *  power cannot be strong on every frontier at once — the historical fate of the
+ *  encircled. Inert with 0–1 enemy fronts, so every ordinary war is unchanged. */
+export const COALITION_FRONT_DRAG = 4;
+
 export function tickPlayerWar(r: RegionSim): void {
     const w = r.playerWar;
     if (!w) return;
@@ -668,10 +678,23 @@ export function tickPlayerWar(r: RegionSim): void {
     // war in their favor; a mono-army that the era's threat counters is punished. Empty player
     // units → compositionMult returns 1, so a pre-unit or abstract war is unchanged. No new RNG.
     const rivalComp = rivalWarComposition(r.year);
-    const P = r.warPower() * compositionMult(w.units, rivalComp, undefined);
-    const R = r.rivalWarPower(rv) * compositionMult(rivalComp, w.units, undefined);
+    let P = r.warPower() * compositionMult(w.units, rivalComp, undefined);
+    let R = r.rivalWarPower(rv) * compositionMult(rivalComp, w.units, undefined);
+    // §Spec12 §B — co-belligerents finally weigh on the scale, not just bleed
+    // cosmetically: each ally/enemy-ally adds its war power at CO_BELLIGERENT_WEIGHT
+    // (they fight at partial commitment — the same half-weight the attrition uses).
+    // Both lists empty (the overwhelming common case) → P, R unchanged bit-for-bit,
+    // so every 1v1 war and the default sweep stay byte-identical. A 3–4 power
+    // coalition, though, now genuinely out-masses a lone nation — the point of §B.
+    for (const id of w.allies) { const a = r.rival(id); if (a) P += r.rivalWarPower(a) * CO_BELLIGERENT_WEIGHT; }
+    for (const id of w.enemyAllies) { const e = r.rival(id); if (e) R += r.rivalWarPower(e) * CO_BELLIGERENT_WEIGHT; }
     const delta = 16 * ((P - R) / (P + R)) + r.rng.int(9) - 4;
     w.score = Math.max(-100, Math.min(100, w.score + delta));
+    // Multi-front overwhelm (Spec 12 §B): a coalition presses more fronts than one
+    // army can hold. No enemy co-belligerents → no drag → ordinary wars byte-identical.
+    if (w.enemyAllies.length >= 2) {
+      w.score = Math.max(-100, w.score - (w.enemyAllies.length - 1) * COALITION_FRONT_DRAG);
+    }
     if (w.blockade) {
       rv.pop *= 0.997; // the quays starve before the trenches do
       w.score = Math.min(100, w.score + 1.5);
