@@ -53,7 +53,8 @@ export interface DynamismSelection {
 export interface ScenarioSelection {
   scenarioId: string | null; // null = sandbox
   eraStart: '1919' | '1950' | '2000';
-  difficulty: 'standard' | 'hard' | 'brutal';
+  /** §DIFF tier. Scenarios carry standard/hard/brutal; the Sandbox picker adds 'easy'. */
+  difficulty: DifficultyTag;
   dynamism: DynamismSelection;
 }
 

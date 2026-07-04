@@ -1,5 +1,5 @@
 import './style.css';
-import { RegionSim, SAVE_SCHEMA_VERSION, IncompatibleSaveError } from './sim/region';
+import { RegionSim, SAVE_SCHEMA_VERSION, IncompatibleSaveError, applyDifficultyPreset } from './sim/region';
 import { RegionView } from './ui/regionview';
 import { WindowManager } from './ui/WindowManager';
 import { Sfx } from './ui/audio';
@@ -151,6 +151,9 @@ function applyDynamism(r: RegionSim, sel?: ScenarioSelection): void {
 titleScreen.onNewColony = () => {
   new DesignScreen().showRegionDesign((design) => {
     const r = RegionSim.create(Date.now() % 100000, design);
+    // §DIFF adversarial finding e: this path silently kept the 1.0 (easy) defaults,
+    // making 'standard' not actually the default experience. Standard is the game.
+    applyDifficultyPreset(r, 'standard');
     applyDynamism(r);
     enterRegionMode(r);
   });
@@ -158,14 +161,18 @@ titleScreen.onNewColony = () => {
 titleScreen.onBeginScenario = (sel: ScenarioSelection) => {
   const seed = Date.now() % 100000;
   if (sel.eraStart === '1919' && !sel.scenarioId) {
-    // Sandbox 1919: standard new colony flow
+    // Sandbox 1919: standard new colony flow. §DIFF: the U11 difficulty pick now
+    // actually reaches the sim (it used to be dropped on this path).
     const r = RegionSim.create(seed, {});
+    applyDifficultyPreset(r, sel.difficulty);
     applyDynamism(r, sel);
     enterRegionMode(r);
   } else if (sel.eraStart === '1919') {
-    // 1919 scenario: standard colony but with scenario wired
+    // 1919 scenario: standard colony but with scenario wired. §DIFF: 1919 scenarios
+    // never passed through fromEraStart's difficulty block — apply the preset here.
     const r = RegionSim.create(seed, {});
     r.activeScenario = sel.scenarioId;
+    applyDifficultyPreset(r, sel.difficulty);
     applyDynamism(r, sel);
     enterRegionMode(r);
   } else {
@@ -174,6 +181,9 @@ titleScreen.onBeginScenario = (sel: ScenarioSelection) => {
       seed,
       scenarioId: sel.scenarioId ?? undefined,
     });
+    // §DIFF adversarial finding e: a sandbox era start (no scenario) has no
+    // scenario tag inside fromEraStart, so the picker's tier was dropped here too.
+    if (!sel.scenarioId) applyDifficultyPreset(r, sel.difficulty);
     applyDynamism(r, sel);
     enterRegionMode(r);
   }

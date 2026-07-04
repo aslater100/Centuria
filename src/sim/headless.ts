@@ -10,7 +10,8 @@
  * target: "within a few months of GDP across a century"). Use it to spot
  * runaway treasuries / death spirals across seeds while tuning.
  */
-import { RegionSim } from './region';
+import { RegionSim, applyDifficultyPreset } from './region';
+import type { DifficultyTier } from './region';
 
 const years = Number(process.argv[2]) > 0 ? Number(process.argv[2]) : 181; // 1919 → 2100
 const runs = Number(process.argv[3]) > 0 ? Number(process.argv[3]) : 1;
@@ -39,9 +40,13 @@ const autoplayStatehood = process.env.SIM_AUTOPLAY_STATEHOOD === '1';
 // belligerent as warming worsens (real resource_dispute casus belli), while
 // green-leaning archetypes form autonomous climate coalitions instead.
 const rivalClimateResponse = process.env.SIM_RIVAL_CLIMATE_RESPONSE === '1';
+// §DIFF sweep tier — SIM_DIFFICULTY=easy|standard|hard|brutal applies the preset
+// ladder. Default (unset) keeps the neutral 1.0 defaults every pinned balance
+// test was tuned against, which is also exactly the 'easy' preset.
+const difficultyTier = process.env.SIM_DIFFICULTY as DifficultyTier | undefined;
 
-console.log(`headless sim: ${years} game-year(s) × ${runs} run(s)  [player spatial play: ${autoDevelopPlayer ? 'AUTO' : 'manual'}; consumer-demand: ${consumerDemand ? 'ON' : 'off'}; autoplay-statehood: ${autoplayStatehood ? 'ON' : 'off'}; rival-climate-response: ${rivalClimateResponse ? 'ON' : 'off'}]\n`);
-console.log('seed |  year | towns | pTwn |    treasury |        GDP | treas/GDP(mo) | infl% |  pop   | sat | pBld | flows | lScar% | fShort% | wMkt% |  gpP% | wars | ticks | outcome');
+console.log(`headless sim: ${years} game-year(s) × ${runs} run(s)  [player spatial play: ${autoDevelopPlayer ? 'AUTO' : 'manual'}; consumer-demand: ${consumerDemand ? 'ON' : 'off'}; autoplay-statehood: ${autoplayStatehood ? 'ON' : 'off'}; rival-climate-response: ${rivalClimateResponse ? 'ON' : 'off'}; difficulty: ${difficultyTier ?? 'default(1.0)'}]\n`);
+console.log('seed |  year | towns | pTwn |    treasury |        GDP | treas/GDP(mo) | infl% |  pop   | sat | pBld | flows | lScar% | fShort% | wMkt% |  gpP% | wars | revs | sec | ticks | outcome');
 console.log('-----+-------+-------+------+-------------+------------+---------------+-------+--------+-----+------+-------+--------+---------+-------+-------+------+-------+--------');
 
 for (let run = 0; run < runs; run++) {
@@ -52,6 +57,7 @@ for (let run = 0; run < runs; run++) {
   r.consumerDemand = consumerDemand;
   r.autoplayStatehood = autoplayStatehood;
   r.rivalClimateResponse = rivalClimateResponse;
+  if (difficultyTier) applyDifficultyPreset(r, difficultyTier);
   const target = r.year + years;
   let ticks = 0;
   while (r.year < target && !r.gameOver && ticks < TICK_CAP) { r.tick(); ticks++; }
@@ -90,6 +96,8 @@ for (let run = 0; run < runs; run++) {
     `${(r.worldMarketTightness() * 100).toFixed(1).padStart(5)} | ` +
     `${(r.worldPowerPressure() * 100).toFixed(1).padStart(5)} | ` +
     `${String(r.warsDeclaredCount).padStart(4)} | ` +
+    `${String(r.revolutionsFired).padStart(4)} | ` +
+    `${String(r.secessionsFired).padStart(3)} | ` +
     `${String(ticks).padStart(5)} | ` +
     `${outcome}`,
   );

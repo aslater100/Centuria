@@ -3574,6 +3574,15 @@ export interface DifficultySettings {
   aiAggression: number;         // 0.5–2.0 multiplier on rival expansion chance
   economicVolatility: number;   // 0.5–2.0 multiplier on boom/bust amplitude
   historicalAnchors: 'on' | 'emergent' | 'off';
+  /** Spec 10 §DIFF — multiplier on the post-2050 aging-crisis pension burden.
+   *  Optional (old serialized objects lack it); consumers read `?? 1`. */
+  pensionMult?: number;
+  /** Spec 10 §DIFF — multiplier on misery-driven grievance pressure (the immiseration→
+   *  revolt chain). This is the knob that gates "real teeth": easy = 0 (misery vents but
+   *  never revolts, preserving the legacy coast-to-2100 feel), standard = 1 (misery reaches
+   *  the revolt line over years), hard/brutal escalate. Optional; consumers read `?? 1` so
+   *  the misery chain is fully live by default (tests, default RegionSim). */
+  unrestPressure?: number;
 }
 
 export const DEFAULT_DIFFICULTY_SETTINGS: DifficultySettings = {
@@ -3581,7 +3590,36 @@ export const DEFAULT_DIFFICULTY_SETTINGS: DifficultySettings = {
   aiAggression: 1.0,
   economicVolatility: 1.0,
   historicalAnchors: 'on',
+  pensionMult: 1.0,
+  // Legacy baseline = easy: the immiseration→revolt chain is dialed to zero so the
+  // pre-rebalance coast-to-2100 behavior (what every old balance test was tuned against)
+  // is preserved exactly. The repaired chain is live at standard+ (the new-game default).
+  unrestPressure: 0.0,
 };
+
+/** Spec 10 §DIFF — the real-teeth difficulty ladder (owner-approved 2026-07-04).
+ *  `easy` IS the pre-rebalance game: every 1.0 multiplier preserved so the old
+ *  coast-to-2100 experience remains selectable (and stays pinned by the tests
+ *  that exercise DEFAULT_DIFFICULTY_SETTINGS). `standard` is tuned so crises
+ *  genuinely bite in normal play — the headless gate targets 2-4 of 20 autoplay
+ *  seeds ending badly (dystopia / collapse), all survivable with active play. */
+export type DifficultyTier = 'easy' | 'standard' | 'hard' | 'brutal';
+export const DIFFICULTY_PRESETS: Record<DifficultyTier, DifficultySettings> = {
+  // pensionMult: calibration-memo arithmetic at the 2-ticks-per-game-year cadence —
+  // ×1 (easy/legacy) drains ~0.6% of the tax take per year (token, unfelt); ×12
+  // (standard) ≈ 7-8%, a real late-game squeeze approaching the memo's OECD ~10%
+  // reference; hard/brutal push past it into genuine crisis territory.
+  easy:     { crisisFrequency: 1.0,  aiAggression: 1.0,  economicVolatility: 1.0,  historicalAnchors: 'on', pensionMult: 1.0,  unrestPressure: 0.0 },
+  standard: { crisisFrequency: 1.15, aiAggression: 1.25, economicVolatility: 1.15, historicalAnchors: 'on', pensionMult: 12.0, unrestPressure: 1.0 },
+  hard:     { crisisFrequency: 1.6,  aiAggression: 1.6,  economicVolatility: 1.5,  historicalAnchors: 'on', pensionMult: 20.0, unrestPressure: 1.5 },
+  brutal:   { crisisFrequency: 2.0,  aiAggression: 2.0,  economicVolatility: 2.0,  historicalAnchors: 'on', pensionMult: 30.0, unrestPressure: 2.0 },
+};
+
+/** Apply a difficulty tier's preset onto a live sim (scenario start, sandbox
+ *  start, or the headless harness's SIM_DIFFICULTY sweep). */
+export function applyDifficultyPreset(r: RegionSim, tier: DifficultyTier): void {
+  r.difficultySettings = { ...DIFFICULTY_PRESETS[tier] };
+}
 
 const TOWN_NAMES = [
   // Original names
@@ -4233,6 +4271,11 @@ export class RegionSim {
   unrestMonthsAtLevel = 0;
   /** D1: consecutive months the hyperinflation-collapse trigger has held (persisted). */
   hyperinflationMonths = 0;
+  /** §DIFF sweep diagnostics — lifetime counts of revolutions fired and settlements lost to
+   *  secession. Deliberately NOT serialized (reset on load): they exist so the headless
+   *  difficulty gate can count real failure-chain events instead of proxying on satisfaction. */
+  revolutionsFired = 0;
+  secessionsFired = 0;
   /** D2: per-settlement consecutive post-revolution months at critical grievance (persisted, keyed by settlement id). */
   postRevoltGrievanceMonths: Record<number, number> = {};
   /** Generational ideology drift accumulator (0–1). */
@@ -4662,6 +4705,7 @@ export class RegionSim {
     t.loyaltyToFaction = 50;
     t.grievance = Math.max(0, t.grievance - 40); // leaving is itself a release valve
     this._territoryCache = null;
+    this.secessionsFired++;
     this.addLog(`SECESSION: ${t.name} breaks from the state and throws in with ${target.name}.`, 'bad');
     return true;
   }
@@ -6112,17 +6156,13 @@ export class RegionSim {
       r.difficultySettings = { ...DEFAULT_DIFFICULTY_SETTINGS, ...opts.difficultySettings };
     }
 
-    // Apply difficulty from scenario
+    // Apply difficulty from scenario — routed through the §DIFF preset ladder.
+    // 'standard' now applies the real-teeth standard preset (it used to be a
+    // no-op that left the easy-equivalent 1.0 defaults in place).
     const scenario = SCENARIOS.find((s) => s.id === r.activeScenario);
     if (scenario) {
-      if (scenario.difficulty === 'hard') {
-        r.difficultySettings.crisisFrequency = 1.5;
-        r.difficultySettings.aiAggression = 1.5;
-        r.difficultySettings.economicVolatility = 1.5;
-      } else if (scenario.difficulty === 'brutal') {
-        r.difficultySettings.crisisFrequency = 2.0;
-        r.difficultySettings.aiAggression = 2.0;
-        r.difficultySettings.economicVolatility = 2.0;
+      applyDifficultyPreset(r, scenario.difficulty);
+      if (scenario.difficulty === 'brutal') {
         // Climate emergency: CO₂ already at 400ppm
         if (scenario.id === 'climate_emergency') {
           r.co2ppm = 400;
@@ -6390,7 +6430,23 @@ export class RegionSim {
           (this.policyActive('civic_pride') ? 0.8 : 1);
         // Apply reduction factors only to positive (building) pressure, not to negative
         // (recovering) pressure — otherwise labor_law would slow grievance recovery.
-        const basePressure = Math.max(0, this.taxRate - 0.15) * 35 - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05;
+        // Misery term (spec 10 §DIFF adversarial finding b): satisfaction used to be a
+        // one-way valve — contentment vented grievance but misery added NOTHING, so a
+        // 0-satisfaction society could never reach the revolt line and the whole
+        // unrest→revolution→partition chain was unreachable from immiseration alone.
+        // Below sat 35 misery now builds pressure. Coefficient 0.12 was tuned empirically
+        // (probe seed 1063): at 0.05 the many homeostatic vents (services, laws, event
+        // reliefs, the unrest ladder's own release valves) capped deep-misery grievance
+        // near 30 — far short of the 90 revolt line — leaving revolution unreachable even
+        // at 0% satisfaction. At 0.12, sustained misery (sat ≤ ~15) escapes equilibrium
+        // and climbs to revolt over years, while sat 25+ still nets negative.
+        // The chain repair itself is difficulty-independent (the coupling should exist), but
+        // its MAGNITUDE is the §DIFF teeth knob: unrestPressure gates whether immiseration
+        // actually reaches the revolt line. easy = 0 → misery never revolts (legacy coast);
+        // standard = 1 → reaches revolt over years; hard/brutal escalate. Default (no preset,
+        // e.g. tests) reads `?? 1`, so the chain is fully live outside the difficulty menu.
+        const miseryPressure = Math.max(0, 35 - t.satisfaction) * 0.12 * (this.difficultySettings.unrestPressure ?? 1);
+        const basePressure = Math.max(0, this.taxRate - 0.15) * 35 + miseryPressure - this.servicesLevel * 0.4 - Math.max(0, t.satisfaction - 55) * 0.05;
         const pressure =
           Math.max(0, basePressure) * laborFactor * constabFactor +
           Math.min(0, basePressure) +

@@ -119,8 +119,12 @@ export function tickMonetary(r: RegionSim): void {
   // confidence<30 trigger and 0.05 base contraction: design-intent citation, not a data source — evoke a
   // "Minsky moment" where credit markets seize once sentiment breaks decisively, echoing the abrupt bank
   // lending contraction seen in the acute phase of the 2008 credit crunch.
+  // §DIFF: economicVolatility scales the bust amplitude — this is the knob's live consumer
+  // (it was advertised in the difficulty UI but consumed nowhere). At 1.0 the arithmetic is
+  // exactly the legacy contraction, so the easy tier and every pinned test are byte-stable.
+  const volatility = r.difficultySettings.economicVolatility;
   if (r.confidence < 30 && r.privateLeverage > 0.5) {
-    r.privateLeverage *= (1 - (0.05 + (30 - r.confidence) * 0.002));
+    r.privateLeverage *= (1 - (0.05 + (30 - r.confidence) * 0.002) * volatility);
     // rng.chance(0.2): design-intent citation, not a data source — evokes that a credit freeze headline is a
     // lumpy, episodic event, not guaranteed every month confidence is low.
     if (r.rng.chance(0.2)) {

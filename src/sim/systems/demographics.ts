@@ -50,7 +50,10 @@ export function tickDemographicTransition(r: RegionSim): void {
       r.addLog('Aging population placing strain on pension system.', 'bad');
     }
     const gdp = Math.max(0, r.gdpLastMonth);
-    const pensionBurden = 0.015 * gdp / 12;
+    // §DIFF pensionMult: at 1.0 (easy / legacy) this is the original token burden the
+    // calibration memo flagged as unfelt (~0.25% GDP/yr at the 2-ticks-per-year cadence);
+    // the standard-and-up presets scale it into a squeeze the late game actually notices.
+    const pensionBurden = 0.015 * gdp / 12 * (r.difficultySettings.pensionMult ?? 1);
     r.treasury -= pensionBurden;
   }
 }
@@ -188,6 +191,7 @@ export function tickUnrestLadder(r: RegionSim): void {
       const revolChance = 0.03 * grevFrac;
       if (r.rng.chance(revolChance)) {
         const capital = playerSettlements[0];
+        r.revolutionsFired++;
         r.addLog(
           `Revolutionary movement seizes ${capital?.name ?? 'the capital'}! The government is overthrown — a successor faction rises. Regime change event pending.`,
           'bad',

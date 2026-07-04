@@ -21,6 +21,7 @@ import {
   RegionSim,
   SCENARIOS,
   DEFAULT_DIFFICULTY_SETTINGS,
+  DIFFICULTY_PRESETS,
 } from '../src/sim/region';
 import { checkScenarioGoals } from '../src/sim/systems/scenarios';
 import { RegionMap } from '../src/sim/worldgen';
@@ -311,9 +312,10 @@ describe('difficultySettings', () => {
     expect(r.difficultySettings.historicalAnchors).toBe('on');
   });
 
-  it('fromEraStart hard scenario sets crisisFrequency=1.5', () => {
+  it('fromEraStart hard scenario applies the hard preset (spec 10 §DIFF ladder)', () => {
     const r = RegionSim.fromEraStart('2000', { seed: 42, scenarioId: 'digital_crossroads' });
-    expect(r.difficultySettings.crisisFrequency).toBe(1.5);
+    expect(r.difficultySettings.crisisFrequency).toBe(DIFFICULTY_PRESETS.hard.crisisFrequency);
+    expect(r.difficultySettings.aiAggression).toBe(DIFFICULTY_PRESETS.hard.aiAggression);
   });
 
   it('fromEraStart brutal scenario sets crisisFrequency=2.0', () => {
