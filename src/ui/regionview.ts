@@ -3009,9 +3009,12 @@ export class RegionView {
    *  in the DOM (so ID-bound handlers survive); switching is pure CSS, no
    *  rebuild. `set` records the choice so the next rebuild matches. The class
    *  pair is parameterised so a panel can nest a second (sub-tab) level.
-   *  `animate` (G3, Overview panel pilot) fades/slides the newly active section
-   *  in via inline styles — no style.css rule needed, so it's opt-in per call
-   *  site rather than a global change to every tabbed panel. */
+   *  `animate` (G3 — piloted on the settlement inspector, now on every tabbed
+   *  panel) fades/slides the newly active section in via inline styles — no
+   *  style.css rule needed, so it's opt-in per call site. Skipped entirely
+   *  under prefers-reduced-motion (checked per click so an OS toggle applies
+   *  live). Inline styles are wiped by the panels' periodic innerHTML rebuilds,
+   *  so nothing lingers between switches. */
   private wireTabs(
     panel: HTMLElement,
     set: (tab: string) => void,
@@ -3023,13 +3026,15 @@ export class RegionView {
       btn.onclick = () => {
         const tab = btn.dataset.ptab!;
         set(tab);
+        const reduceMotion = typeof window.matchMedia === 'function'
+          && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         for (const t of panel.querySelectorAll<HTMLElement>(`.${tabClass}`)) {
           t.classList.toggle('active', t.dataset.ptab === tab);
         }
         for (const s of panel.querySelectorAll<HTMLElement>(`.${sectionClass}`)) {
           const isActive = s.dataset.psection === tab;
           s.classList.toggle('hidden', !isActive);
-          if (animate && isActive) {
+          if (animate && !reduceMotion && isActive) {
             s.style.transition = 'none';
             s.style.opacity = '0';
             s.style.transform = 'translateX(6px)';
@@ -3195,8 +3200,8 @@ export class RegionView {
       (preState ? '' : sec('diplomacy', this.diplomacyHtml())),
     );
 
-    this.wireTabs(this.statePanel, (t) => { this.statePanelTab = t as 'finance' | 'politics' | 'diplomacy'; });
-    this.wireTabs(this.statePanel, (t) => { this.financeSubTab = t as 'treasury' | 'credit'; }, 'pal-subtab', 'pal-subsection');
+    this.wireTabs(this.statePanel, (t) => { this.statePanelTab = t as 'finance' | 'politics' | 'diplomacy'; }, 'pal-tab', 'pal-section', true);
+    this.wireTabs(this.statePanel, (t) => { this.financeSubTab = t as 'treasury' | 'credit'; }, 'pal-subtab', 'pal-subsection', true);
     this.statePanel.querySelector<HTMLInputElement>('#tax-slider')!.oninput = (e) => {
       r.taxRate = Number((e.target as HTMLInputElement).value) / 100;
       const taxVal = this.statePanel.querySelector<HTMLElement>('#tax-val');
@@ -4622,7 +4627,7 @@ export class RegionView {
     this.lastPanelBuildFrame = this.frame;
 
     this.panel.innerHTML = this.panelHtml(t);
-    // G3: fade/slide pilot — this is the "Overview" panel (settlement inspector).
+    // G3: fade/slide on tab switch (pilot site — now enabled on every tabbed panel).
     this.wireTabs(this.panel, (tab) => { this.panelTab = tab as 'overview' | 'economy' | 'people'; }, 'pal-tab', 'pal-section', true);
     const btn = this.panel.querySelector<HTMLButtonElement>('#found-btn');
     if (btn) {
@@ -5290,7 +5295,7 @@ export class RegionView {
     this.lastEconomyBuildFrame = this.frame;
     this.setInnerHtml(this.economyPanel, this.economyPanelHtml());
     const refresh = () => { this.lastEconomyBuildFrame = -999; };
-    this.wireTabs(this.economyPanel, (t) => { this.economyTab = t as 'overview' | 'settlements' | 'supply' | 'wonders'; });
+    this.wireTabs(this.economyPanel, (t) => { this.economyTab = t as 'overview' | 'settlements' | 'supply' | 'wonders'; }, 'pal-tab', 'pal-section', true);
     for (const b of this.economyPanel.querySelectorAll<HTMLButtonElement>('.ep-close')) {
       b.onclick = () => { this.economyOpen = false; };
     }
@@ -5803,7 +5808,7 @@ export class RegionView {
       ['.pal-section[data-psection="tech"]', '.pal-section[data-psection="civics"]'],
     );
 
-    this.wireTabs(this.researchPanel, (t) => { this.researchTab = t as 'tech' | 'civics'; });
+    this.wireTabs(this.researchPanel, (t) => { this.researchTab = t as 'tech' | 'civics'; }, 'pal-tab', 'pal-section', true);
     for (const node of this.researchPanel.querySelectorAll<HTMLElement>('.tt-node')) {
       if (node.dataset.state !== 'avail') continue;
       node.onclick = () => { r.startResearch(node.dataset.id!); forceResearchRebuild(); };
@@ -5824,7 +5829,11 @@ export class RegionView {
       .map((v, i) => `<div class="bar-row"><span>${AGE_BANDS[i]}</span>${meterBar(Math.min(100, (v / Math.max(1, r.popOf(t))) * 100 * 2.5))}<span>${Math.round(v)}</span></div>`)
       .join('');
     const notables = r.notablesAt(t.id)
-      .map((n) => `<li><b>${n.name}</b>, ${Math.floor(n.age)} — <abbr title="${ROLE_BONUS_DESC[n.role]}">${n.role}</abbr><br><span class="insp-skills">${n.bio[n.bio.length - 1]}</span></li>`)
+      .map((n) => {
+        const chronicle = n.bio.slice().reverse().map((line) => `<li>${line}</li>`).join('');
+        return `<li><b>${n.name}</b>, ${Math.floor(n.age)} — <abbr title="${ROLE_BONUS_DESC[n.role]}">${n.role}</abbr>` +
+          `<ul class="thoughts insp-skills" style="max-height:64px;overflow-y:auto;margin:2px 0 4px">${chronicle}</ul></li>`;
+      })
       .join('');
     const can = r.canFoundTown(t.id);
     const tier = pop < 30 ? 'Shack' : pop < 80 ? 'Cottage' : pop < 200 ? 'House' : pop < 500 ? 'Town' : pop < 1000 ? 'Manor' : 'Castle';
