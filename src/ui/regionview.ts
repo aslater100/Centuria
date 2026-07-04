@@ -4,11 +4,12 @@
  * markers, routes, expedition wagons; DOM panel for the selected settlement.
  */
 import './panels.css';
-import type { Settlement, Scout, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, DepressionMeasure, TownFocus, WagePolicy, Route, SectorId, ArmyUnitType, TechNode, Province, DynastyNode, SectorBonusBreakdown } from '../sim/region';
-import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, DISTRICT_DEFS, INTERMEDIATE_GOODS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES, BRANCH_YEAR, UNIT_TYPES, ESPIONAGE_OPS, BLOC_RELATIONS_FLOOR, DEPRESSION_MEASURES, SUPPLY_SHOCK_INFLATION, SUPPLY_SHOCK_EXPORT_DRAG, AGRI_CLIMATE_THRESHOLD, INDUSTRY_BROWNOUT_THRESHOLD, FRONT_PEAK_LEVERAGE_SCALE, FRONT_OCCUPY_THRESHOLD, GOV_OUTLAY_RESERVE_MONTHS, frontPhase, FRONT_PHASE_LABEL, AGENDA_PEACE_RESISTANCE, AGENDA_TABLE_COST, rivalAgendaKind } from '../sim/region';
+import type { Settlement, Scout, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, DepressionMeasure, TownFocus, WagePolicy, Route, SectorId, ArmyUnit, ArmyUnitType, TechNode, Province, DynastyNode, SectorBonusBreakdown } from '../sim/region';
+import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, DISTRICT_DEFS, INTERMEDIATE_GOODS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES, BRANCH_YEAR, UNIT_TYPES, ESPIONAGE_OPS, BLOC_RELATIONS_FLOOR, DEPRESSION_MEASURES, SUPPLY_SHOCK_INFLATION, SUPPLY_SHOCK_EXPORT_DRAG, AGRI_CLIMATE_THRESHOLD, INDUSTRY_BROWNOUT_THRESHOLD, FRONT_PEAK_LEVERAGE_SCALE, FRONT_OCCUPY_THRESHOLD, GOV_OUTLAY_RESERVE_MONTHS, frontPhase, FRONT_PHASE_LABEL, AGENDA_PEACE_RESISTANCE, AGENDA_TABLE_COST, rivalAgendaKind, INSOLVENCY_COLLAPSE_MONTHS } from '../sim/region';
 import type { EspionageOp } from '../sim/region';
 import { rivalArmsCapacity, rivalContinent, sameContinent, COMPASS_FLAVOR } from '../sim/region';
 import type { NotableArc } from '../sim/region';
+import { compositionMult } from '../sim/systems/military';
 import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS, MONTHS, DAYS_PER_MONTH, DAYS_PER_YEAR, START_YEAR } from '../sim/defs';
 import type { CurrencySymbol } from '../sim/defs';
 import { ANNOUNCE_LEAD_DAYS } from '../sim/currency';
@@ -3940,7 +3941,42 @@ export class RegionView {
     const supplyStatus = w.supplyReserve > 2 ? `<span class="c-good">✓</span>` : w.supplyReserve > 1 ? `<span class="c-warn">⚠</span>` : `<span class="c-bad">✗</span>`;
     const supplyLine = `<span class="row-label-140">supply ${supplyStatus} ${Math.round(w.supplyReserve * 10) / 10}mo</span>`;
     const recruitBtn = `<button class="mini war-recruit-btn" id="war-recruit-btn">recruit</button>`;
-    return unitLines + `<p>${supplyLine} ${recruitBtn}</p>`;
+    return unitLines + this.compositionHintHtml(w) + `<p>${supplyLine} ${recruitBtn}</p>`;
+  }
+
+  /** §COMBAT-COMP (spec 11) — combined-arms readout for the war room: an aggregated
+   *  breakdown of the player's army by land arm, plus a matchup read. When the rival
+   *  has a field army on the map (drawn as pawns, so genuinely visible) we read the
+   *  real matchup via compositionMult; otherwise we fall back to the static counter tip. */
+  private compositionHintHtml(w: any): string {
+    const r = this.region;
+    const playerUnits = w.units as ArmyUnit[];
+    if (playerUnits.length === 0) return '';
+    const comp = { militia: 0, cavalry: 0, artillery: 0 };
+    for (const u of playerUnits) {
+      if (u.type === 'militia' || u.type === 'cavalry' || u.type === 'artillery') comp[u.type] += u.count;
+    }
+    const landTotal = comp.militia + comp.cavalry + comp.artillery;
+    const compLine = landTotal > 0
+      ? `<p class="insp-skills" title="Your combined-arms mix — a force with ≥2 arms avoids being hard-countered.">` +
+        `COMPOSITION: militia ${comp.militia} · cavalry ${comp.cavalry} · artillery ${comp.artillery}</p>`
+      : '';
+    // Enemy typed composition is only known when the rival is fielding a province army.
+    const enemyUnits = r.provincialArmies
+      .filter((a) => a.ownerId === w.rivalId)
+      .flatMap((a) => a.units) as ArmyUnit[];
+    const staticTip = `<p class="insp-skills" title="The counter triangle (§COMBAT-COMP).">` +
+      `Militia beat cavalry · cavalry beat artillery · artillery beat militia — a balanced army avoids being hard-countered.</p>`;
+    if (landTotal === 0 || enemyUnits.length === 0) return compLine + staticTip;
+    const mult = compositionMult(playerUnits, enemyUnits, undefined);
+    const v = mult > 1.05
+      ? { cls: 'c-good', text: 'Your composition counters theirs' }
+      : mult < 0.95
+        ? { cls: 'c-bad', text: 'They counter your composition — mix your arms' }
+        : { cls: 'c-warn', text: 'Even matchup' };
+    return compLine +
+      `<p class="insp-skills" title="Composition multiplier ${mult.toFixed(2)} vs their fielded army (>1.05 you counter · <0.95 they counter · else even).">` +
+      `MATCHUP: <span class="${v.cls}">${v.text}</span></p>`;
   }
 
   /** Show recruitment modal for unit types (GDD §7.1). */
@@ -4130,6 +4166,7 @@ export class RegionView {
     }).join('') : '';
 
     return `<p class="insp-skills">NATION</p>` +
+      this.insolvencyBannerHtml() +
       this.depressionResponseHtml() +
       `<div class="bar-row" title="Legitimacy — the regime's right to rule (GDD §5.3)">` +
       `<span class="row-label-80">legitimacy</span>` +
@@ -4154,6 +4191,21 @@ export class RegionView {
       rows +
       `</div>` +
       `<p><button class="mini" id="dismiss-briefs-btn">Dismiss all</button></p>`;
+  }
+
+  /** §ECON-COLLAPSE (spec 11) — sovereign-default warning. Reuses the crisis-banner
+   *  shell (glyph + text, not hue-only per U7). Shows only while insolvent; the
+   *  countdown is the escapable window before the government falls (rating off 'D' or
+   *  debt under the ceiling resets it). Pure read of isInsolvent()/insolvencyMonths. */
+  private insolvencyBannerHtml(): string {
+    const r = this.region;
+    if (!r.isInsolvent()) return '';
+    const monthsLeft = Math.max(1, INSOLVENCY_COLLAPSE_MONTHS - r.insolvencyMonths);
+    return `<div class="crisis-banner terminal">` +
+      `<p class="cb-title">⚠ SOVEREIGN DEFAULT</p>` +
+      `<p class="cb-status" title="Creditors are seizing the state. Pull the credit rating off 'D' — austerity, tax hikes, spending cuts — or bring debt under the ceiling to reset the counter.">` +
+      `government falls in <b>${monthsLeft}</b> month${monthsLeft === 1 ? '' : 's'} unless the rating recovers or debt falls under the ceiling</p>` +
+      `</div>`;
   }
 
   /** Depression-response panel: a depth meter, the emergency toolkit (available

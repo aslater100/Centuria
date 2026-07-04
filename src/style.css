@@ -1314,6 +1314,16 @@ input[type='range']::-moz-range-thumb {
   background: linear-gradient(180deg, rgba(120, 34, 28, 0.28) 0%, rgba(60, 18, 14, 0.14) 100%);
 }
 
+/* §ECON-COLLAPSE (spec 11) — sovereign-default is a terminal countdown: same crisis
+   shell, a heavier left rule so it reads as more urgent than the depression banner. */
+.crisis-banner.terminal {
+  border-color: var(--bad);
+  border-left-width: 4px;
+  background: linear-gradient(180deg, rgba(150, 30, 24, 0.34) 0%, rgba(70, 16, 12, 0.18) 100%);
+}
+
+.crisis-banner.terminal .cb-title { color: var(--bad); }
+
 .crisis-banner .cb-title {
   margin: 0 0 5px 0;
   font-size: 11px;
