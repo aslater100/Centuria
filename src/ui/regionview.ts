@@ -80,6 +80,13 @@ function meterBar(pct: number, tone: 'good' | 'warn' | 'bad' | 'info' | 'gold' =
   return `<div class="meter${cls}"><i style="width:${w}%${fill ? `;background:${fill}` : ''}"></i></div>`;
 }
 
+/** U7c: a hue-independent state glyph so a c-good/c-warn/c-bad value still reads
+ *  as safe/attention/danger for color-blind players. Matches the repo's existing
+ *  ✓/⚠/✗ vocabulary (cf. supplyStatus). Returns '' for neutral/unknown tones. */
+function toneGlyph(cls: string): string {
+  return cls === 'c-good' ? '✓' : cls === 'c-warn' ? '⚠' : cls === 'c-bad' ? '✗' : '';
+}
+
 /** Build an HTML dynasty section for the Century Report.
  *  Renders parent → children relationships among Notables. */
 function dynastyHtml(r: RegionSim): string {
@@ -3266,6 +3273,9 @@ export class RegionView {
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-accept-btn')) {
       btn.onclick = () => r.acceptOffer(Number(btn.dataset.rival));
     }
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-counter-offer-btn')) {
+      btn.onclick = () => r.counterOffer(Number(btn.dataset.rival));
+    }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-decline-btn')) {
       btn.onclick = () => r.declineOffer(Number(btn.dataset.rival));
     }
@@ -3459,6 +3469,8 @@ export class RegionView {
       const offerRow = offer
         ? `<p>offers <b>${TREATY_DEFS[offer.kind].name}</b> ` +
           `<button class="mini dip-accept-btn" data-rival="${rv.id}">sign</button>` +
+          `<button class="mini dip-counter-offer-btn" data-rival="${rv.id}" ` +
+          `title="Haggle before signing: ask for a signing gift. They may agree and pay — or take insult and withdraw the offer.">counter</button>` +
           `<button class="mini dip-decline-btn" data-rival="${rv.id}">decline</button></p>`
         : '';
       // their counter from the bargaining table, if one is on offer (§6.3)
@@ -3924,7 +3936,7 @@ export class RegionView {
       const pct = Math.round((val / max) * 100);
       const filled = Math.round(pct / 10);
       const empty = 10 - filled;
-      return `<span class="${cls}">${'█'.repeat(filled)}${'░'.repeat(empty)}</span> ${Math.round(val)}`;
+      return `<span class="${cls}">${'█'.repeat(filled)}${'░'.repeat(empty)}</span> ${Math.round(val)} ${toneGlyph(cls)}`;
     };
 
     const pfPct = Math.round(r.pressFreedom);
@@ -4422,7 +4434,7 @@ export class RegionView {
     const sym = r.currencySymbol;
     const cls = advisorEst > r.treasury ? 'c-good' : 'c-bad';
     return `<p class="insp-skills" title="Finance advisor estimate for next year's treasury (skill-based noise — higher-skill ministers give more accurate forecasts).">` +
-      `Finance advisor: <span class="${cls}">${sym}${Math.round(advisorEst).toLocaleString()}</span> est. next year</p>`;
+      `Finance advisor: <span class="${cls}">${sym}${Math.round(advisorEst).toLocaleString()} ${cls === 'c-good' ? '▲' : '▼'}</span> est. next year</p>`;
   }
 
   /** Currency standard controls: announce ahead to soften the eventual switch,
@@ -4453,7 +4465,7 @@ export class RegionView {
     return `<p class="insp-skills" title="The discount window lets you borrow short-term from your own central bank at the policy rate. Interest compounds monthly. Outstanding balance is capped at 50% of current treasury.">` +
       `DISCOUNT WINDOW</p>` +
       (r.centralBankLoan > 0
-        ? `<p class="insp-skills">outstanding: <span class="${cbCls}">` + formatCurrency(Math.round(r.centralBankLoan)) + `</span> @ ${(r.policyRate * 100).toFixed(1)}%</p>` +
+        ? `<p class="insp-skills">outstanding: <span class="${cbCls}">` + formatCurrency(Math.round(r.centralBankLoan)) + ` ${toneGlyph(cbCls)}` + `</span> @ ${(r.policyRate * 100).toFixed(1)}%</p>` +
           `<p><button class="mini cb-dw-repay" data-amount="${Math.ceil(r.centralBankLoan * 0.5)}">repay ½</button> ` +
           `<button class="mini cb-dw-repay" data-amount="${Math.ceil(r.centralBankLoan)}">repay all</button></p>`
         : `<p class="insp-skills">no outstanding balance</p>`) +
@@ -4541,7 +4553,7 @@ export class RegionView {
     const legPct = Math.round(r.legitimacy);
     const legCls = legPct >= 60 ? 'c-good' : legPct >= 35 ? 'c-warn' : 'c-bad';
     const legItem = r.nationProclaimed
-      ? `<div class="tb-item tb-legitimacy" title="Legitimacy — the regime's right to rule (GDD §5.3)"><span class="${legCls}">⚖ ${legPct}%</span></div>`
+      ? `<div class="tb-item tb-legitimacy" title="Legitimacy — the regime's right to rule (GDD §5.3)"><span class="${legCls}">⚖ ${legPct}% ${toneGlyph(legCls)}</span></div>`
       : '';
 
     // U2: compact crisis badge, driven by the exact same condition that gates
@@ -4564,7 +4576,7 @@ export class RegionView {
       <div class="tb-item tb-treasury">${treasury}</div>
       <div class="tb-item tb-resources">🌾 ${Math.floor(totalFood)} | 🪵 ${Math.floor(totalWood)}</div>
       <div class="tb-item tb-population" title="Total population of your settlements${selected ? ' (selected settlement in parentheses)' : ''}">👥 ${popLabel}</div>
-      <div class="tb-item tb-happiness" title="Overall happiness — population-weighted satisfaction across your settlements"><span class="${happyCls}">☺ ${happy}%</span></div>
+      <div class="tb-item tb-happiness" title="Overall happiness — population-weighted satisfaction across your settlements"><span class="${happyCls}">☺ ${happy}% ${toneGlyph(happyCls)}</span></div>
       ${legItem}
       ${crisisItem}
       <div class="tb-item tb-speed push-right">${paused} ${speedLabel}</div>
@@ -5250,7 +5262,7 @@ export class RegionView {
         `<div><b>${t.name}</b> <button class="mini sl-select-btn" data-sid="${t.id}" title="Pan to this settlement">→</button>` +
         (hungry ? ` <button class="mini sl-aid-btn" data-sid="${t.id}" title="Send emergency grain convoy (£10)">🌾 aid</button>` : '') +
         `</div>` +
-        `<div class="insp-skills">pop ${pop} · <span class="${satCls}">sat ${Math.round(t.satisfaction)}</span> · <span class="${griCol}">grv ${Math.round(t.grievance)}</span>${strike}</div>` +
+        `<div class="insp-skills">pop ${pop} · <span class="${satCls}">sat ${Math.round(t.satisfaction)} ${toneGlyph(satCls)}</span> · <span class="${griCol}">grv ${Math.round(t.grievance)}</span>${strike}</div>` +
         `<div class="insp-skills">` +
         `<span class="${sCls(status.food)}" title="food">food ${status.food[0]}</span> ` +
         `<span class="${sCls(status.wood)}" title="timber">wood ${status.wood[0]}</span> ` +

@@ -108,6 +108,9 @@
 }
 .ep-beat-good { border-left-color: var(--good); }
 .ep-beat-bad { border-left-color: var(--bad); }
+/* U7c: a leading glyph so the verdict reads without relying on the rule's hue. */
+.ep-beat-good::before { content: "✓ "; font-weight: 700; }
+.ep-beat-bad::before { content: "⚠ "; font-weight: 700; }
 
 /* ---- Advisor briefs: an inset navy well ---- */
 .brief-box {
