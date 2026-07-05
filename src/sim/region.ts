@@ -3311,6 +3311,11 @@ export const MAGLEV_ERA_YEAR = 2005;
  *  Exported for systems/military.ts (tickPlayerWar's interdiction). */
 export const ROUTE_CONDITION_FLOOR = 15;
 
+/** Auto-build treasury floor: the reserve the road auto-builder never spends
+ *  below, on top of a few months of projected upkeep, so it can't bankrupt a
+ *  lean treasury (Route Network → auto-build toggle). */
+export const AUTO_BUILD_TREASURY_FLOOR = 500;
+
 // ---- Climate & the reckoning (GDD §8.2, §3.2 eras 7–8) ----
 
 /** Atmospheric CO₂ at the wagon's arrival, 1900 (GDD §8.2). */
@@ -3834,6 +3839,10 @@ export class RegionSim {
    * over-funds for rapid catch-up repairs. Range 0–1.5.
    */
   routeBudget = 1.0;
+  /** Auto-build roads (Route Network panel toggle): once the `road_building`
+   *  tech is researched, upgrade trails to the best era-unlocked link each month,
+   *  paid from the treasury while a reserve buffer is kept. Off by default. */
+  autoBuildRoutes = false;
   /** Estate Tax law active: monthly wealth levy. */
   estateTaxActive = false;
   // ---- Nation-tier: Constitutional Convention & Proclamation (GDD §2.2) ----
@@ -5709,6 +5718,38 @@ export class RegionSim {
     return this.buildLink(aId, bId, 'maglev');
   }
 
+  /** The best built link kind the era currently allows — the top of KIND_RANK
+   *  whose unlock gate is open. null before the road step is available. */
+  private bestUnlockedRouteKind(): BuiltRouteKind | null {
+    if (this.maglevUnlocked()) return 'maglev';
+    if (this.highwayUnlocked()) return 'highway';
+    if (this.railUnlocked()) return 'rail';
+    if (this.stateProclaimed) return 'road';
+    return null;
+  }
+
+  /** Auto-build pass (Route Network toggle): once `road_building` is researched,
+   *  upgrade land routes toward the best era-unlocked kind, busiest first, paying
+   *  from the treasury while keeping a reserve. Called monthly from monthlyUpdate.
+   *  Reuses buildLink, which already enforces gating, treasury, and no-downgrade. */
+  private autoBuildRoutesPass(): void {
+    if (!this.autoBuildRoutes || !this.stateProclaimed || !this.has('road_building')) return;
+    const target = this.bestUnlockedRouteKind();
+    if (!target) return;
+    // Never spend below a reserve of a few months' route upkeep plus a flat floor.
+    const reserve = Math.max(AUTO_BUILD_TREASURY_FLOOR, this.routeUpkeepProjected() * 3);
+    // Busiest routes first, so a tight budget lands where freight is heaviest.
+    // Sea lanes can never be paved; skip them and anything already at target.
+    const candidates = this.routes
+      .filter((rt) => !rt.sea && KIND_RANK[rt.kind] < KIND_RANK[target])
+      .sort((a, b) => b.freight - a.freight);
+    for (const rt of candidates) {
+      const cost = this.linkCost(rt.a, rt.b, target);
+      if (!cost || this.treasury - cost.total < reserve) continue;
+      this.buildLink(rt.a, rt.b, target);
+    }
+  }
+
   /** Putting a storm-damaged link back in order: crews priced by what the
    *  land charged to build it and how much of it is down. */
   repairCost(r: Route): number {
@@ -5843,6 +5884,12 @@ export class RegionSim {
   /** Set the route maintenance budget level (0–1.5). 1.0 fully funds upkeep. */
   setRouteBudget(level: number): void {
     this.routeBudget = Math.max(0, Math.min(1.5, level));
+  }
+
+  /** Toggle the monthly road auto-builder (Route Network panel). Only meaningful
+   *  once the `road_building` tech is researched — see autoBuildRoutesPass. */
+  setAutoBuildRoutes(on: boolean): void {
+    this.autoBuildRoutes = on;
   }
 
   /** Projected monthly route-maintenance spend at the current budget level —
@@ -7143,6 +7190,7 @@ export class RegionSim {
         this.addLog('The treasury is empty — services are cut back. The towns notice.', 'bad');
       }
     }
+    this.autoBuildRoutesPass();
     this.maintainRoutes();
     tickLegitimacy(this);
     tickRegimeMechanics(this);
@@ -12832,6 +12880,7 @@ export class RegionSim {
       passedLaws: [...this.passedLaws],
       tradeLevyRate: this.tradeLevyRate,
       routeBudget: this.routeBudget,
+      autoBuildRoutes: this.autoBuildRoutes,
       estateTaxActive: this.estateTaxActive,
       nationProclaimed: this.nationProclaimed,
       nationName: this.nationName,
@@ -13099,6 +13148,7 @@ export class RegionSim {
     r.passedLaws = new Set(d.passedLaws ?? []);
     r.tradeLevyRate = d.tradeLevyRate ?? 0.05;
     r.routeBudget = d.routeBudget ?? 1.0;
+    r.autoBuildRoutes = d.autoBuildRoutes ?? false;
     r.estateTaxActive = d.estateTaxActive ?? false;
     r.nationProclaimed = d.nationProclaimed ?? false;
     r.nationName = d.nationName ?? '';

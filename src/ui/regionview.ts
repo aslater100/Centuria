@@ -5410,6 +5410,9 @@ export class RegionView {
         refresh();
       };
     }
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-autobuild-btn')) {
+      b.onclick = () => { r.setAutoBuildRoutes(!r.autoBuildRoutes); refresh(); };
+    }
     const slider = this.routeNetworkPanel.querySelector<HTMLInputElement>('.rn-budget-slider');
     if (slider) {
       // Update the budget + readout live without forcing a full panel rebuild,
@@ -5502,9 +5505,23 @@ export class RegionView {
         `<p class="insp-skills rn-budget-note">${budgetPct < 100 ? 'Routes degrade — repairs underfunded.' : budgetPct > 100 ? 'Routes mend quickly.' : 'Routes hold and slowly improve.'}</p>` +
         `</div>`
       : '';
+    // Auto-build toggle (repurposes the road_building tech): once researched, the
+    // sim upgrades routes to the best era-unlocked kind each month. Before it's
+    // researched, show it disabled so the mechanic is discoverable.
+    const hasRoadTech = r.has('road_building');
+    const autoOn = r.autoBuildRoutes;
+    const autoHtml = r.stateProclaimed
+      ? `<div class="rn-autobuild">` +
+        `<button class="mini rn-autobuild-btn ${autoOn ? 'rn-autobuild-on' : ''}" ${hasRoadTech ? '' : 'disabled'} ` +
+        `title="${hasRoadTech ? 'Automatically upgrade your routes to the best road type each month, paid from the treasury (a reserve is kept).' : 'Research Road Building to enable automatic road construction.'}">` +
+        `${autoOn ? '☑' : '☐'} Auto-build roads${hasRoadTech ? '' : ' (needs Road Building research)'}</button>` +
+        `<p class="insp-skills rn-autobuild-note">${!hasRoadTech ? 'Research Road Building to unlock.' : autoOn ? 'On — trails upgrade to the best era link each month while a reserve holds.' : 'Off — upgrade routes by hand with the ▲ buttons below.'}</p>` +
+        `</div>`
+      : '';
     return (
       `<h3 class="panel-title">ROUTE NETWORK <button class="mini rn-close" title="close (R)">✕</button></h3>` +
       `<p class="insp-skills">${r.routes.length} links · ${built.length} built · upkeep ` + formatCurrency(upkeep, 1) + `/mo at full</p>` +
+      autoHtml +
       budgetHtml +
       `<div class="thoughts">${rows || '<p class="insp-skills">no routes yet</p>'}</div>`
     );
