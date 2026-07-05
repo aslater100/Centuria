@@ -127,6 +127,18 @@ function enterRegionMode(r: RegionSim): void {
   lastAutosaveYear = r.year;
   (window as any).region = r;
   regionView = new RegionView(canvas, r, root);
+  // Top-bar controls (speed cell, hamburger) route back into the loop's
+  // authoritative speed/pause/menu state, kept in sync with the keyboard.
+  regionView.onSetSpeed = (s: number) => { speed = s; paused = false; updateUIState(); };
+  regionView.onTogglePause = () => { if (!pauseMenuOpen) { paused = !paused; updateUIState(); } };
+  regionView.onOpenGameMenu = () => {
+    if (!pauseMenuOpen && regionView && !regionView.ceremonyOpen) {
+      pauseMenuOpen = true;
+      paused = true;
+      updateUIState();
+      openPauseMenu();
+    }
+  };
   new WindowManager(regionView.draggablePanels);
   paused = false;
   updateUIState();

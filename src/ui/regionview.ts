@@ -126,6 +126,10 @@ export class RegionView {
   /** set true by the view while the Incorporation ceremony is on screen */
   ceremonyOpen = false;
   conventionOpen = false;
+  /** Guards drawConvention against rebuilding its DOM every frame — the rebuild
+   *  wiped the player's picks and destroyed buttons mid-click. Built once on open,
+   *  reset when the convention closes. */
+  private conventionBuilt = false;
   /** True when player is in "claim land" mode — clicking map cells triggers claimCell(). */
   claimLandMode = false;
   /** "Found town" placement mode: the source town whose expedition we're siting,
@@ -171,6 +175,15 @@ export class RegionView {
   private negRecounterDraft = new Map<string, number>();
   private researchPanel: HTMLElement;
   researchOpen = false;
+  /** Top-bar speed control: when true the speed cell shows the pause/1×/3×/8×
+   *  buttons instead of the compact readout. Purely a display toggle. */
+  private speedExpanded = false;
+  /** Hooks into main.ts, which owns the authoritative game-speed / pause / menu
+   *  state (the loop reads them). Assigned in main.ts after RegionView is built;
+   *  null-safe so headless callers don't need to wire them. */
+  onSetSpeed: ((speed: number) => void) | null = null;
+  onTogglePause: (() => void) | null = null;
+  onOpenGameMenu: (() => void) | null = null;
   private lastResearchBuildFrame = -999;
   private researchTab: 'tech' | 'civics' = 'tech';
   /** Phase A: the region-wide Route Network panel (toggle with the R key). */
@@ -2666,6 +2679,8 @@ export class RegionView {
 
   private drawConvention(): void {
     if (!this.conventionOpen) return;
+    if (this.conventionBuilt) return; // built once on open — never rebuild per-frame (would wipe the player's picks)
+    this.conventionBuilt = true;
     const r = this.region;
     const notables = r.notables.filter((n) => n.alive);
     const notableOptions = (selected: number | null) =>
@@ -2693,14 +2708,13 @@ export class RegionView {
       junta:      'The generals enter the hall. Order before liberty — for now.',
       monarchy:   'The heir is presented to the gathered lords. Long may they reign.',
     };
-    const chosenGov = (this.convention.querySelector<HTMLInputElement>('input[name=gov-type]:checked')?.value) ?? 'democracy';
-    const flavourLine = govFlavour[chosenGov] ?? 'The convention convenes.';
+    const flavourLine = govFlavour['democracy'] ?? 'The convention convenes.';
     this.convention.innerHTML =
       `<div class="ceremony-box">` +
       `<h2>★ THE CONSTITUTIONAL CONVENTION ★</h2>` +
       `<p class="conv-sub">` +
       `${Math.round(r.totalPop()).toLocaleString()} citizens · ${r.settlements.length} towns · ${r.researched.size} discoveries</p>` +
-      `<p>${flavourLine}</p>` +
+      `<p id="conv-flavour">${flavourLine}</p>` +
       `<p><b>Nation name:</b></p>` +
       `<input id="nation-name" type="text" maxlength="36" placeholder="Name the nation…" value="${suggestedName}">` +
       `<p><b>Form of government:</b></p>` +
@@ -2710,6 +2724,14 @@ export class RegionView {
       `<button id="convention-proclaim-btn">Proclaim the Nation</button>` +
       `<button id="convention-cancel-btn" class="mini ml-8">Cancel</button>` +
       `</div>`;
+    // Update the flavour line when the government pick changes — in place, without
+    // rebuilding the modal (a rebuild would reset every field the player set).
+    for (const radio of this.convention.querySelectorAll<HTMLInputElement>('input[name=gov-type]')) {
+      radio.onchange = () => {
+        const flavour = this.convention.querySelector<HTMLElement>('#conv-flavour');
+        if (flavour) flavour.textContent = govFlavour[radio.value] ?? 'The convention convenes.';
+      };
+    }
     this.convention.querySelector<HTMLButtonElement>('#convention-proclaim-btn')!.onclick = () => {
       const name = (this.convention.querySelector<HTMLInputElement>('#nation-name')!.value || suggestedName).trim();
       const gov = (this.convention.querySelector<HTMLInputElement>('input[name=gov-type]:checked')?.value ?? 'democracy') as GovType;
@@ -2720,6 +2742,7 @@ export class RegionView {
       }
       r.proclaimNation(name, gov, assignments);
       this.conventionOpen = false;
+      this.conventionBuilt = false;
       this.convention.classList.add('hidden');
       // The nation design screen follows the proclamation: economic system,
       // military doctrine, alliances — and the one sanctioned currency re-pick.
@@ -2729,6 +2752,7 @@ export class RegionView {
     };
     this.convention.querySelector<HTMLButtonElement>('#convention-cancel-btn')!.onclick = () => {
       this.conventionOpen = false;
+      this.conventionBuilt = false;
       this.convention.classList.add('hidden');
     };
   }
@@ -3258,6 +3282,7 @@ export class RegionView {
     });
     this.statePanel.querySelector<HTMLButtonElement>('#convention-btn')?.addEventListener('click', () => {
       this.conventionOpen = true;
+      this.conventionBuilt = false;
     });
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.law-btn')) {
       btn.onclick = () => r.enactLaw(btn.dataset.id!);
@@ -4821,8 +4846,20 @@ export class RegionView {
     const treasury = formatCurrency(r.treasury);
     const w = window as any;
     const speed = w.gameSpeed || 1;
-    const paused = w.gamePaused ? '⏸ PAUSED' : '';
+    const isPaused = !!w.gamePaused;
+    const paused = isPaused ? '⏸ PAUSED' : '';
     const speedLabel = speed === 1 ? '1×' : speed === 3 ? '3×' : speed === 8 ? '8×' : `${speed}×`;
+    // Speed cell: collapsed = a single clickable readout; expanded = pause + speed
+    // buttons. The active option is highlighted. Purely a display toggle here —
+    // the clicks route through onSetSpeed/onTogglePause (owned by main.ts).
+    const speedCell = this.speedExpanded
+      ? `<div class="tb-item tb-speed push-right tb-speed-expanded">
+          <button class="tb-speed-btn ${isPaused ? 'tb-speed-active' : ''}" data-speed="pause" title="Pause (Space)">⏸</button>
+          <button class="tb-speed-btn ${!isPaused && speed === 1 ? 'tb-speed-active' : ''}" data-speed="1" title="Normal (1)">1×</button>
+          <button class="tb-speed-btn ${!isPaused && speed === 3 ? 'tb-speed-active' : ''}" data-speed="3" title="Fast (2)">3×</button>
+          <button class="tb-speed-btn ${!isPaused && speed === 8 ? 'tb-speed-active' : ''}" data-speed="8" title="Fastest (3)">8×</button>
+        </div>`
+      : `<button class="tb-item tb-speed push-right tb-speed-toggle" id="tb-speed-btn" title="Game speed — click for options">${paused || speedLabel}</button>`;
     // Population cell shows the whole nation; if a settlement is selected, its
     // share is appended in parentheses so both numbers are visible at a glance.
     const popLabel = selected ? `${nationPop} (${selPop})` : `${nationPop}`;
@@ -4834,11 +4871,34 @@ export class RegionView {
       <div class="tb-item tb-happiness" title="Overall happiness — population-weighted satisfaction across your settlements"><span class="${happyCls}">☺ ${happy}% ${toneGlyph(happyCls)}</span></div>
       ${legItem}
       ${crisisItem}
-      <div class="tb-item tb-speed push-right">${paused} ${speedLabel}</div>
+      ${speedCell}
       <button class="mini tb-item" id="tb-help-btn" title="Help & Wiki (? or H)">❓ Help</button>
+      <button class="mini tb-item tb-menu-btn" id="tb-menu-btn" title="Game menu (Esc)" aria-label="Game menu">☰</button>
     `;
     // U3: '?' Help entry point — rebind each rebuild since innerHTML replaces the node.
     this.topBar.querySelector<HTMLButtonElement>('#tb-help-btn')!.onclick = () => this.toggleWikiPanel();
+    // Hamburger → the game (pause) menu, via the main.ts-owned hook.
+    this.topBar.querySelector<HTMLButtonElement>('#tb-menu-btn')!.onclick = () => this.onOpenGameMenu?.();
+    // Speed control — collapsed toggle expands it; expanded buttons set speed /
+    // pause and collapse again. Handlers rebound each rebuild (innerHTML swap).
+    if (this.speedExpanded) {
+      this.topBar.querySelectorAll<HTMLButtonElement>('.tb-speed-btn').forEach((btn) => {
+        btn.onclick = () => {
+          const val = btn.dataset.speed;
+          if (val === 'pause') this.onTogglePause?.();
+          else this.onSetSpeed?.(Number(val));
+          this.speedExpanded = false;
+          this.lastTopBarFrame = -999; // force an immediate rebuild
+          this.updateTopBar();
+        };
+      });
+    } else {
+      this.topBar.querySelector<HTMLButtonElement>('#tb-speed-btn')!.onclick = () => {
+        this.speedExpanded = true;
+        this.lastTopBarFrame = -999;
+        this.updateTopBar();
+      };
+    }
   }
 
   private updateEventLog(): void {
@@ -5239,17 +5299,17 @@ export class RegionView {
         const def = REGION_EVENT_DEFS.find((d) => d.kind === ev.kind);
         return def && (def.sector === id || def.sector === 'all') && ev.untilDay > r.day;
       });
-      const evtBadge = activeEvt ? ` <span class="insp-cond">[${REGION_EVENT_DEFS.find((d) => d.kind === activeEvt.kind)?.name ?? '!'}]</span>` : '';
+      const evtBadge = activeEvt ? ` <span class="insp-cond sec-badge">[${REGION_EVENT_DEFS.find((d) => d.kind === activeEvt.kind)?.name ?? '!'}]</span>` : '';
       // Spatial-bonus badge: surface WHY this sector earns what it does — the
       // terrain/district/wonder bonuses are otherwise invisible after placement.
       // Read-only (sectorBonusBreakdown is pure), shown only when there is a bonus.
       const bd = r.sectorBonusBreakdown(t.id, id);
       const spatialBadge = bd && bd.total > 0.0005
-        ? ` <span class="insp-state col-42r" ` +
+        ? ` <span class="insp-state col-42r sec-badge" ` +
           `title="${this.escapeAttr(this.spatialBonusTooltip(bd))}">+${Math.round(bd.total * 100)}%</span>`
         : '';
       return (
-        `<div class="bar-row">` +
+        `<div class="bar-row bar-row--sector">` +
         `<span class="col-70" style="color:${color}">${SECTOR_NAMES[id]}</span>` +
         meterBar(pct, 'gold', color) +
         `<span class="col-28r">${pct}%</span>` +
@@ -5366,6 +5426,9 @@ export class RegionView {
         refresh();
       };
     }
+    for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-autobuild-btn')) {
+      b.onclick = () => { r.setAutoBuildRoutes(!r.autoBuildRoutes); refresh(); };
+    }
     const slider = this.routeNetworkPanel.querySelector<HTMLInputElement>('.rn-budget-slider');
     if (slider) {
       // Update the budget + readout live without forcing a full panel rebuild,
@@ -5458,9 +5521,23 @@ export class RegionView {
         `<p class="insp-skills rn-budget-note">${budgetPct < 100 ? 'Routes degrade — repairs underfunded.' : budgetPct > 100 ? 'Routes mend quickly.' : 'Routes hold and slowly improve.'}</p>` +
         `</div>`
       : '';
+    // Auto-build toggle (repurposes the road_building tech): once researched, the
+    // sim upgrades routes to the best era-unlocked kind each month. Before it's
+    // researched, show it disabled so the mechanic is discoverable.
+    const hasRoadTech = r.has('road_building');
+    const autoOn = r.autoBuildRoutes;
+    const autoHtml = r.stateProclaimed
+      ? `<div class="rn-autobuild">` +
+        `<button class="mini rn-autobuild-btn ${autoOn ? 'rn-autobuild-on' : ''}" ${hasRoadTech ? '' : 'disabled'} ` +
+        `title="${hasRoadTech ? 'Automatically upgrade your routes to the best road type each month, paid from the treasury (a reserve is kept).' : 'Research Road Building to enable automatic road construction.'}">` +
+        `${autoOn ? '☑' : '☐'} Auto-build roads${hasRoadTech ? '' : ' (needs Road Building research)'}</button>` +
+        `<p class="insp-skills rn-autobuild-note">${!hasRoadTech ? 'Research Road Building to unlock.' : autoOn ? 'On — trails upgrade to the best era link each month while a reserve holds.' : 'Off — upgrade routes by hand with the ▲ buttons below.'}</p>` +
+        `</div>`
+      : '';
     return (
       `<h3 class="panel-title">ROUTE NETWORK <button class="mini rn-close" title="close (R)">✕</button></h3>` +
       `<p class="insp-skills">${r.routes.length} links · ${built.length} built · upkeep ` + formatCurrency(upkeep, 1) + `/mo at full</p>` +
+      autoHtml +
       budgetHtml +
       `<div class="thoughts">${rows || '<p class="insp-skills">no routes yet</p>'}</div>`
     );

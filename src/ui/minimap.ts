@@ -36,9 +36,16 @@ export class Minimap {
   private cacheKeyMap: RegionSim['map'] | null = null;
   private cacheKeySize = -1;
 
+  // Click-to-expand: the minimap swaps between its configured corner size and a
+  // large overview. draw() keys its cached layers off canvas size, so it rebuilds
+  // automatically on the next frame after we resize.
+  private expanded = false;
+  private collapsedSize: number;
+
   constructor(region: RegionSim, parentElement: HTMLElement, config: Partial<MinimapConfig> = {}) {
     this.region = region;
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.collapsedSize = this.config.size;
 
     // Create canvas element
     this.canvas = document.createElement('canvas');
@@ -46,6 +53,8 @@ export class Minimap {
     this.canvas.width = this.config.size;
     this.canvas.height = this.config.size;
     this.ctx = this.canvas.getContext('2d')!;
+    this.canvas.title = 'Click to expand / shrink';
+    this.canvas.addEventListener('click', () => this.toggleExpanded());
 
     // Position
     const pos = this.config.position;
@@ -266,6 +275,26 @@ export class Minimap {
       ctx.fillStyle = '#cfe0ee';
       ctx.fillText(row.label, pad + 8, ry + 3);
     });
+  }
+
+  /**
+   * Toggle between the compact corner size and a large overview. Resizing the
+   * canvas invalidates draw()'s size-keyed layer cache, so the next frame
+   * re-rasterizes at the new resolution automatically.
+   */
+  toggleExpanded(): void {
+    this.expanded = !this.expanded;
+    const size = this.expanded
+      ? Math.round(Math.min(window.innerWidth, window.innerHeight) * 0.72)
+      : this.collapsedSize;
+    this.config.size = size;
+    this.canvas.width = size;
+    this.canvas.height = size;
+  }
+
+  /** Whether the minimap is currently in its expanded (large overview) state. */
+  isExpanded(): boolean {
+    return this.expanded;
   }
 
   /**

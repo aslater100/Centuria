@@ -64,7 +64,7 @@ export interface ScenarioSelection {
 export function scenarioSelectHtml(selectedId: string | null, sandboxDifficulty: DifficultyTag = 'standard'): string {
   const entries = [
     { id: null, name: 'Sandbox', desc: '1919 — free play, no goals', era: '1919' as const, diff: sandboxDifficulty },
-    ...SCENARIOS.map((s) => ({ id: s.id, name: s.name, desc: `${s.eraStart} — ${s.description.slice(0, 60)}...`, era: s.eraStart, diff: s.difficulty })),
+    ...SCENARIOS.map((s) => ({ id: s.id, name: s.name, desc: `${s.eraStart} — ${s.description}`, era: s.eraStart, diff: s.difficulty })),
   ];
   const rows = entries.map((e) => {
     const isSelected = selectedId === e.id;

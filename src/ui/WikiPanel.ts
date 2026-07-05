@@ -26,28 +26,38 @@ const WIKI_SECTIONS: WikiSection[] = [
       {
         id: 'basics',
         title: 'Game Basics',
-        content: `<strong>Centuria</strong> is a deep simulation builder where you grow a colony from 1800 to 2100.
-        Your goal is to guide settlers through eras, manage resources, research technologies, and build a thriving nation.
+        content: `<strong>Centuria</strong> is a deep-simulation 4X game. You take a single frontier settlement in
+        <strong>1919</strong> and grow it across a full century — into a proclaimed nation, an economy, and a place in a
+        living world of rival powers, all the way to <strong>2100</strong>.
 
         <strong>Key Concepts:</strong>
-        • <em>Settlers</em> are individuals with needs, skills, and desires
-        • <em>Resources</em> flow through your economy (food, wood, crafts, ore, etc.)
-        • <em>Jobs</em> are assigned by work priorities - prioritize what matters most
-        • <em>Technology</em> unlocks new buildings and capabilities each era`,
-        tags: ['basics', 'gameplay']
+        • <em>Settlements</em> are your towns and cities — they grow population, produce goods, and pay taxes.
+        • <em>The Nation</em> — once you proclaim statehood you govern with <em>legitimacy</em> (⚖), laws, and a treasury.
+        • <em>Economy</em> — food (🌾), wood (🪵), and other goods flow through markets; your treasury funds it all.
+        • <em>Research</em> unlocks new capabilities and steers which <em>era branch</em> your world grows into.
+        • <em>The World</em> — rival nations expand, trade, and go to war around you. Crises and depressions hit everyone.
+        • <em>Prestige</em> (★) — earned by building Wonders; the long-run mark of a great civilization.`,
+        tags: ['basics', 'gameplay', '4x']
       },
       {
         id: 'tutorial',
         title: 'First Steps',
-        content: `<strong>Step 1: Build Shelter</strong> - Place houses so settlers have somewhere to sleep.
+        content: `<strong>Step 1: Grow your settlement</strong> — keep food (🌾) ahead of population (👥) and watch
+        happiness (☺). A fed, content town grows on its own.
 
-        <strong>Step 2: Gather Food</strong> - Assign gatherers to collect berries or build a kitchen to cook grain.
+        <strong>Step 2: Open the panels</strong> — press <em>E</em> for the Economy, <em>O</em> for the settlement
+        Overview, and <em>T</em> for the Research tree. These are your main dashboards.
 
-        <strong>Step 3: Research Tech</strong> - Build a Town Hall and assign researchers to unlock new technologies.
+        <strong>Step 3: Research</strong> — the tech tree (<em>T</em>) unlocks buildings, institutions, and the path
+        toward proclaiming a nation.
 
-        <strong>Step 4: Expand</strong> - As your colony grows, build specialized buildings for industry and commerce.
+        <strong>Step 4: Proclaim a nation</strong> — once you qualify, becoming a state unlocks government, laws,
+        taxation, and the Central Bank (<em>B</em>). Keep an eye on legitimacy (⚖) — it's your right to rule.
 
-        <strong>Key Tip:</strong> Check the work priorities panel (right side) to direct settler effort where you need it most.`,
+        <strong>Step 5: Expand & compete</strong> — settle new towns, open the Province view (<em>P</em>) and
+        State/Government panel (<em>G</em>), and start building Wonders to earn prestige (★).
+
+        <strong>Key Tip:</strong> Press <em>C</em> any time for the Century graph to see long-run trends.`,
         tags: ['tutorial', 'getting-started']
       }
     ]
@@ -58,113 +68,122 @@ const WIKI_SECTIONS: WikiSection[] = [
     icon: '⚙️',
     articles: [
       {
-        id: 'needs',
-        title: 'Settler Needs',
-        content: `Every settler has fundamental needs that affect morale and productivity:
+        id: 'nation-legitimacy',
+        title: 'Nation & Legitimacy',
+        content: `A colony becomes a <strong>nation</strong> when you proclaim statehood. From then on you rule with
+        <strong>legitimacy</strong> (⚖ in the top bar) — the regime's right to rule.
 
-        <strong>Basic Needs:</strong>
-        • <em>Food</em> - Without meals, settlers starve. Morale drops if variety is limited.
-        • <em>Sleep</em> - Needs a house with bed. Poor housing causes depression.
-        • <em>Warmth</em> - In winter, settlers near hearths are happier. Cold = sickness.
+        <strong>Legitimacy matters because:</strong>
+        • Low legitimacy invites unrest, faction resistance, and instability.
+        • Major reforms (e.g. extending suffrage) cost political capital and provoke the factions they threaten.
+        • It's shown in the top bar once you're a nation and read in full in the State/Government panel (<em>G</em>).
 
-        <strong>Social Needs:</strong>
-        • <em>Recreation</em> - Access to bars, games, festivals. Boredom kills morale.
-        • <em>Community</em> - Settlers are happier near others. Isolation is depressing.
-        • <em>Meaning</em> - Many settlers want meaningful work, not just any job.
-
-        <strong>Tip:</strong> Morale affects productivity. High morale = faster work. Low morale = strikes and emigration.`,
-        tags: ['mechanics', 'settlers']
+        <strong>Tip:</strong> Reforms are powerful but destabilizing — time them for when legitimacy and happiness can
+        absorb the shock, not during a crisis.`,
+        tags: ['mechanics', 'nation', 'legitimacy']
       },
       {
         id: 'economy',
-        title: 'Economy & Trade',
-        content: `Your economy runs on <strong>resource flow</strong>. Raw materials become processed goods:
+        title: 'Economy & Treasury',
+        content: `Your <strong>treasury</strong> (top bar) funds everything. Settlements produce goods and, once you're a
+        nation, pay taxes into it.
 
-        <strong>Resource Chains:</strong>
-        • Wood → Timber (at Sawmill)
-        • Clay → Brick (at Kiln)
-        • Ore + Coke → Iron (at Blacksmith)
-        • Grain → Meals or Ale (at Kitchen/Brewery)
+        <strong>Managing the economy:</strong>
+        • Open the Economy panel (<em>E</em>) to see production, trade, and balances.
+        • Food (🌾) and wood (🪵) are surfaced right in the top bar — keep them positive.
+        • Set tax policy in the State/Government panel (<em>G</em>): too high crushes happiness, too low starves the treasury.
+        • Once unlocked, the Central Bank (<em>B</em>) lets you manage money, credit, and interest.
 
-        <strong>Markets & Trading:</strong>
-        • Build a Market to trade with passing merchants
-        • Surplus goods can be exported for profit
-        • Import rare resources if production can't keep up
+        <strong>Living World Market</strong> (a World Dynamism option): with it on, goods obey supply and demand —
+        shortages bite and gluts crash prices, so diversify what you produce.
 
-        <strong>Tip:</strong> Monitor stockpiles. Too much waste storage, too little causes gridlock.`,
-        tags: ['mechanics', 'economy']
+        <strong>Tip:</strong> A running surplus is your buffer against the next crisis — don't spend to zero.`,
+        tags: ['mechanics', 'economy', 'treasury']
       },
       {
-        id: 'jobs-priorities',
-        title: 'Jobs & Priorities',
-        content: `Settlers automatically take jobs based on <strong>work priorities</strong>.
+        id: 'crises',
+        title: 'Crises & Depressions',
+        content: `The world is volatile. Economic <strong>depressions</strong> and other crises strike — a
+        <span style="color:#ff8080">⚠ CRISIS</span> badge appears in the top bar when one is active.
 
-        <strong>Priority Levels:</strong>
-        • <em>0 (Disabled)</em> - No one will do this job
-        • <em>1 (Low)</em> - Settlers take this only if other jobs are unavailable
-        • <em>2 (Medium)</em> - Settlers prefer these jobs unless higher priority exists
-        • <em>3 (High)</em> - Settlers prioritize these above all else
+        <strong>During a crisis:</strong>
+        • Production, trade, and happiness come under pressure across the board.
+        • You may be offered recovery choices — read the Nation panel for the details and trade-offs.
+        • Higher difficulties (up to Brutal) raise crisis frequency and economic volatility, and squeeze pensions.
 
-        <strong>Strategic Tips:</strong>
-        • Harvest food at High priority during winter to prevent starvation
-        • Keep construction at Medium during peacetime, High during expansion
-        • Research is vital for unlocking new tech, but not always urgent
-        • Idle jobs at 0 priority if you have no buildings for them`,
-        tags: ['mechanics', 'priorities']
+        <strong>Tip:</strong> Build slack in good years — a treasury cushion and a diverse economy are what carry you
+        through a downturn. Watch happiness (☺); it's the early warning of trouble.`,
+        tags: ['mechanics', 'crisis', 'economy']
       }
     ]
   },
   {
-    id: 'buildings',
-    title: 'Buildings & Crafts',
-    icon: '🏢',
+    id: 'prestige',
+    title: 'Prestige & Wonders',
+    icon: '⭐',
     articles: [
       {
-        id: 'shelter-buildings',
-        title: 'Shelter Buildings',
-        content: `<strong>House</strong> - Sleeps 3 settlers. The foundation of your colony.
-        <strong>Longhouse</strong> - Sleeps 12. For communal-type settlers who thrive in groups.
-        <strong>Clinic</strong> - Heals injured settlers. Medicine from Apothecary speeds healing.
-        <strong>Schoolhouse</strong> - +25% research speed per building. Invest in education for long-term growth.`,
-        tags: ['buildings', 'shelter']
+        id: 'earning-prestige',
+        title: 'How to Earn Prestige',
+        content: `<strong>Prestige</strong> (★) is your civilization's crowning score. It is earned in exactly one way:
+        <strong>completing a Wonder that you own</strong>.
+
+        <strong>How it works:</strong>
+        • Each Wonder is <em>unique</em> — only one of each can ever be built in the whole world. First to finish it
+        claims it; rival nations actively race you for the highest-value ones.
+        • When your nation completes a Wonder, its prestige value is added to your total. If a rival finishes it first,
+        it's gone — you cannot build that Wonder anymore.
+        • Prestige is <strong>never lost or reduced</strong> — it only ever goes up.
+        • Your running total shows as ★ in the Economy → Wonders tab, and is reported in the Century Report.
+
+        <strong>To earn prestige:</strong> prioritize the research and economy needed to build Wonders, and build them
+        <em>before</em> a rival can. There is no other source of prestige — no per-building or per-battle trickle.`,
+        tags: ['prestige', 'wonders', 'score']
       },
       {
-        id: 'food-buildings',
-        title: 'Food & Farming',
-        content: `<strong>Gatherer Site</strong> - Free food from foraged berries (early game, slow production).
-        <strong>Kitchen</strong> - Converts grain into meals (faster processing).
-        <strong>Granary</strong> - +150 meal storage. Build multiple for large stockpiles.
-        <strong>Hunt Lodge</strong> - Hunters bring game. Requires wilderness nearby.
-        <strong>Farm/Garden</strong> - Free food over time. Needs Horticulture tech.
-        <strong>Mill</strong> - Grain → produce (variety). Unlocked in Industrial Era.
-        <strong>Canning Factory</strong> - Preserves food for long-term storage. Modern Era tech.`,
-        tags: ['buildings', 'food']
+        id: 'wonder-list',
+        title: 'The Wonders',
+        content: `Each Wonder grants a one-time burst of prestige (★) to whoever completes it first, plus an
+        empire-wide bonus. Values:
+
+        • <strong>The Great Granary</strong> — ★25
+        • <strong>The Grand Bazaar</strong> — ★25
+        • <strong>The Great Foundry</strong> — ★25
+        • <strong>The Great Library</strong> — ★25
+        • <strong>The Centuria Monument</strong> — ★50
+        • <strong>The Space Program</strong> — ★40
+        • <strong>The Satellite Network</strong> — ★45
+        • <strong>The Orbital Station</strong> — ★60
+
+        <strong>Tip:</strong> The later Wonders are worth the most — but they need a strong late-century economy and the
+        right tech to reach. Plan your research so you arrive first.`,
+        tags: ['prestige', 'wonders']
       }
     ]
   },
   {
     id: 'technology',
-    title: 'Research & Tech',
+    title: 'Research & Eras',
     icon: '📚',
     articles: [
       {
         id: 'research',
-        title: 'How to Research',
-        content: `<strong>Building a Research Capability:</strong>
-        1. Build a Town Hall (costs 60 wood, 20 stone)
-        2. Assign a settler to Researcher priority
-        3. Access the Research panel to view available tech
-        4. Tech progresses over time as researchers work
+        title: 'Research & Era Branches',
+        content: `Open the <strong>Research tree</strong> with <em>T</em>. Technology unlocks new buildings, institutions,
+        and the milestones that let you proclaim a nation and reach the Wonders.
 
-        <strong>Tech Trees by Era:</strong>
-        • <em>Pioneer Era (1900s)</em> - Basic farming, hunting, gathering, steam power
-        • <em>Industrial Era (1920s-1950s)</em> - Steel production, railways, factory systems, mass manufacturing
-        • <em>Modern Era (1960s-1990s)</em> - Electronics, computers, automobiles, advanced logistics
-        • <em>Information Era (2000s)</em> - Robotics, automation, digital infrastructure
-        • <em>Space Age (2050s-2100)</em> - Advanced technology, off-world capabilities
+        <strong>The century unfolds through eras.</strong> As the decades pass (1919 → 2100), the choices you make —
+        especially around industry, climate, and governance — steer your world down an <strong>era branch</strong>: a
+        greener <em>solarpunk</em> path, a corporate-dominated one, a flooded/climate-stressed world, and others. The
+        branch reskins the world and shapes late-game challenges.
 
-        <strong>Tip:</strong> Prioritize foundational techs that unlock entire building categories.`,
-        tags: ['research', 'technology']
+        <strong>World Dynamism — "A World That Fights Back":</strong> with this option on, a warming planet turns
+        fossil-locked powers belligerent while green powers form coalitions — so your tech and climate choices ripple
+        into diplomacy and war.
+
+        <strong>Tip:</strong> Foundational techs that unlock whole categories pay off more than narrow one-offs. Use the
+        Century graph (<em>C</em>) to see where your trajectory is heading.`,
+        tags: ['research', 'technology', 'eras']
       }
     ]
   },
@@ -193,6 +212,13 @@ const WIKI_SECTIONS: WikiSection[] = [
         • <em>C</em> — Open the century graph — long-run trends, any time
         • <em>? or H</em> — Toggle this help wiki
 
+        <strong>Top bar (click, no keyboard needed):</strong>
+        • <em>Speed cell</em> — click it to expand pause / 1× / 3× / 8× buttons.
+        • <em>☰ Menu button</em> — opens the game menu (Save / Load / Return to Menu), same as Esc.
+        • <em>❓ Help</em> — opens this wiki.
+
+        <strong>Minimap (bottom-right):</strong> click it to expand to a large map; click again to shrink it back.
+
         <strong>Tip:</strong> Shortcuts are ignored while typing in a text field (e.g. renaming a town).`,
         tags: ['keybindings', 'reference', 'controls']
       }
@@ -205,50 +231,46 @@ const WIKI_SECTIONS: WikiSection[] = [
     articles: [
       {
         id: 'early-game',
-        title: 'Early Game Strategy',
-        content: `<strong>First Year (Winter Critical):</strong>
-        • Harvest aggressively before winter - you'll need 2x normal food stocks
-        • Build at least 2 hearths for cold survival
-        • Get a basic kitchen running before spring
+        title: 'Early Game (1919+)',
+        content: `<strong>Your first decades:</strong>
+        • Keep food (🌾) comfortably ahead of population (👥) so your settlement grows steadily.
+        • Watch happiness (☺) — it drives growth and warns you before trouble.
+        • Push the Research tree (<em>T</em>) toward the milestones that let you proclaim a nation.
 
-        <strong>Build Order:</strong>
-        1. Shelter (houses)
-        2. Food production (kitchen, gatherer site)
-        3. Town Hall + Researcher
-        4. Expand housing as population grows
-        5. Specialized industry once settled`,
-        tags: ['tips', 'strategy']
+        <strong>Priorities:</strong>
+        1. Stable food surplus and rising population
+        2. Research foundational tech
+        3. Proclaim your nation once you qualify
+        4. Set sensible tax policy (State/Government, <em>G</em>)
+        5. Begin scouting a second settlement site`,
+        tags: ['tips', 'strategy', 'early']
       },
       {
         id: 'mid-game',
         title: 'Mid Game Scaling',
-        content: `<strong>Growth Phase (Years 2-5):</strong>
-        • Your colony should double in size each year if well-managed
-        • Build schools early - education compounds over time
-        • Establish trade routes to stabilize volatile resources
-        • Invest in warehouses to prevent resource bottlenecks
+        content: `<strong>Becoming a power:</strong>
+        • Expand — new settlements widen your economy and tax base. Manage them via the Province view (<em>P</em>).
+        • Once unlocked, use the Central Bank (<em>B</em>) to manage money and credit.
+        • Keep a treasury surplus as a crisis buffer — depressions hit hard, especially on higher difficulty.
 
-        <strong>Avoiding Collapse:</strong>
-        • Monitor morale carefully - it's your canary in the coal mine
-        • Ensure food diversity (3+ food types) to keep morale high
-        • Recreation (bars, festivals) is essential, not optional
-        • Keep population sustainable - don't grow faster than housing/food`,
-        tags: ['tips', 'strategy']
+        <strong>The wider world:</strong>
+        • Rival nations expand and compete. With World Dynamism on, climate and industry choices feed into diplomacy and war.
+        • Start planning for Wonders — decide which prestige (★) targets you can reach before rivals do.`,
+        tags: ['tips', 'strategy', 'mid']
       },
       {
         id: 'late-game',
-        title: 'Late Game Mastery',
-        content: `<strong>Established Civilization (Years 10+):</strong>
-        • Optimize supply chains - remove bottlenecks in resource flow
-        • Automate via priorities - let the system handle routine work
-        • Diversify economy - don't depend on a single export
-        • Plan for era transitions - new eras unlock powerful tech but disrupt industries
+        title: 'Late Game & Prestige',
+        content: `<strong>The road to 2100:</strong>
+        • Race for Wonders — they're your main source of prestige (★) and each is one-per-world, so arrive first.
+        • Your research and climate choices lock in your world's era branch (solarpunk, corporate, drowned, and more).
+        • Steer through late-century crises with a strong, diversified economy and a healthy treasury.
 
-        <strong>Victory Conditions:</strong>
-        • Advance through eras by meeting specific milestones
-        • Each era unlocks new buildings and challenges
-        • By 2100, aim for a sustainable, thriving nation`,
-        tags: ['tips', 'strategy']
+        <strong>Measuring success:</strong>
+        • Prestige (★) is the crowning score — read it in Economy → Wonders and in the Century Report.
+        • Use the Century graph (<em>C</em>) to judge your long-run trajectory and course-correct.
+        • By 2100, aim for a stable, high-legitimacy nation with the Wonders to prove it.`,
+        tags: ['tips', 'strategy', 'late', 'prestige']
       }
     ]
   }

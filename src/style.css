@@ -383,6 +383,48 @@ input[type='range']::-moz-range-thumb {
   font-style: normal;
 }
 
+/* Clickable, collapsed speed readout. Reuses .tb-item chrome but is a button. */
+.tb-speed-toggle {
+  cursor: pointer;
+  color: var(--gold-300);
+  font-weight: 600;
+  min-width: 52px;
+  justify-content: center;
+}
+
+/* Expanded speed control: a row of pause / 1× / 3× / 8× buttons. */
+.tb-speed-expanded {
+  gap: 2px;
+  padding: 2px;
+}
+.tb-speed-btn {
+  padding: 2px 8px;
+  min-width: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+}
+.tb-speed-btn:hover {
+  color: var(--gold-300);
+  border-color: rgba(217, 169, 61, 0.3);
+}
+.tb-speed-btn.tb-speed-active {
+  color: var(--gold-200, var(--gold-300));
+  background: rgba(217, 169, 61, 0.16);
+  border-color: rgba(217, 169, 61, 0.5);
+}
+
+/* Hamburger game-menu button in the top bar. */
+.tb-menu-btn {
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 9px;
+}
+
 .tb-over {
   color: var(--bad);
   font-weight: bold;
@@ -1227,6 +1269,10 @@ input[type='range']::-moz-range-thumb {
 .rn-budget { margin: 6px 0 8px; padding: 6px 0; border-top: 1px solid var(--border-gold-soft); border-bottom: 1px solid var(--border-gold-soft); }
 .rn-budget .rn-budget-slider { width: 100%; margin: 2px 0; cursor: pointer; }
 .rn-budget-readout { color: var(--gold-300); }
+.rn-autobuild { margin: 6px 0; }
+.rn-autobuild .rn-autobuild-btn { width: 100%; text-align: left; cursor: pointer; }
+.rn-autobuild .rn-autobuild-btn.rn-autobuild-on { color: var(--gold-200, var(--gold-300)); border-color: rgba(217, 169, 61, 0.5); background: rgba(217, 169, 61, 0.14); }
+.rn-autobuild .rn-autobuild-note { margin-top: 2px; }
 
 /* ---- Settlement list + Economy panels (Phase A/B) ---- */
 .settlement-list-panel,

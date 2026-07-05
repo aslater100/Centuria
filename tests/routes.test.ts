@@ -212,6 +212,45 @@ describe('Roads & the treasury (M6b)', () => {
     expect(r.buildRoad(a.id, b.id)).toBe(false); // already a road
   });
 
+  it('auto-build upgrades trails once Road Building is researched — and respects its gates', () => {
+    const r = flipped(42);
+    toStatehood(r);
+    const [a, b] = r.settlements;
+    const route = r.routeBetween(a.id, b.id)!;
+    expect(route.kind).toBe('trail');
+    const internal = r as unknown as { researched: Set<string>; autoBuildRoutesPass: () => void };
+
+    // Gate 1: toggle off → nothing builds even with the tech and a full treasury.
+    internal.researched.add('road_building');
+    r.treasury = 100000;
+    internal.autoBuildRoutesPass();
+    expect(r.routeBetween(a.id, b.id)!.kind).toBe('trail');
+
+    // Gate 2: toggle on but tech missing → nothing builds.
+    internal.researched.delete('road_building');
+    r.setAutoBuildRoutes(true);
+    internal.autoBuildRoutesPass();
+    expect(r.routeBetween(a.id, b.id)!.kind).toBe('trail');
+
+    // Gate 3: toggle on + tech + treasury → the trail upgrades to a built link.
+    internal.researched.add('road_building');
+    internal.autoBuildRoutesPass();
+    expect(r.routeBetween(a.id, b.id)!.kind).not.toBe('trail');
+
+    // Reserve guard: a treasury below cost + reserve leaves a fresh trail alone.
+    const r2 = flipped(7);
+    toStatehood(r2);
+    const [c, d] = r2.settlements;
+    // Tear the built link back to a trail so there is something to upgrade.
+    r2.deleteRoute(c.id, d.id);
+    const internal2 = r2 as unknown as { researched: Set<string>; autoBuildRoutesPass: () => void };
+    internal2.researched.add('road_building');
+    r2.setAutoBuildRoutes(true);
+    r2.treasury = 1; // far below any cost + reserve
+    internal2.autoBuildRoutesPass();
+    expect(r2.routeBetween(c.id, d.id)!.kind).toBe('trail');
+  });
+
   it('maintenance: a funded treasury keeps roads up, an empty one lets them rot', () => {
     const r = flipped(42);
     toStatehood(r);
