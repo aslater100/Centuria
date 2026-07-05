@@ -126,6 +126,10 @@ export class RegionView {
   /** set true by the view while the Incorporation ceremony is on screen */
   ceremonyOpen = false;
   conventionOpen = false;
+  /** Guards drawConvention against rebuilding its DOM every frame — the rebuild
+   *  wiped the player's picks and destroyed buttons mid-click. Built once on open,
+   *  reset when the convention closes. */
+  private conventionBuilt = false;
   /** True when player is in "claim land" mode — clicking map cells triggers claimCell(). */
   claimLandMode = false;
   /** "Found town" placement mode: the source town whose expedition we're siting,
@@ -2675,6 +2679,8 @@ export class RegionView {
 
   private drawConvention(): void {
     if (!this.conventionOpen) return;
+    if (this.conventionBuilt) return; // built once on open — never rebuild per-frame (would wipe the player's picks)
+    this.conventionBuilt = true;
     const r = this.region;
     const notables = r.notables.filter((n) => n.alive);
     const notableOptions = (selected: number | null) =>
@@ -2702,14 +2708,13 @@ export class RegionView {
       junta:      'The generals enter the hall. Order before liberty — for now.',
       monarchy:   'The heir is presented to the gathered lords. Long may they reign.',
     };
-    const chosenGov = (this.convention.querySelector<HTMLInputElement>('input[name=gov-type]:checked')?.value) ?? 'democracy';
-    const flavourLine = govFlavour[chosenGov] ?? 'The convention convenes.';
+    const flavourLine = govFlavour['democracy'] ?? 'The convention convenes.';
     this.convention.innerHTML =
       `<div class="ceremony-box">` +
       `<h2>★ THE CONSTITUTIONAL CONVENTION ★</h2>` +
       `<p class="conv-sub">` +
       `${Math.round(r.totalPop()).toLocaleString()} citizens · ${r.settlements.length} towns · ${r.researched.size} discoveries</p>` +
-      `<p>${flavourLine}</p>` +
+      `<p id="conv-flavour">${flavourLine}</p>` +
       `<p><b>Nation name:</b></p>` +
       `<input id="nation-name" type="text" maxlength="36" placeholder="Name the nation…" value="${suggestedName}">` +
       `<p><b>Form of government:</b></p>` +
@@ -2719,6 +2724,14 @@ export class RegionView {
       `<button id="convention-proclaim-btn">Proclaim the Nation</button>` +
       `<button id="convention-cancel-btn" class="mini ml-8">Cancel</button>` +
       `</div>`;
+    // Update the flavour line when the government pick changes — in place, without
+    // rebuilding the modal (a rebuild would reset every field the player set).
+    for (const radio of this.convention.querySelectorAll<HTMLInputElement>('input[name=gov-type]')) {
+      radio.onchange = () => {
+        const flavour = this.convention.querySelector<HTMLElement>('#conv-flavour');
+        if (flavour) flavour.textContent = govFlavour[radio.value] ?? 'The convention convenes.';
+      };
+    }
     this.convention.querySelector<HTMLButtonElement>('#convention-proclaim-btn')!.onclick = () => {
       const name = (this.convention.querySelector<HTMLInputElement>('#nation-name')!.value || suggestedName).trim();
       const gov = (this.convention.querySelector<HTMLInputElement>('input[name=gov-type]:checked')?.value ?? 'democracy') as GovType;
@@ -2729,6 +2742,7 @@ export class RegionView {
       }
       r.proclaimNation(name, gov, assignments);
       this.conventionOpen = false;
+      this.conventionBuilt = false;
       this.convention.classList.add('hidden');
       // The nation design screen follows the proclamation: economic system,
       // military doctrine, alliances — and the one sanctioned currency re-pick.
@@ -2738,6 +2752,7 @@ export class RegionView {
     };
     this.convention.querySelector<HTMLButtonElement>('#convention-cancel-btn')!.onclick = () => {
       this.conventionOpen = false;
+      this.conventionBuilt = false;
       this.convention.classList.add('hidden');
     };
   }
@@ -3267,6 +3282,7 @@ export class RegionView {
     });
     this.statePanel.querySelector<HTMLButtonElement>('#convention-btn')?.addEventListener('click', () => {
       this.conventionOpen = true;
+      this.conventionBuilt = false;
     });
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.law-btn')) {
       btn.onclick = () => r.enactLaw(btn.dataset.id!);
