@@ -141,31 +141,39 @@ describe('Phase C: conquest & diplomacy', () => {
       const r = makeRegion();
       const rivalId = ensureRivalHasSettlement(r);
       const rival = r.faction(rivalId)!;
-      (r as unknown as { treasury: number }).treasury = 1000;
-      rival.treasury = 50; // desperate
 
-      // Plant a second settlement so there's a non-capital to transfer
-      const extraSettlement = r.settlements.find((s) => s.factionId !== r.playerFactionId && s.id !== rival.capital);
-      if (!extraSettlement) {
-        // Can't test without a transferable settlement — skip rather than fail
-        return;
+      // Plant a guaranteed non-capital settlement to transfer. The first plant is
+      // the rival's capital (via ensureRivalHasSettlement); this second one is the
+      // purchasable target. Try a few sites so a bad cell can't skip the assertion.
+      const plant = (r as unknown as {
+        foundSettlement: (f: typeof rival, x: number, y: number) => { id: number } | null;
+      }).foundSettlement.bind(r);
+      let target: { id: number } | null = null;
+      for (const [x, y] of [[40, 40], [45, 45], [50, 50], [30, 60]] as const) {
+        target = plant(rival, x, y);
+        if (target && target.id !== rival.capital) break;
       }
-      if (!rival.settlementIds.includes(extraSettlement.id)) {
-        rival.settlementIds.push(extraSettlement.id);
-      }
+      expect(target).not.toBeNull();
+      const targetSettlement = r.settlement(target!.id)!;
+      expect(targetSettlement.id).not.toBe(rival.capital);
+
+      // Cost is 400 + pop*2 for the least-populated non-capital settlement.
+      const expectedCost = Math.round(400 + (r.popOf(targetSettlement) || 0) * 2);
+      (r as unknown as { treasury: number }).treasury = expectedCost + 1000;
+      rival.treasury = 50; // desperate (< 150), so the sale is allowed
 
       const playerBefore = (r as unknown as { treasury: number }).treasury;
       const rivalBefore = rival.treasury;
-      const result = r.buyLand(rivalId);
 
-      if (result) {
-        const playerFaction = r.faction(r.playerFactionId)!;
-        expect((r as unknown as { treasury: number }).treasury).toBe(playerBefore - 500);
-        expect(rival.treasury).toBe(rivalBefore + 500);
-        expect(playerFaction.settlementIds).toContain(extraSettlement.id);
-        expect(rival.settlementIds).not.toContain(extraSettlement.id);
-        expect(extraSettlement.factionId).toBe(r.playerFactionId);
-      }
+      // The purchase must succeed and actually move the land — no escape hatch.
+      expect(r.buyLand(rivalId)).toBe(true);
+
+      const playerFaction = r.faction(r.playerFactionId)!;
+      expect((r as unknown as { treasury: number }).treasury).toBe(playerBefore - expectedCost);
+      expect(rival.treasury).toBe(rivalBefore + expectedCost);
+      expect(playerFaction.settlementIds).toContain(targetSettlement.id);
+      expect(rival.settlementIds).not.toContain(targetSettlement.id);
+      expect(targetSettlement.factionId).toBe(r.playerFactionId);
     });
   });
 
@@ -285,26 +293,23 @@ describe('Phase C: conquest & diplomacy', () => {
       runDays(r, 30);
 
       const playerSettlement = r.settlements.find((s) => s.factionId === r.playerFactionId);
-      if (playerSettlement) {
-        const cell = r.map.coordToCell(playerSettlement.x, playerSettlement.y);
-        // Find an unclaimed adjacent cell
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const nx = cell.x + dx;
-          const ny = cell.y + dy;
-          if (nx >= 0 && nx < 256 && ny >= 0 && ny < 256) {
-            const can = r.canClaimCell(nx, ny);
-            if (can.ok) {
-              const treasuryBefore = (r as unknown as { treasury: number }).treasury;
-              const result = r.claimCell(nx, ny);
-              if (result) {
-                expect((r as unknown as { treasury: number }).treasury).toBe(treasuryBefore - 25);
-                return; // test passed
-              }
-            }
-          }
+      expect(playerSettlement).toBeDefined();
+
+      // Unclaimed land sits just beyond a settlement's territory radius, so scan the
+      // whole 128×128 grid (territory grid is cached, so this is cheap) for the first
+      // claimable frontier cell. At least one must exist — the capital never fills the
+      // map — so the assertion runs unconditionally, no escape hatch.
+      let claimed: { x: number; y: number } | null = null;
+      for (let x = 0; x < 128 && !claimed; x++) {
+        for (let y = 0; y < 128 && !claimed; y++) {
+          if (r.canClaimCell(x, y).ok) claimed = { x, y };
         }
-        // If we get here, there were no claimable cells; that's OK for this test
       }
+      expect(claimed).not.toBeNull();
+
+      const treasuryBefore = (r as unknown as { treasury: number }).treasury;
+      expect(r.claimCell(claimed!.x, claimed!.y)).toBe(true);
+      expect((r as unknown as { treasury: number }).treasury).toBe(treasuryBefore - 25);
     });
   });
 

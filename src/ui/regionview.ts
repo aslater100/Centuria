@@ -9,6 +9,7 @@ import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_R
 import type { EspionageOp } from '../sim/region';
 import { rivalArmsCapacity, rivalContinent, sameContinent, COMPASS_FLAVOR } from '../sim/region';
 import type { NotableArc } from '../sim/region';
+import type { PlayerWar } from '../sim/region';
 import { compositionMult } from '../sim/systems/military';
 import { formatCurrency, getCurrencySymbol, CURRENCY_SYMBOLS, MONTHS, DAYS_PER_MONTH, DAYS_PER_YEAR, START_YEAR } from '../sim/defs';
 import type { CurrencySymbol } from '../sim/defs';
@@ -401,7 +402,7 @@ export class RegionView {
     topBar.className = 'topbar';
     root.appendChild(topBar);
     this.topBar = topBar;
-    // Create event log for last 3 events
+    // Create scrollable event log (recent events, newest first)
     const eventLog = document.createElement('div');
     eventLog.className = 'eventlog';
     root.appendChild(eventLog);
@@ -422,7 +423,7 @@ export class RegionView {
 
   /** Top bar displaying game metrics. */
   private topBar: HTMLElement;
-  /** Event log showing last 3 events. */
+  /** Scrollable event log showing recent events (newest first). */
   private eventLog: HTMLElement;
 
   /** Draggable panels for the WindowManager (region mode). */
@@ -858,6 +859,12 @@ export class RegionView {
       this.tooltip.style.left = tx + 'px';
       this.tooltip.style.top = ty + 'px';
     }
+  }
+
+  /** Hide the hover tooltip (e.g. when the cursor leaves the canvas). */
+  hideTooltip(): void {
+    this.tooltipSettlementId = null;
+    this.tooltip.classList.add('hidden');
   }
 
   /** Keep the scaled map from drifting off-screen; at scale 1 it stays pinned. */
@@ -2015,10 +2022,10 @@ export class RegionView {
     const spx = W - pw - 14;
     const spy = H - ph - 58;
     g.fillStyle = 'rgba(10,14,24,0.92)';
-    g.beginPath(); (g as any).roundRect?.(spx, spy, pw, ph, 8) ?? g.rect(spx, spy, pw, ph); g.fill();
+    g.beginPath(); g.roundRect?.(spx, spy, pw, ph, 8) ?? g.rect(spx, spy, pw, ph); g.fill();
     g.strokeStyle = 'rgba(80,140,220,0.55)';
     g.lineWidth = 1;
-    g.beginPath(); (g as any).roundRect?.(spx, spy, pw, ph, 8) ?? g.rect(spx, spy, pw, ph); g.stroke();
+    g.beginPath(); g.roundRect?.(spx, spy, pw, ph, 8) ?? g.rect(spx, spy, pw, ph); g.stroke();
     const sname = scout.name ?? 'Scout';
     const days = Math.max(0, scout.expireDay - this.region.day);
     g.fillStyle = '#a8c8ff';
@@ -4028,9 +4035,9 @@ export class RegionView {
   }
 
   /** Military units display and recruitment (GDD §7.1). */
-  private militaryUnitsHtml(w: any): string {
+  private militaryUnitsHtml(w: PlayerWar): string {
     const unitLines = w.units.length > 0
-      ? `<p class="insp-skills">UNITS: ${w.units.map((u: any) => `${u.count} ${u.type} (morale ${Math.round(u.morale)})`).join(' · ')}</p>`
+      ? `<p class="insp-skills">UNITS: ${w.units.map((u: ArmyUnit) => `${u.count} ${u.type} (morale ${Math.round(u.morale)})`).join(' · ')}</p>`
       : `<p class="insp-skills">no units recruited yet</p>`;
     const supplyStatus = w.supplyReserve > 2 ? `<span class="c-good">✓</span>` : w.supplyReserve > 1 ? `<span class="c-warn">⚠</span>` : `<span class="c-bad">✗</span>`;
     const supplyLine = `<span class="row-label-140">supply ${supplyStatus} ${Math.round(w.supplyReserve * 10) / 10}mo</span>`;
@@ -4042,7 +4049,7 @@ export class RegionView {
    *  breakdown of the player's army by land arm, plus a matchup read. When the rival
    *  has a field army on the map (drawn as pawns, so genuinely visible) we read the
    *  real matchup via compositionMult; otherwise we fall back to the static counter tip. */
-  private compositionHintHtml(w: any): string {
+  private compositionHintHtml(w: PlayerWar): string {
     const r = this.region;
     const playerUnits = w.units as ArmyUnit[];
     if (playerUnits.length === 0) return '';
@@ -4844,9 +4851,8 @@ export class RegionView {
       : '';
 
     const treasury = formatCurrency(r.treasury);
-    const w = window as any;
-    const speed = w.gameSpeed || 1;
-    const isPaused = !!w.gamePaused;
+    const speed = window.gameSpeed || 1;
+    const isPaused = !!window.gamePaused;
     const paused = isPaused ? '⏸ PAUSED' : '';
     const speedLabel = speed === 1 ? '1×' : speed === 3 ? '3×' : speed === 8 ? '8×' : `${speed}×`;
     // Speed cell: collapsed = a single clickable readout; expanded = pause + speed
@@ -4865,8 +4871,8 @@ export class RegionView {
     const popLabel = selected ? `${nationPop} (${selPop})` : `${nationPop}`;
     this.topBar.innerHTML = `
       <div class="tb-item tb-date">${month} ${day}, ${year}</div>
-      <div class="tb-item tb-treasury">${treasury}</div>
-      <div class="tb-item tb-resources">🌾 ${Math.floor(totalFood)} | 🪵 ${Math.floor(totalWood)}</div>
+      <div class="tb-item tb-treasury" title="Treasury balance">${treasury}</div>
+      <div class="tb-item tb-resources" title="Food ${Math.floor(totalFood)} · Timber ${Math.floor(totalWood)}">🌾 ${Math.floor(totalFood)} | 🪵 ${Math.floor(totalWood)}</div>
       <div class="tb-item tb-population" title="Total population of your settlements${selected ? ' (selected settlement in parentheses)' : ''}">👥 ${popLabel}</div>
       <div class="tb-item tb-happiness" title="Overall happiness — population-weighted satisfaction across your settlements"><span class="${happyCls}">☺ ${happy}% ${toneGlyph(happyCls)}</span></div>
       ${legItem}
@@ -4907,8 +4913,8 @@ export class RegionView {
     if (logLen === this.lastEventLogLen && this.frame - this.lastEventLogFrame < 30) return;
     this.lastEventLogLen = logLen;
     this.lastEventLogFrame = this.frame;
-    const last3 = r.log.slice(-3).reverse();
-    const entries = last3.map((entry) => {
+    const recent = r.log.slice(-40).reverse();
+    const entries = recent.map((entry) => {
       const className = `log-entry log-${entry.kind}`;
       return `<div class="${className}">${entry.text}</div>`;
     }).join('');

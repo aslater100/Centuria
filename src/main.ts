@@ -1,5 +1,16 @@
 import './style.css';
 import { RegionSim, SAVE_SCHEMA_VERSION, IncompatibleSaveError, applyDifficultyPreset } from './sim/region';
+
+declare global {
+  interface Window {
+    /** Current tick speed multiplier; exposed for debug overlays and the top-bar readout. */
+    gameSpeed?: number;
+    /** Whether the sim loop is paused; exposed for debug overlays and the top-bar readout. */
+    gamePaused?: boolean;
+    /** The live region sim instance; exposed for debugging from the browser console. */
+    region?: RegionSim;
+  }
+}
 import { RegionView } from './ui/regionview';
 import { WindowManager } from './ui/WindowManager';
 import { Sfx } from './ui/audio';
@@ -89,8 +100,8 @@ let speed = 1;
 let pauseMenuOpen = false;
 
 function updateUIState(): void {
-  (window as any).gameSpeed = speed;
-  (window as any).gamePaused = paused;
+  window.gameSpeed = speed;
+  window.gamePaused = paused;
 }
 updateUIState();
 
@@ -125,7 +136,7 @@ function save(slot?: number): boolean {
 function enterRegionMode(r: RegionSim): void {
   region = r;
   lastAutosaveYear = r.year;
-  (window as any).region = r;
+  window.region = r;
   regionView = new RegionView(canvas, r, root);
   // Top-bar controls (speed cell, hamburger) route back into the loop's
   // authoritative speed/pause/menu state, kept in sync with the keyboard.
@@ -352,8 +363,12 @@ canvas.addEventListener('mousemove', (e) => {
     regionDrag.lastY = e.clientY;
     regionDrag.moved += Math.abs(dx) + Math.abs(dy);
     regionView.panBy(dx, dy);
+  } else if (regionView) {
+    regionView.updateTooltip(e.clientX, e.clientY);
   }
 });
+
+canvas.addEventListener('mouseleave', () => { regionView?.hideTooltip(); });
 
 canvas.addEventListener('mousedown', (e) => {
   if (regionView) {

@@ -216,7 +216,7 @@ export function tickRegimeMechanics(r: RegionSim): void {
   // ---- Corporatocracy: shareholder patience decays during long wars ----
   if (r.govType === 'corporatocracy') {
     if (r.playerWar) {
-      const warMonths = (r.day - (r.playerWar as any).startDay) / 30;
+      const warMonths = (r.day - r.playerWar.startedDay) / 30;
       if (warMonths > 12) {
         r.shareholderPatience = Math.max(0, r.shareholderPatience - 3);
       }

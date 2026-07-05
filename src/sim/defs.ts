@@ -177,10 +177,18 @@ export interface PendingEvent {
   chosenIndex?: number;
 }
 
+/** Narrow structural view of the simulation state an event's text callback may
+ *  read. Kept local (rather than importing RegionSim from region.ts) to avoid a
+ *  circular module dependency — region.ts imports from this file. Extend with
+ *  whichever members a future event's text actually needs. */
+export interface EventSimContext {
+  day: number;
+}
+
 export interface EventDef {
   id: string;
   title: string;
-  text: (sim: any) => string; // parameterized by simulation state
+  text: (sim: EventSimContext) => string; // parameterized by simulation state
   choices: { label: string; desc: string }[];
 }
 

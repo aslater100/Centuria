@@ -61,6 +61,20 @@ describe('Save schema v2', () => {
     expect((err as IncompatibleSaveError).foundVersion).toBe(1);
   });
 
+  it('deserialize rejects a future-version blob instead of misparsing it', () => {
+    const r = RegionSim.create(7);
+    const raw = JSON.parse(r.serialize());
+    raw.v = SAVE_SCHEMA_VERSION + 1;
+    let err: unknown;
+    try {
+      RegionSim.deserialize(JSON.stringify(raw));
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(IncompatibleSaveError);
+    expect((err as IncompatibleSaveError).foundVersion).toBe(SAVE_SCHEMA_VERSION + 1);
+  });
+
   it('hyperinflationMonths and postRevoltGrievanceMonths survive a round-trip', () => {
     const r = RegionSim.create(7);
     r.hyperinflationMonths = 7;
