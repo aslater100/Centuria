@@ -1,5 +1,40 @@
 # Session log
 
+## 2026-07-05 — Spec 13 Phase 1: living rival doctrines (branch `claude/continue-ibf23m`)
+
+Milestone push on **Mechanics depth → 10** (owner picked "milestone 9→10"). Spec 11 landed the
+combined-arms counter triangle in the province resolver and retrofitted the main player-war path,
+but the enemy in `tickPlayerWar` was `rivalWarComposition(year)` — one **static, era-only stub,
+identical for every rival**, terrain forced `undefined`. So the tactical duel in the path players
+actually live in was *player choice vs. a scripted constant*. Phase 1 makes it two-sided and
+per-opponent. Spec: `docs/specs/13-living-doctrines.md`. **Schema-free — NOT a Hard Stop.**
+
+### §A — `rivalComposition(rv, year)` (systems/military.ts)
+Pure function layered on the kept era baseline: `offense = (weights.expansion + weights.risk)/20`
+(0..1, 0.5 = neutral) re-weights the base arm counts — offensive expansionists (Hegemon/Opportunist)
+skew to shock+gun arms, cautious isolationists (Hermit) mass infantry. A neutral temperament
+returns the era base **unchanged** (strict generalization of the old stub). Read off `weights`, so
+it generalizes past the five archetypes to named rivals. `tickPlayerWar` now calls it instead of
+`rivalWarComposition`. Effect: the player's optimal counter **differs by opponent** (militia+cavalry
+vs a Hegemon's horse/guns; artillery vs a Hermit's infantry mass).
+
+### §B — theater terrain (`playerHomeBiome`)
+`tickPlayerWar` passed `biome = undefined`; it now passes the biome of the player's largest
+settlement (rivals are off-map, so the decisive ground is the player's own). Terrain reweights both
+sides symmetrically — a second, fair consideration in the counter decision. Deterministic.
+
+### Verification
+Build ✓; full suite **1650** green (new `tests/living-doctrines.test.ts`, 8 tests: neutral =
+baseline, temperament differentiation, per-opponent counter flips, terrain-as-input, count floors).
+`SIM_AUTOPLAY_STATEHOOD=1 SIM_DIFFICULTY=standard` 100y×20 sweep **per-seed identical** pre/post
+(15 nation / 5 encirclement) — outcome-neutral for autoplay (which fields no deliberate counters),
+the axis bites only in the player-driven war path. No new `any`, no schema change.
+
+### Phase 2 (deferred — Hard Stop, awaits sign-off)
+Persisted per-war rival composition that adapts to counter the player's observed mix each month
+(with lag) → a rock-paper-scissors tempo war. Needs `SAVE_SCHEMA_VERSION` bump + serialize/version
+pins. Not started.
+
 ## 2026-07-04 — Spec 12: diplomacy depth + encirclement difficulty (branch `claude/game-audit-score-8ggzeu`)
 
 Owner mandate: push **diplomacy depth** and **difficulty** each toward 10. Approvals on record:

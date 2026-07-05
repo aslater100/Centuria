@@ -14,7 +14,7 @@
  * (computeCombatPower / computeWarScore) stay on RegionSim — the moved bodies reach
  * them, and the war state, through `r`.
  */
-import type { RegionSim, ProvincialArmy, ArmyGroup, ArmyUnit, ArmyUnitType } from '../region';
+import type { RegionSim, ProvincialArmy, ArmyGroup, ArmyUnit, ArmyUnitType, RivalNation } from '../region';
 import {
   UNIT_TYPES,
   MOBILIZATION_DEFS,
@@ -118,6 +118,45 @@ import {
     if (year < 1920) return [u('militia', 60), u('cavalry', 40)];
     if (year < 1960) return [u('militia', 55), u('artillery', 45)];
     return [u('militia', 40), u('cavalry', 30), u('artillery', 30)];
+  }
+
+  /** §Spec13 §A — a rival's ACTUAL fielding doctrine: the era baseline re-weighted by the
+   *  rival's temperament, so every opponent is a different counter problem in the player's own
+   *  wars, not one scripted era stub for all. `offense = (expansion + risk)/20` (0..1, 0.5 =
+   *  neutral): offensive expansionists (Hegemon/Opportunist) skew to the shock/gun arms;
+   *  cautious isolationists (Hermit) mass defensive infantry. A neutral temperament returns the
+   *  era base unchanged, so this strictly generalizes `rivalWarComposition`. Temperament is read
+   *  off `weights` (archetypes are presets over `weights`; named rivals carry custom weights).
+   *  Deterministic — pure over rival weights + year, no RNG, no persisted field. */
+  export function rivalComposition(rv: Pick<RivalNation, 'weights'>, year: number): ArmyUnit[] {
+    const base = rivalWarComposition(year);
+    const offense = (rv.weights.expansion + rv.weights.risk) / 20;
+    const mult: Record<'militia' | 'cavalry' | 'artillery', number> = {
+      militia: Math.max(0.25, 1 + (0.5 - offense) * 0.8),
+      cavalry: Math.max(0.25, 1 + (offense - 0.5) * 0.8),
+      artillery: Math.max(0.25, 1 + (offense - 0.5) * 0.5),
+    };
+    return base.map((u) =>
+      u.type === 'warship' ? u : { ...u, count: Math.max(1, Math.round(u.count * mult[u.type])) },
+    );
+  }
+
+  /** §Spec13 §B — the home theater: the biome of the player's largest settlement, the ground
+   *  the nation musters and defends on. Rivals are off-map (compass only), so the decisive
+   *  terrain is the player's own ground; terrain now shapes the main player war, not only spatial
+   *  province battles. Deterministic. */
+  function playerHomeBiome(r: RegionSim): string | undefined {
+    let bestPop = -1;
+    let biome: string | undefined;
+    for (const t of r.settlements) {
+      if (t.factionId !== r.playerFactionId) continue;
+      const p = r.popOf(t);
+      if (p > bestPop) {
+        bestPop = p;
+        biome = r.map.at(t.x, t.y)?.biome;
+      }
+    }
+    return biome;
   }
 
   const BATTLE_MAX_ROUNDS = 3;
@@ -673,13 +712,16 @@ export function tickPlayerWar(r: RegionSim): void {
       return;
     }
     const mob = MOBILIZATION_DEFS[w.mobilization];
-    // §COMBAT-COMP (player war): the player's real unit composition vs the rival's era-appropriate
-    // force. A player who scouts and hard-counters (or fields balanced combined arms) shifts the
-    // war in their favor; a mono-army that the era's threat counters is punished. Empty player
-    // units → compositionMult returns 1, so a pre-unit or abstract war is unchanged. No new RNG.
-    const rivalComp = rivalWarComposition(r.year);
-    let P = r.warPower() * compositionMult(w.units, rivalComp, undefined);
-    let R = r.rivalWarPower(rv) * compositionMult(rivalComp, w.units, undefined);
+    // §COMBAT-COMP + §Spec13: the player's real unit composition vs THIS rival's actual doctrine
+    // (temperament-weighted, §A) on the home theater's terrain (§B) — a genuinely two-sided,
+    // per-opponent duel, not one scripted era stub for all. A player who scouts the opponent and
+    // hard-counters (or fields balanced combined arms) shifts the war in their favor; a mono-army
+    // the enemy's doctrine counters is punished. Empty player units → compositionMult returns 1,
+    // so a pre-unit or abstract war is unchanged. Deterministic — no new RNG draw.
+    const rivalComp = rivalComposition(rv, r.year);
+    const theater = playerHomeBiome(r);
+    let P = r.warPower() * compositionMult(w.units, rivalComp, theater);
+    let R = r.rivalWarPower(rv) * compositionMult(rivalComp, w.units, theater);
     // §Spec12 §B — co-belligerents finally weigh on the scale, not just bleed
     // cosmetically: each ally/enemy-ally adds its war power at CO_BELLIGERENT_WEIGHT
     // (they fight at partial commitment — the same half-weight the attrition uses).
