@@ -48,6 +48,16 @@
 /* A meter used between text lines (province satisfaction etc.) */
 .meter-line { margin: 2px 0; }
 
+/* Sector rows (sectorsHtml) can carry trailing badges — a spatial-bonus "+N%"
+   and/or an active-event name like "[Consumer Drive]". Let the row wrap so a long
+   badge drops to a second line instead of being clipped, and defeat the global
+   `.bar-row span:last-child { width: 24px }` rule that would otherwise squash the
+   trailing badge into a 24px column. Higher specificity so it wins regardless of
+   stylesheet order. */
+.bar-row.bar-row--sector { flex-wrap: wrap; }
+.bar-row.bar-row--sector span:last-child { width: auto; text-align: left; }
+.bar-row--sector .sec-badge { white-space: nowrap; }
+
 /* Sector-table column widths (sectorsHtml) */
 .col-70 { min-width: 70px; }
 .col-28r { min-width: 28px; text-align: right; }

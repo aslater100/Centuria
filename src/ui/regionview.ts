@@ -5283,17 +5283,17 @@ export class RegionView {
         const def = REGION_EVENT_DEFS.find((d) => d.kind === ev.kind);
         return def && (def.sector === id || def.sector === 'all') && ev.untilDay > r.day;
       });
-      const evtBadge = activeEvt ? ` <span class="insp-cond">[${REGION_EVENT_DEFS.find((d) => d.kind === activeEvt.kind)?.name ?? '!'}]</span>` : '';
+      const evtBadge = activeEvt ? ` <span class="insp-cond sec-badge">[${REGION_EVENT_DEFS.find((d) => d.kind === activeEvt.kind)?.name ?? '!'}]</span>` : '';
       // Spatial-bonus badge: surface WHY this sector earns what it does — the
       // terrain/district/wonder bonuses are otherwise invisible after placement.
       // Read-only (sectorBonusBreakdown is pure), shown only when there is a bonus.
       const bd = r.sectorBonusBreakdown(t.id, id);
       const spatialBadge = bd && bd.total > 0.0005
-        ? ` <span class="insp-state col-42r" ` +
+        ? ` <span class="insp-state col-42r sec-badge" ` +
           `title="${this.escapeAttr(this.spatialBonusTooltip(bd))}">+${Math.round(bd.total * 100)}%</span>`
         : '';
       return (
-        `<div class="bar-row">` +
+        `<div class="bar-row bar-row--sector">` +
         `<span class="col-70" style="color:${color}">${SECTOR_NAMES[id]}</span>` +
         meterBar(pct, 'gold', color) +
         `<span class="col-28r">${pct}%</span>` +
