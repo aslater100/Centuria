@@ -171,6 +171,15 @@ export class RegionView {
   private negRecounterDraft = new Map<string, number>();
   private researchPanel: HTMLElement;
   researchOpen = false;
+  /** Top-bar speed control: when true the speed cell shows the pause/1×/3×/8×
+   *  buttons instead of the compact readout. Purely a display toggle. */
+  private speedExpanded = false;
+  /** Hooks into main.ts, which owns the authoritative game-speed / pause / menu
+   *  state (the loop reads them). Assigned in main.ts after RegionView is built;
+   *  null-safe so headless callers don't need to wire them. */
+  onSetSpeed: ((speed: number) => void) | null = null;
+  onTogglePause: (() => void) | null = null;
+  onOpenGameMenu: (() => void) | null = null;
   private lastResearchBuildFrame = -999;
   private researchTab: 'tech' | 'civics' = 'tech';
   /** Phase A: the region-wide Route Network panel (toggle with the R key). */
@@ -4821,8 +4830,20 @@ export class RegionView {
     const treasury = formatCurrency(r.treasury);
     const w = window as any;
     const speed = w.gameSpeed || 1;
-    const paused = w.gamePaused ? '⏸ PAUSED' : '';
+    const isPaused = !!w.gamePaused;
+    const paused = isPaused ? '⏸ PAUSED' : '';
     const speedLabel = speed === 1 ? '1×' : speed === 3 ? '3×' : speed === 8 ? '8×' : `${speed}×`;
+    // Speed cell: collapsed = a single clickable readout; expanded = pause + speed
+    // buttons. The active option is highlighted. Purely a display toggle here —
+    // the clicks route through onSetSpeed/onTogglePause (owned by main.ts).
+    const speedCell = this.speedExpanded
+      ? `<div class="tb-item tb-speed push-right tb-speed-expanded">
+          <button class="tb-speed-btn ${isPaused ? 'tb-speed-active' : ''}" data-speed="pause" title="Pause (Space)">⏸</button>
+          <button class="tb-speed-btn ${!isPaused && speed === 1 ? 'tb-speed-active' : ''}" data-speed="1" title="Normal (1)">1×</button>
+          <button class="tb-speed-btn ${!isPaused && speed === 3 ? 'tb-speed-active' : ''}" data-speed="3" title="Fast (2)">3×</button>
+          <button class="tb-speed-btn ${!isPaused && speed === 8 ? 'tb-speed-active' : ''}" data-speed="8" title="Fastest (3)">8×</button>
+        </div>`
+      : `<button class="tb-item tb-speed push-right tb-speed-toggle" id="tb-speed-btn" title="Game speed — click for options">${paused || speedLabel}</button>`;
     // Population cell shows the whole nation; if a settlement is selected, its
     // share is appended in parentheses so both numbers are visible at a glance.
     const popLabel = selected ? `${nationPop} (${selPop})` : `${nationPop}`;
@@ -4834,11 +4855,34 @@ export class RegionView {
       <div class="tb-item tb-happiness" title="Overall happiness — population-weighted satisfaction across your settlements"><span class="${happyCls}">☺ ${happy}% ${toneGlyph(happyCls)}</span></div>
       ${legItem}
       ${crisisItem}
-      <div class="tb-item tb-speed push-right">${paused} ${speedLabel}</div>
+      ${speedCell}
       <button class="mini tb-item" id="tb-help-btn" title="Help & Wiki (? or H)">❓ Help</button>
+      <button class="mini tb-item tb-menu-btn" id="tb-menu-btn" title="Game menu (Esc)" aria-label="Game menu">☰</button>
     `;
     // U3: '?' Help entry point — rebind each rebuild since innerHTML replaces the node.
     this.topBar.querySelector<HTMLButtonElement>('#tb-help-btn')!.onclick = () => this.toggleWikiPanel();
+    // Hamburger → the game (pause) menu, via the main.ts-owned hook.
+    this.topBar.querySelector<HTMLButtonElement>('#tb-menu-btn')!.onclick = () => this.onOpenGameMenu?.();
+    // Speed control — collapsed toggle expands it; expanded buttons set speed /
+    // pause and collapse again. Handlers rebound each rebuild (innerHTML swap).
+    if (this.speedExpanded) {
+      this.topBar.querySelectorAll<HTMLButtonElement>('.tb-speed-btn').forEach((btn) => {
+        btn.onclick = () => {
+          const val = btn.dataset.speed;
+          if (val === 'pause') this.onTogglePause?.();
+          else this.onSetSpeed?.(Number(val));
+          this.speedExpanded = false;
+          this.lastTopBarFrame = -999; // force an immediate rebuild
+          this.updateTopBar();
+        };
+      });
+    } else {
+      this.topBar.querySelector<HTMLButtonElement>('#tb-speed-btn')!.onclick = () => {
+        this.speedExpanded = true;
+        this.lastTopBarFrame = -999;
+        this.updateTopBar();
+      };
+    }
   }
 
   private updateEventLog(): void {
