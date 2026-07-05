@@ -1,5 +1,52 @@
 # Session log
 
+## 2026-07-04 — Spec 12: diplomacy depth + encirclement difficulty (branch `claude/game-audit-score-8ggzeu`)
+
+Owner mandate: push **diplomacy depth** and **difficulty** each toward 10. Approvals on record:
+save schema v5, difficulty = climate parity. One interlocking system delivers both — bloc
+alignment is the new depth axis AND the escape valve from the new difficulty pressure. Spec:
+`docs/specs/12-diplomacy-ten.md`.
+
+### §A — depth: alignment diplomacy (new axis on the existing bargaining table)
+- **Entente chip** (`DealBasket.entente`): the player pledges alignment with a rival against a
+  named third power. Personality-priced via `ententeAppetite` (a rival won't turn on an ally/friend
+  or side with a player it fears); on sign it records a persisted `Entente`, dings the target −8,
+  and — the teeth — an entente partner joins the PLAYER's side (`playerWar.allies`) when war is
+  declared on their shared target. Cap `MAX_ENTENTES` 3.
+- **Broker foreign peace** (`brokerForeignPeace`): the player funds a white peace between two
+  rival powers — agency to shape the board, not just react. Weighted by the parties' temperament;
+  one `aiRng` draw.
+
+### §B — difficulty: encirclement (new persisted coalition + terminal loss)
+- `tickCoalition` (teeth-gated, nation-gated): a hostile/threatened world coalesces
+  (balance-of-power — even neutral rivals fear a hegemon), hardens month by month, issues an
+  ultimatum, and — unanswered — marches as one. Losing that coalition war = `gameOverCause
+  'encirclement'`, a new climate-independent run-ender. Three logged, escapable exits: split a
+  member (entente/pact/gift), `yieldToCoalition`, or win the war.
+- **Co-belligerents finally weigh** (`military.ts`): `allies`/`enemyAllies` add
+  `rivalWarPower×0.5` to their side, plus a multi-front score drag — a 4-power bloc now
+  out-masses a lone nation. Both lists empty → byte-identical, so every 1v1 war and the default
+  sweep are unchanged.
+
+### Schema v5 (owner-approved Hard Stop)
+`SAVE_SCHEMA_VERSION` 4→5; `ententes` + `coalition` in serialize/deserialize; `DealBasket.entente`
+rides the `counters` dump. Two version-pin tests updated 4→5.
+
+### Verification
+Build ✓, full suite **1639** green (11-test `tests/diplomacy-coalition.test.ts` added; default
+determinism / economy-balance / monetary-bounds all held → no re-pin). Parity sweeps
+(`SIM_AUTOPLAY_STATEHOOD=1`): standard **10 drowned / 6 encirclement / 4 revolution** (was ~85%
+climate); easy **20 drowned / 0 encirclement** (coast preserved); standard-passive **0
+encirclement** (no ambush of a non-dominant player). Adversarial review by Opus on the balance
+curve + war-power change.
+
+### Honest ceiling (recorded, not inflated)
+A skeptical external audit still rarely stamps a flat 10 (Difficulty 10 ⇒ community-playtested
+tuning; Mechanics 10 ⇒ authored campaign-scale systems). This is built to the credible maximum:
+diplomacy now genuinely multi-axis with player agency + a coalition metagame; difficulty has a
+second, diplomacy-driven, escapable run-ender and climate no longer monopolises endings.
+Insolvency stays player-reachable but non-autoplay-firing (carried-over gap).
+
 ## 2026-07-03 — performance & visual audit + fixes (branch `claude/performance-visual-audit-prxo5b`)
 
 Four parallel audits (regionview draw path, sprites/backdrop/minimap caching, sim tick

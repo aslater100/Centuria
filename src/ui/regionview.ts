@@ -5,7 +5,7 @@
  */
 import './panels.css';
 import type { Settlement, Scout, GovLean, GovType, MinisterRoleId, TreatyKind, CasusBelli, Mobilization, PeaceTerm, DealBasket, OccupationPolicy, MonetaryRegime, DepressionMeasure, TownFocus, WagePolicy, Route, SectorId, ArmyUnit, ArmyUnitType, TechNode, Province, DynastyNode, SectorBonusBreakdown } from '../sim/region';
-import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, DISTRICT_DEFS, INTERMEDIATE_GOODS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES, BRANCH_YEAR, UNIT_TYPES, ESPIONAGE_OPS, BLOC_RELATIONS_FLOOR, DEPRESSION_MEASURES, SUPPLY_SHOCK_INFLATION, SUPPLY_SHOCK_EXPORT_DRAG, AGRI_CLIMATE_THRESHOLD, INDUSTRY_BROWNOUT_THRESHOLD, FRONT_PEAK_LEVERAGE_SCALE, FRONT_OCCUPY_THRESHOLD, GOV_OUTLAY_RESERVE_MONTHS, frontPhase, FRONT_PHASE_LABEL, AGENDA_PEACE_RESISTANCE, AGENDA_TABLE_COST, rivalAgendaKind, INSOLVENCY_COLLAPSE_MONTHS } from '../sim/region';
+import { RegionSim, AGE_BANDS, ROLE_BONUS_DESC, GOV_LEANS, GOV_TYPES, MINISTER_ROLES, RAIL_ERA_YEAR, SEA_WALL_YEAR, TECH_TREE, REGION_LAWS, POLICY_CARDS, POLICY_SWAP_COST, TREATY_DEFS, RIVAL_ARCHETYPES, ENVOY_COST, GIFT_COST, ENVOY_COOLDOWN_DAYS, GIFT_COOLDOWN_DAYS, CASUS_BELLI_DEFS, MOBILIZATION_DEFS, PEACE_TERMS, WAR_SUPPORT_FLOOR, OCCUPATION_DEFS, MAX_OCCUPIED_MARCHES, BLOCKADE_UPKEEP_PER_POP, ACCORD_DEFECT_THRESHOLD, GEOENGINEER_COOLING, MIN_POLICY_RATE, MAX_POLICY_RATE, REGION_BUILDINGS, DISTRICT_DEFS, INTERMEDIATE_GOODS, SECTOR_IDS, SECTOR_NAMES, FOCUS_CHANGE_COST, REGION_EVENT_DEFS, TAX_BAND_LABELS, TAX_BAND_RATES, DEFAULT_CITY_POLICIES, ROUTE_SPECS, RIVAL_REGIMES, BRANCH_YEAR, UNIT_TYPES, ESPIONAGE_OPS, BLOC_RELATIONS_FLOOR, DEPRESSION_MEASURES, SUPPLY_SHOCK_INFLATION, SUPPLY_SHOCK_EXPORT_DRAG, AGRI_CLIMATE_THRESHOLD, INDUSTRY_BROWNOUT_THRESHOLD, FRONT_PEAK_LEVERAGE_SCALE, FRONT_OCCUPY_THRESHOLD, GOV_OUTLAY_RESERVE_MONTHS, frontPhase, FRONT_PHASE_LABEL, AGENDA_PEACE_RESISTANCE, AGENDA_TABLE_COST, rivalAgendaKind, INSOLVENCY_COLLAPSE_MONTHS, MAX_ENTENTES } from '../sim/region';
 import type { EspionageOp } from '../sim/region';
 import { rivalArmsCapacity, rivalContinent, sameContinent, COMPASS_FLAVOR } from '../sim/region';
 import type { NotableArc } from '../sim/region';
@@ -204,6 +204,8 @@ export class RegionView {
   private dealGoldToThem = 0;
   private dealGoldToYou = 0;
   private dealBorder = false;
+  /** Spec 12 §A1 — the entente target chip on the bargaining table; null = no alignment term. */
+  private dealEntente: number | null = null;
   /** Peace terms ticked at the war room's table (GDD §7.4). */
   private peacePicks = new Set<PeaceTerm>();
   /** The Century Report (GDD §8.4): shown once at 2100, dismissible. */
@@ -3307,6 +3309,14 @@ export class RegionView {
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-deal-btn')) {
       btn.onclick = () => this.openDealModal(Number(btn.dataset.rival));
     }
+    // Spec 12 §A2 — mediate a rival's foreign war.
+    for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-broker-btn')) {
+      btn.onclick = () => r.brokerForeignPeace(Number(btn.dataset.rival));
+    }
+    // Spec 12 §B — submit to the encirclement coalition's ultimatum.
+    this.statePanel.querySelector<HTMLButtonElement>('.coalition-yield-btn')?.addEventListener('click', () => {
+      r.yieldToCoalition();
+    });
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-preset-btn')) {
       btn.onclick = () => this.proposePresetDeal(Number(btn.dataset.rival), btn.dataset.preset!);
     }
@@ -3660,12 +3670,26 @@ export class RegionView {
         ? `<p class="insp-skills" title="Their industrial arms base — how well ${rv.name} can equip and sustain a war effort. Read via your intelligence penetration.">` +
           `⚒ Arms base: <b>${Math.round(rivalArmsCapacity(r, rv) * 100)}%</b></p>`
         : '';
+      // Spec 12 §A2 — broker a rival's foreign war: agency to shape the board,
+      // not just react. Only shown while `rv` is a party to a live foreign war.
+      const foreignWar = r.stateProclaimed ? r.foreignWars.find((w) => w.a === rv.id || w.b === rv.id) : undefined;
+      const brokerRow = foreignWar
+        ? (() => {
+            const other = r.rival(foreignWar.a === rv.id ? foreignWar.b : foreignWar.a);
+            const cost = Math.round(40 + Math.min(rv.pop, other?.pop ?? rv.pop) * 0.008);
+            const can = r.treasury >= cost;
+            return `<p class="insp-skills">⚔ fighting ${other?.name ?? '?'} abroad ` +
+              `<button class="mini dip-broker-btn" data-rival="${rv.id}" ${can ? '' : 'disabled'} ` +
+              `title="Fund a mediated peace between ${rv.name} and ${other?.name ?? '?'}: costs ${formatCurrency(cost)}, and may be refused.">` +
+              `Broker Peace ${formatCurrency(cost)}</button></p>`;
+          })()
+        : '';
       return `<div class="bar-row" title="${archetypeTooltip}\n\nAgenda: ${agendaShown}\n\n${personalityInfo}">` +
         `${flagHtml}<span class="row-label">${emblemHtml}<b>${rv.name}</b></span>` +
         meterBar(pct, relTone as 'good' | 'warn' | 'bad') +
         `<span>${rel}</span></div>` +
         `<p class="insp-skills" title="${recentHistory}">${gov} · ${COMPASS_FLAVOR[rv.compass]}${rv.borderSettled ? ' · border settled' : ''} · ${personalityInfo}${personalityInfo ? ' · ' : ''}${treaties}</p>` +
-        offerRow + counterRow + warRecordLine +
+        offerRow + counterRow + warRecordLine + brokerRow +
         verbs + espionage + rivalIntel + armsIntel;
     }).join('');
     // World affairs: what the powers are doing to each other (GDD §6.4)
@@ -3686,7 +3710,52 @@ export class RegionView {
     const world = wars || pacts ? `<p class="insp-skills">WORLD AFFAIRS</p>` + wars + pacts : '';
     const boom = r.day < r.warBoomUntil ? `<p class="insp-skills">WAR ABROAD — export prices booming</p>` : '';
     const exports = r.exportEarningsLastMonth > 0 ? `<p>exports ` + formatCurrency(Math.floor(r.exportEarningsLastMonth)) + `/mo</p>` : '';
-    return provinceToggleHtml + claimLandHtml + `<p class="insp-skills">DIPLOMACY (relations −100..+100)</p>` + this.warHtml() + boom + exports + this.tradeBlocHtml() + this.sanctionsHtml() + this.rivalBlocsHtml() + this.negotiationsHtml() + rows + world;
+    return provinceToggleHtml + claimLandHtml + `<p class="insp-skills">DIPLOMACY (relations −100..+100)</p>` +
+      this.coalitionHtml() + this.warHtml() + boom + exports + this.tradeBlocHtml() + this.sanctionsHtml() +
+      this.rivalBlocsHtml() + this.ententesHtml() + this.negotiationsHtml() + rows + world;
+  }
+
+  /** Spec 12 §B — the encirclement warning: a hostile bloc coordinating against
+   *  the player, prominent by design (it can end the run — GDD "terminal" tier).
+   *  Reuses the crisis-banner shell (glyph + text, not hue-only, per U7). */
+  private coalitionHtml(): string {
+    const r = this.region;
+    const c = r.coalition;
+    if (!c) return '';
+    const members = c.memberIds.map((id) => r.rival(id)?.name).filter(Boolean).join(', ') || '?';
+    if (c.warDeclared) {
+      return `<div class="crisis-banner terminal">` +
+        `<p class="cb-title">⚠ THE COALITION HAS MARCHED</p>` +
+        `<p class="cb-status">${members} declared war together — the encirclement war is now the active war above.</p>` +
+        `</div>`;
+    }
+    const cohesionPct = Math.round(c.cohesion);
+    const ultimatum = c.demand != null
+      ? `<p class="cb-status">Ultimatum — <b>${c.demand === 'tribute' ? 'pay tribute' : 'disarm'}</b>, issued ${this.dateOfDay(c.ultimatumDay!)}.</p>` +
+        `<p><button class="mini coalition-yield-btn" title="Submit to their terms: the bloc disperses at a cost to treasury/legitimacy.">Yield to Ultimatum</button></p>`
+      : '';
+    return `<div class="crisis-banner">` +
+      `<p class="cb-title">⚠ ENCIRCLEMENT — a coalition forms against you</p>` +
+      `<p class="cb-status">members: <b>${members}</b></p>` +
+      `<div class="bar-row" title="Coalition cohesion 0..100: dissolves below ~25, issues an ultimatum at 60+">` +
+      `<span class="row-label">cohesion</span>` +
+      meterBar(cohesionPct, cohesionPct >= 60 ? 'bad' : 'warn') +
+      `<span>${cohesionPct}</span></div>` +
+      ultimatum +
+      `<p class="insp-skills">Three ways out: split a member below the join line (a deal, entente, or gift), yield to the ultimatum, or win the war outright.</p>` +
+      `</div>`;
+  }
+
+  /** Spec 12 §A1 — the player's standing bloc: ententes signed against named rivals. */
+  private ententesHtml(): string {
+    const r = this.region;
+    if (r.ententes.length === 0) return '';
+    const rows = r.ententes.map((e) => {
+      const withName = r.rival(e.withRivalId)?.name ?? '?';
+      const targetName = r.rival(e.targetRivalId)?.name ?? '?';
+      return `<p class="t-sm c-muted">${withName} ⚔ vs ${targetName} (signed ${this.dateOfDay(e.signedDay)})</p>`;
+    }).join('');
+    return `<p class="insp-skills">YOUR ENTENTES (${r.ententes.length}/${MAX_ENTENTES})</p>` + rows;
   }
 
   /** Spec 10 §NEG: the open-negotiations ledger — each haggle, whose move it is,
@@ -4327,6 +4396,7 @@ export class RegionView {
     this.dealGoldToThem = 0;
     this.dealGoldToYou = 0;
     this.dealBorder = false;
+    this.dealEntente = null;
     this.renderDealModal();
   }
 
@@ -4341,6 +4411,7 @@ export class RegionView {
       goldToThem: this.dealGoldToThem,
       goldToYou: this.dealGoldToYou,
       borderSettlement: this.dealBorder,
+      entente: this.dealEntente,
     };
   }
 
@@ -4424,12 +4495,27 @@ export class RegionView {
     const borderRow = `<p><label title="Survey and sign the frontier: no more border friction, and no border casus belli — for either side">` +
       `<input type="checkbox" id="deal-border" ${this.dealBorder ? 'checked' : ''} ${rv.borderSettled ? 'disabled' : ''}> ` +
       `Border Settlement <span class="insp-skills">— ${borderHint}</span></label></p>`;
+    // Spec 12 §A1 — the entente chip: pledge alignment with `rv` against a third
+    // rival. Capped at MAX_ENTENTES active ententes; the select disables at the cap.
+    const ententeCapped = r.ententes.length >= MAX_ENTENTES;
+    const ententeTargets = r.rivals.filter((x) => x.id !== rv.id);
+    const ententeOptions = ententeTargets.map((x) => {
+      const appetite = r.ententeAppetite(rv, x.id);
+      const hint = appetite >= 0 ? 'keen' : 'reluctant';
+      return `<option value="${x.id}" ${this.dealEntente === x.id ? 'selected' : ''}>${x.name} (${hint})</option>`;
+    }).join('');
+    const ententeRow = ententeTargets.length > 0
+      ? `<p><label title="Pledge alignment against a third power: signing costs ${rv.name} relations with the target and gains you +6 with ${rv.name}. If you later declare war on the target, ${rv.name} may roll in on your side.">` +
+        `Entente — align against <select id="deal-entente-select" ${ententeCapped ? 'disabled' : ''}>` +
+        `<option value="">none</option>${ententeOptions}</select></label> ` +
+        `<span class="insp-skills">${ententeCapped ? `bloc capped at ${MAX_ENTENTES}/${MAX_ENTENTES} — retire one to add another` : `${r.ententes.length}/${MAX_ENTENTES} ententes signed`}</span></p>`
+      : '';
     this.dealModal.innerHTML =
       `<div class="ceremony-box">` +
       `<h2>THE BARGAINING TABLE — ${rv.name.toUpperCase()}</h2>` +
       `<p class="insp-skills">${RIVAL_ARCHETYPES[rv.archetype].name} · relations ${Math.round(rv.relations)} · ` +
       `every item is priced from their situation and personality (GDD §6.3)</p>` +
-      treatyRows + borderRow +
+      treatyRows + borderRow + ententeRow +
       `<p><label>${getCurrencySymbol()} to them <input type="number" id="deal-gold-them" class="num-input" min="0" step="5" value="${this.dealGoldToThem}"></label> ` +
       `<label>${getCurrencySymbol()} asked of them <input type="number" id="deal-gold-you" class="num-input" min="0" step="5" value="${this.dealGoldToYou}"></label> ` +
       `<span class="insp-skills">(treasury ` + formatCurrency(Math.floor(r.treasury)) + `)</span></p>` +
@@ -4457,6 +4543,11 @@ export class RegionView {
       this.dealBorder = (e.target as HTMLInputElement).checked;
       refreshVerdict();
     };
+    this.dealModal.querySelector<HTMLSelectElement>('#deal-entente-select')?.addEventListener('change', (e) => {
+      const v = (e.target as HTMLSelectElement).value;
+      this.dealEntente = v === '' ? null : Number(v);
+      refreshVerdict();
+    });
     this.dealModal.querySelector<HTMLInputElement>('#deal-gold-them')!.oninput = (e) => {
       this.dealGoldToThem = Math.max(0, Number((e.target as HTMLInputElement).value) || 0);
       refreshVerdict();

@@ -17,7 +17,7 @@
  * `nextRivalBlocId` counter) were made public for this seam.
  */
 import type { RegionSim } from '../region';
-import type { ForeignWar, RivalNation, CasusBelli, WarScar } from '../region';
+import type { ForeignWar, RivalNation, CasusBelli, WarScar, PlayerWar } from '../region';
 import {
   blocAffinity,
   sameContinent,
@@ -45,6 +45,15 @@ import {
   CLIMATE_BLOC_RELATIONS_THRESHOLD,
   CLIMATE_BLOC_GREEN_THRESHOLD,
   REVANCHISM_BUILDUP_YEARS,
+  COALITION_MIN_MEMBERS,
+  COALITION_JOIN_REL,
+  COALITION_LEAVE_REL,
+  COALITION_FEAR_REL,
+  COALITION_THREAT_BAR,
+  COHESION_START,
+  COHESION_DISSOLVE,
+  COHESION_ULTIMATUM,
+  COALITION_ULTIMATUM_DAYS,
 } from '../region';
 import { formatCurrency } from '../defs';
 import { tickPlayerWar } from './military';
@@ -186,6 +195,133 @@ export function tickNegotiations(r: RegionSim): void {
   }
 }
 
+/** Spec 12 §B — the encirclement pressure. A hostile, threatened world coordinates
+ *  into a coalition that hardens month by month, issues an ultimatum, and — left
+ *  unanswered — marches together in a war whose defeat ends the run. Three logged,
+ *  reachable exits: split a member below the join line (entente/pact/gift), yield to
+ *  the ultimatum, or win the war. Teeth-gated: on easy (unrestPressure 0) the world
+ *  never coalesces and no RNG is drawn, so the default sweep stays byte-identical. */
+export function tickCoalition(r: RegionSim): void {
+  // A coalition whose war is over — the player WON it, negotiated a peace, or the
+  // bloc's lead vanished — is spent. Clear it here (capitulation to the bloc is the
+  // terminal path and clears it in capitulate()). Without this a survived coalition
+  // war leaves a `warDeclared` zombie that never dissolves, and a later, unrelated
+  // capitulation would read as it and fire a chain-less encirclement game-over.
+  if (r.coalition?.warDeclared && (!r.playerWar || !r.coalition.memberIds.includes(r.playerWar.rivalId))) {
+    r.coalition = null;
+    r.addLog('The coalition’s war is spent — the bloc breaks up.', 'good');
+  }
+  const teeth = (r.difficultySettings.unrestPressure ?? 1) > 0;
+  if (!teeth) {
+    // Difficulty softened mid-run: let a coalition that hasn't marched yet lapse.
+    if (r.coalition && !r.coalition.warDeclared) r.coalition = null;
+    return;
+  }
+  if (!r.nationProclaimed) return; // only a nation is large enough to encircle
+
+  const threatening = r.playerCoalitionThreat() >= COALITION_THREAT_BAR;
+  // A rival not bound to the player (pact/entente) and not its current war foe is
+  // available if it either resents the player (grievance) or simply fears a hegemon
+  // (balance-of-power). `staying` adds hysteresis so a grievance member at the join
+  // line doesn't flicker — it must recover past the leave line (and, under a standing
+  // threat, past neutrality) to break ranks.
+  const unbound = (rv: RivalNation): boolean =>
+    !rv.treaties.includes('non_aggression') &&
+    !rv.treaties.includes('defensive_pact') &&
+    !r.ententes.some((e) => e.withRivalId === rv.id) &&
+    r.playerWar?.rivalId !== rv.id;
+  const eligibleToJoin = (rv: RivalNation): boolean =>
+    unbound(rv) && (rv.relations <= COALITION_JOIN_REL || (threatening && rv.relations < COALITION_FEAR_REL));
+  const staying = (rv: RivalNation): boolean =>
+    unbound(rv) && (rv.relations <= COALITION_LEAVE_REL || (threatening && rv.relations < COALITION_FEAR_REL));
+
+  const c = r.coalition;
+  if (c) {
+    if (!c.warDeclared) {
+      // Peel away anyone the player has bought, allied, or simply mollified.
+      c.memberIds = c.memberIds.filter((id) => {
+        const rv = r.rival(id);
+        return rv ? staying(rv) : false;
+      });
+      if (c.memberIds.length < COALITION_MIN_MEMBERS) {
+        r.coalition = null;
+        r.addLog('The coalition against you frays and disperses — for now.', 'good');
+        return;
+      }
+    }
+    // Cohesion hardens under player threat + members' shared hostility, decays otherwise.
+    const threat = r.playerCoalitionThreat();
+    const meanHostility =
+      c.memberIds.reduce((s, id) => s + Math.max(0, -(r.rival(id)?.relations ?? 0)), 0) /
+      (c.memberIds.length * 100);
+    c.cohesion = Math.max(0, Math.min(100, c.cohesion + threat * 6 + meanHostility * 4 - 3));
+    if (!c.warDeclared && c.cohesion < COHESION_DISSOLVE) {
+      r.coalition = null;
+      r.addLog('The coalition against you loses its nerve and dissolves.', 'good');
+      return;
+    }
+    if (!c.warDeclared && c.cohesion >= COHESION_ULTIMATUM) {
+      if (c.ultimatumDay == null) {
+        c.demand = r.treasury > r.gdpLastMonth ? 'tribute' : 'disarm';
+        c.ultimatumDay = r.day;
+        const names = c.memberIds.map((id) => r.rival(id)?.name).filter(Boolean).join(', ');
+        r.addLog(
+          `ULTIMATUM: the coalition (${names}) demands you ${c.demand === 'tribute' ? 'pay tribute' : 'stand down your arms'}. ` +
+          'Yield, split them, or face them together.',
+          'bad',
+        );
+      } else if (r.day - c.ultimatumDay >= COALITION_ULTIMATUM_DAYS && !r.playerWar) {
+        // The window closed unanswered — the bloc marches as one.
+        const members = c.memberIds
+          .map((id) => r.rival(id))
+          .filter((rv): rv is RivalNation => !!rv);
+        if (members.length >= COALITION_MIN_MEMBERS) {
+          const lead = members.reduce((a, b) => (b.pop > a.pop ? b : a));
+          r.startPlayerWar(lead, 'encirclement', true);
+          // startPlayerWar always assigns playerWar; the cast defeats the void-return
+          // narrowing so the rest of the bloc can be enrolled as co-belligerent enemies.
+          const pw = r.playerWar as PlayerWar | null;
+          if (pw) {
+            for (const m of members) {
+              if (m.id !== lead.id && !pw.enemyAllies.includes(m.id)) {
+                pw.enemyAllies.push(m.id);
+                m.relations = r.clampRel(Math.min(m.relations, -60));
+              }
+            }
+          }
+          c.warDeclared = true;
+          r.addLog(
+            `THE COALITION MARCHES: ${lead.name} leads the bloc against you. This is the war they meant to fight.`,
+            'bad',
+          );
+        }
+      }
+    }
+    return;
+  }
+
+  // Formation: a coalition forms in the quiet, not mid-war.
+  if (r.playerWar) return;
+  if (r.playerCoalitionThreat() < COALITION_THREAT_BAR) return;
+  const eligible = r.rivals.filter(eligibleToJoin);
+  if (eligible.length < COALITION_MIN_MEMBERS) return;
+  if (!r.rng.chance(0.20)) return; // it coalesces over months, not the instant the bar is met
+  const members = eligible.slice(0, 4);
+  r.coalition = {
+    memberIds: members.map((rv) => rv.id),
+    formedDay: r.day,
+    cohesion: COHESION_START,
+    demand: null,
+    ultimatumDay: null,
+    warDeclared: false,
+  };
+  r.addLog(
+    `ENCIRCLEMENT: ${members.map((rv) => rv.name).join(', ')} align against you — a hostile bloc takes shape. ` +
+    'Split them, satisfy them, or break them.',
+    'bad',
+  );
+}
+
   /** Monthly diplomacy tick: emergence, relations drift, AI offers,
    *  hostile mischief, regime change abroad, and foreign wars. */
 export function updateDiplomacy(r: RegionSim): void {
@@ -302,6 +438,7 @@ export function updateDiplomacy(r: RegionSim): void {
       if (r.rng.chance(0.01)) r.changeRegime(rv, 'drift');
     }
     tickForeignRelations(r);
+    tickCoalition(r);            // Spec 12 §B: a hostile world encircles the player
     tickPlayerWar(r);
     tickRivalEspionage(r);       // Phase 6: rivals spy on the player
     tickRivalTradeBlocActivity(r); // Phase 6: rivals form their own blocs

@@ -1772,6 +1772,9 @@ export interface DealBasket {
   goldToThem: number;
   goldToYou: number;
   borderSettlement: boolean;
+  /** Spec 12 §A1 — an *entente*: signer + player pledge alignment against this
+   *  target rival id. null/undefined = no alignment term (all legacy baskets). */
+  entente?: number | null;
 }
 
 /** The AI's reading of a basket, in diplomatic points — computed from its
@@ -2128,6 +2131,46 @@ export interface Negotiation {
   expiresDay: number;
 }
 
+/** Spec 12 §A1 — a directed player↔rival alignment against a named third power.
+ *  The player's tool for building a bloc (and for splitting a hostile one). */
+export interface Entente {
+  withRivalId: number;
+  targetRivalId: number;
+  signedDay: number;
+}
+/** The most ententes the player may hold at once — a bloc, not a web. */
+export const MAX_ENTENTES = 3;
+
+/** Spec 12 §B — the anti-player coalition (the encirclement pressure). A hostile,
+ *  threatened world coordinates; unanswered, it can end the run. Persisted (v5). */
+export interface Coalition {
+  memberIds: number[];
+  formedDay: number;
+  /** 0..100 — below COHESION_DISSOLVE it falls apart, at 100 it is ironclad. */
+  cohesion: number;
+  /** The standing demand once the bloc hardens, or null before the ultimatum. */
+  demand: 'tribute' | 'disarm' | null;
+  /** Day the ultimatum was issued (null before). Window = COALITION_ULTIMATUM_DAYS. */
+  ultimatumDay: number | null;
+  /** Set once the bloc marches — capitulating THIS war is the terminal ending. */
+  warDeclared: boolean;
+}
+/** Spec 12 §B tuning — finalized against the standard-tier parity sweep. Only
+ *  live when difficulty teeth are on (unrestPressure > 0); easy never coalesces. */
+export const COALITION_MIN_MEMBERS = 3;
+export const COALITION_JOIN_REL = -35;   // relations at or below → eligible on grievance alone
+export const COALITION_LEAVE_REL = -20;  // grievance member peels away once relations recover here
+/** Balance-of-power: a dominant/belligerent player (threat ≥ bar) draws even NEUTRAL
+ *  rivals into a balancing bloc out of fear — only a rival who genuinely likes you
+ *  (relations ≥ this) stays out. Splitting a fear-coalition therefore means actively
+ *  befriending members past neutrality (or reducing your own threat), not just a nudge. */
+export const COALITION_FEAR_REL = 15;
+export const COALITION_THREAT_BAR = 0.45; // player must loom this large to trigger it
+export const COHESION_START = 40;
+export const COHESION_DISSOLVE = 25;
+export const COHESION_ULTIMATUM = 60;
+export const COALITION_ULTIMATUM_DAYS = 180;
+
 export const ENVOY_COST = 15;
 export const GIFT_COST = 40;
 export const ENVOY_COOLDOWN_DAYS = 90;
@@ -2270,7 +2313,7 @@ export interface ProvincialArmy {
 // ---- War (GDD §7): casus belli → mobilization → war score → negotiated peace ----
 
 /** Why we fight (GDD §7.1): CB quality sets home-front war support at declaration. */
-export type CasusBelli = 'sponsored_raids' | 'border_dispute' | 'fabricated' | 'revanchism' | 'resource_dispute';
+export type CasusBelli = 'sponsored_raids' | 'border_dispute' | 'fabricated' | 'revanchism' | 'resource_dispute' | 'encirclement';
 
 export const CASUS_BELLI_DEFS: Record<CasusBelli, { name: string; support: number; desc: string }> = {
   sponsored_raids: {
@@ -2292,6 +2335,10 @@ export const CASUS_BELLI_DEFS: Record<CasusBelli, { name: string; support: numbe
   resource_dispute: {
     name: 'Resource Dispute', support: 70,
     desc: "Their granaries and mines sit fat while the world runs short — the treasury calls it plunder waiting to happen.",
+  },
+  encirclement: {
+    name: 'Encirclement', support: 75,
+    desc: 'A coalition of frightened powers has resolved to cut you down together — the war they always meant to fight.',
   },
 };
 
@@ -3702,9 +3749,10 @@ export const MIN_SETTLEMENT_SPACING = 8;
 /** Save-blob schema version. v2 added the D1/D2 persisted counters
  *  (hyperinflationMonths, postRevoltGrievanceMonths); v3 (spec 10) adds persistent
  *  diplomacy negotiations and notable narrative-arc state; v4 (spec 11) adds
- *  `insolvencyMonths` (the §ECON-COLLAPSE counter). Saves below this are a hard
- *  cutover — `deserialize` rejects them via IncompatibleSaveError rather than migrating. */
-export const SAVE_SCHEMA_VERSION = 4;
+ *  `insolvencyMonths` (the §ECON-COLLAPSE counter); v5 (spec 12) adds `ententes`
+ *  (player bloc alignment) and `coalition` (the encirclement pressure). Saves below
+ *  this are a hard cutover — `deserialize` rejects them via IncompatibleSaveError. */
+export const SAVE_SCHEMA_VERSION = 5;
 
 /** Thrown by `RegionSim.deserialize` when a save blob predates SAVE_SCHEMA_VERSION.
  *  Callers (load menu, boot) catch this and offer delete-only rather than crashing. */
@@ -3852,6 +3900,10 @@ export class RegionSim {
   negotiations: Negotiation[] = [];
   /** Counter-offers from the bargaining table, awaiting signature (§6.3). */
   counters: DealCounter[] = [];
+  /** Spec 12 §A1 — the player's bloc: standing ententes against named powers. */
+  ententes: Entente[] = [];
+  /** Spec 12 §B — the anti-player coalition, if the world has encircled you. */
+  coalition: Coalition | null = null;
   /** Treaties the player has torn up — priced into every future ask. */
   treatiesBroken = 0;
   /** Foreign wars move prices (GDD §6.4): exports boom while this runs. */
@@ -10771,6 +10823,24 @@ export class RegionSim {
     return (4 - rv.weights.expansion) * 1.2 + rv.weights.grudge * 0.4;
   }
 
+  /** Spec 12 §A1 — what an entente against `targetId` is worth *to `rv`*, in
+   *  diplomatic points. A rival aligns against a power it already resents (and
+   *  the honor/expansion-minded relish taking a side); it will not turn on an
+   *  ally, on a friend, or side with a player it does not trust. Positive =
+   *  appetite the player can bank; negative = a concession the rival wants paying
+   *  for. A missing/invalid target reads as 0 so all legacy baskets are unchanged. */
+  ententeAppetite(rv: RivalNation, targetId: number): number {
+    const target = this.rival(targetId);
+    if (!target || targetId === rv.id) return 0;
+    // Won't march against its own ally — no price makes that basket sign.
+    if (this.alliances.includes(this.pairKey(rv.id, targetId))) return -40;
+    const pairRel = this.pairRelations(rv.id, targetId);
+    let appetite = -pairRel * 0.12;                     // the more it hates the target, the keener
+    appetite += rv.weights.honor * 0.3 + rv.weights.expansion * 0.2 - 3; // taking a side is a commitment
+    appetite += rv.relations * 0.05;                    // and it must trust the hand it takes
+    return appetite;
+  }
+
   /** What £1 buys at this court, in points — commerce raises the bid. */
   private goldRate(rv: RivalNation): number {
     return (0.6 + rv.weights.commerce * 0.08) / GOLD_PER_POINT;
@@ -10790,11 +10860,18 @@ export class RegionSim {
 
   /** Strip a basket to the items that still mean anything. */
   private normalizeBasket(rv: RivalNation, b: DealBasket): DealBasket {
+    // An entente term survives only if it names a real *other* power, isn't already
+    // pledged with this signer, and doesn't push the player past the bloc cap.
+    const t = b.entente ?? null;
+    const already = t != null && this.ententes.some((e) => e.withRivalId === rv.id && e.targetRivalId === t);
+    const roomForBloc = already || this.ententes.length < MAX_ENTENTES;
+    const entente = t != null && t !== rv.id && this.rival(t) && !already && roomForBloc ? t : null;
     return {
       treaties: [...new Set(b.treaties)].filter((k) => !rv.treaties.includes(k)),
       goldToThem: Math.max(0, Math.round(b.goldToThem || 0)),
       goldToYou: Math.max(0, Math.round(b.goldToYou || 0)),
       borderSettlement: b.borderSettlement && !rv.borderSettled,
+      entente,
     };
   }
 
@@ -10804,12 +10881,13 @@ export class RegionSim {
    *  Pure: the UI live-previews the verdict while the player composes. */
   evaluateDeal(rv: RivalNation, basket: DealBasket): DealVerdict {
     const b = this.normalizeBasket(rv, basket);
-    const empty = b.treaties.length === 0 && !b.borderSettlement && b.goldToThem === 0 && b.goldToYou === 0;
+    const empty = b.treaties.length === 0 && !b.borderSettlement && b.goldToThem === 0 && b.goldToYou === 0 && b.entente == null;
     let get = 0;
     let give = 0;
     const weigh = (v: number) => { if (v >= 0) get += v; else give += -v; };
     for (const k of b.treaties) weigh(this.treatyAppetite(rv, k));
     if (b.borderSettlement) weigh(this.borderAppetite(rv));
+    if (b.entente != null) weigh(this.ententeAppetite(rv, b.entente));
     get += b.goldToThem * this.goldRate(rv);
     give += b.goldToYou * this.goldRate(rv);
     const cost = give * this.dealPremium(rv) + this.tableCost(rv);
@@ -10887,10 +10965,45 @@ export class RegionSim {
     return true;
   }
 
+  /** Spec 12 §A2 — the player as mediator (agency to shape the board, not just
+   *  react). Fund a white peace between two rival powers: no dictated victor, no
+   *  devastation — a tense truce, and gratitude from both. Weighted by the parties'
+   *  temperament and their opinion of you; one `aiRng` draw. Returns whether peace
+   *  was struck. All draws on the AI stream, so the open sim stays reproducible. */
+  brokerForeignPeace(rivalId: number): boolean {
+    if (!this.stateProclaimed) return false;
+    const w = this.foreignWars.find((x) => x.a === rivalId || x.b === rivalId);
+    if (!w) return false;
+    const a = this.rival(w.a);
+    const b = this.rival(w.b);
+    if (!a || !b) return false;
+    const cost = Math.round(40 + Math.min(a.pop, b.pop) * 0.008);
+    if (this.treasury < cost) return false;
+    const relAvg = (a.relations + b.relations) / 2;
+    const p = Math.max(0.15, Math.min(0.9,
+      0.45 + relAvg / 200 - (a.weights.grudge + b.weights.grudge) * 0.015));
+    if (!this.aiRng.chance(p)) {
+      a.relations = this.clampRel(a.relations - 2);
+      b.relations = this.clampRel(b.relations - 2);
+      this.addLog(`${a.name} and ${b.name} rebuff your mediation — the guns speak on.`, 'info');
+      return false;
+    }
+    this.treasury -= cost;
+    this.foreignWars = this.foreignWars.filter((x) => x !== w);
+    this.rivalPairs[this.pairKey(a.id, b.id)] = this.clampRel(-20); // a wary truce, not a dictated −60
+    a.relations = this.clampRel(a.relations + 4);
+    b.relations = this.clampRel(b.relations + 4);
+    this.noteHistory(a, `Accepted ${this.stateName || 'the State'}'s mediated peace with ${b.name}, ${this.year}.`);
+    this.noteHistory(b, `Accepted ${this.stateName || 'the State'}'s mediated peace with ${a.name}, ${this.year}.`);
+    this.addLog(`MEDIATION: ${this.stateName || 'the State'} brokers peace between ${a.name} and ${b.name} — ${formatCurrency(cost)} well spent.`, 'good');
+    return true;
+  }
+
   /** A basket in plain words, for logs and the panel. */
   basketLabel(b: DealBasket): string {
     const parts = b.treaties.map((k) => TREATY_DEFS[k].name);
     if (b.borderSettlement) parts.push('Border Settlement');
+    if (b.entente != null) parts.push(`Entente vs ${this.rival(b.entente)?.name ?? 'a rival'}`);
     if (b.goldToThem > 0) parts.push(`` + formatCurrency(b.goldToThem) + ` to them`);
     if (b.goldToYou > 0) parts.push(`` + formatCurrency(b.goldToYou) + ` to you`);
     return parts.join(' + ') || 'nothing';
@@ -10907,7 +11020,18 @@ export class RegionSim {
       rv.borderSettled = true;
       this.noteHistory(rv, `Settled the frontier with ${this.stateName || 'the State'}, ${this.year}.`);
     }
-    rv.relations = this.clampRel(rv.relations + 4 + b.treaties.length * 2);
+    // Spec 12 §A1 — the entente is inked: the bloc grows, and the named power
+    // reads the alignment as the hostile signal it is (and, being courted, a
+    // coalition member peeled onto the player's side leaves the encirclement).
+    if (b.entente != null) {
+      const target = this.rival(b.entente);
+      if (target && !this.ententes.some((e) => e.withRivalId === rv.id && e.targetRivalId === b.entente)) {
+        this.ententes.push({ withRivalId: rv.id, targetRivalId: b.entente, signedDay: this.day });
+        target.relations = this.clampRel(target.relations - 8);
+        this.noteHistory(rv, `Entente with ${this.stateName || 'the State'} against ${target.name}, ${this.year}.`);
+      }
+    }
+    rv.relations = this.clampRel(rv.relations + 4 + b.treaties.length * 2 + (b.entente != null ? 2 : 0));
     this.addLog(`ACCORD: ${this.stateName || 'the State'} and ${rv.name} sign — ${this.basketLabel(b)}.`, 'good');
   }
 
@@ -11557,6 +11681,21 @@ export class RegionSim {
         ally.relations = this.clampRel(Math.min(ally.relations, -40));
         this.noteHistory(ally, `Marched beside ${rv.name} against ${this.nationName || this.stateName || 'the nation'}, ${this.year}.`);
         this.addLog(`${ally.name} honors its alliance with ${rv.name} — its armies take the field against you.`, 'bad');
+      }
+    }
+    // Spec 12 §A1 — ententes come due: a partner pledged against THIS target may
+    // honor the alignment and take the field beside you (mirror of the enemy-ally
+    // co-belligerence above). The bloc the player built now pays out.
+    for (const e of this.ententes) {
+      if (e.targetRivalId !== rv.id) continue;
+      const partner = this.rival(e.withRivalId);
+      if (!partner || partner.id === rv.id) continue;
+      if (this.playerWar.allies.includes(partner.id) || this.playerWar.enemyAllies.includes(partner.id)) continue;
+      if (this.rng.chance(0.4 + partner.weights.honor * 0.05)) {
+        this.playerWar.allies.push(partner.id);
+        partner.relations = this.clampRel(partner.relations + 5);
+        this.noteHistory(partner, `Honored the entente and marched against ${rv.name}, ${this.year}.`);
+        this.addLog(`${partner.name} honors its entente with you — its armies take the field against ${rv.name}.`, 'good');
       }
     }
     const nation = this.nationName || this.stateName || 'the nation';
@@ -12281,10 +12420,52 @@ export class RegionSim {
   }
 
   /** Sue for terms you cannot refuse — or be made to (GDD §7.4). */
+  /** Spec 12 §B — how large the player looms to a hostile world, 0..1: the
+   *  greater of territorial dominance and belligerence (broken seals, an offensive
+   *  war under way, marches held under occupation). Both axes are player-driven and
+   *  legible, so the encirclement pressure never reads as a silent ambush. */
+  playerCoalitionThreat(): number {
+    // Relative dominance: with a handful of rivals splitting the rest of the map, a
+    // nation holding even a third of it is the hegemon others balance against.
+    const dominance = Math.max(0, (this.playerTerritoryControl() - 0.18) / 0.32);
+    let belligerence = this.treatiesBroken * 0.12;
+    if (this.playerWar && !this.playerWar.defensive) belligerence += 0.35;
+    belligerence += (this.playerWar?.occupied ?? 0) * 0.10;
+    return Math.max(0, Math.min(1, Math.max(dominance, belligerence)));
+  }
+
+  /** Spec 12 §B — submit to the coalition's ultimatum: the bloc disperses, at a
+   *  price. Tribute strips the treasury; disarmament costs standing and pride.
+   *  Either way relations with the members thaw and the encirclement lifts. Only
+   *  valid on a standing ultimatum before the bloc marches. */
+  yieldToCoalition(): boolean {
+    const c = this.coalition;
+    if (!c || c.demand == null || c.warDeclared) return false;
+    if (c.demand === 'tribute') {
+      const pay = Math.max(0, Math.round(this.treasury * 0.15)); // never pays the player in debt
+      this.treasury -= pay;
+      this.legitimacy = Math.max(0, this.legitimacy - 5);
+      this.addLog(`You buy off the coalition — ${formatCurrency(pay)} in tribute, and the bloc disperses. (Legitimacy −5.)`, 'bad');
+    } else {
+      this.legitimacy = Math.max(0, this.legitimacy - 12);
+      this.addLog('You submit to the coalition’s terms — the nation stands down, and the bloc disperses. (Legitimacy −12.)', 'bad');
+    }
+    for (const id of c.memberIds) {
+      const rv = this.rival(id);
+      if (rv) rv.relations = this.clampRel(rv.relations + 15);
+    }
+    this.coalition = null;
+    return true;
+  }
+
   capitulate(): boolean {
     const w = this.playerWar;
     const rv = w ? this.rival(w.rivalId) : undefined;
     if (!w || !rv) return false;
+    // Spec 12 §B — was THIS the coalition's war? (Capture before playerWar clears.)
+    const c = this.coalition;
+    const wasCoalitionWar = !!(c && c.warDeclared &&
+      (c.memberIds.includes(w.rivalId) || w.enemyAllies.some((id) => c.memberIds.includes(id))));
     this.recordWarScar(w, rv, 'defeat');
     this.playerWar = null;
     const nation = this.nationName || 'the nation';
@@ -12302,6 +12483,22 @@ export class RegionSim {
       this.noteHistory(ally, `Shared in ${nation}'s defeat by ${rv.name}, ${this.year}.`);
     }
     this.noteHistory(rv, `Dictated peace to ${nation}, ${this.year}.`);
+    // Spec 12 §B terminal — losing the coalition's war is the encirclement ending:
+    // a whole hostile bloc dictates the peace and the nation is carved up. Terminal
+    // only where difficulty has teeth (easy never coalesces in the first place).
+    if (wasCoalitionWar) {
+      this.coalition = null;
+      const teeth = (this.difficultySettings.unrestPressure ?? 1) > 0;
+      if (teeth) {
+        this.gameOver = true;
+        this.gameOverCause = 'encirclement';
+        this.addLog(
+          'DISMEMBERED: the coalition dictates the peace and carves up the nation. (Failure state: encirclement.)',
+          'bad',
+        );
+        return true;
+      }
+    }
     this.addLog(
       `DEFEAT: ${rv.name} dictates the peace — reparations, a stripped treasury, ` +
       `and a generation that will not forget.`,
@@ -12813,6 +13010,8 @@ export class RegionSim {
       hyperinflationMonths: this.hyperinflationMonths,
       insolvencyMonths: this.insolvencyMonths,
       negotiations: this.negotiations,
+      ententes: this.ententes,
+      coalition: this.coalition,
       postRevoltGrievanceMonths: this.postRevoltGrievanceMonths,
     });
   }
@@ -13165,6 +13364,8 @@ export class RegionSim {
     r.hyperinflationMonths = d.hyperinflationMonths ?? 0;
     r.insolvencyMonths = d.insolvencyMonths ?? 0;
     r.negotiations = d.negotiations ?? [];
+    r.ententes = d.ententes ?? [];
+    r.coalition = d.coalition ?? null;
     r.postRevoltGrievanceMonths = d.postRevoltGrievanceMonths ?? {};
     // Recompute cached perf fields after full restore.
     r.activeRailRoutes = r.routes.filter((rt) => rt.kind === 'rail' && rt.condition > 50).length;
