@@ -958,6 +958,8 @@ export interface RegionLaw {
   requiresNation?: boolean; // gates nation-tier laws behind Proclamation
   domain: 'economic' | 'social' | 'security' | 'information';
   desc: string;
+  /** Faction this law is aligned with; ministers opposed to it may resign in protest. */
+  factionAlignment?: string;
 }
 
 export const REGION_LAWS: RegionLaw[] = [
@@ -10095,7 +10097,7 @@ export class RegionSim {
     this.addLog(`LAW ENACTED: "${law.name}". ${law.desc.split('.')[0]}.`, 'good');
 
     // Resignation check: ministers who oppose the law's faction alignment may resign
-    const lawFaction = (law as any).factionAlignment as string | undefined;
+    const lawFaction = law.factionAlignment;
     if (lawFaction) {
       for (let i = 0; i < this.ministers.length; i++) {
         const m = this.ministers[i];
@@ -10117,7 +10119,7 @@ export class RegionSim {
       security: 'defence',
       information: 'press',
     };
-    const portfolio = domainToPortfolio[(law as any).domain as string];
+    const portfolio = domainToPortfolio[law.domain];
     if (portfolio) this.recordPortfolioAction(portfolio);
 
     return true;
@@ -13069,7 +13071,7 @@ export class RegionSim {
    *  from the stored seed; all mutable state is restored from the JSON. */
   static deserialize(json: string): RegionSim {
     const d = JSON.parse(json);
-    if ((d.v ?? 0) < SAVE_SCHEMA_VERSION) throw new IncompatibleSaveError(d.v ?? 0);
+    if ((d.v ?? 0) !== SAVE_SCHEMA_VERSION) throw new IncompatibleSaveError(d.v ?? 0);
     const seed = d.mapSeed ?? 42;
     const rng = new Rng(0);
     const map = new RegionMap(seed);
@@ -13112,7 +13114,9 @@ export class RegionSim {
     // key order so a save round-trips byte-for-byte. (Defaults-before-spread would
     // hoist skill/health/children/loyalty to the front, reordering a present
     // notable's keys and breaking the lossless round-trip the harness checks.)
-    r.notables = (d.notables ?? []).map((n: any) => ({
+    type SerializedNotable = Omit<Notable, 'skill' | 'health' | 'children' | 'loyalty'> &
+      Partial<Pick<Notable, 'skill' | 'health' | 'children' | 'loyalty'>>;
+    r.notables = ((d.notables ?? []) as SerializedNotable[]).map((n) => ({
       ...n,
       skill: n.skill ?? 50,
       health: n.health ?? 80,

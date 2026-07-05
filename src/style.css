@@ -476,13 +476,17 @@ input[type='range']::-moz-range-thumb {
   max-width: 640px;
   font-size: 11px;
   z-index: 10;
-  pointer-events: none;
+  pointer-events: auto;
   background: var(--surface);
   border: 1px solid var(--border-gold-soft);
   border-radius: var(--radius-lg);
   padding: 8px 4px;
   box-shadow: var(--shadow-panel);
   backdrop-filter: blur(8px);
+  /* Cap the banner and let older lines scroll instead of scrolling off a 3-line window. */
+  max-height: 132px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .log-entry {
