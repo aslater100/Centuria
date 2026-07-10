@@ -334,3 +334,36 @@ HF connector (then dispatch the asset-generator agent per centuria-plan G1), or 
 encoder). Zoom-in pixelation of image-based terrain (cache authored at base scale,
 `imageSmoothingEnabled=false` at blit) is a known limitation to pair with real art — supersample
 the mapCache when art lands.
+
+### Adversarial review pass (8 finder angles) — all 10 findings fixed in the follow-up commit
+
+Correctness: **signed-shift bug** `th >> 8` → `>>> 8` (negative drawImage source-y on ~half of
+hexes once th ≥ 2³¹ — proven with x=24); **mapCacheSignature** re-keyed from registry-global
+`assets.count` to `assets.version('terrain-')` (kills the 11-spurious-rebuild startup storm AND
+detects in-place slot replacement, which a size count cannot); **ghost-waterline year≥2030 term**
+added to the signature (latent: a cool/landlocked run reaching 2030 never showed the flood
+overlay); **branch-aware key light** — `eraKeyLight(era, branch)` now lives in `backdrop.ts`
+beside `ERA_SKY` (dystopia lights sodium-amber, not neutral teal; wash + banner accents both
+consume it; 3 new backdrop tests); **edge blend gated on `!tileArt`** (both correctness finders:
+procedural wedges were tinting painted art); **guard asymmetry** normalized (0-width decode →
+null at `artFor`, so draw and suppression can't disagree); **river shimmer made static** (a frame
+term baked into a cache never animates — it only re-rolled on rebuild); **scout panel migrated to
+`roundedPath`** (the pre-existing `roundRect?.() ?? rect()` idiom always unioned a sharp rect —
+panel rendered square-cornered with a doubled stroke); **pop chip measured via `textW`** (was a
+6px/char guess); **`traceHexPath` extraction** (the corner walk existed in five copies — fill and
+clips can no longer drift). Also: per-biome art + blend-style lookups hoisted out of the 16k-hex
+loop, mountain facet deduped, `shoot.ts` MANIFEST_SLOTS + script usage docs + HANDOFF slot counts
+updated to the 16-slot catalog.
+
+**Correction to commit 5d7a052's message:** it claimed "the no-art render is unchanged" — true
+only of the `!tileArt` gating on pre-existing layers; the Phase 4 restyles (edge blend, arc
+canopy, scree, mountain facet) intentionally changed the default frame. Owner-approved via
+"finish up to phase 5".
+
+**Deferred from review (logged, not fixed):** minimap.ts carries a drifted copy of the biome
+palette (marsh/river differ already) — unifying needs a shared module (minimap→regionview import
+would cycle); the six `!tileArt` gates could collapse into one `drawBiomeDetail()` (explicit
+layer-policy comment added instead); the three per-hex hash sites could share a helper.
+
+Suite: **1654** green · tsc ✓ · build ✓ · post-fix A/B re-shoot ✓ (full tile coverage after the
+shift fix, 33fps steady with art).

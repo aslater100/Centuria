@@ -23,7 +23,7 @@ import { sparklineGrid } from './sparklines';
 import { centuryGraphHtml } from './centuryGraph';
 import { AssetRegistry, townSpriteTier, TOWN_TIER_PX } from './assets/registry';
 import { buildPawnSprites } from './sprites';
-import { Backdrop, buildBackdropPalette, eraIdForYear, type Sky, type Branch, type EraId } from './backdrop';
+import { Backdrop, buildBackdropPalette, eraIdForYear, eraKeyLight, type Sky, type Branch } from './backdrop';
 import { Modal, createErrorState } from './components';
 import { WikiPanel } from './WikiPanel';
 
@@ -46,18 +46,9 @@ const SECTOR_RGB: Record<string, string> = {
 const SECTOR_HEX: Record<string, string> = {
   agriculture: '#8a9a4a', industry: '#9a6a3a', services: '#4a7fa4', information: '#7a5a9a', all: '#9a8a5a',
 };
-// Era key-light: a warm highlight (from the upper-left, matching drawTerrain's
-// NW hillshade) fading to a cool shadow, so the whole frame reads as one lit
-// world. Warmth tracks the era's sky (mirrors ERA_SKY in backdrop.ts) — a faint
-// mood tint over the foreground, never a repaint of it (GDD §3.1 Contrast Rule).
-const ERA_LIGHT: Record<EraId, { warm: string; cool: string }> = {
-  dawn:    { warm: '255,224,176', cool: '30,40,68' },
-  modern:  { warm: '255,246,214', cool: '32,46,74' },
-  analog:  { warm: '255,226,168', cool: '40,44,60' },
-  digital: { warm: '210,230,248', cool: '28,40,66' },
-  future:  { warm: '206,240,238', cool: '26,48,60' },
-};
-// Season nudges the key-light: summer brighter/warmer, winter dimmer/cooler.
+// The era/branch key-light table lives in backdrop.ts (eraKeyLight) beside
+// ERA_SKY, so a future branch repaints the light exactly as it repaints the
+// sky. Season nudges the wash alphas: summer brighter/warmer, winter cooler.
 const SEASON_WARM_A = [0.07, 0.08, 0.07, 0.055];
 const SEASON_COOL_A = [0.10, 0.09, 0.105, 0.125];
 
@@ -66,20 +57,24 @@ const SEASON_COOL_A = [0.10, 0.09, 0.105, 0.125];
 const DISTRICT_DEF_BY_ID = new Map(DISTRICT_DEFS.map((d) => [d.id, d]));
 const REGION_BUILDING_BY_ID = new Map(REGION_BUILDINGS.map((b) => [b.id, b]));
 
-/** Fill a hex polygon from precomputed corners (no stroke). */
-function fillHexPath(g: CanvasRenderingContext2D, corners: { x: number; y: number }[]): void {
+/** Trace the hex polygon from precomputed corners into the current path —
+ *  the single copy of the corner walk shared by fill/stroke/clip sites, so
+ *  hex geometry can never drift between the fill and the clip that masks it. */
+function traceHexPath(g: CanvasRenderingContext2D, corners: { x: number; y: number }[]): void {
   g.beginPath();
   g.moveTo(corners[0].x, corners[0].y);
   for (let i = 1; i < 6; i++) g.lineTo(corners[i].x, corners[i].y);
   g.closePath();
+}
+
+/** Fill a hex polygon from precomputed corners (no stroke). */
+function fillHexPath(g: CanvasRenderingContext2D, corners: { x: number; y: number }[]): void {
+  traceHexPath(g, corners);
   g.fill();
 }
 
 function strokeHexPath(g: CanvasRenderingContext2D, corners: { x: number; y: number }[]): void {
-  g.beginPath();
-  g.moveTo(corners[0].x, corners[0].y);
-  for (let i = 1; i < 6; i++) g.lineTo(corners[i].x, corners[i].y);
-  g.closePath();
+  traceHexPath(g, corners);
   g.stroke();
 }
 
@@ -1413,11 +1408,16 @@ export class RegionView {
     for (const t of r.settlements) s += `;${t.id},${t.factionId},${Math.round(t.x)},${Math.round(t.y)}`;
     // Fog-of-war frontier: use the pre-tracked counter instead of scanning 10 000 tiles.
     s += `|fog${r.exploredCount}`;
-    // Ghost waterline: rebuild cache when sea-rise warning fires (adds blue coastal overlay).
-    s += `|rise${r.seaRiseAnnounced ? 1 : 0}`;
-    // Override art registers asynchronously (Image.onload); terrain tiles bake
-    // into this cache, so rebuild once when each asset actually arrives.
-    s += `|a${this.assets.count}`;
+    // Ghost waterline: rebuild when the sea-rise warning fires OR the year-2030
+    // fallback in drawTerrain flips (a cool/landlocked run can reach 2030 with
+    // seaRiseAnnounced still false — the overlay must not wait for an unrelated
+    // rebuild to appear).
+    s += `|rise${r.seaRiseAnnounced || r.year >= 2030 ? 1 : 0}`;
+    // Override art registers asynchronously (Image.onload); ONLY terrain tiles
+    // bake into this cache, so key on the terrain-slot registration version —
+    // town/backdrop arrivals must not trigger 16k-hex rebuilds, and an in-place
+    // slot replacement (regenerated art) must.
+    s += `|a${this.assets.version('terrain-')}`;
     return s;
   }
 
@@ -2068,14 +2068,17 @@ export class RegionView {
     if (seasonTint) { g.fillStyle = seasonTint; g.fillRect(0, 0, W, H); }
     // Era key-light: one directional wash (warm upper-left highlight → cool
     // lower-right shadow) so the map, tokens and parallax sky share a single
-    // light. Era/season-driven (day/night is disabled — atmosphere() returns 0),
-    // low-alpha over the foreground, cached until size/era/season changes.
+    // light. Era/season/branch-driven (day/night is disabled — atmosphere()
+    // returns 0), low-alpha over the foreground, cached until any of those
+    // change. Branch-aware via eraKeyLight: a dystopia future is lit sodium-
+    // amber to match its repainted sky, not the neutral teal.
     const era = eraIdForYear(this.region.year);
+    const branch = this.region.eraBranch as Branch;
     const season = ((lit.season % 4) + 4) % 4;
-    const lightSig = `${W}x${H}|${era}|${season}`;
+    const lightSig = `${W}x${H}|${era}|${branch ?? '-'}|${season}`;
     if (!this.lightGrad || this.lightSig !== lightSig) {
       this.lightSig = lightSig;
-      const { warm, cool } = ERA_LIGHT[era];
+      const { warm, cool } = eraKeyLight(era, branch);
       const grad = g.createLinearGradient(W * 0.12, 0, W * 0.88, H);
       grad.addColorStop(0, `rgba(${warm},${SEASON_WARM_A[season]})`);
       grad.addColorStop(0.5, 'rgba(0,0,0,0)');
@@ -2106,10 +2109,12 @@ export class RegionView {
     const spx = W - pw - 14;
     const spy = H - ph - 58;
     g.fillStyle = 'rgba(10,14,24,0.92)';
-    g.beginPath(); g.roundRect?.(spx, spy, pw, ph, 8) ?? g.rect(spx, spy, pw, ph); g.fill();
+    this.roundedPath(spx, spy, pw, ph, 8);
+    g.fill();
     g.strokeStyle = 'rgba(80,140,220,0.55)';
     g.lineWidth = 1;
-    g.beginPath(); g.roundRect?.(spx, spy, pw, ph, 8) ?? g.rect(spx, spy, pw, ph); g.stroke();
+    this.roundedPath(spx, spy, pw, ph, 8);
+    g.stroke();
     const sname = scout.name ?? 'Scout';
     const days = Math.max(0, scout.expireDay - this.region.day);
     g.fillStyle = '#a8c8ff';
@@ -2449,42 +2454,55 @@ export class RegionView {
     else g.rect(x, y, w, h);
   }
 
+  /** Era/branch-keyed banner accent strings, rebuilt only when the era or
+   *  branch turns over (once per decades) — not per settlement per frame. */
+  private bannerAccent: { key: string; line: string; border: string } | null = null;
+
   /** Civ5-style city banner: a dark plate with an era-tinted accent line, a
    *  gold population chip, and the settlement name — replaces the floating
    *  name/pop text so settlements read as anchored cities, not map labels. */
   private drawCityBanner(px: number, py: number, name: string, pop: number, selected: boolean): void {
     const g = this.g;
-    const accent = ERA_LIGHT[eraIdForYear(this.region.year)].warm;
-    g.font = 'bold 11px monospace';
-    const nameW = this.textW(name);
-    const popText = String(pop);
-    const popW = popText.length * 6 + 8; // 10px monospace ≈ 6px/char — no measureText churn
-    const w = Math.ceil(nameW + popW + 18);
+    const era = eraIdForYear(this.region.year);
+    const branch = this.region.eraBranch as Branch;
+    const accentKey = `${era}|${branch ?? '-'}`;
+    if (!this.bannerAccent || this.bannerAccent.key !== accentKey) {
+      const { warm } = eraKeyLight(era, branch);
+      this.bannerAccent = { key: accentKey, line: `rgba(${warm},0.85)`, border: `rgba(${warm},0.35)` };
+    }
+    // Layout: pad·[pop chip]·pad·[name]·2pad — every offset derives from these.
+    const pad = 3;
     const h = 16;
+    g.font = '10px monospace';
+    const popText = String(pop);
+    const popW = Math.ceil(this.textW(popText)) + 8; // measured — no per-platform glyph guess
+    g.font = 'bold 11px monospace';
+    const nameW = Math.ceil(this.textW(name));
+    const w = pad + popW + pad + nameW + pad * 2;
     const x = Math.round(px - w / 2);
     const y = Math.round(py);
     // Plate + era accent + border
     g.fillStyle = selected ? 'rgba(24,28,40,0.92)' : 'rgba(10,14,22,0.78)';
     this.roundedPath(x, y, w, h, 4);
     g.fill();
-    g.fillStyle = `rgba(${accent},0.85)`;
-    g.fillRect(x + 3, y, w - 6, 1);
-    g.strokeStyle = selected ? 'rgba(232,210,122,0.9)' : `rgba(${accent},0.35)`;
+    g.fillStyle = this.bannerAccent.line;
+    g.fillRect(x + pad, y, w - pad * 2, 1);
+    g.strokeStyle = selected ? 'rgba(232,210,122,0.9)' : this.bannerAccent.border;
     g.lineWidth = 1;
     this.roundedPath(x + 0.5, y + 0.5, w - 1, h - 1, 4);
     g.stroke();
     // Population chip
     g.fillStyle = 'rgba(232,210,122,0.16)';
-    this.roundedPath(x + 3, y + 3, popW, h - 6, 3);
+    this.roundedPath(x + pad, y + pad, popW, h - pad * 2, 3);
     g.fill();
     g.fillStyle = '#e8d27a';
     g.font = '10px monospace';
     g.textAlign = 'center';
-    g.fillText(popText, x + 3 + popW / 2, y + h - 5);
-    // Name
+    g.fillText(popText, x + pad + popW / 2, y + h - 5);
+    // Name — centred in its field between the chip and the right padding.
     g.fillStyle = '#e6ecf5';
     g.font = 'bold 11px monospace';
-    g.fillText(name, x + popW + 6 + (w - popW - 9) / 2, y + h - 4);
+    g.fillText(name, x + pad + popW + pad + nameW / 2, y + h - 4);
     g.textAlign = 'left';
   }
 
@@ -2619,10 +2637,7 @@ export class RegionView {
       const cx = hw;
       const cy = size;
       const corners = hexCorners(cx, cy, size);
-      c.beginPath();
-      c.moveTo(corners[0].x, corners[0].y);
-      for (let i = 1; i < 6; i++) c.lineTo(corners[i].x, corners[i].y);
-      c.closePath();
+      traceHexPath(c, corners);
       c.clip();
       const grad = c.createRadialGradient(cx, cy, size * 0.2, cx, cy, size);
       if (kind === 'ao') {
@@ -2684,6 +2699,36 @@ export class RegionView {
       hexNeighbors(x, y).some(([nc, nr]) => !isWater(nc, nr));
     const touchesWater = (x: number, y: number): boolean =>
       hexNeighbors(x, y).some(([nc, nr]) => isWater(nc, nr));
+    // Per-biome painted-tile lookup, resolved once per rebuild instead of once
+    // per hex; a degenerate 0-width decode normalizes to null HERE so the draw
+    // and the procedural-detail suppression below can never disagree.
+    const artCache = new Map<string, HTMLImageElement | null>();
+    const artFor = (biome: string): HTMLImageElement | null => {
+      let img = artCache.get(biome);
+      if (img === undefined) {
+        img = this.assets.get(`terrain-${biome}`);
+        if (img && img.width <= 0) img = null;
+        artCache.set(biome, img);
+      }
+      return img;
+    };
+    // Edge-blend fill styles per base colour (≤10 land literals × 2 bands),
+    // so the blend pass never re-parses hex strings per edge.
+    const blendStyles = new Map<string, string[]>();
+    const blendStylesFor = (hex: string): string[] => {
+      let s = blendStyles.get(hex);
+      if (!s) {
+        const { r, g: gg, b } = hexToRgb(hex);
+        s = RegionView.BLEND_BANDS.map(([, a]) => `rgba(${r},${gg},${b},${a})`);
+        blendStyles.set(hex, s);
+      }
+      return s;
+    };
+    // Layer policy for painted tiles: DATA-DRIVEN overlays (coast shallows,
+    // beach lip, hillshade, snow caps, ambient occlusion, contours, ghost
+    // waterline) draw OVER art — they visualize sim state the texture cannot
+    // know. DECORATIVE noise (dither, edge blend, canopy, tufts, scree, peak
+    // facet, reeds) is suppressed by art — the painting supplies its own detail.
     for (let y = 0; y < N; y++) {
       for (let x = 0; x < N; x++) {
         const c = map.at(x, y);
@@ -2704,18 +2749,15 @@ export class RegionView {
         // deterministic per-hex source offset samples a different sub-rect of
         // the texture each tile, so one image never reads as wallpaper. Absent
         // art → null → every procedural detail below is untouched.
-        const tileArt = water ? null : this.assets.get(`terrain-${c.biome}`);
-        if (tileArt && tileArt.width > 0) {
+        const tileArt = water ? null : artFor(c.biome);
+        if (tileArt) {
           const th = (x * 92837111 ^ y * 689287499) >>> 0;
           const sw = Math.max(1, tileArt.width >> 1);
           const sh = Math.max(1, tileArt.height >> 1);
           const sx = th % Math.max(1, tileArt.width - sw);
-          const sy = (th >> 8) % Math.max(1, tileArt.height - sh);
+          const sy = (th >>> 8) % Math.max(1, tileArt.height - sh); // >>> : th ≥ 2^31 must not go negative
           g.save();
-          g.beginPath();
-          g.moveTo(corners[0].x, corners[0].y);
-          for (let i = 1; i < 6; i++) g.lineTo(corners[i].x, corners[i].y);
-          g.closePath();
+          traceHexPath(g, corners);
           g.clip();
           g.imageSmoothingEnabled = true; // painterly art wants smoothing (restore() reverts)
           g.drawImage(tileArt, sx, sy, sw, sh, bx, by, bw, bh);
@@ -2746,18 +2788,21 @@ export class RegionView {
         // Biome edge blend: each differing LAND neighbour bleeds its base
         // colour across the shared edge in two stepped bands, melting the
         // hard polygon seam into a dithered transition. Water boundaries stay
-        // crisp (the shallows/beach rims already own the coastline).
-        if (!water) {
+        // crisp (the shallows/beach rims already own the coastline), and a
+        // painted tile stays unmuddied — flat procedural wedges over artwork
+        // would tint it with hues the painting may not contain.
+        if (!water && !tileArt) {
           for (let d = 0; d < 6; d++) {
             const [bnc, bnr] = hexNeighborDir(x, y, d);
             if (bnc < 0 || bnr < 0 || bnc >= N || bnr >= N) continue;
             const nCell = map.at(bnc, bnr);
             if (nCell.biome === c.biome || RegionView.WATER_BIOMES.has(nCell.biome)) continue;
-            const nrgb = hexToRgb(this.biomeBaseColor(nCell.biome, nCell.elevation));
+            const styles = blendStylesFor(this.biomeBaseColor(nCell.biome, nCell.elevation));
             const e0 = corners[d];
             const e1 = corners[(d + 1) % 6];
-            for (const [depth, alpha] of RegionView.BLEND_BANDS) {
-              g.fillStyle = `rgba(${nrgb.r},${nrgb.g},${nrgb.b},${alpha})`;
+            for (let bi = 0; bi < RegionView.BLEND_BANDS.length; bi++) {
+              const depth = RegionView.BLEND_BANDS[bi][0];
+              g.fillStyle = styles[bi];
               g.beginPath();
               g.moveTo(e0.x, e0.y);
               g.lineTo(e1.x, e1.y);
@@ -2788,10 +2833,7 @@ export class RegionView {
         const needsClip = c.biome === 'forest' || c.biome === 'plains' || c.biome === 'hills';
         if (needsClip) {
           g.save();
-          g.beginPath();
-          g.moveTo(corners[0].x, corners[0].y);
-          for (let i = 1; i < 6; i++) g.lineTo(corners[i].x, corners[i].y);
-          g.closePath();
+          traceHexPath(g, corners);
           g.clip();
         }
         // Forest canopy: layered round crowns — shadow disc, mid crown, lit
@@ -2830,42 +2872,42 @@ export class RegionView {
         if (needsClip) g.restore();
         // Mountains: a faceted peak — lit NW face, shadowed SE face — over the
         // base grey, so ranges read as relief rather than flat stone plates.
+        // One triangle per sign so the two faces always share the same ridge.
         if (c.biome === 'mountains' && !tileArt) {
           const pw2 = bw * 0.5;
           const ph2 = bh * 0.52;
           const apy = cy - ph2 * 0.5;
-          g.fillStyle = 'rgba(235,232,225,0.3)';
-          g.beginPath();
-          g.moveTo(cx, apy);
-          g.lineTo(cx - pw2 * 0.5, apy + ph2);
-          g.lineTo(cx, apy + ph2 * 0.8);
-          g.closePath();
-          g.fill();
-          g.fillStyle = 'rgba(30,26,22,0.3)';
-          g.beginPath();
-          g.moveTo(cx, apy);
-          g.lineTo(cx + pw2 * 0.5, apy + ph2);
-          g.lineTo(cx, apy + ph2 * 0.8);
-          g.closePath();
-          g.fill();
+          const faces: readonly (readonly [number, string])[] = [
+            [-1, 'rgba(235,232,225,0.3)'], // lit NW face
+            [1, 'rgba(30,26,22,0.3)'],     // shadowed SE face
+          ];
+          for (const [sgn, fill] of faces) {
+            g.fillStyle = fill;
+            g.beginPath();
+            g.moveTo(cx, apy);
+            g.lineTo(cx + sgn * pw2 * 0.5, apy + ph2);
+            g.lineTo(cx, apy + ph2 * 0.8);
+            g.closePath();
+            g.fill();
+          }
         }
         // Mountain snow caps on highest peaks
         if (c.biome === 'mountains' && c.elevation > 0.82) {
           g.fillStyle = `rgba(230,230,240,${(c.elevation - 0.82) * 2.5})`;
           fillHexPath(g, corners);
         }
-        // River shimmer
-        if (c.biome === 'river' && (x + y + Math.floor(this.frame / 12)) % 5 === 0) {
+        // River glints: a static deterministic subset of river tiles carries a
+        // bright wash. (This layer BAKES into the signature-gated mapCache, so
+        // a frame term could never animate — it only re-rolled arbitrarily on
+        // rebuild. Live water animation is drawWaterAnimation's job.)
+        if (c.biome === 'river' && (x * 7 + y * 11) % 5 === 0) {
           g.fillStyle = 'rgba(180,220,240,0.22)';
           fillHexPath(g, corners);
         }
         // Marsh reeds texture (clipped separately to allow full-height strips)
         if (c.biome === 'marsh' && !tileArt && (x * 5 + y * 7) % 11 < 3) {
           g.save();
-          g.beginPath();
-          g.moveTo(corners[0].x, corners[0].y);
-          for (let i = 1; i < 6; i++) g.lineTo(corners[i].x, corners[i].y);
-          g.closePath();
+          traceHexPath(g, corners);
           g.clip();
           g.fillStyle = 'rgba(60,80,30,0.4)';
           g.fillRect(bx + bw * 0.3, by, Math.max(1, bw * 0.2), bh);

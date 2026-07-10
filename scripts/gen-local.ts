@@ -18,7 +18,8 @@
  *   npm run gen:local -- --dry-run                  # plan only, no server needed
  *   npm run gen:local -- --slots=backdrop-dawn      # one slot
  *   npm run gen:local -- --category=backdrop        # all 5 backdrops
- *   npm run gen:local                                # all 11 slots
+ *   npm run gen:local -- --category=terrain         # all 5 terrain tile textures
+ *   npm run gen:local                                # all 16 slots
  *   npm run gen:local -- --backend=comfy --model=sd_xl_base_1.0.safetensors
  *   npm run gen:local -- --slots=town-castle --bg-tool=rembg
  *   npm run gen:local -- --max-dim=768           # low-VRAM (e.g. 4 GB): cap gen size

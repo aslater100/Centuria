@@ -18,7 +18,7 @@
  * Options:
  *   --dry-run        Print what would be requested without calling the API.
  *   --slots=a,b      Comma-separated subset of slot names.
- *   --category=town|backdrop   Filter by category.
+ *   --category=town|backdrop|terrain   Filter by category.
  *   --era=dawn       Filter backdrop slots by era id.
  *   --model=<id>     Override the HF model (default below).
  *   --retries=N      Max retries on a model-loading 503 (default: 4).
