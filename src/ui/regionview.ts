@@ -23,7 +23,7 @@ import { sparklineGrid } from './sparklines';
 import { centuryGraphHtml } from './centuryGraph';
 import { AssetRegistry, townSpriteTier, TOWN_TIER_PX } from './assets/registry';
 import { buildPawnSprites } from './sprites';
-import { Backdrop, buildBackdropPalette, type Sky, type Branch } from './backdrop';
+import { Backdrop, buildBackdropPalette, eraIdForYear, type Sky, type Branch, type EraId } from './backdrop';
 import { Modal, createErrorState } from './components';
 import { WikiPanel } from './WikiPanel';
 
@@ -46,6 +46,21 @@ const SECTOR_RGB: Record<string, string> = {
 const SECTOR_HEX: Record<string, string> = {
   agriculture: '#8a9a4a', industry: '#9a6a3a', services: '#4a7fa4', information: '#7a5a9a', all: '#9a8a5a',
 };
+// Era key-light: a warm highlight (from the upper-left, matching drawTerrain's
+// NW hillshade) fading to a cool shadow, so the whole frame reads as one lit
+// world. Warmth tracks the era's sky (mirrors ERA_SKY in backdrop.ts) — a faint
+// mood tint over the foreground, never a repaint of it (GDD §3.1 Contrast Rule).
+const ERA_LIGHT: Record<EraId, { warm: string; cool: string }> = {
+  dawn:    { warm: '255,224,176', cool: '30,40,68' },
+  modern:  { warm: '255,246,214', cool: '32,46,74' },
+  analog:  { warm: '255,226,168', cool: '40,44,60' },
+  digital: { warm: '210,230,248', cool: '28,40,66' },
+  future:  { warm: '206,240,238', cool: '26,48,60' },
+};
+// Season nudges the key-light: summer brighter/warmer, winter dimmer/cooler.
+const SEASON_WARM_A = [0.07, 0.08, 0.07, 0.055];
+const SEASON_COOL_A = [0.10, 0.09, 0.105, 0.125];
+
 // O(1) def lookups for the per-frame building/district render loops (the
 // arrays are small, but `.find` per placed item per frame adds up).
 const DISTRICT_DEF_BY_ID = new Map(DISTRICT_DEFS.map((d) => [d.id, d]));
@@ -265,10 +280,20 @@ export class RegionView {
   // keyed on exploredCount + visibilityVersion so it rebuilds when scouts move.
   // Offscreen canvas of water pixels; rebuilt only on canvas resize (biomes are fixed).
   private waterMaskCanvas: HTMLCanvasElement | null = null;
+  // Water pixels carrying a diagonal sun-highlight (bright upper-left) for an
+  // additive specular glint; built alongside the mask, blitted per frame.
+  private waterGlintCanvas: HTMLCanvasElement | null = null;
   private waterMaskDims = '';
   // Cached vignette gradient — rebuilt only when canvas dimensions change.
   private vignetteGrad: CanvasGradient | null = null;
   private vignetteDims = '';
+  // Cached era/season key-light gradient — rebuilt only when size, era or season changes.
+  private lightGrad: CanvasGradient | null = null;
+  private lightSig = '';
+  // Reusable hex-shaped alpha masks (ambient occlusion, coast shallows), keyed by
+  // kind+size. Blitted per tile into the static mapCache — one drawImage instead
+  // of a per-hex CanvasGradient (there are up to REGION_N² = 16384 tiles).
+  private hexMaskCache = new Map<string, HTMLCanvasElement>();
   // Cached hex layout params (size/ox/oy) — only depend on canvas dimensions.
   private cachedHexLayout: { size: number; ox: number; oy: number } | null = null;
   // Cached pixel-coord arrays for route paths — stable until canvas resize.
@@ -1079,6 +1104,8 @@ export class RegionView {
         if (!this.inView(px, py, 40)) continue;
         const selected = this.selectedFactionId === faction.id;
         this.withGlyphScale(px, py, () => {
+          // Ground shadow so the marker sits on the terrain.
+          this.groundShadow(px, py + 9, 8);
           // Selection halo
           if (selected) {
             g.strokeStyle = '#fff';
@@ -1125,6 +1152,8 @@ export class RegionView {
       const isSelected = isPlayer && scout.id === this.selectedScoutId;
       const color = faction.color ?? (isPlayer ? '#6af' : '#aaa');
 
+      // Ground shadow stays put while the sprite bobs above it.
+      this.groundShadow(px, py + 6, 5);
       if (isSelected) {
         g.strokeStyle = 'rgba(255,255,255,0.9)';
         g.lineWidth = 1.5;
@@ -1183,6 +1212,7 @@ export class RegionView {
       g.fillStyle = 'rgba(220,210,170,0.25)';
       g.fillRect(target.px - 4, target.py - 4, 8, 8);
       const bob = Math.floor(this.frame / 15) % 2;
+      this.groundShadow(px, py + 4, 5); // wagon sits on the ground line
       g.fillStyle = '#c2a14d';
       g.fillRect(px - 4, py - 3 - bob, 8, 6);
       g.fillStyle = '#1a1410';
@@ -1561,6 +1591,17 @@ export class RegionView {
    *  chip, instead of a bare `⚔N` glyph. 1–3 figures scale with the count; the
    *  2-frame walk cycle ties to the global frame counter (so they shuffle in
    *  place). `frames` is a unit's [stand, step] sprite pair. */
+  /** Soft elliptical ground shadow under a map token, mirroring the settlement
+   *  shadow in drawTownTier — grounds scouts, wagons, armies and rival markers on
+   *  the terrain instead of floating them. Screen-space; drawn under the token. */
+  private groundShadow(px: number, py: number, rx: number, ry = rx * 0.42): void {
+    const g = this.g;
+    g.fillStyle = 'rgba(0,0,0,0.22)';
+    g.beginPath();
+    g.ellipse(px, py, rx, ry, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+
   private drawSquad(cx: number, cy: number, count: number, frames: HTMLCanvasElement[], color: string): void {
     if (frames.length === 0) return;
     const g = this.g;
@@ -1570,6 +1611,8 @@ export class RegionView {
     const SP = 24; // on-map size of each 32×32 figure
     const prevSmoothing = g.imageSmoothingEnabled;
     g.imageSmoothingEnabled = false;
+    // Ground shadow under the whole squad footprint.
+    this.groundShadow(cx, cy, 9 + (n - 1) * 4);
     // Back-to-front so nearer figures overlap the farther ones.
     for (let i = n - 1; i >= 0; i--) {
       const dx = (i - (n - 1) / 2) * 8;
@@ -1968,6 +2011,18 @@ export class RegionView {
     this.waterMaskCanvas.height = H;
     const mc = this.waterMaskCanvas.getContext('2d')!;
     mc.clearRect(0, 0, W, H);
+    if (!this.waterGlintCanvas) this.waterGlintCanvas = document.createElement('canvas');
+    this.waterGlintCanvas.width = W;
+    this.waterGlintCanvas.height = H;
+    const gc = this.waterGlintCanvas.getContext('2d')!;
+    gc.clearRect(0, 0, W, H);
+    // The glint carries a diagonal highlight — brightest upper-left, matching the
+    // era key-light — so the additive sparkle concentrates where the sun hits.
+    const glint = gc.createLinearGradient(0, 0, W, H);
+    glint.addColorStop(0, 'rgba(255,250,235,0.85)');
+    glint.addColorStop(0.45, 'rgba(255,250,235,0.14)');
+    glint.addColorStop(1, 'rgba(255,250,235,0)');
+    gc.fillStyle = glint;
     const map = this.region.map;
     const N = REGION_N;
     const m = 60;
@@ -1977,21 +2032,32 @@ export class RegionView {
       for (let x = 0; x < N; x++) {
         if (!RegionView.WATER_BIOMES.has(map.at(x, y).biome)) continue;
         const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
-        fillHexPath(mc, hexCorners(cx, cy, size));
+        const corners = hexCorners(cx, cy, size);
+        fillHexPath(mc, corners);
+        fillHexPath(gc, corners);
       }
     }
     this.waterMaskDims = dims;
   }
 
-  /** Subtle per-frame water shimmer — one drawImage instead of 65 536 fillRects. */
+  /** Subtle per-frame water shimmer + a pulsing additive sun-glint — two
+   *  drawImages instead of 65 536 fillRects. */
   private drawWaterAnimation(): void {
     const W = this.viewW;
     const H = this.viewH;
     this.ensureWaterMask(W, H);
+    const g = this.g;
     const wave = Math.sin(this.frame * 0.05) * 0.5 + 0.5; // 0..1
-    this.g.globalAlpha = wave * 0.04; // max 4% opacity — very subtle shimmer
-    this.g.drawImage(this.waterMaskCanvas!, 0, 0);
-    this.g.globalAlpha = 1;
+    g.globalAlpha = wave * 0.04; // max 4% opacity — very subtle shimmer
+    g.drawImage(this.waterMaskCanvas!, 0, 0);
+    // Additive specular glint, pulsing with the same wave; save/restore so the
+    // 'lighter' comp-op never leaks into later map layers.
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.globalAlpha = 0.06 + wave * 0.08;
+    g.drawImage(this.waterGlintCanvas!, 0, 0);
+    g.restore();
+    g.globalAlpha = 1;
   }
 
   /** Full-screen atmospheric pass (screen-space): seasonal wash + vignette. */
@@ -2000,6 +2066,24 @@ export class RegionView {
     // Seasonal wash — faint, so it colours the mood without fighting the map.
     const seasonTint = ['rgba(120,180,96,0.07)', 'rgba(255,206,120,0.06)', 'rgba(208,138,60,0.08)', 'rgba(150,182,224,0.09)'][lit.season] ?? '';
     if (seasonTint) { g.fillStyle = seasonTint; g.fillRect(0, 0, W, H); }
+    // Era key-light: one directional wash (warm upper-left highlight → cool
+    // lower-right shadow) so the map, tokens and parallax sky share a single
+    // light. Era/season-driven (day/night is disabled — atmosphere() returns 0),
+    // low-alpha over the foreground, cached until size/era/season changes.
+    const era = eraIdForYear(this.region.year);
+    const season = ((lit.season % 4) + 4) % 4;
+    const lightSig = `${W}x${H}|${era}|${season}`;
+    if (!this.lightGrad || this.lightSig !== lightSig) {
+      this.lightSig = lightSig;
+      const { warm, cool } = ERA_LIGHT[era];
+      const grad = g.createLinearGradient(W * 0.12, 0, W * 0.88, H);
+      grad.addColorStop(0, `rgba(${warm},${SEASON_WARM_A[season]})`);
+      grad.addColorStop(0.5, 'rgba(0,0,0,0)');
+      grad.addColorStop(1, `rgba(${cool},${SEASON_COOL_A[season]})`);
+      this.lightGrad = grad;
+    }
+    g.fillStyle = this.lightGrad;
+    g.fillRect(0, 0, W, H);
     // Vignette: a darkened frame that draws the eye inward. Gradient is cached per canvas size.
     const dims = `${W}x${H}`;
     if (!this.vignetteGrad || this.vignetteDims !== dims) {
@@ -2086,8 +2170,10 @@ export class RegionView {
         fillHexPath(g, hexCorners(cx, cy, size));
       }
     }
-    // 2) frontier lines: each hex edge where the neighbor belongs to a different faction
-    g.lineWidth = 2;
+    // 2) frontier glow: each hex edge bordering a different faction gets a wide
+    //    soft cultural halo under a crisp core line, so borders read as lit bands
+    //    of influence rather than hard ink strokes. Three passes, widest first.
+    const frontierPasses: [number, number][] = [[6, 0.09], [3.2, 0.2], [1.3, 0.9]];
     for (let y = 0; y < N; y++) {
       for (let x = 0; x < N; x++) {
         const fid = grid[x * N + y];
@@ -2095,20 +2181,24 @@ export class RegionView {
         if (!rgb) continue;
         const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
         const corners = hexCorners(cx, cy, size);
-        g.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},0.85)`;
         for (let d = 0; d < 6; d++) {
           const [nc, nr] = hexNeighborDir(x, y, d);
           const nb = nc >= 0 && nc < N && nr >= 0 && nr < N ? grid[nc * N + nr] : -9;
           if (nb === fid) continue;
           const a = corners[d];
           const b = corners[(d + 1) % 6];
-          g.beginPath();
-          g.moveTo(a.x, a.y);
-          g.lineTo(b.x, b.y);
-          g.stroke();
+          for (const [lw, alpha] of frontierPasses) {
+            g.lineWidth = lw;
+            g.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
+            g.beginPath();
+            g.moveTo(a.x, a.y);
+            g.lineTo(b.x, b.y);
+            g.stroke();
+          }
         }
       }
     }
+    g.lineWidth = 1;
   }
 
   /** Phase 0: at-a-glance resource health under each settlement — three small
@@ -2430,16 +2520,76 @@ export class RegionView {
       this.door(px - 2, py - 4, 4, 12, '#c2a14d'); // gate
       g.fillStyle = '#241a12'; g.fillRect(px - 1, py - 6, 2, 3); // portcullis
     }
-    // selection glow
+    // Selection glow: a soft additive gold bloom under the settlement plus a
+    // gentle ring — Civ5-style tile feedback rather than a hard box.
     if (selected) {
-      g.strokeStyle = '#e8d27a';
-      g.lineWidth = 2;
-      g.strokeRect(px - 20, py - 24, 40, 36);
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      const bloom = g.createRadialGradient(px, py - 4, 4, px, py - 4, 30);
+      bloom.addColorStop(0, 'rgba(232,210,122,0.32)');
+      bloom.addColorStop(1, 'rgba(232,210,122,0)');
+      g.fillStyle = bloom;
+      g.beginPath();
+      g.arc(px, py - 4, 30, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+      g.strokeStyle = 'rgba(232,210,122,0.85)';
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.ellipse(px, py + 9, 20, 8, 0, 0, Math.PI * 2);
+      g.stroke();
       g.lineWidth = 1;
     }
   }
 
   private static readonly WATER_BIOMES = new Set(['sea', 'lake', 'river']);
+
+  /**
+   * A reusable hex-shaped alpha mask drawn once and blitted per tile (there are
+   * up to REGION_N² tiles, so a per-hex CanvasGradient is too costly). Its local
+   * hex is centred at (hw, size) so blitting at (bx, by) — the tile's bounding-box
+   * origin in drawTerrain — lands it exactly over the tile.
+   *   'ao'    — transparent centre → soft dark rim: a lit dome, so flat polygon
+   *             tiles gain depth and the grid stops reading as a wireframe.
+   *   'coast' — transparent deep centre → bright turquoise foam rim: shallows that
+   *             hug the coastline instead of a flat one-alpha wash.
+   */
+  private hexMask(kind: 'ao' | 'coast', size: number): HTMLCanvasElement {
+    const key = `${kind}|${Math.round(size * 10)}`;
+    const cached = this.hexMaskCache.get(key);
+    if (cached) return cached;
+    const hw = (Math.sqrt(3) * size) / 2;
+    const w = Math.max(1, Math.ceil(hw * 2));
+    const h = Math.max(1, Math.ceil(size * 2));
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const c = cv.getContext('2d');
+    if (c) {
+      const cx = hw;
+      const cy = size;
+      const corners = hexCorners(cx, cy, size);
+      c.beginPath();
+      c.moveTo(corners[0].x, corners[0].y);
+      for (let i = 1; i < 6; i++) c.lineTo(corners[i].x, corners[i].y);
+      c.closePath();
+      c.clip();
+      const grad = c.createRadialGradient(cx, cy, size * 0.2, cx, cy, size);
+      if (kind === 'ao') {
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(0.72, 'rgba(0,0,0,0)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.14)');
+      } else {
+        grad.addColorStop(0, 'rgba(86,150,160,0)');
+        grad.addColorStop(0.55, 'rgba(86,150,160,0.18)');
+        grad.addColorStop(1, 'rgba(150,210,205,0.5)');
+      }
+      c.fillStyle = grad;
+      c.fillRect(0, 0, w, h);
+    }
+    this.hexMaskCache.set(key, cv);
+    return cv;
+  }
 
   /** The generated land itself, in hexagonal tiles: this map IS the world. */
   private drawTerrain(g: CanvasRenderingContext2D, W: number, H: number): void {
@@ -2489,11 +2639,11 @@ export class RegionView {
         fillHexPath(g, corners);
 
         const water = RegionView.WATER_BIOMES.has(c.biome);
-        // Coastal shallows: water cells touching land get a turquoise rim — the
-        // single biggest readability win, giving the map a real coastline.
+        // Coastal shallows: water cells touching land get a turquoise foam rim
+        // that fades to deep water at the tile centre — a real coastline, the
+        // single biggest readability win. Reusable hex mask, not a per-hex fill.
         if (water && c.biome !== 'river' && touchesLand(x, y)) {
-          g.fillStyle = 'rgba(86,150,160,0.5)';
-          fillHexPath(g, corners);
+          g.drawImage(this.hexMask('coast', size), bx, by);
         }
         // Beach: land cells at the water's edge get a sandy lip.
         if (!water && c.biome !== 'mountains' && touchesWater(x, y)) {
@@ -2582,6 +2732,9 @@ export class RegionView {
           g.fillRect(bx + bw * 0.3, by, Math.max(1, bw * 0.2), bh);
           g.restore();
         }
+        // Ambient occlusion: a soft dark rim inside each land tile so the ground
+        // reads as lit domes rather than flat polygons — the main de-diagram cue.
+        if (!water) g.drawImage(this.hexMask('ao', size), bx, by);
       }
     }
     // Ghost waterline (GDD §8.2): a faint blue overlay on low-elevation coastal
@@ -2615,8 +2768,10 @@ export class RegionView {
     }
 
     // Contour lines: draw shared hex edge when elevation crosses 0.2/0.4/0.6/0.8.
-    // Check only directions 0/1/2 (E, SE, SW) so each edge is drawn once.
-    g.strokeStyle = 'rgba(0,0,0,0.12)';
+    // Check only directions 0/1/2 (E, SE, SW) so each edge is drawn once. Kept
+    // faint — with per-tile ambient occlusion doing the depth work, these read as
+    // gentle terracing rather than hard ink (less diagram, more terrain).
+    g.strokeStyle = 'rgba(0,0,0,0.06)';
     g.lineWidth = 1;
     for (const level of [0.2, 0.4, 0.6, 0.8]) {
       for (let y = 0; y < N; y++) {

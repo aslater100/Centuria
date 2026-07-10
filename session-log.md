@@ -244,3 +244,41 @@ legitimacy/happiness/satisfaction/finance/press-freedom/credibility-gap/epilogue
 
 ### Not done
 - **G1 art-override generation** stays deferred — owner chose "stay procedural".
+
+## 2026-07-10 — Graphics cohesion pass toward a Civ5 look (branch `claude/game-graphics-improvement-bx5kke`)
+
+Owner asked to move the map's graphics base toward Civilization 5 "with the graphics creators we
+already have". Research (renderer/pipeline map + a 3-strategy design panel + judge) surfaced the
+key fork: the AI-asset path is what "graphics creators" points at, but it **reopens the dropped G1
+"stay procedural" decision** *and* every in-sandbox generation channel is currently
+broken/blocked (`hf-assets.ts` → removed `api-inference` endpoint; HF egress 403; MCP-Gradio needs
+connector enablement; no local SD). Owner picked **procedural cohesion** (no G1 reopen), with
+**local SD (`gen:local`)** as the eventual channel when assets are pursued. So this pass is
+**pure procedural, render-only, zero assets, zero schema/sim touch** — and preserves the
+procedural-fallback discipline so local-SD art can drop in later.
+
+All changes in `src/ui/regionview.ts`:
+- **Phase 0 — era key-light wash** (`drawAtmosphere`): one directional warm-upper-left→cool-lower-
+  right tint keyed to era (`eraIdForYear`, module table `ERA_LIGHT`) + season, cached by
+  size|era|season, layered under the existing vignette. Day/night stays disabled (`atmosphere()`
+  returns night:0/golden:0) — driven by era/season only. So map + tokens + parallax sky share one
+  light. Low-alpha tint of the foreground, never a repaint (GDD §3.1 Contrast Rule).
+- **Phase 1 — de-diagram, baked into the signature-gated `mapCache`** (`drawTerrain` /
+  `drawTerritories`): reusable hex-mask helper `hexMask('ao'|'coast', size)` — a per-tile ambient-
+  occlusion rim (lit domes, not flat polygons) and a coast shallows gradient replacing the flat
+  turquoise rim; both are one `drawImage` per tile (no per-hex `CanvasGradient` — up to 16384
+  tiles). Frontier lines → a 3-pass inward-fading cultural glow band. Contour strokes softened
+  0.12→0.06 (AO now carries the depth).
+- **Phase 2 — per-frame polish**: `groundShadow()` helper under scouts / expeditions / rival
+  diamonds / army squads; additive pulsing water sun-glint (`waterGlintCanvas`, `'lighter'` comp-op
+  save/restored so it never leaks); settlement selection → soft additive gold bloom + ellipse ring.
+
+Determinism preserved (render-only, no `Math.random`, no sim reads/writes); all comp-op/alpha
+mutations save/restored; no new deps. Build ✓ (`tsc && vite build`), **1650** tests green, and a
+Playwright render of the region view at 1935/1985/2055 confirms the effects land with no
+corruption and the era light visibly warms/cools across eras.
+
+**Deferred (still gated on owner sign-off / a live channel):** Phase 3 (fill the wired
+`town-<tier>`/`backdrop-<era>` slots + HUD chrome — technically the G1 target), Phase 4 (subtle
+biome edge-blend on the clickable field — Contrast-Rule-sensitive), Phase 5 (opt-in painted-terrain
+asset seam — reopens G1). None started.
