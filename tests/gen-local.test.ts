@@ -33,8 +33,9 @@ describe('gen-local arg parsing & selection', () => {
   });
 
   it('selectSlots filters by slot / category / era', () => {
-    expect(selectSlots(parseArgs([])).length).toBe(11);
+    expect(selectSlots(parseArgs([])).length).toBe(16); // 6 town + 5 backdrop + 5 terrain
     expect(selectSlots(parseArgs(['--category=backdrop'])).length).toBe(5);
+    expect(selectSlots(parseArgs(['--category=terrain'])).length).toBe(5);
     expect(selectSlots(parseArgs(['--category=town'])).every((s) => s.category === 'town')).toBe(true);
     expect(selectSlots(parseArgs(['--era=dawn'])).map((s) => s.slot)).toEqual(['backdrop-dawn']);
   });

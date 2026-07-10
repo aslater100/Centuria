@@ -282,3 +282,55 @@ corruption and the era light visibly warms/cools across eras.
 `town-<tier>`/`backdrop-<era>` slots + HUD chrome — technically the G1 target), Phase 4 (subtle
 biome edge-blend on the clickable field — Contrast-Rule-sensitive), Phase 5 (opt-in painted-terrain
 asset seam — reopens G1). None started.
+
+## 2026-07-10 (later) — Phases 3–5 landed: terrain seam, biome blend, city banners (same branch, PR #356)
+
+Owner said **"finish up to phase 5"** — explicit sign-off for Phase 4 and the G1 reopen for the
+asset seams. What shipped:
+
+- **Phase 5 — painted-terrain override seam** (G1 reopen, seam only; ships inert):
+  `AssetCategory` widened to `'town'|'backdrop'|'terrain'`; `TERRAIN_BIOMES`
+  (plains/forest/hills/mountains/marsh — water stays procedural, the bathymetry ramp is
+  elevation-continuous) + `TERRAIN_SUFFIX`/prompts in `assetCatalog.ts` (512², 64-multiples);
+  5 `terrain-<biome>` slots in the manifest's `availableSlots` (**`items` stays `[]`** — the
+  git contract holds); `.gitignore` gets `terrain-*.png`. In `drawTerrain`: base biome switch
+  extracted to `biomeBaseColor()`; when `assets.get('terrain-<biome>')` holds art it is clipped
+  into the hex over the base fill with a **deterministic per-hex source sub-rect** (kills
+  wallpaper repetition), smoothing enabled inside save/restore; every procedural detail
+  (dither/canopy/tufts/rocks/reeds) is gated on `!tileArt`, so no-art renders **byte-identical
+  procedural**. `AssetRegistry` gained a `count` getter and `mapCacheSignature` appends it —
+  async `Image.onload` arrival rebuilds the terrain cache exactly once per asset.
+- **Phase 4 — biome edge blend + painterly features:** two-band stepped colour bleed
+  (`BLEND_BANDS` [0.34, 0.10]/[0.16, 0.13]) from each differing LAND neighbour across the shared
+  edge (water boundaries stay crisp — shallows/beach own the coastline); forest canopy upgraded
+  from 3 fillRect squares to 4 layered arc crowns (shadow/crown/lit cap); hills to rounded scree
+  with a lit edge; mountains gain a lit-NW/shadowed-SE faceted peak. All cache-resident.
+- **Phase 3 — Civ5-style city banners:** `drawCityBanner()` (dark rounded plate, era-tinted
+  accent from `ERA_LIGHT`, gold pop chip, name) replaces the floating name/pop text;
+  `roundedPath()` helper deliberately avoids the `roundRect?.() ?? rect()` idiom (that evaluates
+  BOTH sides when roundRect exists, unioning a sharp rect into the path — pre-existing in the
+  scout panel).
+- **Phase 3 generation — BLOCKED in-session, channels verified live-probed:** HF MCP
+  `dynamic_space` invoke returns **`gradio=none`** (managed connector has Gradio Space tools
+  disabled — the runbook's predicted cheapest unblock: enable Gradio tools on the HF connector
+  for `evalstate/flux1_schnell` + `not-lain/background-removal`). Direct scripts remain dead
+  (removed api-inference endpoint + 403 egress). **`gen:local` picks up the terrain family with
+  zero script changes** (its only category branch is `'town'` for the 512 floor + bg-cut):
+  `npm run gen:local -- --category=terrain` (or bare for all 16). Per the asset-generator
+  runbook, nothing was fabricated; the seam was A/B-proven with **route-intercepted synthetic
+  textures** (Playwright, nothing written to `public/assets/`): stripes+jitter appeared clipped
+  per-hex with visible sub-rect phase variation, town-castle checkerboard replaced the sprite,
+  and steady-state fps held (36 vs 34 procedural; the transient 10fps during art arrival is the
+  ≤6 one-time cache rebuilds).
+- Tests: catalog tests extended (terrain slots, category, no era, 64-multiple dims);
+  `gen-local.test.ts` bare-run expectation 11 → 16.
+
+**Verification:** tsc ✓ · full suite green (1651 after the gen-local expectation fix) · build ✓ ·
+A/B screenshots ✓ · adversarial 8-angle review run on the diff (findings triaged before commit).
+
+**Still open:** actually generating the 16 slots needs one of: (a) Gradio tools enabled on the
+HF connector (then dispatch the asset-generator agent per centuria-plan G1), or (b) owner runs
+`npm run gen:local` against a local SD server (their stated preference). Audio stays blocked (no
+encoder). Zoom-in pixelation of image-based terrain (cache authored at base scale,
+`imageSmoothingEnabled=false` at blit) is a known limitation to pair with real art — supersample
+the mapCache when art lands.

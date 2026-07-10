@@ -20,8 +20,12 @@
 export const TOWN_TIERS = ['shack', 'cottage', 'house', 'town', 'manor', 'castle'] as const;
 /** Backdrop-era slots, mirroring `eraIdForYear` in backdrop.ts. */
 export const BACKDROP_ERAS = ['dawn', 'modern', 'analog', 'digital', 'future'] as const;
+/** Land-biome tile-texture slots, mirroring drawTerrain's biome switch in
+ *  regionview.ts (water biomes stay procedural — the bathymetry ramp is
+ *  elevation-continuous and a repeating texture would fight it). */
+export const TERRAIN_BIOMES = ['plains', 'forest', 'hills', 'mountains', 'marsh'] as const;
 
-export type AssetCategory = 'town' | 'backdrop';
+export type AssetCategory = 'town' | 'backdrop' | 'terrain';
 
 export interface AssetSlotDef {
   /** Registry slot name, e.g. `town-castle` or `backdrop-dawn`. */
@@ -54,6 +58,12 @@ const TOWN_SUFFIX =
 const BACKDROP_SUFFIX =
   'wide atmospheric sky matte painting, no foreground, no buildings, no people, no text, ' +
   'soft diffuse light, gallery-quality, gentle gradient from horizon to zenith';
+// Terrain tiles fill hexes on the map (opaque, clipped to the hex at draw time;
+// the renderer samples a random sub-rect per hex, so near-uniform texture beats
+// a single striking composition).
+const TERRAIN_SUFFIX =
+  'seen from directly above, seamless tileable terrain texture, painterly strategy game ground, ' +
+  'even coverage, no horizon, no objects, no buildings, no text, no border, muted natural palette';
 export const NEGATIVE =
   'realistic photo, 3d render, blurry, watermark, signature, text, ui, frame, harsh contrast';
 
@@ -76,6 +86,16 @@ const BACKDROP_PROMPT: Record<(typeof BACKDROP_ERAS)[number], string> = {
   future: `near-future neutral sky, clean teal-grey gradient horizon to deep zenith, faint high-altitude contrails, calm speculative atmosphere, ${BACKDROP_SUFFIX}`,
 };
 
+const TERRAIN_PROMPT: Record<(typeof TERRAIN_BIOMES)[number], string> = {
+  // Palettes echo drawTerrain's biome colours (regionview.ts) so painted tiles
+  // and the procedural fallback read as the same ground at hex boundaries.
+  plains: `rolling grassland meadow, muted sage and olive green grass with faint dry patches and dirt flecks, ${TERRAIN_SUFFIX}`,
+  forest: `dense temperate forest canopy, dark green layered treetop crowns with deep shadow between them, ${TERRAIN_SUFFIX}`,
+  hills: `dry rolling upland scrub, tan-olive grass with scattered grey rocks and low worn ridges, ${TERRAIN_SUFFIX}`,
+  mountains: `high rocky alpine terrain, grey weathered stone ridges with scree and faint snow dust, ${TERRAIN_SUFFIX}`,
+  marsh: `boggy wetland marsh, dark green-brown reeds and moss with small still water patches, ${TERRAIN_SUFFIX}`,
+};
+
 /** The full catalog of live override slots the generator can target. */
 export const LIVE_ASSET_CATALOG: AssetSlotDef[] = [
   ...TOWN_TIERS.map((tier): AssetSlotDef => ({
@@ -92,6 +112,13 @@ export const LIVE_ASSET_CATALOG: AssetSlotDef[] = [
     w: 1216,
     h: 704,
     prompt: BACKDROP_PROMPT[era],
+  })),
+  ...TERRAIN_BIOMES.map((biome): AssetSlotDef => ({
+    slot: `terrain-${biome}`,
+    category: 'terrain',
+    w: 512,
+    h: 512,
+    prompt: TERRAIN_PROMPT[biome],
   })),
 ];
 

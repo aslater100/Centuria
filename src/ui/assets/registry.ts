@@ -67,6 +67,13 @@ export class AssetRegistry {
     return this.images.get(slot) ?? null;
   }
 
+  /** Count of fully-loaded assets. Images register asynchronously (`onload`), so
+   *  cache signatures that bake assets in (e.g. the terrain mapCache) include
+   *  this count to rebuild once art actually arrives. */
+  get count(): number {
+    return this.images.size;
+  }
+
   has(slot: string): boolean {
     return this.images.has(slot);
   }

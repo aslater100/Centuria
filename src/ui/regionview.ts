@@ -1073,16 +1073,13 @@ export class RegionView {
           g.fillRect(sx + 4, py - 1, 2, 2);
         }
         this.drawTownTier(px, py, pop, this.selectedId === t.id);
-        g.fillStyle = '#e8d27a';
-        g.font = '12px monospace';
-        g.textAlign = 'center';
-        g.fillText(t.name, px, py + 28);
-        g.fillStyle = '#9ab0c4';
-        g.font = '10px monospace';
-        g.fillText(`${pop}`, px, py + 40);
+        this.drawCityBanner(px, py + 20, t.name, pop, this.selectedId === t.id);
         if (region.day - t.lastRaidDay < 5) {
           g.fillStyle = '#e04444';
+          g.font = '10px monospace';
+          g.textAlign = 'center';
           g.fillText('⚔', px + 22, py - 6);
+          g.textAlign = 'left';
         }
       });
     }
@@ -1418,6 +1415,9 @@ export class RegionView {
     s += `|fog${r.exploredCount}`;
     // Ghost waterline: rebuild cache when sea-rise warning fires (adds blue coastal overlay).
     s += `|rise${r.seaRiseAnnounced ? 1 : 0}`;
+    // Override art registers asynchronously (Image.onload); terrain tiles bake
+    // into this cache, so rebuild once when each asset actually arrives.
+    s += `|a${this.assets.count}`;
     return s;
   }
 
@@ -2438,6 +2438,56 @@ export class RegionView {
     }
   }
 
+  /** Begin a rounded-rect path, falling back to a plain rect where roundRect is
+   *  unavailable. (Deliberately NOT the `roundRect?.() ?? rect()` idiom — that
+   *  evaluates BOTH sides when roundRect exists, unioning a sharp rect into the
+   *  path.) */
+  private roundedPath(x: number, y: number, w: number, h: number, r: number): void {
+    const g = this.g;
+    g.beginPath();
+    if (g.roundRect) g.roundRect(x, y, w, h, r);
+    else g.rect(x, y, w, h);
+  }
+
+  /** Civ5-style city banner: a dark plate with an era-tinted accent line, a
+   *  gold population chip, and the settlement name — replaces the floating
+   *  name/pop text so settlements read as anchored cities, not map labels. */
+  private drawCityBanner(px: number, py: number, name: string, pop: number, selected: boolean): void {
+    const g = this.g;
+    const accent = ERA_LIGHT[eraIdForYear(this.region.year)].warm;
+    g.font = 'bold 11px monospace';
+    const nameW = this.textW(name);
+    const popText = String(pop);
+    const popW = popText.length * 6 + 8; // 10px monospace ≈ 6px/char — no measureText churn
+    const w = Math.ceil(nameW + popW + 18);
+    const h = 16;
+    const x = Math.round(px - w / 2);
+    const y = Math.round(py);
+    // Plate + era accent + border
+    g.fillStyle = selected ? 'rgba(24,28,40,0.92)' : 'rgba(10,14,22,0.78)';
+    this.roundedPath(x, y, w, h, 4);
+    g.fill();
+    g.fillStyle = `rgba(${accent},0.85)`;
+    g.fillRect(x + 3, y, w - 6, 1);
+    g.strokeStyle = selected ? 'rgba(232,210,122,0.9)' : `rgba(${accent},0.35)`;
+    g.lineWidth = 1;
+    this.roundedPath(x + 0.5, y + 0.5, w - 1, h - 1, 4);
+    g.stroke();
+    // Population chip
+    g.fillStyle = 'rgba(232,210,122,0.16)';
+    this.roundedPath(x + 3, y + 3, popW, h - 6, 3);
+    g.fill();
+    g.fillStyle = '#e8d27a';
+    g.font = '10px monospace';
+    g.textAlign = 'center';
+    g.fillText(popText, x + 3 + popW / 2, y + h - 5);
+    // Name
+    g.fillStyle = '#e6ecf5';
+    g.font = 'bold 11px monospace';
+    g.fillText(name, x + popW + 6 + (w - popW - 9) / 2, y + h - 4);
+    g.textAlign = 'left';
+  }
+
   private drawTownTier(px: number, py: number, pop: number, selected: boolean): void {
     const g = this.g;
     const tier = townSpriteTier(pop);
@@ -2591,6 +2641,34 @@ export class RegionView {
     return cv;
   }
 
+  /** Base fill for a biome at an elevation — the single source of truth shared
+   *  by the main tile fill and the biome edge blend. Sea uses a continuous
+   *  depth ramp (bathymetry); every land biome returns a hex literal. */
+  private biomeBaseColor(biome: string, elevation: number): string {
+    switch (biome) {
+      case 'sea': {
+        // Open ocean sinks toward near-black blue, shelf water lifts to teal.
+        const d = Math.max(0, Math.min(1, -elevation / 0.6));
+        return `rgb(${Math.round(40 - 22 * d)},${Math.round(64 - 30 * d)},${Math.round(86 - 36 * d)})`;
+      }
+      case 'lake':      return '#2e4a5c';
+      case 'river':     return '#36586e';
+      case 'marsh':     return '#39503e';
+      case 'plains':    return elevation > 0.35 ? '#4e5e40' : '#46563a';
+      case 'forest':    return elevation > 0.4 ? '#2e4826' : '#33502c';
+      case 'hills':     return elevation > 0.6 ? '#6a6450' : '#5a5742';
+      case 'mountains': return elevation > 0.88 ? '#d0cec8' : elevation > 0.78 ? '#a8a49c' : '#7a7060';
+      default:          return '#46563a';
+    }
+  }
+
+  /** Two stepped bands (depth-toward-centre, alpha) for the biome edge blend —
+   *  a dithered gradient in the GDD's tolerance, not smooth AA mush. */
+  private static readonly BLEND_BANDS: readonly (readonly [number, number])[] = [
+    [0.34, 0.10],
+    [0.16, 0.13],
+  ];
+
   /** The generated land itself, in hexagonal tiles: this map IS the world. */
   private drawTerrain(g: CanvasRenderingContext2D, W: number, H: number): void {
     const { region } = this;
@@ -2617,28 +2695,32 @@ export class RegionView {
         const bw = hw * 2;
         const bh = size * 2;
         // Base biome colour
-        let col: string;
-        switch (c.biome) {
-          case 'sea': {
-            // Continuous depth ramp: open ocean sinks toward near-black blue,
-            // shelf water lifts toward a teal shore — the map reads as bathymetry.
-            const d = Math.max(0, Math.min(1, -c.elevation / 0.6));
-            col = `rgb(${Math.round(40 - 22 * d)},${Math.round(64 - 30 * d)},${Math.round(86 - 36 * d)})`;
-            break;
-          }
-          case 'lake':      col = '#2e4a5c'; break;
-          case 'river':     col = '#36586e'; break;
-          case 'marsh':     col = '#39503e'; break;
-          case 'plains':    col = c.elevation > 0.35 ? '#4e5e40' : '#46563a'; break;
-          case 'forest':    col = c.elevation > 0.4 ? '#2e4826' : '#33502c'; break;
-          case 'hills':     col = c.elevation > 0.6 ? '#6a6450' : '#5a5742'; break;
-          case 'mountains': col = c.elevation > 0.88 ? '#d0cec8' : c.elevation > 0.78 ? '#a8a49c' : '#7a7060'; break;
-          default:          col = '#46563a';
-        }
-        g.fillStyle = col;
+        g.fillStyle = this.biomeBaseColor(c.biome, c.elevation);
         fillHexPath(g, corners);
 
         const water = RegionView.WATER_BIOMES.has(c.biome);
+        // Painted-terrain override seam (`terrain-<biome>`): when the registry
+        // holds a tile texture, clip it into the hex over the base fill. A
+        // deterministic per-hex source offset samples a different sub-rect of
+        // the texture each tile, so one image never reads as wallpaper. Absent
+        // art → null → every procedural detail below is untouched.
+        const tileArt = water ? null : this.assets.get(`terrain-${c.biome}`);
+        if (tileArt && tileArt.width > 0) {
+          const th = (x * 92837111 ^ y * 689287499) >>> 0;
+          const sw = Math.max(1, tileArt.width >> 1);
+          const sh = Math.max(1, tileArt.height >> 1);
+          const sx = th % Math.max(1, tileArt.width - sw);
+          const sy = (th >> 8) % Math.max(1, tileArt.height - sh);
+          g.save();
+          g.beginPath();
+          g.moveTo(corners[0].x, corners[0].y);
+          for (let i = 1; i < 6; i++) g.lineTo(corners[i].x, corners[i].y);
+          g.closePath();
+          g.clip();
+          g.imageSmoothingEnabled = true; // painterly art wants smoothing (restore() reverts)
+          g.drawImage(tileArt, sx, sy, sw, sh, bx, by, bw, bh);
+          g.restore();
+        }
         // Coastal shallows: water cells touching land get a turquoise foam rim
         // that fades to deep water at the tile centre — a real coastline, the
         // single biggest readability win. Reusable hex mask, not a per-hex fill.
@@ -2651,12 +2733,39 @@ export class RegionView {
           fillHexPath(g, corners);
         }
         // Subtle per-cell dither so flat colour bands read as textured ground.
-        if (!water) {
+        // (Painted tile art carries its own variation — skip when overridden.)
+        if (!water && !tileArt) {
           const hash = (x * 73856093 ^ y * 19349663) >>> 0;
           const n = (hash % 5) - 2; // -2..+2
           if (n !== 0) {
             g.fillStyle = n > 0 ? `rgba(255,250,235,${n * 0.018})` : `rgba(0,0,0,${-n * 0.022})`;
             fillHexPath(g, corners);
+          }
+        }
+
+        // Biome edge blend: each differing LAND neighbour bleeds its base
+        // colour across the shared edge in two stepped bands, melting the
+        // hard polygon seam into a dithered transition. Water boundaries stay
+        // crisp (the shallows/beach rims already own the coastline).
+        if (!water) {
+          for (let d = 0; d < 6; d++) {
+            const [bnc, bnr] = hexNeighborDir(x, y, d);
+            if (bnc < 0 || bnr < 0 || bnc >= N || bnr >= N) continue;
+            const nCell = map.at(bnc, bnr);
+            if (nCell.biome === c.biome || RegionView.WATER_BIOMES.has(nCell.biome)) continue;
+            const nrgb = hexToRgb(this.biomeBaseColor(nCell.biome, nCell.elevation));
+            const e0 = corners[d];
+            const e1 = corners[(d + 1) % 6];
+            for (const [depth, alpha] of RegionView.BLEND_BANDS) {
+              g.fillStyle = `rgba(${nrgb.r},${nrgb.g},${nrgb.b},${alpha})`;
+              g.beginPath();
+              g.moveTo(e0.x, e0.y);
+              g.lineTo(e1.x, e1.y);
+              g.lineTo(e1.x + (cx - e1.x) * depth, e1.y + (cy - e1.y) * depth);
+              g.lineTo(e0.x + (cx - e0.x) * depth, e0.y + (cy - e0.y) * depth);
+              g.closePath();
+              g.fill();
+            }
           }
         }
 
@@ -2685,31 +2794,61 @@ export class RegionView {
           g.closePath();
           g.clip();
         }
-        // Forest canopy: layered blobs — dark trunks under lit crowns — so
-        // woodland reads as foliage rather than a flat green block.
-        if (c.biome === 'forest') {
-          const r = Math.max(2, bw * 0.26);
-          for (let k = 0; k < 3; k++) {
+        // Forest canopy: layered round crowns — shadow disc, mid crown, lit
+        // NW cap — so woodland reads as painted foliage, not square confetti.
+        // Skipped when a painted tile texture already supplies the canopy.
+        if (c.biome === 'forest' && !tileArt) {
+          const r = Math.max(2, bw * 0.24);
+          for (let k = 0; k < 4; k++) {
             const h = (x * 17 + y * 31 + k * 101) >>> 0;
-            const tx = bx + (h % Math.max(1, Math.floor(bw - r)));
-            const ty = by + ((h >> 4) % Math.max(1, Math.floor(bh - r)));
-            g.fillStyle = 'rgba(18,36,14,0.5)';
-            g.fillRect(tx, ty + 1, r, r); // shadow
-            g.fillStyle = 'rgba(58,96,46,0.55)';
-            g.fillRect(tx, ty, r, r); // lit crown
+            const tx = bx + r + (h % Math.max(1, Math.floor(bw - r * 2)));
+            const ty = by + r + ((h >> 4) % Math.max(1, Math.floor(bh - r * 2)));
+            g.fillStyle = 'rgba(14,30,12,0.5)';
+            g.beginPath(); g.arc(tx + 1, ty + 2, r * 0.85, 0, Math.PI * 2); g.fill(); // ground shadow
+            g.fillStyle = 'rgba(52,88,42,0.75)';
+            g.beginPath(); g.arc(tx, ty, r * 0.8, 0, Math.PI * 2); g.fill(); // crown
+            g.fillStyle = 'rgba(88,128,64,0.55)';
+            g.beginPath(); g.arc(tx - r * 0.25, ty - r * 0.25, r * 0.45, 0, Math.PI * 2); g.fill(); // lit cap
           }
         }
         // Plains: sparse grass tufts for a meadow texture.
-        if (c.biome === 'plains' && (x * 13 + y * 7) % 6 < 2) {
+        if (c.biome === 'plains' && !tileArt && (x * 13 + y * 7) % 6 < 2) {
           g.fillStyle = 'rgba(120,134,78,0.4)';
           g.fillRect(bx + (x % 3) + 1, by + bh * 0.4, Math.max(1, bw * 0.18), Math.max(1, bh * 0.4));
         }
-        // Hills: a few scattered rocks/scrub dots.
-        if (c.biome === 'hills' && (x * 11 + y * 5) % 5 < 2) {
-          g.fillStyle = 'rgba(40,36,28,0.32)';
-          g.fillRect(bx + bw * 0.5, by + bh * 0.45, Math.max(1, bw * 0.22), Math.max(1, bh * 0.22));
+        // Hills: rounded scree stones with a lit edge instead of one flat square.
+        if (c.biome === 'hills' && !tileArt && (x * 11 + y * 5) % 5 < 2) {
+          const sx2 = bx + bw * 0.5;
+          const sy2 = by + bh * 0.48;
+          const sr = Math.max(1.5, bw * 0.12);
+          g.fillStyle = 'rgba(40,36,28,0.4)';
+          g.beginPath(); g.arc(sx2, sy2, sr, 0, Math.PI * 2); g.fill();
+          g.beginPath(); g.arc(sx2 + sr * 1.4, sy2 + sr * 0.6, sr * 0.7, 0, Math.PI * 2); g.fill();
+          g.fillStyle = 'rgba(210,200,180,0.25)';
+          g.beginPath(); g.arc(sx2 - sr * 0.3, sy2 - sr * 0.3, sr * 0.5, 0, Math.PI * 2); g.fill();
         }
         if (needsClip) g.restore();
+        // Mountains: a faceted peak — lit NW face, shadowed SE face — over the
+        // base grey, so ranges read as relief rather than flat stone plates.
+        if (c.biome === 'mountains' && !tileArt) {
+          const pw2 = bw * 0.5;
+          const ph2 = bh * 0.52;
+          const apy = cy - ph2 * 0.5;
+          g.fillStyle = 'rgba(235,232,225,0.3)';
+          g.beginPath();
+          g.moveTo(cx, apy);
+          g.lineTo(cx - pw2 * 0.5, apy + ph2);
+          g.lineTo(cx, apy + ph2 * 0.8);
+          g.closePath();
+          g.fill();
+          g.fillStyle = 'rgba(30,26,22,0.3)';
+          g.beginPath();
+          g.moveTo(cx, apy);
+          g.lineTo(cx + pw2 * 0.5, apy + ph2);
+          g.lineTo(cx, apy + ph2 * 0.8);
+          g.closePath();
+          g.fill();
+        }
         // Mountain snow caps on highest peaks
         if (c.biome === 'mountains' && c.elevation > 0.82) {
           g.fillStyle = `rgba(230,230,240,${(c.elevation - 0.82) * 2.5})`;
@@ -2721,7 +2860,7 @@ export class RegionView {
           fillHexPath(g, corners);
         }
         // Marsh reeds texture (clipped separately to allow full-height strips)
-        if (c.biome === 'marsh' && (x * 5 + y * 7) % 11 < 3) {
+        if (c.biome === 'marsh' && !tileArt && (x * 5 + y * 7) % 11 < 3) {
           g.save();
           g.beginPath();
           g.moveTo(corners[0].x, corners[0].y);

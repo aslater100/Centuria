@@ -10,6 +10,7 @@ dist/
 # scripts/hf-assets.ts / src/data/assetCatalog.ts.
 public/assets/town-*.png
 public/assets/backdrop-*.png
+public/assets/terrain-*.png
 public/audio/music-*.ogg
 public/audio/ambience-*.ogg
 screenshots/

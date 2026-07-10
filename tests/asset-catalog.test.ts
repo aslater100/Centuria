@@ -3,6 +3,7 @@ import {
   LIVE_ASSET_CATALOG,
   TOWN_TIERS,
   BACKDROP_ERAS,
+  TERRAIN_BIOMES,
   mergeManifestItems,
   type GeneratedAssetItem,
 } from '../src/data/assetCatalog';
@@ -17,11 +18,12 @@ const item = (slot: string, sha = 'a'): GeneratedAssetItem => ({
 });
 
 describe('LIVE_ASSET_CATALOG', () => {
-  it('covers exactly the live town tiers and backdrop eras', () => {
+  it('covers exactly the live town tiers, backdrop eras and terrain biomes', () => {
     const slots = LIVE_ASSET_CATALOG.map((s) => s.slot).sort();
     const expected = [
       ...TOWN_TIERS.map((t) => `town-${t}`),
       ...BACKDROP_ERAS.map((e) => `backdrop-${e}`),
+      ...TERRAIN_BIOMES.map((b) => `terrain-${b}`),
     ].sort();
     expect(slots).toEqual(expected);
   });
@@ -50,6 +52,17 @@ describe('LIVE_ASSET_CATALOG', () => {
       const def = LIVE_ASSET_CATALOG.find((s) => s.slot === `backdrop-${era}`);
       expect(def, `missing backdrop-${era}`).toBeDefined();
       expect(def!.era).toBe(era);
+    }
+  });
+
+  it('terrain slots carry the terrain category, no era, and 64-multiple dims', () => {
+    for (const biome of TERRAIN_BIOMES) {
+      const def = LIVE_ASSET_CATALOG.find((s) => s.slot === `terrain-${biome}`);
+      expect(def, `missing terrain-${biome}`).toBeDefined();
+      expect(def!.category).toBe('terrain');
+      expect(def!.era).toBeUndefined();
+      expect(def!.w % 64).toBe(0); // FLUX needs 64-multiples
+      expect(def!.h % 64).toBe(0);
     }
   });
 });

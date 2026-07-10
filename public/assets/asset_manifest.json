@@ -12,7 +12,12 @@
     "backdrop-modern",
     "backdrop-analog",
     "backdrop-digital",
-    "backdrop-future"
+    "backdrop-future",
+    "terrain-plains",
+    "terrain-forest",
+    "terrain-hills",
+    "terrain-mountains",
+    "terrain-marsh"
   ],
   "items": []
 }
