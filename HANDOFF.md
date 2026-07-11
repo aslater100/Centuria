@@ -1144,10 +1144,12 @@ town engine (`public/sprites/`); the live `AssetRegistry` slots (`town-<tier>`,
 
 - **`src/data/assetCatalog.ts`** (type-checked, unit-tested, no network/fs):
   `LIVE_ASSET_CATALOG` — the 6 town tiers (mirroring `townSpriteTier`) + 5
-  backdrop eras (mirroring `eraIdForYear`), each with a tuned prompt (backdrop
-  palettes echo `ERA_SKY` so generated art and the procedural fallback read as
-  the same era). Plus the pure `mergeManifestItems(existing, incoming)` (replace
-  by slot, preserve others, sort — diff-friendly manifest).
+  backdrop eras (mirroring `eraIdForYear`) + 5 terrain-biome tile textures
+  (mirroring `drawTerrain`'s land biomes; added 2026-07 with the painted-terrain
+  seam), each with a tuned prompt (backdrop palettes echo `ERA_SKY`, terrain
+  palettes echo `biomeBaseColor`, so generated art and the procedural fallback
+  read as the same world). Plus the pure `mergeManifestItems(existing, incoming)`
+  (replace by slot, preserve others, sort — diff-friendly manifest).
 - **`scripts/hf-assets.ts`** — thin CLI + HF I/O over the catalog: writes PNG
   bytes straight to `public/assets/` (HF returns PNG the registry loads directly,
   **so sprites/backdrops need no encoder**), sha256s them, and `mergeManifestItems`

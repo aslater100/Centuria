@@ -119,6 +119,28 @@ const BRANCH_SKY: Record<NonNullable<Branch>, { zenith: RGB; horizon: RGB }> = {
   drowned:   { zenith: [62, 78, 92],   horizon: [110, 128, 140] }, // heavy grey-blue
 };
 
+/** Era key-light — the warm upper-left highlight / cool lower-right shadow the
+ *  screen-space wash (RegionView.drawAtmosphere) and UI accents (city banners)
+ *  tint the frame with, as 'r,g,b' strings. Lives here beside ERA_SKY so era
+ *  look is one module's responsibility; matching that discipline, a future
+ *  branch repaints the key-light exactly as BRANCH_SKY repaints the sky —
+ *  under dystopia the light is sodium-amber, not the neutral teal. */
+const ERA_KEY_LIGHT: Record<EraId, { warm: string; cool: string }> = {
+  dawn:    { warm: '255,224,176', cool: '30,40,68' },
+  modern:  { warm: '255,246,214', cool: '32,46,74' },
+  analog:  { warm: '255,226,168', cool: '40,44,60' },
+  digital: { warm: '210,230,248', cool: '28,40,66' },
+  future:  { warm: '206,240,238', cool: '26,48,60' },
+};
+const BRANCH_KEY_LIGHT: Record<NonNullable<Branch>, { warm: string; cool: string }> = {
+  solarpunk: { warm: '195,240,205', cool: '22,52,44' },  // clean cyan-green light
+  dystopia:  { warm: '250,180,100', cool: '46,36,26' },  // sodium smog light
+  drowned:   { warm: '165,195,220', cool: '24,38,54' },  // cold drowned light
+};
+export function eraKeyLight(era: EraId, branch: Branch): { warm: string; cool: string } {
+  return era === 'future' && branch ? BRANCH_KEY_LIGHT[branch] : ERA_KEY_LIGHT[era];
+}
+
 /** Season tint added to both ends (warm/cool/wash). */
 const SEASON_SHIFT: RGB[] = [
   [6, 12, 4],    // spring — fresh green lift

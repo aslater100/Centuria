@@ -37,6 +37,9 @@ export interface AssetManifest { schemaVersion?: number; items?: AssetItem[]; }
 
 export class AssetRegistry {
   private images = new Map<string, HTMLImageElement>();
+  /** Per-slot registration stamp (monotonic tick), driving version(). */
+  private stamps = new Map<string, number>();
+  private tick = 0;
   private loaded = false;
 
   /** Fetch the manifest and start loading every listed asset. Never throws. */
@@ -54,7 +57,12 @@ export class AssetRegistry {
         if (!it || !it.slot) continue;
         const file = it.file ?? `${it.slot}.png`;
         const img = new Image();
-        img.onload = () => this.images.set(it.slot, img); // appears next frame
+        img.onload = () => {
+          // Appears next frame. The stamp records registration order so
+          // version() moves on arrival AND on same-slot replacement.
+          this.images.set(it.slot, img);
+          this.stamps.set(it.slot, ++this.tick);
+        };
         img.src = `${base}${dir}/${file}`;
       }
     } catch {
@@ -65,6 +73,17 @@ export class AssetRegistry {
   /** The loaded image for a slot, or null → the caller draws procedurally. */
   get(slot: string): HTMLImageElement | null {
     return this.images.get(slot) ?? null;
+  }
+
+  /** Monotonic version of the loaded slots matching a prefix. Images register
+   *  asynchronously (`onload`), so cache signatures that bake assets in (e.g.
+   *  the terrain mapCache keys on `version('terrain-')`) rebuild exactly when a
+   *  matching asset arrives — or is replaced in-place (a plain size count would
+   *  miss replacement and would rebuild spuriously on unrelated slots). */
+  version(prefix: string): number {
+    let v = 0;
+    for (const [slot, t] of this.stamps) if (slot.startsWith(prefix) && t > v) v = t;
+    return v;
   }
 
   has(slot: string): boolean {

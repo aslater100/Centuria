@@ -64,6 +64,7 @@ const OVERRIDE_FILE = 'shoot-ab-override.png';
 const MANIFEST_SLOTS = [
   'town-shack', 'town-cottage', 'town-house', 'town-town', 'town-manor', 'town-castle',
   'backdrop-dawn', 'backdrop-modern', 'backdrop-analog', 'backdrop-digital', 'backdrop-future',
+  'terrain-plains', 'terrain-forest', 'terrain-hills', 'terrain-mountains', 'terrain-marsh',
 ];
 
 const EMPTY_MANIFEST_JSON = JSON.stringify({

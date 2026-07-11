@@ -244,3 +244,126 @@ legitimacy/happiness/satisfaction/finance/press-freedom/credibility-gap/epilogue
 
 ### Not done
 - **G1 art-override generation** stays deferred — owner chose "stay procedural".
+
+## 2026-07-10 — Graphics cohesion pass toward a Civ5 look (branch `claude/game-graphics-improvement-bx5kke`)
+
+Owner asked to move the map's graphics base toward Civilization 5 "with the graphics creators we
+already have". Research (renderer/pipeline map + a 3-strategy design panel + judge) surfaced the
+key fork: the AI-asset path is what "graphics creators" points at, but it **reopens the dropped G1
+"stay procedural" decision** *and* every in-sandbox generation channel is currently
+broken/blocked (`hf-assets.ts` → removed `api-inference` endpoint; HF egress 403; MCP-Gradio needs
+connector enablement; no local SD). Owner picked **procedural cohesion** (no G1 reopen), with
+**local SD (`gen:local`)** as the eventual channel when assets are pursued. So this pass is
+**pure procedural, render-only, zero assets, zero schema/sim touch** — and preserves the
+procedural-fallback discipline so local-SD art can drop in later.
+
+All changes in `src/ui/regionview.ts`:
+- **Phase 0 — era key-light wash** (`drawAtmosphere`): one directional warm-upper-left→cool-lower-
+  right tint keyed to era (`eraIdForYear`, module table `ERA_LIGHT`) + season, cached by
+  size|era|season, layered under the existing vignette. Day/night stays disabled (`atmosphere()`
+  returns night:0/golden:0) — driven by era/season only. So map + tokens + parallax sky share one
+  light. Low-alpha tint of the foreground, never a repaint (GDD §3.1 Contrast Rule).
+- **Phase 1 — de-diagram, baked into the signature-gated `mapCache`** (`drawTerrain` /
+  `drawTerritories`): reusable hex-mask helper `hexMask('ao'|'coast', size)` — a per-tile ambient-
+  occlusion rim (lit domes, not flat polygons) and a coast shallows gradient replacing the flat
+  turquoise rim; both are one `drawImage` per tile (no per-hex `CanvasGradient` — up to 16384
+  tiles). Frontier lines → a 3-pass inward-fading cultural glow band. Contour strokes softened
+  0.12→0.06 (AO now carries the depth).
+- **Phase 2 — per-frame polish**: `groundShadow()` helper under scouts / expeditions / rival
+  diamonds / army squads; additive pulsing water sun-glint (`waterGlintCanvas`, `'lighter'` comp-op
+  save/restored so it never leaks); settlement selection → soft additive gold bloom + ellipse ring.
+
+Determinism preserved (render-only, no `Math.random`, no sim reads/writes); all comp-op/alpha
+mutations save/restored; no new deps. Build ✓ (`tsc && vite build`), **1650** tests green, and a
+Playwright render of the region view at 1935/1985/2055 confirms the effects land with no
+corruption and the era light visibly warms/cools across eras.
+
+**Deferred (still gated on owner sign-off / a live channel):** Phase 3 (fill the wired
+`town-<tier>`/`backdrop-<era>` slots + HUD chrome — technically the G1 target), Phase 4 (subtle
+biome edge-blend on the clickable field — Contrast-Rule-sensitive), Phase 5 (opt-in painted-terrain
+asset seam — reopens G1). None started.
+
+## 2026-07-10 (later) — Phases 3–5 landed: terrain seam, biome blend, city banners (same branch, PR #356)
+
+Owner said **"finish up to phase 5"** — explicit sign-off for Phase 4 and the G1 reopen for the
+asset seams. What shipped:
+
+- **Phase 5 — painted-terrain override seam** (G1 reopen, seam only; ships inert):
+  `AssetCategory` widened to `'town'|'backdrop'|'terrain'`; `TERRAIN_BIOMES`
+  (plains/forest/hills/mountains/marsh — water stays procedural, the bathymetry ramp is
+  elevation-continuous) + `TERRAIN_SUFFIX`/prompts in `assetCatalog.ts` (512², 64-multiples);
+  5 `terrain-<biome>` slots in the manifest's `availableSlots` (**`items` stays `[]`** — the
+  git contract holds); `.gitignore` gets `terrain-*.png`. In `drawTerrain`: base biome switch
+  extracted to `biomeBaseColor()`; when `assets.get('terrain-<biome>')` holds art it is clipped
+  into the hex over the base fill with a **deterministic per-hex source sub-rect** (kills
+  wallpaper repetition), smoothing enabled inside save/restore; every procedural detail
+  (dither/canopy/tufts/rocks/reeds) is gated on `!tileArt`, so no-art renders **byte-identical
+  procedural**. `AssetRegistry` gained a `count` getter and `mapCacheSignature` appends it —
+  async `Image.onload` arrival rebuilds the terrain cache exactly once per asset.
+- **Phase 4 — biome edge blend + painterly features:** two-band stepped colour bleed
+  (`BLEND_BANDS` [0.34, 0.10]/[0.16, 0.13]) from each differing LAND neighbour across the shared
+  edge (water boundaries stay crisp — shallows/beach own the coastline); forest canopy upgraded
+  from 3 fillRect squares to 4 layered arc crowns (shadow/crown/lit cap); hills to rounded scree
+  with a lit edge; mountains gain a lit-NW/shadowed-SE faceted peak. All cache-resident.
+- **Phase 3 — Civ5-style city banners:** `drawCityBanner()` (dark rounded plate, era-tinted
+  accent from `ERA_LIGHT`, gold pop chip, name) replaces the floating name/pop text;
+  `roundedPath()` helper deliberately avoids the `roundRect?.() ?? rect()` idiom (that evaluates
+  BOTH sides when roundRect exists, unioning a sharp rect into the path — pre-existing in the
+  scout panel).
+- **Phase 3 generation — BLOCKED in-session, channels verified live-probed:** HF MCP
+  `dynamic_space` invoke returns **`gradio=none`** (managed connector has Gradio Space tools
+  disabled — the runbook's predicted cheapest unblock: enable Gradio tools on the HF connector
+  for `evalstate/flux1_schnell` + `not-lain/background-removal`). Direct scripts remain dead
+  (removed api-inference endpoint + 403 egress). **`gen:local` picks up the terrain family with
+  zero script changes** (its only category branch is `'town'` for the 512 floor + bg-cut):
+  `npm run gen:local -- --category=terrain` (or bare for all 16). Per the asset-generator
+  runbook, nothing was fabricated; the seam was A/B-proven with **route-intercepted synthetic
+  textures** (Playwright, nothing written to `public/assets/`): stripes+jitter appeared clipped
+  per-hex with visible sub-rect phase variation, town-castle checkerboard replaced the sprite,
+  and steady-state fps held (36 vs 34 procedural; the transient 10fps during art arrival is the
+  ≤6 one-time cache rebuilds).
+- Tests: catalog tests extended (terrain slots, category, no era, 64-multiple dims);
+  `gen-local.test.ts` bare-run expectation 11 → 16.
+
+**Verification:** tsc ✓ · full suite green (1651 after the gen-local expectation fix) · build ✓ ·
+A/B screenshots ✓ · adversarial 8-angle review run on the diff (findings triaged before commit).
+
+**Still open:** actually generating the 16 slots needs one of: (a) Gradio tools enabled on the
+HF connector (then dispatch the asset-generator agent per centuria-plan G1), or (b) owner runs
+`npm run gen:local` against a local SD server (their stated preference). Audio stays blocked (no
+encoder). Zoom-in pixelation of image-based terrain (cache authored at base scale,
+`imageSmoothingEnabled=false` at blit) is a known limitation to pair with real art — supersample
+the mapCache when art lands.
+
+### Adversarial review pass (8 finder angles) — all 10 findings fixed in the follow-up commit
+
+Correctness: **signed-shift bug** `th >> 8` → `>>> 8` (negative drawImage source-y on ~half of
+hexes once th ≥ 2³¹ — proven with x=24); **mapCacheSignature** re-keyed from registry-global
+`assets.count` to `assets.version('terrain-')` (kills the 11-spurious-rebuild startup storm AND
+detects in-place slot replacement, which a size count cannot); **ghost-waterline year≥2030 term**
+added to the signature (latent: a cool/landlocked run reaching 2030 never showed the flood
+overlay); **branch-aware key light** — `eraKeyLight(era, branch)` now lives in `backdrop.ts`
+beside `ERA_SKY` (dystopia lights sodium-amber, not neutral teal; wash + banner accents both
+consume it; 3 new backdrop tests); **edge blend gated on `!tileArt`** (both correctness finders:
+procedural wedges were tinting painted art); **guard asymmetry** normalized (0-width decode →
+null at `artFor`, so draw and suppression can't disagree); **river shimmer made static** (a frame
+term baked into a cache never animates — it only re-rolled on rebuild); **scout panel migrated to
+`roundedPath`** (the pre-existing `roundRect?.() ?? rect()` idiom always unioned a sharp rect —
+panel rendered square-cornered with a doubled stroke); **pop chip measured via `textW`** (was a
+6px/char guess); **`traceHexPath` extraction** (the corner walk existed in five copies — fill and
+clips can no longer drift). Also: per-biome art + blend-style lookups hoisted out of the 16k-hex
+loop, mountain facet deduped, `shoot.ts` MANIFEST_SLOTS + script usage docs + HANDOFF slot counts
+updated to the 16-slot catalog.
+
+**Correction to commit 5d7a052's message:** it claimed "the no-art render is unchanged" — true
+only of the `!tileArt` gating on pre-existing layers; the Phase 4 restyles (edge blend, arc
+canopy, scree, mountain facet) intentionally changed the default frame. Owner-approved via
+"finish up to phase 5".
+
+**Deferred from review (logged, not fixed):** minimap.ts carries a drifted copy of the biome
+palette (marsh/river differ already) — unifying needs a shared module (minimap→regionview import
+would cycle); the six `!tileArt` gates could collapse into one `drawBiomeDetail()` (explicit
+layer-policy comment added instead); the three per-hex hash sites could share a helper.
+
+Suite: **1654** green · tsc ✓ · build ✓ · post-fix A/B re-shoot ✓ (full tile coverage after the
+shift fix, 33fps steady with art).

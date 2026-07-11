@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   eraIdForYear,
+  eraKeyLight,
   statBand,
   buildBackdropPalette,
   buildHorizonGlow,
   rgbCss,
   type BackdropInputs,
+  type EraId,
 } from '../src/ui/backdrop';
 
 const base: BackdropInputs = {
@@ -28,6 +30,32 @@ describe('eraIdForYear', () => {
     expect(eraIdForYear(2039)).toBe('digital');
     expect(eraIdForYear(2040)).toBe('future');
     expect(eraIdForYear(2100)).toBe('future');
+  });
+});
+
+describe('eraKeyLight', () => {
+  const eras: EraId[] = ['dawn', 'modern', 'analog', 'digital', 'future'];
+
+  it('returns a warm/cool r,g,b pair for every era', () => {
+    for (const era of eras) {
+      const { warm, cool } = eraKeyLight(era, null);
+      expect(warm).toMatch(/^\d+,\d+,\d+$/);
+      expect(cool).toMatch(/^\d+,\d+,\d+$/);
+    }
+  });
+
+  it('a branch repaints the FUTURE key-light (one lit world with the branch sky)', () => {
+    const neutral = eraKeyLight('future', null);
+    for (const branch of ['solarpunk', 'dystopia', 'drowned'] as const) {
+      expect(eraKeyLight('future', branch)).not.toEqual(neutral);
+    }
+  });
+
+  it('a branch never repaints a pre-future era (branches are future-only)', () => {
+    for (const era of eras) {
+      if (era === 'future') continue;
+      expect(eraKeyLight(era, 'dystopia')).toEqual(eraKeyLight(era, null));
+    }
   });
 });
 
