@@ -8,6 +8,8 @@
  */
 import { Rng, hash01 } from './rng';
 import type { Command } from './commands';
+import { recordDeed, fadeDeeds, type Deed, type OpinionEntry } from './memory';
+import { scheduleReactions as scheduleReactionsFor, tickReactions, type PendingReaction } from './reactions';
 import {
   createTerritory, settleTerritory, advanceTerritory, contestedMask, areaByFid,
   serializeTerritory, deserializeTerritory, makeSnapshot, expandHistory, SHIFT_REPORT_MIN, CONTROL_MAX,
@@ -1942,6 +1944,8 @@ export interface RegionalFaction {
   overlordId: number | null;
   /** Procedural identity (Centuria 2.0 §H). */
   identity?: NationIdentity;
+  /** What this faction remembers about us, newest first (Centuria 2.0 §B). */
+  opinion?: OpinionEntry[];
   /** Faction IDs that have submitted as vassals to this faction. */
   vassals: number[];
 }
@@ -2012,6 +2016,8 @@ export interface RivalNation {
   };
   /** Procedural identity (Centuria 2.0 §H); absent on historical-roster powers. */
   identity?: NationIdentity;
+  /** What this power remembers about us, newest first (Centuria 2.0 §B). */
+  opinion?: OpinionEntry[];
 }
 
 /** A generated nation's culture, heraldry and character (Centuria 2.0 §H). */
@@ -2020,6 +2026,7 @@ export interface NationIdentity {
   land: string;
   adjective: string;
   leaderTitle: string;
+  leaderName?: string;
   flag: FlagSpec;
   quirks: string[];
   voice: NationVoice;
@@ -3836,6 +3843,19 @@ export class RegionSim {
   log: LogEntry[] = [];
   /** Centuria 2.0 §A — every player command, in issue order (see commands.ts). */
   commandLog: Command[] = [];
+  /** Centuria 2.0 §B — the world's ledger of what we have done. */
+  deeds: Deed[] = [];
+  nextDeedId = 1;
+  /** Centuria 2.0 §C — reactions rolled but not yet delivered. */
+  pendingReactions: PendingReaction[] = [];
+
+  scheduleReactions(d: Deed): void {
+    scheduleReactionsFor(this, d);
+  }
+
+  regimeBlocOf(regimeId: string): RegimeBloc {
+    return RIVAL_REGIMES.find((g) => g.id === regimeId)?.bloc ?? 'traditional';
+  }
   stateProclaimed = false;
   /** charter done, waiting on the player's ceremony choices */
   ceremonyPending = false;
@@ -4799,8 +4819,10 @@ export class RegionSim {
       if (sh.cells < SHIFT_REPORT_MIN) continue;
       if (sh.to === this.playerFactionId) {
         this.addLog(`FRONTIER: our border advances — ${sh.cells} hexes pass from ${name(sh.from)} to us.`, 'good');
+        recordDeed(this, { tag: 'took_land', weight: Math.min(3, sh.cells / 8), targetKind: 'faction', targetId: sh.from });
       } else if (sh.from === this.playerFactionId) {
         this.addLog(`FRONTIER: ${name(sh.to)} presses into our borderlands — ${sh.cells} hexes lost.`, 'bad');
+        recordDeed(this, { tag: 'lost_land', weight: Math.min(3, sh.cells / 8), targetKind: 'faction', targetId: sh.to });
       }
     }
     if (this.day % DAYS_PER_YEAR < 30 && !this.territoryHistory.some((h) => h.year === this.year)) {
@@ -4967,7 +4989,7 @@ export class RegionSim {
         vassals: [],
         identity: this.worldMode === 'procedural' ? {
           culture: gen.culture, land: gen.land, adjective: gen.adjective, leaderTitle: gen.leaderTitle,
-          flag: gen.flag, quirks: gen.quirks, voice: gen.voice,
+          leaderName: gen.leaderName, flag: gen.flag, quirks: gen.quirks, voice: gen.voice,
         } : undefined,
       };
 
@@ -6544,6 +6566,7 @@ export class RegionSim {
   }
 
   private dailyUpdate(): void {
+    tickReactions(this);
     const seasonMult = [1.25, 1.35, 1.0, 0.15][this.seasonIndex];
     // A hotter century farms worse (GDD §8.2): yield drag past +0.8°C.
     const climateDrag = 1 - Math.min(0.35, Math.max(0, this.warmingC - 0.8) * 0.08);
@@ -6775,6 +6798,7 @@ export class RegionSim {
 
   private monthlyUpdate(): void {
     this.tickTerritory();
+    fadeDeeds(this);
     // Record the prior month's net treasury swing before this month's books move.
     this.treasuryDeltaMonth = this.treasury - this.prevMonthTreasury;
     this.prevMonthTreasury = this.treasury;
@@ -11665,6 +11689,9 @@ export class RegionSim {
       frontPeak: Math.round(w.front?.peak ?? w.score),
     });
     // Post-war relations shift: the loser resents, the winner grows confident.
+    if (outcome === 'victory' || outcome === 'defeat') {
+      recordDeed(this, { tag: outcome === 'victory' ? 'war_won' : 'war_lost', weight: 2, targetKind: 'rival', targetId: rv.id });
+    }
     if (outcome === 'victory') {
       // Defeated rival resents the player; grudge scales with occupation depth.
       rv.relations = this.clampRel(rv.relations - 30 - w.occupied * 5);
@@ -11764,7 +11791,7 @@ export class RegionSim {
   }
 
   /** A rival imposes retaliatory sanctions on the player after an espionage exposure. */
-  private rivalImposeSanction(rv: RivalNation): void {
+  rivalImposeSanction(rv: RivalNation): void {
     if (this.sanctions.some((s) => s.imposerId === rv.id && s.targetId === 0 &&
         (s.untilDay < 0 || s.untilDay > this.day))) return;
     this.sanctions.push({ imposerId: rv.id, targetId: 0, startDay: this.day, untilDay: this.day + 180, tradeReduction: 0.25 });
@@ -13002,6 +13029,9 @@ export class RegionSim {
       routes: this.routes,
       log: this.log,
       commandLog: this.commandLog,
+      deeds: this.deeds,
+      nextDeedId: this.nextDeedId,
+      pendingReactions: this.pendingReactions,
       territory: this.territory ? serializeTerritory(this.territory) : null,
       territoryHistory: this.territoryHistory,
       stateProclaimed: this.stateProclaimed,
@@ -13275,6 +13305,9 @@ export class RegionSim {
     r.routes = (d.routes as Route[]).map((rt) => ({ ...rt, cargoType: rt.cargoType ?? null, cargoPriority: rt.cargoPriority ?? null }));
     r.log = d.log;
     r.commandLog = d.commandLog ?? [];
+    r.deeds = d.deeds ?? [];
+    r.nextDeedId = d.nextDeedId ?? 1;
+    r.pendingReactions = d.pendingReactions ?? [];
     r.territory = d.territory ? deserializeTerritory(d.territory) : null;
     r.territoryHistory = d.territoryHistory ?? [];
     const hist = expandHistory(r.territoryHistory, REGION_N * REGION_N);

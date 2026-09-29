@@ -4132,6 +4132,13 @@ export class RegionView {
         `<span>${rel}</span></div>` +
         `<p class="insp-skills" title="${recentHistory}">${gov} · ${COMPASS_FLAVOR[rv.compass]}${rv.borderSettled ? ' · border settled' : ''} · ${personalityInfo}${personalityInfo ? ' · ' : ''}${treaties}</p>` +
         (quirkHtml ? `<p class="insp-skills">${quirkHtml}</p>` : '') +
+        (rv.opinion?.length
+          ? `<details class="memory"><summary class="t-10">They remember (${rv.opinion.length})</summary>` +
+            rv.opinion.slice(0, 5).map((o) =>
+              `<p class="t-10 ${o.delta < 0 ? 'c-bad' : o.delta > 0 ? 'c-good' : 'c-muted'}">` +
+              `${o.delta > 0 ? '+' : ''}${o.delta} · ${o.text}</p>`).join('') +
+            `</details>`
+          : '') +
         offerRow + counterRow + warRecordLine + brokerRow +
         verbs + espionage + rivalIntel + armsIntel;
     }).join('');
@@ -5501,6 +5508,12 @@ export class RegionView {
         ? `<p class="insp-skills">${faction.identity.quirks.map((id) => QUIRKS.find((q) => q.id === id))
             .filter((q): q is NonNullable<typeof q> => !!q)
             .map((q) => `<span class="quirk-tag" title="${q.desc}">${q.label}</span>`).join(' ')}</p>`
+        : '') +
+      (faction.opinion?.length
+        ? `<details class="memory"><summary class="t-10">They remember (${faction.opinion.length})</summary>` +
+          faction.opinion.slice(0, 5).map((o) =>
+            `<p class="t-10 ${o.delta < 0 ? 'c-bad' : o.delta > 0 ? 'c-good' : 'c-muted'}">${o.text}</p>`).join('') +
+          `</details>`
         : '') +
       (isVassal ? `<p class="c-good">★ Vassal of your state</p>` : '') +
       (atWar ? `<p class="c-bad">⚔ AT WAR</p>` : '') +
