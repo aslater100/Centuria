@@ -46,7 +46,8 @@ export interface BorderShift {
 }
 
 /** Yearly ownership snapshot: the first is a full RLE, later ones store only
- *  the cells that changed since the previous snapshot ("idx:fid,…"). */
+ *  the cells that changed since the previous snapshot ("idx:fid" or runs
+ *  "idx:len:fid", comma-separated). */
 export interface TerritorySnapshot {
   year: number;
   rle?: string;
@@ -55,8 +56,17 @@ export interface TerritorySnapshot {
 
 export function makeSnapshot(year: number, owner: Int16Array, prev: Int16Array | null): TerritorySnapshot {
   if (!prev) return { year, rle: encodeRle(owner) };
+  // Changed cells as runs "start:len:owner" — frontier shifts come in strips.
   const parts: string[] = [];
-  for (let i = 0; i < owner.length; i++) if (owner[i] !== prev[i]) parts.push(`${i}:${owner[i]}`);
+  let i = 0;
+  while (i < owner.length) {
+    if (owner[i] === prev[i]) { i++; continue; }
+    const v = owner[i];
+    let j = i + 1;
+    while (j < owner.length && owner[j] === v && owner[j] !== prev[j]) j++;
+    parts.push(j - i === 1 ? `${i}:${v}` : `${i}:${j - i}:${v}`);
+    i = j;
+  }
   return { year, delta: parts.join(',') };
 }
 
@@ -69,8 +79,9 @@ export function expandHistory(hist: readonly TerritorySnapshot[], size: number):
     else if (cur) {
       const next: Int16Array = cur.slice();
       if (h.delta) for (const p of h.delta.split(',')) {
-        const [i, v] = p.split(':').map(Number);
-        next[i] = v;
+        const f = p.split(':').map(Number);
+        if (f.length === 2) next[f[0]] = f[1];
+        else next.fill(f[2], f[0], f[0] + f[1]);
       }
       cur = next;
     } else continue;
@@ -94,15 +105,38 @@ interface CellPressure {
   byFid: Map<number, Float32Array>;
 }
 
+/** Scratch buffers reused across passes (the sim is single-threaded). */
+const pool = { size: 0, free: [] as Float32Array[], core: new Int16Array(0), coreDist: new Float32Array(0),
+  best: new Int16Array(0), bestP: new Float32Array(0), second: new Float32Array(0) };
+
+function scratch(size: number): Float32Array {
+  const a = pool.free.pop();
+  if (a && a.length === size) { a.fill(0); return a; }
+  return new Float32Array(size);
+}
+
+function releasePressure(P: CellPressure): void {
+  for (const a of P.byFid.values()) pool.free.push(a);
+}
+
 function computePressure(t: TerritoryState, sources: readonly InfluenceSource[]): CellPressure {
   const { n } = t;
   const size = n * n;
+  if (pool.size !== size) {
+    pool.size = size;
+    pool.free = [];
+    pool.core = new Int16Array(size);
+    pool.coreDist = new Float32Array(size);
+    pool.best = new Int16Array(size);
+    pool.bestP = new Float32Array(size);
+    pool.second = new Float32Array(size);
+  }
   const byFid = new Map<number, Float32Array>();
-  const core = new Int16Array(size).fill(UNCLAIMED);
-  const coreDist = new Float32Array(size).fill(Infinity);
+  const core = pool.core.fill(UNCLAIMED);
+  const coreDist = pool.coreDist.fill(Infinity);
   for (const s of sources) {
     let arr = byFid.get(s.fid);
-    if (!arr) { arr = new Float32Array(size); byFid.set(s.fid, arr); }
+    if (!arr) { arr = scratch(size); byFid.set(s.fid, arr); }
     const r = s.radius;
     const coreR = r * CORE_FRACTION;
     const x0 = Math.max(0, Math.floor(s.x - r)), x1 = Math.min(n - 1, Math.ceil(s.x + r));
@@ -118,9 +152,9 @@ function computePressure(t: TerritoryState, sources: readonly InfluenceSource[])
       }
     }
   }
-  const best = new Int16Array(size).fill(UNCLAIMED);
-  const bestP = new Float32Array(size);
-  const second = new Float32Array(size);
+  const best = pool.best.fill(UNCLAIMED);
+  const bestP = pool.bestP.fill(0);
+  const second = pool.second.fill(0);
   for (const [fid, arr] of byFid) {
     for (let i = 0; i < size; i++) {
       const p = arr[i];
@@ -148,6 +182,7 @@ export function settleTerritory(t: TerritoryState, sources: readonly InfluenceSo
       t.control[i] = 128;
     }
   }
+  releasePressure(P);
 }
 
 /** Monthly pass: frontiers erode, consolidate and flip. Returns the shifts. */
@@ -197,6 +232,7 @@ export function advanceTerritory(t: TerritoryState, sources: readonly InfluenceS
       t.control[i] = c;
     }
   }
+  releasePressure(P);
   return [...shifts.values()];
 }
 
@@ -218,15 +254,19 @@ export function contestedMask(t: TerritoryState, sources: readonly InfluenceSour
     const rival = P.best[i] === o ? P.second[i] : P.bestP[i];
     if (rival > 0 && (t.control[i] < CONTESTED_BELOW || rival > po * (1 - FLIP_MARGIN))) out[i] = 1;
   }
+  releasePressure(P);
   return out;
 }
 
-export function areaByFid(t: TerritoryState): { area: Map<number, number>; land: number } {
+/** Owned land per faction. `mask` (1 = count) restricts the tally, e.g. to
+ *  the heartland continent; its index order must match `owner`'s. */
+export function areaByFid(t: TerritoryState, mask?: ArrayLike<number>): { area: Map<number, number>; land: number } {
   const area = new Map<number, number>();
   let land = 0;
   for (let i = 0; i < t.owner.length; i++) {
     const o = t.owner[i];
     if (o === WATER) continue;
+    if (mask && !mask[i]) continue;
     land++;
     if (o >= 0) area.set(o, (area.get(o) ?? 0) + 1);
   }

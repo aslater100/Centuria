@@ -33,7 +33,7 @@ function worldSim(
   layout: Array<{ ind: number; agri: number; faction?: number }>,
   year = 2000,
 ): RegionSim {
-  const r = RegionSim.create(7);
+  const r = RegionSim.create(7, { worldPowers: 0 });
   const base = r.settlements[0];
   while (r.settlements.length < layout.length) {
     const clone = structuredClone(base) as Settlement;
@@ -192,7 +192,7 @@ describe('worldMarketTightness', () => {
 // ============================================================
 describe('world market in live autoplay', () => {
   it('stays a finite [0,1] reading and is 0 in self-sufficient play', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     r.autoDevelopPlayer = true;
     const target = r.year + 30;
     let guard = 0;

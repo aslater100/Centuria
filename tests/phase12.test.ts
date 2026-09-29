@@ -30,7 +30,7 @@ function runMonths(r: RegionSim, months: number): void {
 
 /** Create a minimal region with statehood granted and enough to avoid bankruptcy. */
 function stateRegion(seed = 42): RegionSim {
-  const r = RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$' });
+  const r = RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
   // Manually proclaim state so player actions are available
   r.stateProclaimed = true;
   r.treasury = 100000;
@@ -569,7 +569,7 @@ describe('Phase 12: Media & Misinformation System', () => {
     });
 
     it('grantPressLicense fails without State tier', () => {
-      const r = RegionSim.create(42, { currencySymbol: '$' });
+      const r = RegionSim.create(42, { currencySymbol: '$', worldPowers: 0 });
       r.politicalCapital = 999;
       const result = r.grantPressLicense();
       expect(result.ok).toBe(false);

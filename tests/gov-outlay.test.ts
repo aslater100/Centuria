@@ -29,7 +29,7 @@ const runMonthlyEconomy = (r: RegionSim): void =>
   (r as unknown as { monthlyEconomy(): void }).monthlyEconomy();
 
 function freshSim(seed = 42): RegionSim {
-  return RegionSim.create(seed);
+  return RegionSim.create(seed, { worldPowers: 0 });
 }
 
 function grantIncomeTax(r: RegionSim): void {

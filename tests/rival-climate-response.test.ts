@@ -56,7 +56,7 @@ function addRival(r: RegionSim, opts: { id: number; archetype?: RivalNation['arc
  *  year, so every good's eraUnlock has passed) so a good's world scarcity is
  *  controllable via goodStocks. */
 function worldSim(layout: Array<{ ind: number; agri: number; faction?: number }>): RegionSim {
-  const r = RegionSim.create(7);
+  const r = RegionSim.create(7, { worldPowers: 0 });
   const base = r.settlements[0];
   while (r.settlements.length < layout.length) {
     const clone = structuredClone(base) as Settlement;
@@ -93,21 +93,21 @@ function starveWorldOfTextiles(r: RegionSim): void {
 
 describe('rivalClimateUrgency — pure per-rival pressure signal', () => {
   it('is 0 with no warming, for any archetype', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     r.warmingC = 0;
     const rv = addRival(r, { id: 1, archetype: 'hermit_kingdom' });
     expect(rivalClimateUrgency(r, rv)).toBe(0);
   });
 
   it('is 0 for a fully green-committed archetype regardless of warming (propensity 1.0)', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     r.warmingC = 5;
     const rv = addRival(r, { id: 1, archetype: 'trading_republic' });
     expect(rivalClimateUrgency(r, rv)).toBe(0);
   });
 
   it('rises toward its cap for a fossil-locked archetype as warming worsens', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     const rv = addRival(r, { id: 1, archetype: 'hermit_kingdom' }); // propensity 0.1
     r.warmingC = 0;
     const low = rivalClimateUrgency(r, rv);
@@ -118,7 +118,7 @@ describe('rivalClimateUrgency — pure per-rival pressure signal', () => {
   });
 
   it('stays bounded to [0,1] even past the urgency ceiling', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     const rv = addRival(r, { id: 1, archetype: 'hegemon' });
     r.warmingC = WORLD_GREEN_URGENCY_C * 10; // way past the cap
     const u = rivalClimateUrgency(r, rv);
@@ -177,7 +177,7 @@ describe('rivalResourceGrievance — a REAL resource_dispute casus belli, not a 
 describe('existential climate response — the relations drag makes wars measurable', () => {
   it('a fossil-locked rival\'s relations sour FASTER under warming when the flag is on', () => {
     const mkRun = (flag: boolean): number => {
-      const r = RegionSim.create(1000);
+      const r = RegionSim.create(1000, { worldPowers: 0 });
       r.warmingC = WORLD_GREEN_URGENCY_C;
       r.rivalClimateResponse = flag;
       const rv = addRival(r, { id: 1, archetype: 'hegemon' });
@@ -192,7 +192,7 @@ describe('existential climate response — the relations drag makes wars measura
 
   it('a fully green rival\'s relations drift is UNCHANGED by the flag (no drag applied)', () => {
     const mkRun = (flag: boolean): number => {
-      const r = RegionSim.create(1000);
+      const r = RegionSim.create(1000, { worldPowers: 0 });
       r.warmingC = WORLD_GREEN_URGENCY_C;
       r.rivalClimateResponse = flag;
       const rv = addRival(r, { id: 1, archetype: 'trading_republic' });
@@ -205,7 +205,7 @@ describe('existential climate response — the relations drag makes wars measura
 
   it('is a no-op with no warming even when the flag is on (urgency is 0)', () => {
     const mkRun = (flag: boolean): number => {
-      const r = RegionSim.create(1000);
+      const r = RegionSim.create(1000, { worldPowers: 0 });
       r.warmingC = 0;
       r.rivalClimateResponse = flag;
       const rv = addRival(r, { id: 1, archetype: 'hegemon' });
@@ -219,7 +219,7 @@ describe('existential climate response — the relations drag makes wars measura
 
 describe('existential climate response — autonomous rival climate coalitions', () => {
   it('never forms a bloc when the flag is off (no RNG draw, no state touched)', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     r.rivalClimateResponse = false;
     const a = addRival(r, { id: 1, archetype: 'trading_republic' });
     const b = addRival(r, { id: 2, archetype: 'crusader_state' });
@@ -229,7 +229,7 @@ describe('existential climate response — autonomous rival climate coalitions',
   });
 
   it('eventually forms between two green-eligible, non-hostile rivals when the flag is on', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     r.rivalClimateResponse = true;
     const a = addRival(r, { id: 1, archetype: 'trading_republic' });
     const b = addRival(r, { id: 2, archetype: 'crusader_state' });
@@ -243,7 +243,7 @@ describe('existential climate response — autonomous rival climate coalitions',
   });
 
   it('does not form when the pair is too hostile, even with the flag on', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     r.rivalClimateResponse = true;
     const a = addRival(r, { id: 1, archetype: 'trading_republic' });
     const b = addRival(r, { id: 2, archetype: 'crusader_state' });
@@ -253,7 +253,7 @@ describe('existential climate response — autonomous rival climate coalitions',
   });
 
   it('membership measurably lifts the world green share (archetypeGreenShare), so bloc members bend the curve faster', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     const a = addRival(r, { id: 1, archetype: 'crusader_state' }); // propensity 0.9, not the 1.0 ceiling
     const before = r.worldEmissions();
     r.rivalClimateBlocs.push({ id: 1, memberRivalIds: [a.id], foundedYear: r.year });
@@ -265,7 +265,7 @@ describe('existential climate response — autonomous rival climate coalitions',
 
 describe('existential climate response — round-trips and stays out of the way when off', () => {
   it('rivalClimateBlocs serializes and deserializes (backward-compatible ?? [] for old saves)', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     r.rivalClimateResponse = true;
     const a = addRival(r, { id: 1, archetype: 'trading_republic' });
     const b = addRival(r, { id: 2, archetype: 'crusader_state' });
@@ -288,7 +288,7 @@ describe('existential climate response — round-trips and stays out of the way 
   // save/load. Old saves without the key still default OFF (see
   // tests/world-dynamism.test.ts for the full matrix).
   it('the flag is serialized — a campaign option survives save/load', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     r.rivalClimateResponse = true;
     const saved = r.serialize();
     const loaded = RegionSim.deserialize(saved);

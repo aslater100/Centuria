@@ -812,11 +812,25 @@ export function tickPlayerWar(r: RegionSim): void {
     if (w.front.position >= FRONT_OCCUPY_THRESHOLD && w.occupied < MAX_OCCUPIED_MARCHES && takeRoll) {
       w.occupied++;
       w.support = Math.min(100, w.support + 3); // the parade writes the headline
-      r.addLog(`Our columns take one of ${rv.name}'s marches — military administration begins (${w.occupied} occupied).`, 'good');
+      const town = r.frontierTownOf(rv);
+      if (town) {
+        r.transferSettlement(town, r.playerFactionId, 20);
+        (w.occupiedTowns ??= []).push(town.id);
+        r.addLog(`OCCUPATION: our columns take ${town.name} from ${rv.name} — military administration begins (${w.occupied} occupied).`, 'good', { cat: 'war' });
+      } else {
+        r.addLog(`Our columns take one of ${rv.name}'s marches — military administration begins (${w.occupied} occupied).`, 'good');
+      }
     } else if (w.front.position < 0 && w.occupied > 0 && cedeRoll) {
       w.occupied--;
       if (w.occupied === 0) w.resistance = 0;
-      r.addLog(`${rv.name}'s counterattack retakes its march — the garrison falls back (${w.occupied} occupied).`, 'bad');
+      const lostId = w.occupiedTowns?.pop();
+      const lost = lostId !== undefined ? r.settlement(lostId) : undefined;
+      if (lost && rv.factionId !== undefined && lost.factionId === r.playerFactionId) {
+        r.transferSettlement(lost, rv.factionId, 70);
+        r.addLog(`${rv.name}'s counterattack retakes ${lost.name} — the garrison falls back (${w.occupied} occupied).`, 'bad', { cat: 'war' });
+      } else {
+        r.addLog(`${rv.name}'s counterattack retakes its march — the garrison falls back (${w.occupied} occupied).`, 'bad');
+      }
     }
     if (w.occupied > 0) {
       const occ = OCCUPATION_DEFS[w.occupationPolicy];

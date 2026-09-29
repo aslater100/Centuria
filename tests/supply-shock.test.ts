@@ -25,7 +25,7 @@ import { tickIntermediateGoods } from '../src/sim/systems/goods';
  */
 
 function freshSim(seed = 7): RegionSim {
-  return RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$' });
+  return RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
 }
 
 /** Pin the sim's reported year so era-gated goods unlock for the test. */

@@ -25,7 +25,7 @@ import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, M
 import type { CurrencySymbol, RegionDesign, NationDesign, AiDifficulty } from './defs';
 import { computePenalty, transitionEfficiency, ANNOUNCE_LEAD_DAYS } from './currency';
 import type { CurrencyChangeCause, CurrencyAnnouncement, CurrencyTransition } from './currency';
-import { RegionMap, REGION_N, CELL_SCALE } from './worldgen';
+import { RegionMap, REGION_N, CELL_SCALE, WORLD_SCALE } from './worldgen';
 import type { TownSite } from './worldgen';
 import { hexNeighbors, hexDistance } from './hex';
 import { Weather } from './weather';
@@ -1949,6 +1949,10 @@ export interface RegionalFaction {
   overlordId: number | null;
   /** Procedural identity (Centuria 2.0 §H). */
   identity?: NationIdentity;
+  /** Where the nation's seat lies (0..100 coords) — founding anchor for a new power. */
+  seat?: { x: number; y: number };
+  /** Great-power link: the RivalNation this faction is the territory of. */
+  rivalId?: number;
   /** What this faction remembers about us, newest first (Centuria 2.0 §B). */
   opinion?: OpinionEntry[];
   /** Faction IDs that have submitted as vassals to this faction. */
@@ -2023,6 +2027,12 @@ export interface RivalNation {
   identity?: NationIdentity;
   /** What this power remembers about us, newest first (Centuria 2.0 §B). */
   opinion?: OpinionEntry[];
+  /** Centuria 2.0: the on-map faction that is this power's territory. */
+  factionId?: number;
+  /** Landmass id of the power's capital (replaces the compass horizon). */
+  continentId?: number;
+  /** Town population at the last monthly sync — national pop grows with it. */
+  townPopLast?: number;
 }
 
 /** A generated nation's culture, heraldry and character (Centuria 2.0 §H). */
@@ -2051,6 +2061,7 @@ export function rivalContinent(rv: RivalNation): RivalContinent {
   return rv.compass;
 }
 export function sameContinent(a: RivalNation, b: RivalNation): boolean {
+  if (a.continentId !== undefined && b.continentId !== undefined) return a.continentId === b.continentId;
   return rivalContinent(a) === rivalContinent(b);
 }
 /** Geography amplifies ideology between neighbours: compatible regimes sharing
@@ -2224,6 +2235,15 @@ export const ENVOY_COOLDOWN_DAYS = 90;
 export const GIFT_COOLDOWN_DAYS = 60;
 /** The world proclaims its first foreign nation in this band (GDD §6.2). */
 export const RIVAL_EMERGENCE_YEAR = 1922;
+/** Centuria 2.0: great powers already standing on the map in 1919. */
+export const GREAT_POWERS_AT_START = 3;
+/** Towns a great power holds at its founding, beyond the capital. */
+export const POWER_START_TOWNS = 3;
+/** Bounds on a power's monthly national growth as it follows its towns: never
+ *  faster than the legacy 0.15%/month drift (young towns outgrow a nation),
+ *  slower when its towns stall, shrinking up to 1%/month when they fall. */
+export const POWER_GROWTH_CAP = 0.0015;
+export const POWER_SHRINK_CAP = 0.01;
 export const MAX_RIVALS = 6;
 /** Each treaty the player breaks raises every future ask (GDD §5.4 reputation). */
 export const TREATY_BREACH_PENALTY = 15;
@@ -2606,6 +2626,8 @@ export interface PlayerWar {
   enemyAllies: number[];
   /** Enemy marches under military administration (GDD §7.4). */
   occupied: number;
+  /** Centuria 2.0: the real enemy towns those marches are, in order taken. */
+  occupiedTowns?: number[];
   /** 0–100 resistance in the occupied marches. */
   resistance: number;
   occupationPolicy: OccupationPolicy;
@@ -3796,7 +3818,7 @@ export const MAX_SETTLEMENTS = 24;
 /** Minimum Euclidean spacing between settlement centres, in 0–100 map coords.
  *  Founding is rejected within this radius of any existing town so cities don't
  *  pile on top of each other. Used by both player expeditions and AI expansion. */
-export const MIN_SETTLEMENT_SPACING = 8;
+export const MIN_SETTLEMENT_SPACING = 8 * WORLD_SCALE;
 
 /** Save-blob schema version. v2 added the D1/D2 persisted counters
  *  (hyperinflationMonths, postRevoltGrievanceMonths); v3 (spec 10) adds persistent
@@ -3809,8 +3831,16 @@ export const SAVE_SCHEMA_VERSION = 6;
 /** Centuria 2.0 §F stakes caps. */
 export const LEVY_STACK_CEILING = 0.2;
 /** Centuria 2.0 §G breakaway nations. */
-export const BREAKAWAY_DISTANCE = 30;
-export const BREAKAWAY_JOIN_RADIUS = 18;
+export const BREAKAWAY_DISTANCE = 30 * WORLD_SCALE;
+/** How far (0..100 units) a nation looks beyond its towns for new sites. */
+export const EXPAND_REACH = 16 * WORLD_SCALE;
+/** Border-history snapshot cadence (the scrubber appends the present). */
+export const TERRITORY_SNAPSHOT_YEARS = 3;
+/** Coalition dominance: our land relative to the largest great power's. A rising
+ *  contender alarms the powers as it nears their size (threat bar ≈ 0.85×). */
+export const COALITION_HEGEMON_FLOOR = 0.58;
+export const COALITION_HEGEMON_SPAN = 0.6;
+export const BREAKAWAY_JOIN_RADIUS = 18 * WORLD_SCALE;
 export const BREAKAWAY_JOIN_GRIEVANCE = 60;
 export const WAR_QUALITY_TAPER = 0.75;
 
@@ -3852,6 +3882,9 @@ export class RegionSim {
   log: LogEntry[] = [];
   /** Centuria 2.0 §A — every player command, in issue order (see commands.ts). */
   commandLog: Command[] = [];
+  /** The occupied town a border_province peace is keeping (transient, set and
+   *  consumed within one peace signing). */
+  private pendingCession: number | null = null;
   /** Centuria 2.0 §B — the world's ledger of what we have done. */
   deeds: Deed[] = [];
   nextDeedId = 1;
@@ -4509,8 +4542,10 @@ export class RegionSim {
   }
 
   totalPop(): number {
+    // "The region": everything but the great powers' own towns, which are
+    // accounted as nations (rv.pop, worldEmissions) rather than locals.
     return Math.round(
-      this.settlements.reduce((s, t) => s + this.popOf(t), 0) +
+      this.settlements.reduce((s, t) => s + (this.isPowerTown(t) ? 0 : this.popOf(t)), 0) +
       this.expeditions.reduce((s, e) => s + e.pop, 0),
     );
   }
@@ -4754,46 +4789,96 @@ export class RegionSim {
     const popReach = 4 + Math.sqrt(pop) * 0.45; // hamlet ~5 units, city ~14
     const garrisonReach = Math.sqrt(Math.max(0, t.garrisonStrength)) * 0.6;
     const devReach = (t.buildings?.length ?? 0) * 0.4;
-    return Math.min(18, popReach + garrisonReach + devReach);
+    return Math.min(18, popReach + garrisonReach + devReach) * WORLD_SCALE;
   }
 
-  /** Everything that can move a border, flattened to a string for cheap cache
-   *  invalidation: positions, population, garrison, development and ownership. */
-  private territorySignature(): string {
-    let s = `${this.settlements.length}`;
-    for (const t of this.settlements) {
-      s += `|${t.id}:${t.x.toFixed(1)},${t.y.toFixed(1)},${Math.round(this.popOf(t))},` +
-        `${Math.round(t.garrisonStrength)},${t.factionId},${t.buildings?.length ?? 0}`;
-    }
-    return s;
-  }
-
-  private _territoryCache: { sig: string; result: TerritoryControl } | null = null;
+  private _territoryCache: { version: number; result: TerritoryControl } | null = null;
 
   /** Compute the territory control grid over the REGION_N×REGION_N map: each
    *  land cell is claimed by the faction projecting the strongest influence
    *  (radius − distance) onto it, or left unclaimed if no settlement reaches.
    *  Cached by signature so it's cheap to call every render frame. */
   computeTerritoryGrid(): TerritoryControl {
-    const sig = `${this.territorySignature()}#${this.territoryVersion}`;
-    if (this._territoryCache && this._territoryCache.sig === sig) {
-      return this._territoryCache.result;
-    }
-    const t = this.ensureTerritory();
+    // Pure read: ownership only changes in settleOwnership()/tickTerritory(), so
+    // a reloaded save sees exactly the grid the original would (determinism).
+    if (!this.territory) this.settleOwnership();
+    const sig = this.territoryVersion;
+    if (this._territoryCache && this._territoryCache.version === sig) return this._territoryCache.result;
+    const t = this.territory!;
     const sources = this.territorySources();
-    settleTerritory(t, sources);
-    const { area, land } = areaByFid(t);
+    const home = this.homeLandmass();
+    const mask = home >= 0 ? this.homeMask(home) : undefined;
+    const { area, land } = areaByFid(t, mask);
     const control = new Map<number, number>();
     if (land > 0) for (const [fid, cells] of area) control.set(fid, cells / land);
+    const world = areaByFid(t);
+    let biggestPower = 0;
+    for (const [fid, n] of world.area) if (this.faction(fid)?.rivalId !== undefined) biggestPower = Math.max(biggestPower, n);
+    const mine = world.area.get(this.playerFactionId) ?? 0;
+    this._hegemonRatio = biggestPower > 0 ? mine / biggestPower : 0;
+    let contested: Uint8Array | null = null;
     const result: TerritoryControl = {
       grid: t.owner.slice(),
-      contested: contestedMask(t, sources),
+      get contested(): Uint8Array {
+        return (contested ??= contestedMask(t, sources));
+      },
       controlLevel: t.control.slice(),
       control,
       landCells: land,
     };
-    this._territoryCache = { sig, result };
+    this._territoryCache = { version: sig, result };
     return result;
+  }
+
+  /** Who holds which town, hashed — the trigger for an immediate settle pass. */
+  private ownershipSig(): number {
+    let h = this.settlements.length;
+    for (const t of this.settlements) h = (Math.imul(h, 31) + t.id * 7 + t.factionId + 1) | 0;
+    return h;
+  }
+
+  /** Claim new towns' land / hand over transferred cores right away. Called at
+   *  every ownership change and daily as a backstop; a no-op when nothing moved. */
+  settleOwnership(): void {
+    const sig = this.ownershipSig();
+    if (this.territory && sig === this.territorySettledSig) return;
+    settleTerritory(this.ensureTerritory(), this.territorySources());
+    this.territorySettledSig = sig;
+    this.territoryVersion++;
+  }
+
+  private _hegemonRatio = 0;
+
+  /** Our land against the largest great power's (1 = as big as the biggest). */
+  playerHegemonRatio(): number {
+    this.computeTerritoryGrid();
+    return this._hegemonRatio;
+  }
+
+  /** Ownership signature at the last settle pass (serialized). */
+  territorySettledSig = 0;
+
+  private _homeLandmass: number | null = null;
+  private _homeMask: Uint8Array | null = null;
+
+  /** The player's heartland continent — territory shares are measured on it. */
+  homeLandmass(): number {
+    if (this._homeLandmass !== null) return this._homeLandmass;
+    const home = this.settlements[0];
+    if (!home) return -1;
+    const c = this.map.coordToCell(home.x, home.y);
+    this._homeLandmass = this.map.landmassAt(c.x, c.y);
+    return this._homeLandmass;
+  }
+
+  /** 1 on heartland cells, in the territory grid's x*N+y order. */
+  private homeMask(home: number): Uint8Array {
+    if (this._homeMask) return this._homeMask;
+    const N = REGION_N;
+    const m = new Uint8Array(N * N);
+    for (let x = 0; x < N; x++) for (let y = 0; y < N; y++) m[x * N + y] = this.map.landmass[y * N + x] === home ? 1 : 0;
+    this._homeMask = m;
+    return m;
   }
 
   /** Centuria 2.0 §G — persistent hex ownership, created on first use. */
@@ -4830,7 +4915,7 @@ export class RegionSim {
   tickTerritory(): void {
     const t = this.ensureTerritory();
     const sources = this.territorySources();
-    settleTerritory(t, sources);
+    this.territorySettledSig = this.ownershipSig();
     this.lastBorderShifts = advanceTerritory(t, sources);
     this.territoryVersion++;
     const name = (fid: number) => this.faction(fid)?.name ?? 'a rival power';
@@ -4844,7 +4929,8 @@ export class RegionSim {
         recordDeed(this, { tag: 'lost_land', weight: Math.min(3, sh.cells / 8), targetKind: 'faction', targetId: sh.to });
       }
     }
-    if (this.day % DAYS_PER_YEAR < 30 && !this.territoryHistory.some((h) => h.year === this.year)) {
+    if (this.day % DAYS_PER_YEAR < 30 && (this.year - START_YEAR) % TERRITORY_SNAPSHOT_YEARS === 0
+      && !this.territoryHistory.some((h) => h.year === this.year)) {
       this.territoryHistory.push(makeSnapshot(this.year, t.owner, this.lastSnapshotOwner));
       this.lastSnapshotOwner = t.owner.slice();
     }
@@ -4911,8 +4997,7 @@ export class RegionSim {
       f.settlementIds.push(s.id);
     }
     if (joining.some((s) => s.id === player.capital)) player.capital = player.settlementIds[0] ?? -1;
-    this._territoryCache = null;
-    this.territoryVersion++;
+    this.settleOwnership();
     this.secessionsFired++;
     this.addLog(
       `INDEPENDENCE: ${joining.map((s) => s.name).join(', ')} ${joining.length > 1 ? 'break' : 'breaks'} away and ` +
@@ -4955,7 +5040,7 @@ export class RegionSim {
     if (player.capital === t.id) player.capital = player.settlementIds[0] ?? -1;
     t.loyaltyToFaction = 50;
     t.grievance = Math.max(0, t.grievance - 40); // leaving is itself a release valve
-    this._territoryCache = null;
+    this.settleOwnership();
     this.secessionsFired++;
     this.addLog(`SECESSION: ${t.name} breaks from the state and throws in with ${target.name}.`, 'bad');
     return true;
@@ -6141,7 +6226,7 @@ export class RegionSim {
     rng: Rng,
     map: RegionMap,
     weather: Weather,
-    opts: { name?: string; treasury?: number; pref?: 'river-valley' | 'coastal' | 'highlands' | 'surprise' } = {},
+    opts: { name?: string; treasury?: number; pref?: 'river-valley' | 'coastal' | 'highlands' | 'surprise'; worldPowers?: number } = {},
   ): RegionSim {
     const region = new RegionSim(rng, 0, map, weather);
     const site = map.startSite(opts.pref ?? 'river-valley');
@@ -6215,6 +6300,8 @@ export class RegionSim {
       founder.bio = [`Founding settler, 1900.`, `Named ${role} at the founding.`];
     }
 
+    region.foundWorldPowers(opts.worldPowers ?? GREAT_POWERS_AT_START);
+
     const mayor = region.notables.find((n) => n.role === 'Mayor' && n.alive);
     region.addLog(
       `The Great War has ended. Empires lie shattered. ${home.name} is founded, ${START_YEAR} — ` +
@@ -6226,11 +6313,11 @@ export class RegionSim {
   }
 
   /** Create a fresh colony from a seed and optional design overrides. */
-  static create(seed: number, design: { currencySymbol?: string; expansionSpeed?: string; tradeOpenness?: string; taxRate?: number; servicesLevel?: number } = {}): RegionSim {
+  static create(seed: number, design: { currencySymbol?: string; expansionSpeed?: string; tradeOpenness?: string; taxRate?: number; servicesLevel?: number; worldPowers?: number } = {}): RegionSim {
     const rng = new Rng(seed);
     const map = new RegionMap(seed);
     const weather = new Weather(seed);
-    const region = RegionSim.foundColony(rng, map, weather, { treasury: 5000 });
+    const region = RegionSim.foundColony(rng, map, weather, { treasury: 5000, worldPowers: design.worldPowers });
     if (design.currencySymbol) region.currencySymbol = design.currencySymbol as CurrencySymbol;
     if (design.expansionSpeed) region.expansionSpeed = design.expansionSpeed as 'cautious' | 'steady' | 'aggressive';
     if (design.tradeOpenness) region.tradeOpenness = design.tradeOpenness as 'protectionist' | 'balanced' | 'free-trade';
@@ -6591,7 +6678,7 @@ export class RegionSim {
       || this.expeditions.some((e) => Math.hypot(e.targetX - rx, e.targetY - ry) < MIN_SETTLEMENT_SPACING);
     if (tooClose) return { ok: false, reason: 'too close to an existing town' };
     const fromCell = this.map.coordToCell(t.x, t.y);
-    const range = Math.round(REGION_N * 0.28);
+    const range = Math.round(REGION_N * 0.28 * WORLD_SCALE);
     if (Math.hypot(cell.x - fromCell.x, cell.y - fromCell.y) > range) {
       return { ok: false, reason: 'too far from your towns to reach' };
     }
@@ -6644,6 +6731,7 @@ export class RegionSim {
   }
 
   private dailyUpdate(): void {
+    this.settleOwnership();
     tickReactions(this);
     const seasonMult = [1.25, 1.35, 1.0, 0.15][this.seasonIndex];
     // A hotter century farms worse (GDD §8.2): yield drag past +0.8°C.
@@ -8670,7 +8758,7 @@ export class RegionSim {
       target.garrisonStrength = 1;
       target.loyaltyToFaction = 40;
       target.grievance = Math.min(100, target.grievance + 30);
-      this._territoryCache = null;
+      this.settleOwnership();
       this.addLog(`VICTORY: your militia storm ${target.name} — it is annexed into your realm.`, 'good');
       if (enemy.capital === target.id) enemy.capital = enemy.settlementIds[0] ?? -1;
       if (enemy.settlementIds.length === 0) {
@@ -10991,6 +11079,7 @@ export class RegionSim {
       this.rivalPairs[this.pairKey(rv.id, other.id)] = this.clampRel(Math.max(-60, Math.min(40, rel)));
     }
     this.rivals.push(rv);
+    this.plantPower(rv);
     const archetypeData = RIVAL_ARCHETYPES[arch];
     this.addLog(
       `A NEW POWER: ${COMPASS_FLAVOR[rv.compass]}, ${rv.leader} proclaims ${rv.name}, a ${regime.name.toLowerCase()} ` +
@@ -11011,6 +11100,147 @@ export class RegionSim {
         flag: gen.flag, quirks: gen.quirks, voice: gen.voice,
       },
     };
+  }
+
+  /** Centuria 2.0 — the powers that already stand in 1919. Drawn from a
+   *  private stream so the colony's own RNG sequence is untouched. */
+  foundWorldPowers(count: number): void {
+    const saved = this.rng;
+    this.rng = new Rng((this.map.seed ^ 0x51ed270b) >>> 0);
+    try {
+      for (let i = 0; i < count; i++) {
+        const rv = this.spawnRival();
+        if (!rv) break;
+        rv.emergedYear = this.year;
+      }
+    } finally {
+      this.rng = saved;
+    }
+  }
+
+  /** Where a new power stands up: a ring continent nobody holds yet, else the
+   *  land farthest from every existing town. */
+  private powerSite(): { x: number; y: number; landmass: number } | null {
+    const held = new Set(this.rivals.map((rv) => rv.continentId).filter((c): c is number => c !== undefined));
+    const free = this.map.foreignCapitalSites().filter((c) => !held.has(c.landmass)
+      && !this.settlements.some((t) => Math.hypot(t.x - c.x, t.y - c.y) < MIN_SETTLEMENT_SPACING * 3));
+    if (free.length) return free[0];
+    let best: { x: number; y: number; landmass: number; d: number } | null = null;
+    for (let i = 0; i < 400; i++) {
+      const cx = 4 + ((i * 97) % (REGION_N - 8)), cy = 4 + ((i * 61 + 13) % (REGION_N - 8));
+      if (this.map.siteScore(cx, cy) <= 0) continue;
+      const c = this.map.cellToCoord(cx, cy);
+      const d = Math.min(Infinity, ...this.settlements.map((t) => Math.hypot(t.x - c.rx, t.y - c.ry)));
+      if (!best || d > best.d) best = { x: c.rx, y: c.ry, landmass: this.map.landmassAt(cx, cy), d };
+    }
+    return best && best.d >= MIN_SETTLEMENT_SPACING * 3 ? best : null;
+  }
+
+  /** Give a great power real territory: an on-map faction sharing its identity,
+   *  a capital and a few towns on its own continent. */
+  plantPower(rv: RivalNation): RegionalFaction | null {
+    const site = this.powerSite();
+    if (!site) return null;
+    const id = Math.max(0, ...this.regionalFactions.map((f) => f.id)) + 1;
+    const palette = ['#c0392b', '#2980b9', '#8e44ad', '#d35400', '#16a085', '#7f8c8d', '#b7950b'];
+    const knobs = this.aiKnobs();
+    const f: RegionalFaction = {
+      id, name: rv.name, color: palette[this.rivals.indexOf(rv) % palette.length],
+      capital: -1, settlementIds: [], treasury: 400, treasuryByCurrency: { [id]: 400 },
+      militaryStrength: 8, techProgress: 0, centralBank: null, currencyId: id,
+      currencyName: 'Crowns', aggressiveness: Math.min(100, rv.weights.expansion * 10),
+      regime: rv.regime, techFocus: 'mining', aiGoal: 'consolidate the realm',
+      lastScoutDay: -1, lastRaidDay: -999, lastUpdateDay: this.day, updateFrequency: knobs.updateFreq,
+      currentGoal: null, lastGoalCheckDay: this.day, overlordId: null, vassals: [],
+      seat: { x: site.x, y: site.y }, rivalId: rv.id,
+    };
+    this.regionalFactions.push(f);
+    this.exchangeRates[`0:${id}`] = 1.0;
+    this.exchangeRates[`${id}:0`] = 1.0;
+    const cap = this.foundSettlement(f, site.x, site.y);
+    if (cap) {
+      f.capital = cap.id;
+      cap.cohorts.bands = cap.cohorts.bands.map((b) => b * 6);
+      cap.garrisonStrength = 6;
+      const nrng = nationRng(this.map.seed, `power-towns:${rv.id}`);
+      for (let k = 0, tries = 0; k < POWER_START_TOWNS && tries < 40; tries++) {
+        const a = nrng.next() * Math.PI * 2;
+        const d = MIN_SETTLEMENT_SPACING * (1.1 + nrng.next() * 0.9);
+        const x = site.x + Math.cos(a) * d, y = site.y + Math.sin(a) * d;
+        const c = this.map.coordToCell(x, y);
+        if (this.map.siteScore(c.x, c.y) < 0 || this.map.landmassAt(c.x, c.y) !== site.landmass) continue;
+        const t = this.foundSettlement(f, x, y);
+        if (t) { t.cohorts.bands = t.cohorts.bands.map((b) => b * 2); k++; }
+      }
+    }
+    rv.factionId = id;
+    rv.continentId = site.landmass;
+    this.syncPowerFaction(rv);
+    rv.townPopLast = this.powerTownPop(rv);
+    this.settleOwnership();
+    return f;
+  }
+
+  /** Mirror a power's name, regime and identity onto its territory (copied,
+   *  never aliased, so a save reloads to exactly the same state). */
+  syncPowerFaction(rv: RivalNation): void {
+    const f = rv.factionId !== undefined ? this.faction(rv.factionId) : undefined;
+    if (!f) return;
+    f.name = rv.name;
+    f.regime = rv.regime;
+    f.identity = rv.identity ? structuredClone(rv.identity) : undefined;
+  }
+
+  /** True for a settlement held by a great power's on-map faction. */
+  isPowerTown(t: Settlement): boolean {
+    return this.faction(t.factionId)?.rivalId !== undefined;
+  }
+
+  /** Population living in a power's on-map towns. */
+  powerTownPop(rv: RivalNation): number {
+    if (rv.factionId === undefined) return 0;
+    return this.settlements.filter((t) => t.factionId === rv.factionId).reduce((s, t) => s + this.popOf(t), 0);
+  }
+
+  /** Monthly: a power's national population follows its towns (capped), and a
+   *  power that has lost every town is a rump state. */
+  syncPowerPop(rv: RivalNation): void {
+    if (rv.factionId === undefined) { rv.pop *= 1.0015; return; }
+    const now = this.powerTownPop(rv);
+    const last = rv.townPopLast ?? now;
+    if (last > 0 && now > 0) {
+      const g = Math.max(-POWER_SHRINK_CAP, Math.min(POWER_GROWTH_CAP, now / last - 1));
+      rv.pop *= 1 + g;
+    }
+    rv.townPopLast = now;
+  }
+
+  /** The power's town nearest our own territory — the one a war fights over. */
+  frontierTownOf(rv: RivalNation): Settlement | null {
+    if (rv.factionId === undefined) return null;
+    const ours = this.settlements.filter((t) => t.factionId === this.playerFactionId);
+    const theirs = this.settlements.filter((t) => t.factionId === rv.factionId);
+    if (!ours.length || !theirs.length) return null;
+    const f = this.faction(rv.factionId);
+    const pool = theirs.length > 1 ? theirs.filter((t) => t.id !== f?.capital) : theirs;
+    const dist = (t: Settlement) => Math.min(...ours.map((o) => Math.hypot(o.x - t.x, o.y - t.y)));
+    return pool.reduce((a, b) => (dist(b) < dist(a) ? b : a));
+  }
+
+  /** Hand a settlement to another faction (occupation, cession), keeping every
+   *  roster and the border state honest. */
+  transferSettlement(t: Settlement, toFaction: number, loyalty = 40): void {
+    const from = this.faction(t.factionId);
+    const to = this.faction(toFaction);
+    if (!to || t.factionId === toFaction) return;
+    if (from) {
+      from.settlementIds = from.settlementIds.filter((id) => id !== t.id);
+      if (from.capital === t.id) from.capital = from.settlementIds[0] ?? -1;
+    }
+    t.factionId = toFaction;
+    t.loyaltyToFaction = loyalty;
+    to.settlementIds.push(t.id);
+    this.settleOwnership();
   }
 
   /** What this rival wants on the ledger before it signs (GDD §6.3: the
@@ -11756,6 +11986,21 @@ export class RegionSim {
 
   /** Write a WarScar when a war ends; call before nulling playerWar. */
   private recordWarScar(w: PlayerWar, rv: RivalNation, outcome: WarScar['outcome']): void {
+    // Occupied towns are annexed on victory; any other ending hands them back
+    // (a border_province term then re-cedes one for good).
+    const held = w.occupiedTowns ?? [];
+    if (outcome === 'victory') {
+      for (const id of held) {
+        const t = this.settlement(id);
+        if (t) this.addLog(`ANNEXATION: ${t.name} passes to us by right of conquest.`, 'good', { cat: 'frontier' });
+      }
+    } else if (rv.factionId !== undefined) {
+      for (const id of held) {
+        const t = this.settlement(id);
+        if (t && t.factionId === this.playerFactionId) this.transferSettlement(t, rv.factionId, 70);
+      }
+    }
+    w.occupiedTowns = [];
     const durationMonths = Math.round((this.day - w.startedDay) / 30);
     this.warScars.push({
       rivalId: rv.id,
@@ -11799,6 +12044,7 @@ export class RegionSim {
       rv.identity.flag = reviseFlag(rv.identity.flag, next.id, this.map.seed + rv.id);
       if (rv.name !== oldName) this.noteHistory(rv, `${oldName} renamed itself ${rv.name}, ${this.year}; ${rv.leader} leads.`);
     }
+    this.syncPowerFaction(rv);
     this.noteHistory(rv,
       cause === 'defeat'
         ? `Defeat brought down the ${old.name}; a ${next.name} seized power, ${this.year}.`
@@ -12208,7 +12454,7 @@ export class RegionSim {
     const playerSettlements = this.settlements.filter((s) => s.factionId === this.playerFactionId);
     const rivalSettlements = this.settlements.filter((s) => s.factionId === rivalId);
     const sharesBorder = playerSettlements.some((ps) =>
-      rivalSettlements.some((rs) => Math.hypot(ps.x - rs.x, ps.y - rs.y) < 30)
+      rivalSettlements.some((rs) => Math.hypot(ps.x - rs.x, ps.y - rs.y) < 30 * WORLD_SCALE)
     ) || rv.relations < 0; // rivals with negative relations have border tensions
     if (sharesBorder || rivalSettlements.length > 0 || rv.compass !== undefined) {
       result.push({
@@ -12637,6 +12883,9 @@ export class RegionSim {
       return false;
     }
     const nation = this.nationName || 'the nation';
+    // A border_province peace keeps the first town we took; the rest go home.
+    const kept = terms.includes('border_province') ? w.occupiedTowns?.shift() : undefined;
+    this.pendingCession = kept ?? null;
     this.recordWarScar(w, rv, 'negotiated');
     this.playerWar = null;
     rv.pop *= 0.92; // the war's bill abroad
@@ -12693,6 +12942,18 @@ export class RegionSim {
         break;
       }
       case 'border_province': {
+        const keptId = this.pendingCession;
+        this.pendingCession = null;
+        const ceded = keptId !== null ? this.settlement(keptId) ?? null : this.frontierTownOf(rv);
+        if (ceded) {
+          if (ceded.factionId !== this.playerFactionId) this.transferSettlement(ceded, this.playerFactionId, 35);
+          rv.weights.grudge = Math.min(10, rv.weights.grudge + 3);
+          rv.relations = -80;
+          this.noteHistory(rv, `Ceded ${ceded.name} to ${nation}, ${this.year}. The revanchists vow return.`);
+          this.addLog(`PEACE: the frontier moves — ${ceded.name} passes from ${rv.name} to ${nation}. Its revanchists will remember.`, 'good', { cat: 'frontier' });
+          recordDeed(this, { tag: 'took_land', weight: 2, targetKind: 'rival', targetId: rv.id });
+          break;
+        }
         const t = [...this.settlements].sort((a, b) => this.popOf(b) - this.popOf(a))[0];
         const absorbed = Math.round(rv.pop * 0.012);
         if (t) {
@@ -12725,9 +12986,10 @@ export class RegionSim {
    *  war under way, marches held under occupation). Both axes are player-driven and
    *  legible, so the encirclement pressure never reads as a silent ambush. */
   playerCoalitionThreat(): number {
-    // Relative dominance: with a handful of rivals splitting the rest of the map, a
-    // nation holding even a third of it is the hegemon others balance against.
-    const dominance = Math.max(0, (this.playerTerritoryControl() - 0.18) / 0.32);
+    // Relative dominance (Centuria 2.0): the great powers hold their continents, so
+    // a player who merely unites the heartland is not yet a hegemon — one who
+    // outgrows the largest power is.
+    const dominance = Math.max(0, (this.playerHegemonRatio() - COALITION_HEGEMON_FLOOR) / COALITION_HEGEMON_SPAN);
     let belligerence = this.treatiesBroken * 0.12;
     if (this.playerWar && !this.playerWar.defensive) belligerence += 0.35;
     belligerence += (this.playerWar?.occupied ?? 0) * 0.10;
@@ -13116,6 +13378,7 @@ export class RegionSim {
       eventsFired: this.eventsFired,
       eventFlags: this.eventFlags,
       territory: this.territory ? serializeTerritory(this.territory) : null,
+      territorySettledSig: this.territorySettledSig,
       territoryHistory: this.territoryHistory,
       stateProclaimed: this.stateProclaimed,
       ceremonyPending: this.ceremonyPending,
@@ -13396,6 +13659,7 @@ export class RegionSim {
     r.eventsFired = d.eventsFired ?? {};
     r.eventFlags = d.eventFlags ?? [];
     r.territory = d.territory ? deserializeTerritory(d.territory) : null;
+    r.territorySettledSig = d.territorySettledSig ?? 0;
     r.territoryHistory = d.territoryHistory ?? [];
     const hist = expandHistory(r.territoryHistory, REGION_N * REGION_N);
     r.lastSnapshotOwner = hist.length ? hist[hist.length - 1].owner : null;
@@ -15001,18 +15265,22 @@ export class RegionSim {
     return types;
   }
 
+  /** Where a town-less faction starts looking: its seat if it has one on
+   *  record, else the heartland continent around the player. */
+  private factionAnchor(f: RegionalFaction): { x: number; y: number } {
+    if (f.seat) return f.seat;
+    const home = this.settlements.find((s) => s.factionId === this.playerFactionId);
+    const hx = home?.x ?? 50, hy = home?.y ?? 50;
+    const a = ((f.id ?? 1) * 2.399) % (Math.PI * 2);
+    return { x: hx + Math.cos(a) * 14 * WORLD_SCALE * 2, y: hy + Math.sin(a) * 14 * WORLD_SCALE * 2 };
+  }
+
   /** Find best settlement expansion site using Monte Carlo sampling. */
   private findBestExpansionSite(faction: RegionalFaction, samples: number = 5): { x: number; y: number; score: number } | null {
     let bestSite: { x: number; y: number; score: number } | null = null;
     const bias = faction.currentGoal?.settlementBias ?? [];
     // Compass-direction preference: factions spread from their map-edge compass position
     // so each rival occupies a distinct quadrant rather than piling on top of the player.
-    const compassBias: Record<string, (x: number, y: number) => number> = {
-      north: (_x, y) => y < 40 ? 15 : 0,
-      south: (_x, y) => y > 60 ? 15 : 0,
-      east:  (x, _y) => x > 60 ? 15 : 0,
-      west:  (x, _y) => x < 40 ? 15 : 0,
-    };
     // Bootstrap uses 8 samples for better initial placement; established factions use 5
     const effectiveSamples = faction.settlementIds.length === 0 ? Math.max(samples, 8) : samples;
     // Personality terrain pull: the faction's sector lean (the SAME factionBuildLean
@@ -15022,16 +15290,24 @@ export class RegionSim {
     // (no RNG draw) → the aiRng stream is untouched; only WHERE it lands changes.
     const lean = this.factionBuildLean(faction);
 
+    // Centuria 2.0: nations grow outward from their own towns (a new faction
+    // from its capital's continent), not by dice across the whole world.
+    const own = faction.settlementIds.map((id) => this.settlement(id)).filter((t): t is Settlement => !!t);
+    const anchor = own.length ? null : this.factionAnchor(faction);
     for (let i = 0; i < effectiveSamples; i++) {
-      const x = this.aiRng.int(100), y = this.aiRng.int(100);
-      const site = this.map.siteAt(x, y);
+      const base = own.length ? own[this.aiRng.int(own.length)] : anchor!;
+      const reach = own.length ? EXPAND_REACH : EXPAND_REACH * 1.5;
+      const x = Math.max(1, Math.min(99, base.x + (this.aiRng.next() - 0.5) * 2 * reach));
+      const y = Math.max(1, Math.min(99, base.y + (this.aiRng.next() - 0.5) * 2 * reach));
+      const sc = this.map.coordToCell(x, y);
+      const site = this.map.siteAt(sc.x, sc.y);
       if (!site) continue;
 
       // Score using direct field checks — avoids allocating a siteTypes array per sample
       let score = 50;
 
-      const isRiver = site.river || this.map.siteAt(Math.max(0, x - 1), y)?.river === true;
-      const isCoastal = site.coastal || x < 5 || x > 95 || y < 5 || y > 95;
+      const isRiver = site.river;
+      const isCoastal = site.coastal;
       const isMountain = site.roughness > 0.4;
       const isPlains = site.fertility > 0.9 && site.roughness < 0.2;
       const isForest = site.forest > 0.5;
@@ -15062,10 +15338,6 @@ export class RegionSim {
       if (isCoastal || isRiver) leanPull += lean.services;
       score += leanPull * EXPAND_LEAN_SCALE;
 
-      // Compass-direction pull keeps rival factions in distinct map quadrants
-      const aig = faction.aiGoal ?? '';
-      const compassKey = ['north', 'south', 'east', 'west'].find(d => aig.includes(d) || faction.name.toLowerCase().includes(d));
-      if (compassKey) score += compassBias[compassKey](x, y);
 
       // Noise for variety
       score += this.aiRng.int(11) - 5;
@@ -15076,8 +15348,7 @@ export class RegionSim {
       // never build). Checked AFTER every aiRng draw so the stream order — and
       // thus determinism and every downstream rival roll — is untouched; only
       // WHICH sampled cell wins changes.
-      const cell = this.map.coordToCell(x, y);
-      const settleable = this.map.siteScore(cell.x, cell.y) >= 0;
+      const settleable = this.map.siteScore(sc.x, sc.y) >= 0;
 
       if (settleable && score > 0 && (!bestSite || score > bestSite.score)) {
         bestSite = { x: Math.round(x), y: Math.round(y), score };
@@ -15128,11 +15399,12 @@ export class RegionSim {
     }
 
     // Create new settlement
-    const site = this.map.siteAt(Math.round(x), Math.round(y));
+    const cell = this.map.coordToCell(x, y);
+    const site = this.map.siteAt(cell.x, cell.y);
     if (!site) return null;
 
     // Determine resource focus from site characteristics
-    const siteTypes = this.siteType(Math.round(x), Math.round(y));
+    const siteTypes = this.siteType(cell.x, cell.y);
     let resourceFocus: 'wool' | 'grain' | 'iron' | 'wood' | 'diverse' = 'diverse';
     if (siteTypes.includes('coastal')) resourceFocus = 'wool'; // trade goods
     else if (siteTypes.includes('plains')) resourceFocus = 'grain'; // agriculture
@@ -15142,8 +15414,8 @@ export class RegionSim {
     const settlement: Settlement = {
       id: this.nextId++,
       name: this.factionSettlementName(faction, resourceFocus),
-      x: Math.round(x),
-      y: Math.round(y),
+      x,
+      y,
       foundedDay: this.day,
       cohorts: { bands: [5, 10, 8, 4, 1] }, // starting population ~28
       food: Math.round(28 * 0.75 * 90), // 90-day buffer so new settlements don't starve immediately
@@ -15176,6 +15448,7 @@ export class RegionSim {
 
     this.settlements.push(settlement);
     faction.settlementIds.push(settlement.id);
+    this.settleOwnership();
 
     // graft onto the faction's central backbone (the root town self-anchors → no trail)
     const anchor = this.networkAnchor(settlement);

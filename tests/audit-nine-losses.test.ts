@@ -6,7 +6,7 @@ import { tickUnrestLadder } from '../src/sim/systems/demographics';
 /** A proclaimed nation with the monetary machinery on — mirrors the fixture the
  *  economy/serialize guards use, so the central bank is established. */
 function nation(seed: number): RegionSim {
-  const r = RegionSim.create(seed);
+  const r = RegionSim.create(seed, { worldPowers: 0 });
   r.stateProclaimed = true;
   r.nationProclaimed = true;
   r.govType = 'republic';
@@ -40,7 +40,7 @@ describe('Save schema v2', () => {
   });
 
   it('a fresh RegionSim round-trips through serialize → deserialize', () => {
-    const r = RegionSim.create(7);
+    const r = RegionSim.create(7, { worldPowers: 0 });
     const r2 = RegionSim.deserialize(r.serialize());
     expect(r2).toBeInstanceOf(RegionSim);
     // canonical (post-load) form is a fixed point
@@ -48,7 +48,7 @@ describe('Save schema v2', () => {
   });
 
   it('deserialize throws IncompatibleSaveError (foundVersion 1) for a v1 blob', () => {
-    const r = RegionSim.create(7);
+    const r = RegionSim.create(7, { worldPowers: 0 });
     const raw = JSON.parse(r.serialize());
     raw.v = 1;
     let err: unknown;
@@ -62,7 +62,7 @@ describe('Save schema v2', () => {
   });
 
   it('deserialize rejects a future-version blob instead of misparsing it', () => {
-    const r = RegionSim.create(7);
+    const r = RegionSim.create(7, { worldPowers: 0 });
     const raw = JSON.parse(r.serialize());
     raw.v = SAVE_SCHEMA_VERSION + 1;
     let err: unknown;
@@ -76,7 +76,7 @@ describe('Save schema v2', () => {
   });
 
   it('hyperinflationMonths and postRevoltGrievanceMonths survive a round-trip', () => {
-    const r = RegionSim.create(7);
+    const r = RegionSim.create(7, { worldPowers: 0 });
     r.hyperinflationMonths = 7;
     r.postRevoltGrievanceMonths = { 3: 2, 5: 1 };
     const r2 = RegionSim.deserialize(r.serialize());
@@ -165,7 +165,7 @@ describe('D1 hyperinflation loss', () => {
 
 describe('D2 secession', () => {
   it('secedeSettlement hands a player town to a rival and updates both rosters', () => {
-    const r = RegionSim.create(7);
+    const r = RegionSim.create(7, { worldPowers: 0 });
     const town = r.settlements.find((t) => t.factionId === r.playerFactionId)!;
     const rivalId = ensureRivalHasSettlement(r);
     const player = r.faction(r.playerFactionId)!;
@@ -180,7 +180,7 @@ describe('D2 secession', () => {
   });
 
   it('secedeSettlement is a no-op when no other faction can receive the town', () => {
-    const r = RegionSim.create(7);
+    const r = RegionSim.create(7, { worldPowers: 0 });
     const town = r.settlements.find((t) => t.factionId === r.playerFactionId)!;
     r.regionalFactions = r.regionalFactions.filter((f) => f.id === r.playerFactionId);
     expect(r.secedeSettlement(town)).toBe(false);
@@ -188,7 +188,7 @@ describe('D2 secession', () => {
   });
 
   it('postRevoltGrievanceMonths climbs only while grievance holds the revolt line', () => {
-    const r = RegionSim.create(7);
+    const r = RegionSim.create(7, { worldPowers: 0 });
     // crisisFrequency 0 → secession roll (0.08 × freq) is 0, so the counter is
     // observable climbing without any RNG-gated defection firing.
     r.difficultySettings.crisisFrequency = 0;

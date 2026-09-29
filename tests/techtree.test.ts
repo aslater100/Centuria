@@ -5,7 +5,7 @@ import { MINUTES_PER_DAY, START_YEAR, DAYS_PER_YEAR } from '../src/sim/defs';
 const ticksPerDay = MINUTES_PER_DAY / REGION_MINUTES_PER_TICK;
 
 function makeRegion(): RegionSim {
-  return RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$' });
+  return RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
 }
 
 function runDays(r: RegionSim, days: number): void {

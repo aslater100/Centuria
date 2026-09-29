@@ -42,8 +42,8 @@ function saveKiB(r: RegionSim): number {
   return Buffer.byteLength(r.serialize(), 'utf8') / 1024;
 }
 
-const EARLY_CEIL_KIB = 64; // today ~22 KiB
-const CENTURY_CEIL_KIB = 256; // ~231 KiB after Centuria 2.0 living borders (territory grid + yearly delta history, +~33 KiB); was 224
+const EARLY_CEIL_KIB = 96; // ~65 KiB after Centuria 2.0 world map (256² grid, great powers' towns at founding); was 64
+const CENTURY_CEIL_KIB = 448; // ~403 KiB after Centuria 2.0 world map (256² territory, great powers' on-map towns, 3-yearly border history); was 256
 
 describe('save-size regression guard (roadmap risk #5)', () => {
   it('a fresh nation serializes small', () => {

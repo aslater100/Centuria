@@ -47,15 +47,15 @@ describe('RegionSim.fromEraStart("1950")', () => {
     expect(r.nationProclaimed).toBe(true);
   });
 
-  it('has exactly 3 settlements', () => {
+  it('has exactly 3 player settlements', () => {
     const r = eraStart('1950');
-    expect(r.settlements.length).toBe(3);
+    expect(r.settlements.filter((s) => s.factionId === r.playerFactionId).length).toBe(3);
   });
 
-  it('all settlements belong to the player faction', () => {
+  it('every foreign settlement belongs to a great power on the map (Centuria 2.0)', () => {
     const r = eraStart('1950');
-    for (const s of r.settlements) {
-      expect(s.factionId).toBe(r.playerFactionId);
+    for (const s of r.settlements.filter((t) => t.factionId !== r.playerFactionId)) {
+      expect(r.faction(s.factionId)?.rivalId).toBeDefined();
     }
   });
 
@@ -106,9 +106,9 @@ describe('RegionSim.fromEraStart("2000")', () => {
     expect(r.nationProclaimed).toBe(true);
   });
 
-  it('has 5 settlements', () => {
+  it('has 5 player settlements', () => {
     const r = eraStart('2000');
-    expect(r.settlements.length).toBe(5);
+    expect(r.settlements.filter((s) => s.factionId === r.playerFactionId).length).toBe(5);
   });
 
   it('total population in the 2000–3500 range', () => {

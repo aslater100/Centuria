@@ -13,7 +13,7 @@ function runDays(r: RegionSim, days: number): void {
 
 /** Create a colony and launch the first expedition, wait for 2 towns and 1 auto-blazed trail. */
 function flipped(seed: number): RegionSim {
-  const r = RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$' });
+  const r = RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
   r.settlements[0].cohorts.bands[2] += 20;
   r.settlements[0].food = 200;
   r.settlements[0].wood = 200;

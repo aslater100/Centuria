@@ -24,7 +24,7 @@ function runDays(r: RegionSim, days: number): void {
 
 /** Create a two-town colony ready for economy tests. */
 function twoTownSim(seed = 42): RegionSim {
-  const r = RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$' });
+  const r = RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
   r.settlements[0].cohorts.bands[2] += 30;
   r.settlements[0].food = 300;
   r.settlements[0].wood = 300;

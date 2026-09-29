@@ -42,7 +42,7 @@ function worldSim(
   layout: Array<{ ind: number; agri: number; faction?: number }>,
   opts: { year?: number; consumerDemand?: boolean } = {},
 ): RegionSim {
-  const r = RegionSim.create(7);
+  const r = RegionSim.create(7, { worldPowers: 0 });
   const base = r.settlements[0];
   while (r.settlements.length < layout.length) {
     const clone = structuredClone(base) as Settlement;
@@ -256,7 +256,7 @@ describe('byte-identical when off + determinism', () => {
 // ============================================================
 describe('consumer-demand in live autoplay', () => {
   it('ON: the world market is LIVE (tightness > 0) yet finite & bounded over 30y', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     r.autoDevelopPlayer = true;
     r.consumerDemand = true;
     const target = r.year + 30;
@@ -272,7 +272,7 @@ describe('consumer-demand in live autoplay', () => {
   });
 
   it('OFF: stays dormant (tightness 0) — the legacy structural baseline', () => {
-    const r = RegionSim.create(1000);
+    const r = RegionSim.create(1000, { worldPowers: 0 });
     r.autoDevelopPlayer = true;
     r.consumerDemand = false;
     const target = r.year + 30;
@@ -286,7 +286,7 @@ describe('consumer-demand in live autoplay', () => {
 
   it('increment 2: consumer-demand ON now DIVERGES the on-map economy from OFF (the sink makes it respond), yet stays deterministic & bounded', () => {
     const run = (cd: boolean): RegionSim => {
-      const r = RegionSim.create(1007);
+      const r = RegionSim.create(1007, { worldPowers: 0 });
       r.autoDevelopPlayer = true;
       r.autoExpandPlayer = true; // a multi-town nation so cross-town shortage can open
       r.consumerDemand = cd;
@@ -395,7 +395,7 @@ describe('CONSUMER-DEMAND increment 2 — the per-town final-consumption SINK', 
     // this tick (the sink + the penalty consume no rng), so the only difference is the
     // `goodsTerm` — which is present ON, gated to 0 OFF.
     const dayMove = (cd: boolean): number => {
-      const r = RegionSim.create(1000);
+      const r = RegionSim.create(1000, { worldPowers: 0 });
       const warm = r.year + 5;
       while (r.year < warm && !r.gameOver) r.tick();
       const cap = r.settlements.find((t) => t.factionId === r.playerFactionId)!;
@@ -430,7 +430,7 @@ describe('CONSUMER-DEMAND increment 3 — the macro bite (stagflation pair)', ()
     // shortfall — which enters solely through the industry `supplyMult`. Fresh sims have
     // localGoodsScarcity 0 + supplyShockMult 1, so the industry ratio is exactly the drag.
     const measure = (shortfall: number) => {
-      const r = RegionSim.create(7);
+      const r = RegionSim.create(7, { worldPowers: 0 });
       const t = r.settlements[0];
       r.finalConsumptionShortfall = shortfall;
       (r as unknown as { updateSectors(t: Settlement): void }).updateSectors(t);
@@ -448,7 +448,7 @@ describe('CONSUMER-DEMAND increment 3 — the macro bite (stagflation pair)', ()
 
   it('industry output-drag is INERT with no shortfall (byte-identical): a zero signal is ×1', () => {
     const measure = (shortfall: number) => {
-      const r = RegionSim.create(7);
+      const r = RegionSim.create(7, { worldPowers: 0 });
       const t = r.settlements[0];
       r.finalConsumptionShortfall = shortfall;
       (r as unknown as { updateSectors(t: Settlement): void }).updateSectors(t);
@@ -464,7 +464,7 @@ describe('CONSUMER-DEMAND increment 3 — the macro bite (stagflation pair)', ()
     // cost-push channel as the raw-cascade + local-goods pushes. Same-seed sims differ
     // only in the injected shortfall, so the inflation gap is purely `finalShortfallPush`.
     const measure = (shortfall: number) => {
-      const r = RegionSim.create(7);
+      const r = RegionSim.create(7, { worldPowers: 0 });
       r.passedLaws.add('central_bank_charter'); // hasCentralBank() → tickMonetary bites
       expect(r.hasCentralBank()).toBe(true);
       r.finalConsumptionShortfall = shortfall;
@@ -484,7 +484,7 @@ describe('CONSUMER-DEMAND increment 3 — the macro bite (stagflation pair)', ()
     // which never charters one — never runs it and its inflation stays flat regardless of
     // shortfall (the documented reason the headless sweep infl% is pinned even ON).
     const withBank = (shortfall: number) => {
-      const r = RegionSim.create(7);
+      const r = RegionSim.create(7, { worldPowers: 0 });
       r.passedLaws.add('central_bank_charter');
       r.finalConsumptionShortfall = shortfall;
       tickMonetary(r);
@@ -494,7 +494,7 @@ describe('CONSUMER-DEMAND increment 3 — the macro bite (stagflation pair)', ()
     // monetary tick (the value a healthy / consumerDemand-off nation always sees).
     expect(withBank(0)).toBe(withBank(0));
     // A charter-holder DOES feel it; a fresh no-bank sim's tick never calls tickMonetary.
-    expect(RegionSim.create(7).hasCentralBank()).toBe(false);
+    expect(RegionSim.create(7, { worldPowers: 0 }).hasCentralBank()).toBe(false);
     expect(withBank(0.5)).toBeGreaterThan(withBank(0));
   });
 });

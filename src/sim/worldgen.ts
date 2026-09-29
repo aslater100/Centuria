@@ -10,12 +10,14 @@
 
 import { hexNeighbors, hexDistance, offsetToCube } from './hex';
 
-export const REGION_N = 128; // region is REGION_N × REGION_N cells over 0..100 coords
-// Hex size on screen is inversely proportional to REGION_N. At 128 each hex is
-// ~2× the size it was at 256, so a founding settlement reads as a single hex and
-// the painterly terrain — not the city sprites — fills the frame. Still a roomy
-// 16k-cell continent. Map-gen is O(N²) but one-time; the strategic map renders
-// from a static cache, so grid size is ~free per frame. See regionview.ts.
+export const REGION_N = 256; // the world is REGION_N × REGION_N cells over 0..100 coords
+// Centuria 2.0: one shared world. The player's heartland sits at the centre and
+// the great powers hold the continents around it. Everything was tuned at 128
+// cells, so per-hex footprints and costs are kept by scaling distances in
+// 0..100 units with WORLD_SCALE — the world simply has 4× the hexes.
+
+/** 0..100-unit distances tuned on the 128-cell map are multiplied by this. */
+export const WORLD_SCALE = 128 / REGION_N;
 
 /** The grid resolution everything was originally tuned against. */
 const BASE_REGION_N = 64;
@@ -23,7 +25,7 @@ const BASE_REGION_N = 64;
  *  corridor build/upkeep) are divided by this so they stay constant in the
  *  fixed 0..100 logical world regardless of REGION_N. Town *spacing* stays in
  *  raw cells, so a finer grid genuinely fits more settlements. */
-export const CELL_SCALE = REGION_N / BASE_REGION_N;
+export const CELL_SCALE = (REGION_N / BASE_REGION_N) * WORLD_SCALE;
 
 export type Biome =
   | 'sea' | 'lake' | 'river' | 'marsh' | 'plains' | 'forest' | 'hills' | 'mountains';
@@ -134,25 +136,57 @@ export class RegionMap {
    */
   private continentCores(): { cx: number; cy: number; rx: number; ry: number; h: number }[] {
     const s = this.seed;
-    // Two independent deterministic draws per core, salted so no two share a stream.
     const rnd = (i: number, salt: number) =>
       hash2(Math.imul(i + 1, 0x1f1f1f1f) ^ salt, Math.imul(i + 1, 0x2c9277b5) + salt * 0x9e37, s);
-    // Base layouts keep centres ≥ ~0.40 apart; with land radii ≤ 0.20 a moat of
-    // sea survives between every pair even after jitter and coastline noise.
-    const count = 3 + (s % 2); // 3 or 4 major continents
-    const bases: [number, number][] = count === 3
-      ? [[0.32, 0.36], [0.70, 0.33], [0.50, 0.72]]
-      : [[0.28, 0.30], [0.72, 0.29], [0.30, 0.71], [0.71, 0.72]];
+    // The heartland at the centre, 4–5 continents in a ring around it; centres
+    // stay ≥ ~0.3 apart and radii ≤ ~0.13, so open sea separates every pair.
+    const ring = 4 + (s % 2);
+    const phase = rnd(99, 7) * Math.PI * 2;
+    const bases: [number, number][] = [[0.5, 0.5]];
+    for (let i = 0; i < ring; i++) {
+      const a = phase + (i / ring) * Math.PI * 2;
+      bases.push([0.5 + Math.cos(a) * 0.33, 0.5 + Math.sin(a) * 0.33]);
+    }
     return bases.map(([bx, by], i) => {
-      const heart = i === 0 ? 0.045 : 0; // the heartland runs a touch broader
+      const heart = i === 0 ? 0.02 : 0;
       return {
-        cx: Math.max(0.15, Math.min(0.85, bx + (rnd(i, 1) - 0.5) * 0.07)),
-        cy: Math.max(0.15, Math.min(0.85, by + (rnd(i, 2) - 0.5) * 0.07)),
-        rx: 0.145 + heart + rnd(i, 3) * 0.045,
-        ry: 0.135 + heart + rnd(i, 4) * 0.045,
-        h: i === 0 ? 0.95 : 0.82 + rnd(i, 5) * 0.12,
+        cx: Math.max(0.12, Math.min(0.88, bx + (rnd(i, 1) - 0.5) * 0.04)),
+        cy: Math.max(0.12, Math.min(0.88, by + (rnd(i, 2) - 0.5) * 0.04)),
+        rx: 0.095 + heart + rnd(i, 3) * 0.03,
+        ry: 0.09 + heart + rnd(i, 4) * 0.03,
+        h: i === 0 ? 0.95 : 0.84 + rnd(i, 5) * 0.1,
       };
     });
+  }
+
+  /** Normalised centres of the continental shelves; index 0 is the heartland. */
+  continentCentres(): { x: number; y: number }[] {
+    return this.continentCores().map((c) => ({ x: c.cx, y: c.cy }));
+  }
+
+  /** Best capital site on each ring continent, in 0..100 coords (heartland excluded). */
+  foreignCapitalSites(): { x: number; y: number; landmass: number }[] {
+    const out: { x: number; y: number; landmass: number }[] = [];
+    const home = this.landmassAt(Math.floor(REGION_N / 2), Math.floor(REGION_N / 2));
+    for (const c of this.continentCores().slice(1)) {
+      const cx = Math.floor(c.cx * REGION_N), cy = Math.floor(c.cy * REGION_N);
+      const reach = Math.floor(Math.max(c.rx, c.ry) * REGION_N * 0.8);
+      let best: { x: number; y: number; score: number } | null = null;
+      for (let y = cy - reach; y <= cy + reach; y++) {
+        for (let x = cx - reach; x <= cx + reach; x++) {
+          if (x < 4 || y < 4 || x >= REGION_N - 4 || y >= REGION_N - 4) continue;
+          const sc = this.siteScore(x, y);
+          if (sc <= 0) continue;
+          const score = sc - Math.hypot(x - cx, y - cy) / reach;
+          if (!best || score > best.score) best = { x, y, score };
+        }
+      }
+      if (!best) continue;
+      const lm = this.landmassAt(best.x, best.y);
+      if (lm === home || out.some((o) => o.landmass === lm)) continue;
+      out.push({ x: ((best.x + 0.5) / REGION_N) * 100, y: ((best.y + 0.5) / REGION_N) * 100, landmass: lm });
+    }
+    return out;
   }
 
   private generate(): void {
@@ -428,7 +462,7 @@ export class RegionMap {
     let best = { x: REGION_N / 2, y: REGION_N / 2, score: -Infinity };
     for (let y = 8; y < REGION_N - 8; y++) {
       for (let x = 8; x < REGION_N - 8; x++) {
-        const centerBias = 1 - (Math.abs(x - REGION_N / 2) + Math.abs(y - REGION_N / 2)) / REGION_N;
+        const centerBias = 1 - (Math.abs(x - REGION_N / 2) + Math.abs(y - REGION_N / 2)) / (REGION_N * WORLD_SCALE);
         let score = this.siteScore(x, y) + centerBias * 1.2;
         if (this.siteScore(x, y) < 0) continue; // never settle water or peaks
         const c = this.at(x, y);
@@ -444,12 +478,12 @@ export class RegionMap {
   }
 
   /** Best unclaimed site within reach — expeditions read the land, not dice. */
-  bestSiteNear(fromX: number, fromY: number, claimed: { x: number; y: number }[], range = Math.round(REGION_N * 0.28)): TownSite | null {
+  bestSiteNear(fromX: number, fromY: number, claimed: { x: number; y: number }[], range = Math.round(REGION_N * 0.28 * WORLD_SCALE)): TownSite | null {
     let best: { x: number; y: number; score: number } | null = null;
     // Minimum gap to any existing/pending town, in cell space: ~8 map units
     // (matches MIN_SETTLEMENT_SPACING) so player towns don't crowd either.
-    const minGap = REGION_N * 0.08;
-    const minFromOrigin = REGION_N * 0.05;
+    const minGap = REGION_N * 0.08 * WORLD_SCALE;
+    const minFromOrigin = REGION_N * 0.05 * WORLD_SCALE;
     for (let y = Math.max(2, fromY - range); y < Math.min(REGION_N - 2, fromY + range); y++) {
       for (let x = Math.max(2, fromX - range); x < Math.min(REGION_N - 2, fromX + range); x++) {
         const d = Math.hypot(x - fromX, y - fromY);

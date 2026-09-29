@@ -79,7 +79,7 @@ function pairRel(r: RegionSim, a: number, b: number): number {
 
 describe('the continent seam (compass horizon = continent, Phase C re-implements)', () => {
   it('rivalContinent is the compass horizon and sameContinent compares it', () => {
-    const r = RegionSim.create(42);
+    const r = RegionSim.create(42, { worldPowers: 0 });
     const a = injectRival(r, { id: 9001, compass: 'east' });
     const b = injectRival(r, { id: 9002, compass: 'east' });
     const c = injectRival(r, { id: 9003, compass: 'west' });
@@ -90,7 +90,7 @@ describe('the continent seam (compass horizon = continent, Phase C re-implements
   });
 
   it('continentTerm: nothing across oceans, bond for compatible neighbours, friction for incompatible', () => {
-    const r = RegionSim.create(42);
+    const r = RegionSim.create(42, { worldPowers: 0 });
     const a = injectRival(r, { id: 9001, compass: 'north' });
     const b = injectRival(r, { id: 9002, compass: 'north' });
     const c = injectRival(r, { id: 9003, compass: 'south' });
@@ -109,7 +109,7 @@ describe('geography in the relations drift baseline', () => {
   // `pairRelationsBase` is the one formula both the drift target and the
   // spawn seeding read, so the tick-level behaviour follows from it.
   it('compatible neighbours read a warmer baseline than the same pair an ocean apart', () => {
-    const r = RegionSim.create(42);
+    const r = RegionSim.create(42, { worldPowers: 0 });
     // A/B share the eastern horizon, C is identical but west — junta all
     // round (same regime bloc, blocAffinity +12 ≥ 0 → neighbour bond).
     const a = injectRival(r, { id: 9001, compass: 'east' });
@@ -124,7 +124,7 @@ describe('geography in the relations drift baseline', () => {
   });
 
   it('incompatible neighbours grind below the same quarrel an ocean apart', () => {
-    const r = RegionSim.create(42);
+    const r = RegionSim.create(42, { worldPowers: 0 });
     // A junta (autocratic) beside B parliamentary (liberal) — the quarrel
     // pair (blocAffinity −14 < 0) with a shared border to grind against.
     const a = injectRival(r, { id: 9001, compass: 'east' });
@@ -148,7 +148,7 @@ describe('wars cluster on shared ground', () => {
   it('hostile neighbours come to blows measurably more often than hostile distant powers', () => {
     const hostile = { expansion: 8, commerce: 0, honor: 0, risk: 8, grudge: 5 };
     const countWars = (compassB: RivalNation['compass']): number => {
-      const r = RegionSim.create(7);
+      const r = RegionSim.create(7, { worldPowers: 0 });
       const a = injectRival(r, { id: 9001, compass: 'east', weights: hostile });
       const b = injectRival(r, { id: 9002, compass: compassB, weights: hostile });
       const key = r.pairKey(a.id, b.id);
@@ -173,7 +173,7 @@ describe('trade blocs organise by continent (commit 2)', () => {
   const commerce = { commerce: 8, expansion: 2 };
 
   it('a cross-continent pair at the neighbour bar never blocs — the overseas bar is higher', () => {
-    const r = RegionSim.create(42);
+    const r = RegionSim.create(42, { worldPowers: 0 });
     const a = injectRival(r, { id: 9001, compass: 'east', weights: commerce });
     const b = injectRival(r, { id: 9002, compass: 'west', weights: commerce });
     const key = r.pairKey(a.id, b.id);
@@ -186,7 +186,7 @@ describe('trade blocs organise by continent (commit 2)', () => {
   });
 
   it('the same pair as neighbours blocs at the historical bar', () => {
-    const r = RegionSim.create(42);
+    const r = RegionSim.create(42, { worldPowers: 0 });
     const a = injectRival(r, { id: 9001, compass: 'east', weights: commerce });
     const b = injectRival(r, { id: 9002, compass: 'east', weights: commerce });
     const key = r.pairKey(a.id, b.id);
@@ -199,7 +199,7 @@ describe('trade blocs organise by continent (commit 2)', () => {
   });
 
   it('an overseas pact still forms once ties are genuinely warm', () => {
-    const r = RegionSim.create(42);
+    const r = RegionSim.create(42, { worldPowers: 0 });
     const a = injectRival(r, { id: 9001, compass: 'east', weights: commerce });
     const b = injectRival(r, { id: 9002, compass: 'west', weights: commerce });
     const key = r.pairKey(a.id, b.id);
@@ -211,7 +211,7 @@ describe('trade blocs organise by continent (commit 2)', () => {
   });
 
   it('joining an existing bloc reads the candidate pair geography, not the bloc', () => {
-    const r = RegionSim.create(42);
+    const r = RegionSim.create(42, { worldPowers: 0 });
     const a = injectRival(r, { id: 9001, compass: 'east', weights: commerce });
     const b = injectRival(r, { id: 9002, compass: 'east', weights: commerce });
     const c = injectRival(r, { id: 9003, compass: 'east', weights: commerce });
@@ -233,7 +233,7 @@ describe('trade blocs organise by continent (commit 2)', () => {
   });
 
   it('climate coalitions stay continent-blind — a planetary threat unites across oceans', () => {
-    const r = RegionSim.create(42);
+    const r = RegionSim.create(42, { worldPowers: 0 });
     (r as unknown as { rivalClimateResponse: boolean }).rivalClimateResponse = true;
     const a = injectRival(r, { id: 9001, compass: 'east', archetype: 'trading_republic' });
     const b = injectRival(r, { id: 9002, compass: 'west', archetype: 'trading_republic' });
@@ -249,7 +249,7 @@ describe('trade blocs organise by continent (commit 2)', () => {
 describe('determinism (same seed, same code → same world)', () => {
   it('two same-seed runs of the geography-aware drift stay byte-identical', () => {
     const run = (): string => {
-      const r = RegionSim.create(1000);
+      const r = RegionSim.create(1000, { worldPowers: 0 });
       injectRival(r, { id: 9001, compass: 'east' });
       injectRival(r, { id: 9002, compass: 'east', regime: 'parliamentary' });
       injectRival(r, { id: 9003, compass: 'west' });
