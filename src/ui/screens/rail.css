@@ -1,0 +1,52 @@
+.screen-rail {
+  position: fixed;
+  left: 10px;
+  top: 52px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-gold-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+}
+
+.rail-btn {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-inner);
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.rail-btn:hover {
+  background: var(--surface-raised);
+  border-color: var(--border-gold);
+}
+
+.rail-btn.active {
+  border-color: var(--border-gold);
+  box-shadow: var(--glow-gold);
+}
+
+.rail-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.rail-key {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font: 9px var(--mono);
+  color: var(--muted);
+}

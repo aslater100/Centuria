@@ -92,10 +92,37 @@ export function agenda(r: RegionSim): AgendaItem[] {
   for (const b of r.advisorBriefs.slice(-2)) {
     items.push({ id: `brief:${b.day}:${b.portfolio}`, kind: 'advisor', urgency: 1, title: `${b.portfolio} minister`, detail: b.message });
   }
-  return items.sort((a, b) => b.urgency - a.urgency);
+  const goal = objective(r);
+  return [...(goal ? [goal] : []), ...items.sort((a, b) => b.urgency - a.urgency)];
 }
 
 /** Items that justify stopping the clock at the turn of the month. */
 export function agendaDemandsPause(items: readonly AgendaItem[]): boolean {
   return items.some((i) => i.urgency >= 2);
+}
+
+/** The standing objective (replaces the old canvas statehood banner): the next
+ *  constitutional step and what still blocks it. */
+export function objective(r: RegionSim): AgendaItem | null {
+  if (!r.stateProclaimed) {
+    if (r.ceremonyPending || r.charterEligible()) {
+      return { id: 'goal:state', kind: 'milestone', urgency: 2, title: 'Charter ready',
+        detail: 'Every requirement is met — proclaim the State.' };
+    }
+    const gates = r.charterGates();
+    const done = gates.filter((g) => g.met).length;
+    return { id: `goal:state:${done}`, kind: 'milestone', urgency: 1, title: `Toward Statehood ${done}/${gates.length}`,
+      detail: gates.map((g) => `${g.met ? '✓' : '✗'} ${g.label} ${g.detail}`).join(' · ') };
+  }
+  if (!r.nationProclaimed) {
+    const gates = r.canCallConventionGates();
+    const done = gates.filter((g) => g.met).length;
+    if (done === gates.length) {
+      return { id: 'goal:nation', kind: 'milestone', urgency: 2, title: 'Convention ready',
+        detail: 'Call the constitutional convention from the Nation screen (G).' };
+    }
+    return { id: `goal:nation:${done}`, kind: 'milestone', urgency: 1, title: `Toward Nationhood ${done}/${gates.length}`,
+      detail: gates.map((g) => `${g.met ? '✓' : '✗'} ${g.label}${g.detail ? ' ' + g.detail : ''}`).join(' · ') };
+  }
+  return null;
 }

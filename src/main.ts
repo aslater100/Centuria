@@ -192,6 +192,11 @@ function enterRegionMode(r: RegionSim): void {
   regionView.onSetSpeed = (s: number) => { speed = s; paused = false; updateUIState(); };
   regionView.onTogglePause = () => { if (!pauseMenuOpen) { paused = !paused; updateUIState(); } };
   regionView.onAdvanceMonth = advanceMonth;
+  regionView.onRailScreen = (id) => {
+    if (id === 'history') regionView?.toggleHistory();
+    else if (id === 'settings') settingsPanel.open();
+    else if (id === 'nation') regionView?.toggleStatePanel();
+  };
   applySettings(settings);
   onboarding = settings.showTutorial ? new Onboarding(root) : null;
   turnHoldMonth = -1;
@@ -388,7 +393,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (regionView && !pauseMenuOpen) {
-    if (e.key === 't' || e.key === 'T') { regionView.researchOpen = !regionView.researchOpen; e.preventDefault(); return; }
+    if (e.key === 't' || e.key === 'T') { regionView.openScreen('research'); e.preventDefault(); return; }
     if (e.key === 'p' || e.key === 'P') { regionView.toggleProvinceView(); e.preventDefault(); return; }
     if ((e.key === 'b' || e.key === 'B') && region?.hasCentralBank()) {
       regionView.centralBankOpen = !regionView.centralBankOpen; e.preventDefault(); return;

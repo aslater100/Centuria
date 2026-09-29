@@ -33,6 +33,10 @@ import { QUIRKS } from '../sim/procgen/nation';
 import { flagDataUrl } from './flag';
 import { Dispatch, AgendaBar, DecisionCard } from './dispatch';
 import { DiplomacyScreen } from './diplomacyScreen';
+import { EconomyScreen } from './screens/economyScreen';
+import { ResearchScreen } from './screens/researchScreen';
+import { TownDrawer } from './screens/townDrawer';
+import { ScreenRail, type RailScreen } from './screens/rail';
 
 /** localStorage flag (U3): the in-game wiki auto-opens once on a player's first game. */
 const WIKI_FIRST_RUN_KEY = 'centuria-wiki-seen';
@@ -438,6 +442,16 @@ export class RegionView {
     this.agendaBar.onAdvanceMonth = () => this.onAdvanceMonth?.();
     this.decisionCard = new DecisionCard(root);
     this.diplomacyScreen = new DiplomacyScreen(root);
+    this.economyScreen = new EconomyScreen(root);
+    this.researchScreen = new ResearchScreen(root);
+    this.townDrawer = new TownDrawer(root);
+    this.rail = new ScreenRail(root);
+    this.rail.onOpen = (id) => this.openScreen(id);
+    this.economyScreen.onFocusTown = (id) => { this.economyScreen.close(); this.focusTown(id); };
+    this.townDrawer.onFound = (id) => { this.townDrawer.close(); this.toggleFoundingMode(id); };
+    this.townDrawer.onStartBuild = (id, def) => { this.townDrawer.close(); this.toggleBuildingPlacement(id, def); };
+    this.townDrawer.onStartDistrict = (id, def) => { this.townDrawer.close(); this.toggleDistrictPlacement(id, def); };
+    this.overviewOpen = false;
     this.agendaBar.onOpenDecision = (id) => this.decisionCard.open(this.region, id);
     this.decisionCard.onChoose = (id, i) => { issue(this.region, 'chooseEventOption', id, i); };
     // Start zoomed in on the founding settlement (Civ-style entry view).
@@ -461,6 +475,35 @@ export class RegionView {
   readonly agendaBar: AgendaBar;
   readonly decisionCard: DecisionCard;
   readonly diplomacyScreen: DiplomacyScreen;
+  readonly economyScreen: EconomyScreen;
+  readonly researchScreen: ResearchScreen;
+  readonly townDrawer: TownDrawer;
+  readonly rail: ScreenRail;
+  /** Set by main.ts for rail entries it owns (history, settings, nation). */
+  onRailScreen: ((id: RailScreen) => void) | null = null;
+
+  /** Open one full screen from the rail or its hotkey (toggles if already open). */
+  openScreen(id: RailScreen): void {
+    const r = this.region;
+    const toggle = (s: { isOpen: boolean; open(r: RegionSim): void; close(): void }) => (s.isOpen ? s.close() : s.open(r));
+    if (id === 'economy') toggle(this.economyScreen);
+    else if (id === 'research') toggle(this.researchScreen);
+    else if (id === 'foreign') toggle(this.diplomacyScreen);
+    else if (id === 'help') this.toggleWikiPanel();
+    else this.onRailScreen?.(id);
+  }
+
+  /** Centre the camera on a town and open its drawer. */
+  focusTown(id: number): void {
+    const t = this.region.settlement(id);
+    if (!t) return;
+    this.selectedId = id;
+    this.townDrawer.open(this.region, id);
+    const p = this.toPx(t.x, t.y);
+    this.camX += this.viewW / 2 - p.px;
+    this.camY += this.viewH / 2 - p.py;
+    this.clampCamera();
+  }
 
   /** Pop the first open decision (called by main.ts when the turn holds). */
   openPendingDecision(): void {
@@ -739,6 +782,7 @@ export class RegionView {
       if (Math.hypot(p.px - mx, p.py - my) < radius) {
         if (t.factionId === this.region.playerFactionId) {
           this.selectedId = t.id;
+          this.townDrawer.open(this.region, t.id);
         } else {
           // Clicking a rival settlement opens the rival faction panel
           this.selectedFactionId = t.factionId;
@@ -787,8 +831,7 @@ export class RegionView {
 
   /** E key: toggle the Economy panel. */
   toggleEconomyPanel(): void {
-    this.economyOpen = !this.economyOpen;
-    this.lastEconomyBuildFrame = -999;
+    this.openScreen('economy');
   }
 
   /** G key: toggle the State/Government panel. */
@@ -1268,107 +1311,6 @@ export class RegionView {
       } else {
         this.selectedScoutId = null;
       }
-    }
-
-    // Charter banner — the path to the State. Each requirement reads as a
-    // ✓/✗ chip so the player can see exactly what still blocks Incorporation.
-    // Drawn above the 44px DOM bottombar (which always renders over the canvas),
-    // so the banner clears it instead of hiding behind the S/R/E/T buttons.
-    const barTop = H - 52; // top of the banner's reserved strip (above bottombar)
-    if (!region.stateProclaimed) {
-      if (region.ceremonyPending || region.charterEligible()) {
-        g.font = 'bold 13px monospace';
-        const need = region.ceremonyPending
-          ? 'The Charter is drafted — the towns await your proclamation.'
-          : `Regional Charter being drafted… ${Math.floor(region.charterProgress)}%`;
-        const bw = Math.max(460, this.textW(need) + 28);
-        g.fillStyle = 'rgba(12,10,7,0.94)';
-        g.fillRect(W / 2 - bw / 2, barTop - 32, bw, 32);
-        g.strokeStyle = 'rgba(143,194,106,0.5)';
-        g.strokeRect(W / 2 - bw / 2 + 0.5, barTop - 32 + 0.5, bw - 1, 31);
-        g.fillStyle = '#a8e06a';
-        g.textAlign = 'center';
-        g.fillText(need, W / 2, barTop - 11);
-        g.textAlign = 'left';
-      } else {
-        // Not yet eligible: draw the gate chips, color-coded, centered.
-        const gates = region.charterGates();
-        g.font = 'bold 13px monospace';
-        const head = 'Toward Statehood — ';
-        const segs = gates.map((gt) => ({
-          text: `${gt.met ? '✓' : '✗'} ${gt.label} ${gt.detail}`,
-          color: gt.met ? '#a8e06a' : '#f0a868',
-        }));
-        const sep = '   ';
-        const totalW = this.textW(head) +
-          segs.reduce((w, s, i) => w + this.textW(s.text) + (i ? this.textW(sep) : 0), 0);
-        const bw = Math.max(460, totalW + 28);
-        g.fillStyle = 'rgba(12,10,7,0.94)';
-        g.fillRect(W / 2 - bw / 2, barTop - 32, bw, 32);
-        g.strokeStyle = 'rgba(143,194,106,0.45)';
-        g.strokeRect(W / 2 - bw / 2 + 0.5, barTop - 32 + 0.5, bw - 1, 31);
-        let x = W / 2 - totalW / 2;
-        const y = barTop - 11;
-        g.textAlign = 'left';
-        g.fillStyle = '#fffcf0';
-        g.fillText(head, x, y);
-        x += this.textW(head);
-        for (let i = 0; i < segs.length; i++) {
-          if (i) { g.fillStyle = '#7a7060'; g.fillText(sep, x, y); x += this.textW(sep); }
-          g.fillStyle = segs[i].color;
-          g.fillText(segs[i].text, x, y);
-          x += this.textW(segs[i].text);
-        }
-      }
-    } else if (!region.nationProclaimed) {
-      // State proclaimed but nation not yet: show convention gate chips
-      const gates = region.canCallConventionGates();
-      const allMet = gates.every(gt => gt.met);
-      if (allMet) {
-        g.fillStyle = 'rgba(110,74,47,0.94)';
-        g.fillRect(W / 2 - 260, barTop - 30, 520, 30);
-        g.fillStyle = '#e8d27a';
-        g.font = 'bold 13px monospace';
-        g.textAlign = 'center';
-        g.fillText(`★ ${region.stateName.toUpperCase()} — Convention ready. Open the State panel. ★`, W / 2, barTop - 10);
-        g.textAlign = 'left';
-      } else {
-        g.font = 'bold 13px monospace';
-        const head = `${region.stateName} — Toward Nationhood: `;
-        const segs = gates.filter(gt => !gt.met).map((gt) => ({
-          text: `✗ ${gt.label}${gt.detail ? ' ' + gt.detail : ''}`,
-          color: '#f0a868',
-        }));
-        const sep = '   ';
-        const totalW = this.textW(head) +
-          segs.reduce((w, s, i) => w + this.textW(s.text) + (i ? this.textW(sep) : 0), 0);
-        const bw = Math.max(460, totalW + 28);
-        g.fillStyle = 'rgba(12,10,7,0.94)';
-        g.fillRect(W / 2 - bw / 2, barTop - 32, bw, 32);
-        g.strokeStyle = 'rgba(232,210,122,0.35)';
-        g.strokeRect(W / 2 - bw / 2 + 0.5, barTop - 32 + 0.5, bw - 1, 31);
-        let x = W / 2 - totalW / 2;
-        const y = barTop - 11;
-        g.textAlign = 'left';
-        g.fillStyle = '#e8d27a';
-        g.fillText(head, x, y);
-        x += this.textW(head);
-        for (let i = 0; i < segs.length; i++) {
-          if (i) { g.fillStyle = '#7a7060'; g.fillText(sep, x, y); x += this.textW(sep); }
-          g.fillStyle = segs[i].color;
-          g.fillText(segs[i].text, x, y);
-          x += this.textW(segs[i].text);
-        }
-      }
-    } else {
-      // Nation proclaimed: show nation name banner
-      g.fillStyle = 'rgba(110,74,47,0.92)';
-      g.fillRect(W / 2 - 200, barTop - 30, 400, 30);
-      g.fillStyle = '#e8d27a';
-      g.font = 'bold 14px monospace';
-      g.textAlign = 'center';
-      g.fillText(`★ ${region.nationName.toUpperCase()} ★`, W / 2, barTop - 10);
-      g.textAlign = 'left';
     }
 
     this.drawRivalBanners(W, H);
@@ -5522,7 +5464,14 @@ export class RegionView {
   private updateEventLog(): void {
     if (this.newsTick++ % 15 !== 0) return;
     this.dispatch.update(this.region);
-    if (this.newsTick % 60 === 1) this.diplomacyScreen.refresh(this.region);
+    if (this.newsTick % 60 === 1) {
+      this.diplomacyScreen.refresh(this.region);
+      this.economyScreen.refresh(this.region);
+      this.researchScreen.refresh(this.region);
+      this.townDrawer.refresh(this.region);
+    }
+    this.rail.setActive(this.economyScreen.isOpen ? 'economy' : this.researchScreen.isOpen ? 'research'
+      : this.diplomacyScreen.isOpen ? 'foreign' : this.historyOpen ? 'history' : null);
     this.agendaBar.update(this.region, this.awaitingTurn);
   }
 
