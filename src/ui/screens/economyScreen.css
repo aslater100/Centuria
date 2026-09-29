@@ -140,3 +140,12 @@
 .ec-slider input[type='range'] { -webkit-appearance: none; appearance: none; height: 6px; background: rgba(255, 255, 255, 0.16); border-radius: 3px; }
 .ec-slider input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--gold-500); border: 2px solid var(--gold-300); cursor: pointer; }
 .ec-slider input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--gold-500); border: 2px solid var(--gold-300); cursor: pointer; }
+
+.ec-netstats { margin-left: 0; flex-wrap: wrap; align-items: center; }
+.ec-conn { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; font-size: 12.5px; margin-bottom: 8px; }
+.ec-conn label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.ec-conn select { background: var(--navy-800); color: var(--text); border: 1px solid var(--border-gold-soft); border-radius: 4px; padding: 3px 6px; font-size: 12px; }
+.ec-table tr.locked td { color: var(--muted-2); }
+.ec-why { display: inline-block; margin-left: 8px; color: var(--muted-2); }
+.econ-screen button[data-act='build'] { padding: 4px 11px; font-size: 12px; color: var(--text); background: var(--navy-700); border: 1px solid var(--border-gold-soft); border-radius: 4px; cursor: pointer; }
+.ec-note { font-size: 12px; margin: 8px 0 0; } .ec-note.good { color: var(--good); } .ec-note.bad { color: var(--bad-bright); }

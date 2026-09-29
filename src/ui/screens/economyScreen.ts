@@ -2,7 +2,7 @@ import './economyScreen.css';
 import {
   BASE_PRICE, INTERMEDIATE_GOODS, REGION_BUILDINGS, ROUTE_SPECS, SECTOR_IDS, SECTOR_NAMES, TAX_BAND_LABELS,
   TAX_BAND_RATES, TECH_TREE, TRADE_GOODS,
-  type RegionalBuildingDef, type RegionSim, type Route, type SectorBonusBreakdown, type SectorId, type Settlement,
+  type BuiltRouteKind, type RegionalBuildingDef, type RegionSim, type Route, type SectorBonusBreakdown, type SectorId, type Settlement,
 } from '../../sim/region';
 import { formatCurrency } from '../../sim/defs';
 import { issue } from '../../sim/commands';
@@ -160,6 +160,8 @@ export class EconomyScreen {
   private last: RegionSim | null = null;
   private sig = '';
   private note: { text: string; ok: boolean } | null = null;
+  private connA = 0;
+  private connB = 0;
   private readonly onKey = (ev: KeyboardEvent): void => {
     if (ev.key === 'Escape') { ev.stopPropagation(); this.close(); }
   };
@@ -185,6 +187,9 @@ export class EconomyScreen {
         this.redraw(r);
       } else if (t.id === 'ec-auto') {
         issue(r, 'setAutoBuildRoutes', (t as HTMLInputElement).checked);
+        this.redraw(r);
+      } else if (t instanceof HTMLSelectElement && (t.dataset.conn === 'a' || t.dataset.conn === 'b')) {
+        if (t.dataset.conn === 'a') this.connA = Number(t.value); else this.connB = Number(t.value);
         this.redraw(r);
       } else if (t instanceof HTMLSelectElement && t.dataset.cargo) {
         const [a, b] = t.dataset.cargo.split(':').map(Number);
@@ -246,7 +251,14 @@ export class EconomyScreen {
       const id = Number(act.dataset.id);
       const a = Number(act.dataset.a);
       const b = Number(act.dataset.b);
-      if (act.dataset.act === 'repair') {
+      if (act.dataset.act === 'build') {
+        const kind = act.dataset.kind as BuiltRouteKind;
+        const cmd = kind === 'road' ? 'buildRoad' : kind === 'rail' ? 'buildRail' : kind === 'highway' ? 'buildHighway' : 'buildMaglev';
+        const ok = issue(r, cmd, a, b);
+        this.note = { text: ok ? `${kind[0].toUpperCase()}${kind.slice(1)} built.` : `Could not build the ${kind}.`, ok };
+      } else if (act.dataset.act === 'pick') {
+        this.connA = a; this.connB = b;
+      } else if (act.dataset.act === 'repair') {
         const ok = issue(r, 'repairRoute', a, b);
         this.note = { text: ok ? 'Repair crews dispatched — route restored.' : 'Repair refused (treasury or route state).', ok };
       } else if (act.dataset.act === 'delete') {
@@ -419,9 +431,18 @@ export class EconomyScreen {
       `<label class="ec-check${canAuto ? '' : ' off'}"><input id="ec-auto" type="checkbox" ${r.autoBuildRoutes ? 'checked' : ''} ${canAuto ? '' : 'disabled'}> Auto-build roads` +
       `${canAuto ? '' : ` <span class="ec-dim">(needs ${esc(TECH_TREE.find((n) => n.id === 'road_building')?.name ?? 'Road Building')})</span>`}</label>` +
       `<div class="ec-tradestats"><span>Exports <b>${money(r.exportEarningsLastMonth)}</b>/mo</span><span>Trade turnover <b>${money(r.tradeValueLastMonth)}</b>/mo</span></div></section>`;
+    const built = routes.filter((rt) => rt.kind !== 'trail').length;
+    const fullUpkeep = routes.reduce((sum, rt) => sum + (rt.kind === 'trail' ? 0 : r.maintBill(rt)), 0);
+    const linked = r.connectedToAll();
+    const summary =
+      `<section class="ec-card"><h3>Network</h3><div class="ec-tradestats ec-netstats"><span>Links <b>${routes.length}</b> (${built} built)</span>` +
+      `<span>Upkeep at full <b>${money(fullUpkeep, 1)}</b>/mo</span>` +
+      `<span class="ec-chip ${linked ? 'good' : 'warn'}">${linked ? 'All towns connected' : 'Some towns unconnected'}</span></div></section>`;
     const item = (rt: Route): string => {
-      const a = r.settlement(rt.a)?.name ?? '?';
-      const b = r.settlement(rt.b)?.name ?? '?';
+      const sa = r.settlement(rt.a), sb = r.settlement(rt.b);
+      const a = sa?.name ?? '?';
+      const b = sb?.name ?? '?';
+      const days = Math.max(1, Math.round(r.map.travelDays(sa?.x ?? 0, sa?.y ?? 0, sb?.x ?? 0, sb?.y ?? 0) / ROUTE_SPECS[rt.kind].speed));
       const cap = r.effectiveCapacity(rt);
       const max = rt.sea ? 130 : ROUTE_SPECS[rt.kind].capacity;
       const cc = rt.condition >= 70 ? 'good' : rt.condition >= 40 ? 'warn' : 'bad';
@@ -434,15 +455,59 @@ export class EconomyScreen {
       return `<article class="ec-route"><header><b>${esc(a)} ↔ ${esc(b)}</b><span class="ec-chip ${built ? 'info' : 'flat'}">${rt.sea ? 'sea lane' : rt.kind}</span></header>` +
         `<div class="ec-rmeter"><span>Condition</span>${meter(rt.condition, cc)}<b>${Math.round(rt.condition)}%</b></div>` +
         `<div class="ec-rmeter"><span>Load</span>${meter(cap > 0 ? (rt.freight / cap) * 100 : 0, 'info')}<b>${Math.round(rt.freight)}/${Math.round(cap)}</b></div>` +
-        `<p class="ec-foot">Capacity ${Math.round(max)} at full condition · upkeep ${money(r.maintBill(rt) * r.routeBudget, 1)}/mo · cargo: ${esc(auto)}</p>` +
+        `<p class="ec-foot">~${days}d travel · capacity ${Math.round(max)} at full condition · upkeep ${money(r.maintBill(rt) * r.routeBudget, 1)}/mo · cargo: ${esc(auto)}</p>` +
         `<div class="ec-ractions"><label>Cargo priority <select data-cargo="${rt.a}:${rt.b}" aria-label="Cargo priority for ${esc(a)} to ${esc(b)}">` +
         `<option value=""${cargo === '' ? ' selected' : ''}>Automatic</option>` +
         SECTOR_IDS.map((s) => `<option value="${s}"${cargo === s ? ' selected' : ''}>${SECTOR_NAMES[s]}</option>`).join('') + `</select></label>` +
         `<button data-act="repair" data-a="${rt.a}" data-b="${rt.b}" ${canRepair ? '' : 'disabled'} title="${esc(repairWhy)}">Repair${canRepair ? ' · ' + money(cost) : ''}</button>` +
+        `<button data-act="pick" data-a="${rt.a}" data-b="${rt.b}" title="Choose this pair in Build a connection">Upgrade…</button>` +
         `<button class="danger" data-act="delete" data-a="${rt.a}" data-b="${rt.b}" ${built && r.stateProclaimed ? '' : 'disabled'} title="${built ? 'Tear up the link; a trail remains' : 'Trails cannot be removed'}">Tear up</button></div></article>`;
     };
-    return controls + `<section class="ec-card"><h3>Routes (${routes.length})</h3>` +
+    return controls + summary + this.connect(r) + `<section class="ec-card"><h3>Routes (${routes.length})</h3>` +
       (routes.length ? `<div class="ec-routes">${routes.map(item).join('')}</div>` : `<p class="ec-empty">No routes yet. Found more towns to link them.</p>`) + `</section>`;
+  }
+
+  private connect(r: RegionSim): string {
+    const mine = r.settlements.filter((t) => t.factionId === r.playerFactionId);
+    if (mine.length < 2) return `<section class="ec-card"><h3>Build a connection</h3><p class="ec-empty">Found a second town to link it.</p></section>`;
+    if (!mine.some((t) => t.id === this.connA)) this.connA = mine[0].id;
+    if (!mine.some((t) => t.id === this.connB) || this.connB === this.connA) this.connB = (mine.find((t) => t.id !== this.connA) ?? mine[1]).id;
+    const opts = (sel: number): string => mine.map((t) => `<option value="${t.id}"${t.id === sel ? ' selected' : ''}>${esc(t.name)}</option>`).join('');
+    const a = this.connA, b = this.connB;
+    const existing = r.routeBetween(a, b);
+    const RANK: Record<Route['kind'], number> = { trail: 0, road: 1, rail: 2, highway: 3, maglev: 4 };
+    const kinds: { kind: BuiltRouteKind; unlocked: boolean; need: string }[] = [
+      { kind: 'road', unlocked: true, need: '' },
+      { kind: 'rail', unlocked: r.railUnlocked(), need: 'Rail not yet unlocked' },
+      { kind: 'highway', unlocked: r.highwayUnlocked(), need: 'Highways not yet unlocked' },
+      { kind: 'maglev', unlocked: r.maglevUnlocked(), need: 'Maglev not yet unlocked' },
+    ];
+    const rows = kinds.map(({ kind, unlocked, need }) => {
+      const cost = r.linkCost(a, b, kind);
+      const have = existing ? RANK[existing.kind] >= RANK[kind] : false;
+      const why = !r.stateProclaimed ? 'Needs statehood'
+        : !unlocked ? need
+        : have ? `Already ${existing?.kind === kind ? 'built' : `have a better link (${existing?.kind})`}`
+        : !cost ? 'No passable corridor between these towns'
+        : r.treasury < cost.total ? `Treasury short by ${money(cost.total - r.treasury)}`
+        : '';
+      const upkeep = cost ? r.maintBill({ a, b, kind, condition: 100, path: Array.from({ length: cost.cells }, () => ({ x: 0, y: 0 })), terrainCost: 0, freight: 0, cargoType: null, cargoPriority: null }) : 0;
+      return `<tr class="${unlocked ? '' : 'locked'}"><td><b>${kind}</b></td>` +
+        `<td>${unlocked ? '<span class="ec-chip good">unlocked</span>' : '<span class="ec-chip flat">locked</span>'}</td>` +
+        `<td class="n">${cost ? money(cost.total) : '—'}</td><td class="n">${cost ? cost.cells : '—'}</td>` +
+        `<td class="n">${cost ? money(upkeep * r.routeBudget, 1) : '—'}</td>` +
+        `<td><button data-act="build" data-kind="${kind}" data-a="${a}" data-b="${b}" ${why ? 'disabled' : ''} title="${esc(why || (cost?.breakdown ?? ''))}">Build</button>` +
+        `${why ? `<small class="ec-why">${esc(why)}</small>` : ''}</td></tr>`;
+    }).join('');
+    const cur = existing
+      ? `<span class="ec-chip info">${existing.sea ? 'sea lane' : existing.kind} · ${Math.round(existing.condition)}%</span> upkeep ${money(r.maintBill(existing) * r.routeBudget, 1)}/mo`
+      : `<span class="ec-chip flat">no route</span>`;
+    const notice = this.note ? `<p class="ec-note ${this.note.ok ? 'good' : 'bad'}">${esc(this.note.text)}</p>` : '';
+    return `<section class="ec-card"><h3>Build a connection</h3><div class="ec-conn">` +
+      `<label>From <select data-conn="a" aria-label="Town A">${opts(a)}</select></label>` +
+      `<label>To <select data-conn="b" aria-label="Town B">${opts(b)}</select></label><span>Existing: ${cur}</span></div>` +
+      `<div class="ec-scroll"><table class="ec-table"><thead><tr><th>Kind</th><th>Status</th><th class="n">Cost</th><th class="n">Cells</th><th class="n">Upkeep/mo</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` +
+      notice + `</section>`;
   }
 
   private towns(r: RegionSim, towns: Settlement[]): string {
