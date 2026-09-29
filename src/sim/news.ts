@@ -46,7 +46,7 @@ function severityOf(cat: NewsCategory, kind: LogEntry['kind']): 1 | 2 | 3 {
 }
 
 export function newsItemFor(r: RegionSim, e: LogEntry, powers: Named[] = knownPowers(r)): NewsItem {
-  const { cat: parsed, body } = classify(e.text);
+  const { cat: parsed, body } = classify(e.text.replace(/\s*(?:at\s*)?\(\d+,\s*\d+\)/g, ''));
   const byActor = e.actor ? powers.find((p) => p.kind === e.actor!.kind && p.id === e.actor!.id) : undefined;
   const found = byActor ?? powers.find((p) => e.text.includes(p.name));
   const cat: NewsCategory = e.cat ?? (parsed === 'domestic' && found ? 'world' : parsed);
@@ -78,8 +78,15 @@ export function briefHeadline(body: string, year: number): string {
   return registerFor(year) === 'broadsheet' ? h.toUpperCase() : h;
 }
 
+/** Bookkeeping lines the log keeps but no editor would print. */
+const NOT_NEWS = [/proclaims new goal/i, /^Claimed land at/i];
+
+function newsworthy(e: LogEntry): boolean {
+  return !NOT_NEWS.some((re) => re.test(e.text));
+}
+
 /** Newest-first feed of the most recent `limit` log entries. */
 export function newsFeed(r: RegionSim, limit = 40): NewsItem[] {
   const powers = knownPowers(r);
-  return r.log.slice(-limit).reverse().map((e) => newsItemFor(r, e, powers));
+  return r.log.slice(-limit).filter(newsworthy).reverse().map((e) => newsItemFor(r, e, powers));
 }

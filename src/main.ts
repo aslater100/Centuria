@@ -405,6 +405,7 @@ window.addEventListener('keydown', (e) => {
       if (e.key === 'c' || e.key === 'C') { regionView.openCenturyGraph(); e.preventDefault(); return; }
       if (e.key === '?') { regionView.toggleWikiPanel(); e.preventDefault(); return; }
       if (e.key === 'h' || e.key === 'H') { regionView.toggleHistory(); e.preventDefault(); return; }
+      if (e.key === 'd' || e.key === 'D') { regionView.toggleDiplomacy(); e.preventDefault(); return; }
     }
   }
 });

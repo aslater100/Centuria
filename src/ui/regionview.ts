@@ -32,6 +32,7 @@ import { factionColor, type Settings } from './settings';
 import { QUIRKS } from '../sim/procgen/nation';
 import { flagDataUrl } from './flag';
 import { Dispatch, AgendaBar, DecisionCard } from './dispatch';
+import { DiplomacyScreen } from './diplomacyScreen';
 
 /** localStorage flag (U3): the in-game wiki auto-opens once on a player's first game. */
 const WIKI_FIRST_RUN_KEY = 'centuria-wiki-seen';
@@ -409,12 +410,11 @@ export class RegionView {
     root.appendChild(this.provincePanel);
     // U3: in-game wiki — dead code until now. Auto-opens once on a player's very
     // first game (localStorage flag), otherwise stays closed until the Help
-    // button or ?/H keys open it.
+    // button or ? key open it.
     this.wikiPanel = new WikiPanel(root);
-    if (!localStorage.getItem(WIKI_FIRST_RUN_KEY)) {
-      localStorage.setItem(WIKI_FIRST_RUN_KEY, '1');
-      this.wikiPanel.show();
-    }
+    // The first-session tutorial (onboarding.ts) now does the welcoming; the wiki
+    // stays one keypress (?) away instead of covering the map on first launch.
+    try { localStorage.setItem(WIKI_FIRST_RUN_KEY, '1'); } catch { /* storage blocked */ }
     this.minimap = new Minimap(region, root, { size: 140, position: 'bottom-right' });
     // Create tooltip element
     this.tooltip = document.createElement('div');
@@ -438,6 +438,7 @@ export class RegionView {
     };
     this.agendaBar.onAdvanceMonth = () => this.onAdvanceMonth?.();
     this.decisionCard = new DecisionCard(root);
+    this.diplomacyScreen = new DiplomacyScreen(root);
     this.agendaBar.onOpenDecision = (id) => this.decisionCard.open(this.region, id);
     this.decisionCard.onChoose = (id, i) => { issue(this.region, 'chooseEventOption', id, i); };
     // Start zoomed in on the founding settlement (Civ-style entry view).
@@ -460,6 +461,7 @@ export class RegionView {
   readonly dispatch: Dispatch;
   readonly agendaBar: AgendaBar;
   readonly decisionCard: DecisionCard;
+  readonly diplomacyScreen: DiplomacyScreen;
 
   /** Pop the first open decision (called by main.ts when the turn holds). */
   openPendingDecision(): void {
@@ -5416,15 +5418,19 @@ export class RegionView {
   private updateEventLog(): void {
     if (this.newsTick++ % 15 !== 0) return;
     this.dispatch.update(this.region);
+    if (this.newsTick % 60 === 1) this.diplomacyScreen.refresh(this.region);
     this.agendaBar.update(this.region, this.awaitingTurn);
   }
 
   /** Open the State panel on its Diplomacy tab (news and agenda click-through). */
   private focusDiplomacy(): void {
-    if (!this.region.stateProclaimed) return;
-    this.stateOpen = true;
-    this.statePanelTab = 'diplomacy';
-    this.lastStatePanelBuildFrame = -999;
+    this.diplomacyScreen.open(this.region);
+  }
+
+  /** D key: the full diplomacy screen. */
+  toggleDiplomacy(): void {
+    if (this.diplomacyScreen.isOpen) this.diplomacyScreen.close();
+    else this.diplomacyScreen.open(this.region);
   }
 
   private drawPanel(): void {
