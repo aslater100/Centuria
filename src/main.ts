@@ -387,7 +387,8 @@ window.addEventListener('keydown', (e) => {
       if (e.key === 'g' || e.key === 'G') { regionView.toggleStatePanel(); e.preventDefault(); return; }
       if (e.key === 'o' || e.key === 'O') { regionView.toggleOverviewPanel(); e.preventDefault(); return; }
       if (e.key === 'c' || e.key === 'C') { regionView.openCenturyGraph(); e.preventDefault(); return; }
-      if (e.key === '?' || e.key === 'h' || e.key === 'H') { regionView.toggleWikiPanel(); e.preventDefault(); return; }
+      if (e.key === '?') { regionView.toggleWikiPanel(); e.preventDefault(); return; }
+      if (e.key === 'h' || e.key === 'H') { regionView.toggleHistory(); e.preventDefault(); return; }
     }
   }
 });

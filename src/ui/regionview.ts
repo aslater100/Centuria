@@ -27,6 +27,7 @@ import { Backdrop, buildBackdropPalette, eraIdForYear, eraKeyLight, type Sky, ty
 import { Modal, createErrorState } from './components';
 import { WikiPanel } from './WikiPanel';
 import { issue } from '../sim/commands';
+import { expandHistory } from '../sim/territory';
 import { QUIRKS } from '../sim/procgen/nation';
 import { flagDataUrl } from './flag';
 import { Dispatch, AgendaBar, DecisionCard } from './dispatch';
@@ -341,7 +342,7 @@ export class RegionView {
   /** Parallax atmosphere behind the map; era/season/weather/tension-tinted. */
   private readonly backdrop = new Backdrop();
 
-  constructor(private canvas: HTMLCanvasElement, private region: RegionSim, root: HTMLElement) {
+  constructor(private canvas: HTMLCanvasElement, private region: RegionSim, private root: HTMLElement) {
     this.g = canvas.getContext('2d', { alpha: false })!;
     void this.assets.load();
     // If the era was already decided in a prior session (loaded save), treat the
@@ -1441,7 +1442,7 @@ export class RegionView {
     // town/backdrop arrivals must not trigger 16k-hex rebuilds, and an in-place
     // slot replacement (regenerated art) must.
     s += `|a${this.assets.version('terrain-')}`;
-    s += `|tv${r.territoryVersion}`;
+    s += `|tv${r.territoryVersion}|h${this.historyView ? this.historyView.idx : -1}`;
     return s;
   }
 
@@ -2177,8 +2178,12 @@ export class RegionView {
   private drawTerritories(g: CanvasRenderingContext2D, W: number, H: number): void {
     const { region } = this;
     const N = REGION_N;
-    const { grid, contested, controlLevel } = region.computeTerritoryGrid();
-    this.noteBorderChanges(grid);
+    const live = region.computeTerritoryGrid();
+    const hv = this.historyView;
+    const grid = hv ? hv.owners[hv.idx] : live.grid;
+    const contested = hv ? new Uint8Array(grid.length) : live.contested;
+    const controlLevel = hv ? new Uint8Array(grid.length).fill(255) : live.controlLevel;
+    if (!hv) this.noteBorderChanges(grid);
     const m = 60;
     const { size, ox, oy } = hexLayoutParams(W, H, N, m);
     const colorCache = new Map<number, { r: number; g: number; b: number } | null>();
@@ -2253,6 +2258,57 @@ export class RegionView {
       }
     }
     g.lineWidth = 1;
+  }
+
+  /** Centuria 2.0 history scrubber: replaying yearly border snapshots. */
+  private historyView: { years: number[]; owners: Int16Array[]; idx: number; bar: HTMLElement; timer: number | null } | null = null;
+
+  get historyOpen(): boolean {
+    return this.historyView !== null;
+  }
+
+  toggleHistory(): void {
+    if (this.historyView) {
+      if (this.historyView.timer !== null) window.clearInterval(this.historyView.timer);
+      this.historyView.bar.remove();
+      this.historyView = null;
+      this.prevTerritoryGrid = null;
+      return;
+    }
+    const snaps = expandHistory(this.region.territoryHistory, REGION_N * REGION_N);
+    const years = snaps.map((x) => x.year);
+    const owners = snaps.map((x) => x.owner);
+    years.push(this.region.year);
+    owners.push(this.region.computeTerritoryGrid().grid.slice());
+    const bar = document.createElement('div');
+    bar.className = 'history-bar';
+    bar.innerHTML =
+      `<button class="history-play" title="Play">▶</button>` +
+      `<input class="history-range" type="range" min="0" max="${years.length - 1}" value="${years.length - 1}">` +
+      `<span class="history-year">${years[years.length - 1]}</span>` +
+      `<button class="history-close" title="Close (H)">×</button>`;
+    this.root.appendChild(bar);
+    const hv = { years, owners, idx: years.length - 1, bar, timer: null as number | null };
+    this.historyView = hv;
+    const range = bar.querySelector<HTMLInputElement>('.history-range')!;
+    const label = bar.querySelector<HTMLElement>('.history-year')!;
+    const play = bar.querySelector<HTMLButtonElement>('.history-play')!;
+    const setIdx = (i: number) => {
+      hv.idx = Math.max(0, Math.min(years.length - 1, i));
+      range.value = String(hv.idx);
+      label.textContent = String(years[hv.idx]);
+    };
+    range.oninput = () => setIdx(Number(range.value));
+    play.onclick = () => {
+      if (hv.timer !== null) { window.clearInterval(hv.timer); hv.timer = null; play.textContent = '▶'; return; }
+      if (hv.idx >= years.length - 1) setIdx(0);
+      play.textContent = '❚❚';
+      hv.timer = window.setInterval(() => {
+        if (hv.idx >= years.length - 1) { window.clearInterval(hv.timer!); hv.timer = null; play.textContent = '▶'; return; }
+        setIdx(hv.idx + 1);
+      }, 350);
+    };
+    bar.querySelector<HTMLButtonElement>('.history-close')!.onclick = () => this.toggleHistory();
   }
 
   private prevTerritoryGrid: Int16Array | null = null;
