@@ -8,7 +8,8 @@
  */
 import { Rng, hash01 } from './rng';
 import type { Command } from './commands';
-import { recordDeed, fadeDeeds, type Deed, type OpinionEntry } from './memory';
+import { recordDeed, fadeDeeds, type Deed, type OpinionEntry, type ActorKind } from './memory';
+import type { NewsCategory } from './narrative/press';
 import { scheduleReactions as scheduleReactionsFor, tickReactions, type PendingReaction } from './reactions';
 import {
   createTerritory, settleTerritory, advanceTerritory, contestedMask, areaByFid,
@@ -16,7 +17,7 @@ import {
   type TerritoryState, type BorderShift, type TerritorySnapshot, type InfluenceSource,
 } from './territory';
 import {
-  generateNation, nationRng, personName, reviseFlag, stateNameFor, leaderTitleFor,
+  generateNation, nationRng, personName, placeName, reviseFlag, stateNameFor, leaderTitleFor,
   type CultureId, type FlagSpec, type NationVoice,
 } from './procgen/nation';
 import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, MONTHS, DAYS_PER_MONTH, FactionId as NewFactionId, activeFactions, formatCurrency, setCurrencySymbol, AI_DIFFICULTY, TUNING } from './defs';
@@ -120,6 +121,9 @@ export interface LogEntry {
   day: number;
   text: string;
   kind: 'info' | 'good' | 'bad';
+  /** Centuria 2.0 §E — the foreign power speaking, when there is one. */
+  actor?: { kind: ActorKind; id: number };
+  cat?: NewsCategory;
 }
 
 /** Region-tier clock runs faster: 30 game-minutes per tick (GDD §8.6). */
@@ -13616,8 +13620,8 @@ export class RegionSim {
     return r;
   }
 
-  addLog(text: string, kind: LogEntry['kind']): void {
-    this.log.push({ day: this.day, text, kind });
+  addLog(text: string, kind: LogEntry['kind'], meta?: Pick<LogEntry, 'actor' | 'cat'>): void {
+    this.log.push(meta ? { day: this.day, text, kind, ...meta } : { day: this.day, text, kind });
     if (this.log.length > 200) this.log.shift();
   }
 
@@ -15009,6 +15013,15 @@ export class RegionSim {
       wood:    ['Timberfall', 'Sawmill Crossing', 'Woodstock', 'Ashwood'],
       diverse: ['New Haven', 'Crossroads', 'Outpost', 'Settlement'],
     };
+    // Centuria 2.0 §H: a generated nation names its towns in its own tongue.
+    if (faction.identity) {
+      const usedNames = new Set(this.settlements.map((s) => s.name));
+      for (let k = 0; k < 12; k++) {
+        const nrng = nationRng(this.map.seed, `town:${faction.id}:${faction.settlementIds.length}:${k}`);
+        const candidate = placeName(nrng, faction.identity.culture);
+        if (!usedNames.has(candidate)) return candidate;
+      }
+    }
     const pool = byFocus[focus] ?? byFocus.diverse;
     const idx = faction.settlementIds.length % pool.length;
     // Avoid name collisions with existing settlements

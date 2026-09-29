@@ -8,6 +8,7 @@
 import type { RegionSim, RivalNation, RegionalFaction, TreatyKind, LogEntry } from './region';
 import { noteOpinion, type Deed, type DeedTag, type ActorKind, type OpinionEntry } from './memory';
 import rulesJson from '../data/reactions.json';
+import { voiceLead } from './narrative/press';
 
 export interface ReactionEffects {
   relations?: number;
@@ -211,6 +212,8 @@ export function tickReactions(r: RegionSim): void {
     const text = fill(rule.text, a, p.targetName);
     const delta = applyEffects(r, a, rule.effects);
     noteOpinion(opinionLog(a), { day: r.day, tag: p.tag, delta, text });
-    r.addLog(text, rule.kind);
+    const voice = a.kind === 'rival' ? a.rv.identity?.voice : a.f.identity?.voice;
+    const lead = voiceLead(voice, `${r.day}|${p.ruleId}|${a.id}`);
+    r.addLog(lead + text, rule.kind, { actor: { kind: a.kind, id: a.id }, cat: 'reaction' });
   }
 }

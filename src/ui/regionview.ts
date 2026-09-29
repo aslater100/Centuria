@@ -29,6 +29,7 @@ import { WikiPanel } from './WikiPanel';
 import { issue } from '../sim/commands';
 import { QUIRKS } from '../sim/procgen/nation';
 import { flagDataUrl } from './flag';
+import { Dispatch, AgendaBar } from './dispatch';
 
 /** localStorage flag (U3): the in-game wiki auto-opens once on a player's first game. */
 const WIKI_FIRST_RUN_KEY = 'centuria-wiki-seen';
@@ -306,8 +307,6 @@ export class RegionView {
   private prevCanvasH = 0;
   // DOM update throttles — avoid innerHTML reflows every rAF frame.
   private lastTopBarFrame = -999;
-  private lastEventLogLen = -1;
-  private lastEventLogFrame = -999;
   // Province list cache: computeProvinces() is O(settlements) but called in two hot paths.
   private _provincesCache: Province[] = [];
   private _provincesCacheFrame = -1;
@@ -426,10 +425,16 @@ export class RegionView {
     root.appendChild(topBar);
     this.topBar = topBar;
     // Create scrollable event log (recent events, newest first)
-    const eventLog = document.createElement('div');
-    eventLog.className = 'eventlog';
-    root.appendChild(eventLog);
-    this.eventLog = eventLog;
+    this.dispatch = new Dispatch(root);
+    this.agendaBar = new AgendaBar(root);
+    this.dispatch.onFocusRival = () => this.focusDiplomacy();
+    this.agendaBar.onFocusRival = () => this.focusDiplomacy();
+    this.agendaBar.onFocusSettlement = (id) => {
+      this.selectedId = id;
+      this.overviewOpen = true;
+      this.lastPanelBuildFrame = -999;
+    };
+    this.agendaBar.onAdvanceMonth = () => this.onAdvanceMonth?.();
     // Start zoomed in on the founding settlement (Civ-style entry view).
     if (region.settlements.length > 0) {
       const home = region.settlements[0];
@@ -447,7 +452,11 @@ export class RegionView {
   /** Top bar displaying game metrics. */
   private topBar: HTMLElement;
   /** Scrollable event log showing recent events (newest first). */
-  private eventLog: HTMLElement;
+  readonly dispatch: Dispatch;
+  readonly agendaBar: AgendaBar;
+  /** Set by main.ts: the loop is holding at the turn of the month. */
+  awaitingTurn = false;
+  onAdvanceMonth: (() => void) | null = null;
 
   /** Draggable panels for the WindowManager (region mode). */
   get draggablePanels(): { id: string; element: HTMLElement; baseZ: number }[] {
@@ -5325,18 +5334,20 @@ export class RegionView {
     }
   }
 
+  private newsTick = 0;
+
   private updateEventLog(): void {
-    const r = this.region;
-    const logLen = r.log.length;
-    if (logLen === this.lastEventLogLen && this.frame - this.lastEventLogFrame < 30) return;
-    this.lastEventLogLen = logLen;
-    this.lastEventLogFrame = this.frame;
-    const recent = r.log.slice(-40).reverse();
-    const entries = recent.map((entry) => {
-      const className = `log-entry log-${entry.kind}`;
-      return `<div class="${className}">${entry.text}</div>`;
-    }).join('');
-    this.eventLog.innerHTML = entries || '<div class="log-entry log-info">No recent events</div>';
+    if (this.newsTick++ % 15 !== 0) return;
+    this.dispatch.update(this.region);
+    this.agendaBar.update(this.region, this.awaitingTurn);
+  }
+
+  /** Open the State panel on its Diplomacy tab (news and agenda click-through). */
+  private focusDiplomacy(): void {
+    if (!this.region.stateProclaimed) return;
+    this.stateOpen = true;
+    this.statePanelTab = 'diplomacy';
+    this.lastStatePanelBuildFrame = -999;
   }
 
   private drawPanel(): void {

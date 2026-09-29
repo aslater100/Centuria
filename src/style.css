@@ -467,27 +467,141 @@ input[type='range']::-moz-range-thumb {
 }
 
 /* ---- Event log: top-center herald, last 3 events only ---- */
-.eventlog {
+/* ---- Centuria 2.0: the Dispatch (newspaper column) ---- */
+.dispatch {
+  position: fixed;
+  right: 12px;
+  top: 52px;
+  bottom: 170px;
+  width: 330px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  background: #efe6cf;
+  color: #231c10;
+  border-radius: 4px;
+  box-shadow: var(--shadow-panel);
+  font-family: var(--serif);
+  overflow: hidden;
+  transition: transform 0.25s ease;
+}
+.dispatch.collapsed { bottom: auto; }
+.dispatch.collapsed .dispatch-body { display: none; }
+.dispatch-head {
+  text-align: center;
+  padding: 8px 10px 4px;
+  border-bottom: 3px double #3b2f1b;
+}
+.dispatch-masthead {
+  font-family: 'Old English Text MT', 'UnifrakturMaguntia', var(--serif);
+  font-size: 22px;
+  line-height: 1.1;
+  letter-spacing: 0.5px;
+}
+.dispatch-dateline {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  opacity: 0.7;
+  margin-top: 2px;
+}
+.dispatch-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(59, 47, 27, 0.35);
+}
+.dispatch-tab, .dispatch-collapse {
+  font: 11px var(--serif);
+  background: none;
+  border: none;
+  color: inherit;
+  padding: 2px 6px;
+  cursor: pointer;
+  opacity: 0.65;
+}
+.dispatch-tab.active { opacity: 1; font-weight: bold; border-bottom: 2px solid currentColor; }
+.dispatch-collapse { margin-left: auto; }
+.dispatch-body { overflow-y: auto; padding: 4px 10px 10px; overscroll-behavior: contain; }
+.dispatch-item { padding: 6px 0; border-bottom: 1px solid rgba(59, 47, 27, 0.2); }
+.dispatch-item[data-rival] { cursor: pointer; }
+.dispatch-item[data-rival]:hover { background: rgba(59, 47, 27, 0.06); }
+.dispatch-item.lead .dispatch-headline { font-size: 17px; }
+.dispatch-meta { display: flex; align-items: center; gap: 6px; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; }
+.dispatch-flag { width: 18px; height: 12px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.dispatch-when { margin-left: auto; }
+.dispatch-headline { margin: 2px 0; font-size: 13px; line-height: 1.2; font-weight: bold; }
+.dispatch-item.kind-bad .dispatch-headline { color: #7d1d12; }
+.dispatch-item.kind-good .dispatch-headline { color: #1f5a2d; }
+.dispatch-text { margin: 0; font-size: 11.5px; line-height: 1.35; }
+.dispatch-text.brief { opacity: 0.75; font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dispatch-empty { font-style: italic; opacity: 0.6; text-align: center; margin-top: 20px; }
+
+.dispatch[data-register='wire'] { background: #f4f1e8; font-family: 'Courier New', var(--mono); }
+.dispatch[data-register='wire'] .dispatch-masthead { font-family: var(--serif); font-weight: bold; font-size: 20px; }
+.dispatch[data-register='broadcast'] { background: #13233d; color: #e9eef7; font-family: var(--sans); }
+.dispatch[data-register='broadcast'] .dispatch-head { border-bottom: 3px solid #e63b2e; }
+.dispatch[data-register='broadcast'] .dispatch-masthead { font-family: var(--sans); font-weight: 800; text-transform: uppercase; font-size: 18px; }
+.dispatch[data-register='broadcast'] .dispatch-item.kind-bad .dispatch-headline { color: #ff8a80; }
+.dispatch[data-register='broadcast'] .dispatch-item.kind-good .dispatch-headline { color: #9be7b0; }
+.dispatch[data-register='feed'] { background: #0d1117; color: #e6edf3; font-family: var(--sans); border: 1px solid #30363d; }
+.dispatch[data-register='feed'] .dispatch-head { border-bottom: 1px solid #30363d; text-align: left; }
+.dispatch[data-register='feed'] .dispatch-masthead { font-family: var(--sans); font-weight: 700; font-size: 18px; }
+.dispatch[data-register='feed'] .dispatch-item { border-bottom-color: #21262d; }
+.dispatch[data-register='feed'] .dispatch-item.kind-bad .dispatch-headline { color: #ff7b72; }
+.dispatch[data-register='feed'] .dispatch-item.kind-good .dispatch-headline { color: #7ee787; }
+
+/* ---- Centuria 2.0: monthly agenda strip ---- */
+.agenda-bar {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
   top: 52px;
-  width: auto;
-  max-width: 640px;
-  font-size: 11px;
-  z-index: 10;
-  pointer-events: auto;
+  max-width: min(760px, calc(100vw - 760px));
+  min-width: 420px;
+  z-index: 11;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 6px 8px;
   background: var(--surface);
   border: 1px solid var(--border-gold-soft);
   border-radius: var(--radius-lg);
-  padding: 8px 4px;
   box-shadow: var(--shadow-panel);
-  backdrop-filter: blur(8px);
-  /* Cap the banner and let older lines scroll instead of scrolling off a 3-line window. */
-  max-height: 132px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  font-size: 11px;
+  color: var(--text);
 }
+.agenda-bar.awaiting { border-color: var(--border-gold); box-shadow: var(--shadow-panel), var(--glow-gold); }
+.agenda-label { display: flex; flex-direction: column; justify-content: center; font-family: var(--serif); font-size: 13px; white-space: nowrap; color: var(--text-bright); }
+.agenda-label small { font-family: var(--sans); font-size: 10px; color: var(--muted); }
+.agenda-items { display: flex; gap: 6px; overflow-x: auto; flex: 1; }
+.agenda-item {
+  display: flex; flex-direction: column; text-align: left;
+  min-width: 120px; max-width: 190px;
+  padding: 4px 8px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-inner);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius);
+  color: inherit; cursor: pointer; font: inherit;
+}
+.agenda-item.urg-2 { border-left-color: var(--warn); }
+.agenda-item.urg-3 { border-left-color: var(--bad); }
+.agenda-title { font-weight: 600; color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agenda-detail { color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agenda-advance {
+  white-space: nowrap;
+  padding: 0 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-gold);
+  background: var(--gold-face);
+  color: var(--text-dark);
+  font-weight: 700;
+  cursor: pointer;
+}
+.agenda-advance:hover { background: var(--gold-face-hover); }
+.agenda-bar.awaiting .agenda-advance { animation: agenda-pulse 1.6s ease-in-out infinite; }
+@keyframes agenda-pulse { 50% { box-shadow: 0 0 14px rgba(232, 197, 104, 0.8); } }
 
 .log-entry {
   padding: 4px 12px;
