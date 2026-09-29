@@ -218,6 +218,18 @@ export function updateArmyMovement(r: RegionSim): void {
   }
 
   /** Resolve combat when opposing armies occupy the same province. */
+/** Centuria 2.0 §F — a field battle against the rival you are formally at war with
+ *  moves that war's score and home-front support, so the map decides the war. */
+export const BATTLE_WAR_SCORE = 8;
+export const BATTLE_ROUT_WAR_SCORE_MULT = 1.5;
+export function applyBattleToWar(r: RegionSim, rivalId: number, playerWon: boolean, routed: boolean): void {
+  const w = r.playerWar;
+  if (!w || w.rivalId !== rivalId) return;
+  const swing = BATTLE_WAR_SCORE * (routed ? BATTLE_ROUT_WAR_SCORE_MULT : 1) * (playerWon ? 1 : -1);
+  w.score = Math.max(-100, Math.min(100, w.score + swing));
+  r.warSupport = Math.max(0, Math.min(100, r.warSupport + swing / 2));
+}
+
 export function resolveProvinceBattle(r: RegionSim, provinceId: number): void {
     const playerArmies = r.provincialArmies.filter((a) => a.ownerId === 0 && a.provinceId === provinceId && !a.destinationId);
     const rivalArmies = r.provincialArmies.filter((a) => a.ownerId !== 0 && a.provinceId === provinceId && !a.destinationId);
@@ -320,6 +332,7 @@ export function resolveProvinceBattle(r: RegionSim, provinceId: number): void {
       }
       r.addLog(`BATTLE of ${sName}: ${rv?.name ?? 'the enemy'} drives our forces back!`, 'bad');
     }
+    applyBattleToWar(r, rvId, playerWinsBattle, routed);
   }
 
   /** Monthly: rival AI spawns and manoeuvres armies (expansion-minded powers threaten borders). */
@@ -475,6 +488,7 @@ export function resolveArmyGroupBattle(r: RegionSim, provinceId: number): void {
       r.lastBattleWon = false;
       r.addLog(`BATTLE OF ${sName.toUpperCase()}: our forces lose, ${rvName} holds the field — ${casualties} casualties.`, 'bad');
     }
+    applyBattleToWar(r, rvId, playerWinsBattle, routed);
     // Remove armies with no manpower
     r.armyGroups = r.armyGroups.filter((a) => a.manpower > 0);
   }

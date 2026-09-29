@@ -24,6 +24,8 @@ import {
   FRAGILITY_GAIN,
 } from '../region';
 
+export const PRINT_YIELD_ZERO_INFLATION = 0.2;
+
 /** Monthly tick of the credit cycle, inflation, FX, and bond service. */
 export function tickMonetary(r: RegionSim): void {
   const gdp = Math.max(1, r.gdpLastMonth);
@@ -177,8 +179,10 @@ export function tickMonetary(r: RegionSim): void {
   // 0.018/month (~21.6%/yr) print seigniorage: design-intent citation, not a data source — evokes the
   // inflation-tax/seigniorage revenue literature (Cagan-style optimal-seigniorage models), where money-
   // financed regimes have historically extracted low-double-digit-percent-of-GDP annual revenue this way.
+  // Centuria 2.0 §F: seigniorage erodes as inflation expectations catch up — the
+  // presses yield nothing once inflation reaches PRINT_YIELD_ZERO_INFLATION.
   if (r.monetaryRegime === 'print') {
-    r.treasury += gdp * 0.018;
+    r.treasury += gdp * 0.018 * Math.max(0, 1 - r.inflationRate / PRINT_YIELD_ZERO_INFLATION);
   }
 
   // 8. Bond debt service

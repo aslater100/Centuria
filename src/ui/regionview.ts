@@ -26,6 +26,7 @@ import { buildPawnSprites } from './sprites';
 import { Backdrop, buildBackdropPalette, eraIdForYear, eraKeyLight, type Sky, type Branch } from './backdrop';
 import { Modal, createErrorState } from './components';
 import { WikiPanel } from './WikiPanel';
+import { issue } from '../sim/commands';
 
 /** localStorage flag (U3): the in-game wiki auto-opens once on a player's first game. */
 const WIKI_FIRST_RUN_KEY = 'centuria-wiki-seen';
@@ -661,7 +662,7 @@ export class RegionView {
       const { size, ox, oy } = hexLayoutParams(W, H, REGION_N, 60);
       const { col, row } = screenToHex(mx, my, size, ox, oy);
       if (col >= 0 && col < REGION_N && row >= 0 && row < REGION_N) {
-        this.region.buildCity(this.buildingPlacement.townId, this.buildingPlacement.defId, col * REGION_N + row);
+        issue(this.region, 'buildCity', this.buildingPlacement.townId, this.buildingPlacement.defId, col * REGION_N + row);
       }
       this.cancelBuildingPlacement();
       this.refreshPanel();
@@ -674,7 +675,7 @@ export class RegionView {
       const { size, ox, oy } = hexLayoutParams(W, H, REGION_N, 60);
       const { col, row } = screenToHex(mx, my, size, ox, oy);
       if (col >= 0 && col < REGION_N && row >= 0 && row < REGION_N) {
-        this.region.placeDistrict(this.districtPlacement.townId, this.districtPlacement.defId, col * REGION_N + row);
+        issue(this.region, 'placeDistrict', this.districtPlacement.townId, this.districtPlacement.defId, col * REGION_N + row);
       }
       this.cancelDistrictPlacement();
       this.refreshPanel();
@@ -688,7 +689,7 @@ export class RegionView {
       const { size, ox, oy } = hexLayoutParams(W, H, REGION_N, 60);
       const { col, row } = screenToHex(mx, my, size, ox, oy);
       if (col >= 0 && col < REGION_N && row >= 0 && row < REGION_N) {
-        this.region.foundTownAt(this.foundingFromId, (col / REGION_N) * 100, (row / REGION_N) * 100);
+        issue(this.region, 'foundTownAt', this.foundingFromId, (col / REGION_N) * 100, (row / REGION_N) * 100);
       }
       this.cancelFoundingMode();
       this.refreshPanel();
@@ -703,7 +704,7 @@ export class RegionView {
       if (hc >= 0 && hc < REGION_N && hr >= 0 && hr < REGION_N) {
         const rx = (hc / REGION_N) * 100;
         const ry = (hr / REGION_N) * 100;
-        this.region.setScoutTarget(this.selectedScoutId, rx, ry);
+        issue(this.region, 'setScoutTarget', this.selectedScoutId, rx, ry);
       }
       this.selectedScoutId = null;
       return;
@@ -729,7 +730,7 @@ export class RegionView {
       const { size, ox, oy } = hexLayoutParams(W, H, REGION_N, 60);
       const { col, row } = screenToHex(mx, my, size, ox, oy);
       if (col >= 0 && col < REGION_N && row >= 0 && row < REGION_N) {
-        this.region.claimCell(col, row);
+        issue(this.region, 'claimCell', col, row);
       }
     }
   }
@@ -1980,15 +1981,15 @@ export class RegionView {
       const invSel = this.provincePanel.querySelector<HTMLSelectElement>('#pp-inv');
       const autoSel = this.provincePanel.querySelector<HTMLSelectElement>('#pp-auto');
       taxSel?.addEventListener('change', () => {
-        this.region.setProvincePolicy(prov.id, { taxMultiplier: parseFloat(taxSel.value) });
+        issue(this.region, 'setProvincePolicy', prov.id, { taxMultiplier: parseFloat(taxSel.value) });
         this.lastProvincePanelBuildFrame = 0; // force rebuild
       });
       invSel?.addEventListener('change', () => {
-        this.region.setProvincePolicy(prov.id, { investmentLevel: parseInt(invSel.value) });
+        issue(this.region, 'setProvincePolicy', prov.id, { investmentLevel: parseInt(invSel.value) });
         this.lastProvincePanelBuildFrame = 0;
       });
       autoSel?.addEventListener('change', () => {
-        this.region.setProvincePolicy(prov.id, { autonomyLevel: parseInt(autoSel.value) });
+        issue(this.region, 'setProvincePolicy', prov.id, { autonomyLevel: parseInt(autoSel.value) });
         this.lastProvincePanelBuildFrame = 0;
       });
     }
@@ -1996,7 +1997,7 @@ export class RegionView {
     // Army cancel handlers
     for (const a of armies) {
       this.provincePanel.querySelector(`#cancel-army-${a.id}`)?.addEventListener('click', () => {
-        this.region.cancelArmyMovement(a.id);
+        issue(this.region, 'cancelArmyMovement', a.id);
         this.lastProvincePanelBuildFrame = 0;
       });
     }
@@ -3014,7 +3015,7 @@ export class RegionView {
     this.ceremony.querySelector<HTMLButtonElement>('#proclaim-btn')!.onclick = () => {
       const name = this.ceremony.querySelector<HTMLInputElement>('#state-name')!.value;
       const lean = (this.ceremony.querySelector<HTMLInputElement>('input[name=lean]:checked')?.value ?? 'council') as GovLean;
-      r.completeIncorporation(name, lean);
+      issue(r, 'completeIncorporation', name, lean);
       this.ceremonyOpen = false;
       this.ceremony.classList.add('hidden');
     };
@@ -3083,14 +3084,14 @@ export class RegionView {
         const role = sel.dataset.role as MinisterRoleId;
         assignments[role] = sel.value ? Number(sel.value) : null;
       }
-      r.proclaimNation(name, gov, assignments);
+      issue(r, 'proclaimNation', name, gov, assignments);
       this.conventionOpen = false;
       this.conventionBuilt = false;
       this.convention.classList.add('hidden');
       // The nation design screen follows the proclamation: economic system,
       // military doctrine, alliances — and the one sanctioned currency re-pick.
       if (r.nationProclaimed) {
-        new DesignScreen().showNationDesign(r.currencySymbol, (design) => r.applyNationDesign(design));
+        new DesignScreen().showNationDesign(r.currencySymbol, (design) => issue(r, 'applyNationDesign', design));
       }
     };
     this.convention.querySelector<HTMLButtonElement>('#convention-cancel-btn')!.onclick = () => {
@@ -3628,7 +3629,7 @@ export class RegionView {
       this.conventionBuilt = false;
     });
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.law-btn')) {
-      btn.onclick = () => r.enactLaw(btn.dataset.id!);
+      btn.onclick = () => issue(r, 'enactLaw', btn.dataset.id!);
     }
     // Phase 18: dismiss advisor briefs
     this.statePanel.querySelector<HTMLButtonElement>('#dismiss-briefs-btn')?.addEventListener('click', () => {
@@ -3641,13 +3642,13 @@ export class RegionView {
       };
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-envoy-btn')) {
-      btn.onclick = () => r.sendEnvoy(Number(btn.dataset.rival));
+      btn.onclick = () => issue(r, 'sendEnvoy', Number(btn.dataset.rival));
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-gift-btn')) {
-      btn.onclick = () => r.sendGift(Number(btn.dataset.rival));
+      btn.onclick = () => issue(r, 'sendGift', Number(btn.dataset.rival));
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-prop-btn')) {
-      btn.onclick = () => r.proposeTreaty(Number(btn.dataset.rival), btn.dataset.kind as TreatyKind);
+      btn.onclick = () => issue(r, 'proposeTreaty', Number(btn.dataset.rival), btn.dataset.kind as TreatyKind);
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.lender-btn')) {
       btn.onclick = () => this.showLoanDialog(Number(btn.dataset.lender));
@@ -3657,42 +3658,42 @@ export class RegionView {
     }
     // Discount-window wiring moved to wireCentralBankPanel().
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-break-btn')) {
-      btn.onclick = () => r.breakTreaty(Number(btn.dataset.rival), btn.dataset.kind as TreatyKind);
+      btn.onclick = () => issue(r, 'breakTreaty', Number(btn.dataset.rival), btn.dataset.kind as TreatyKind);
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-accept-btn')) {
-      btn.onclick = () => r.acceptOffer(Number(btn.dataset.rival));
+      btn.onclick = () => issue(r, 'acceptOffer', Number(btn.dataset.rival));
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-counter-offer-btn')) {
-      btn.onclick = () => r.counterOffer(Number(btn.dataset.rival));
+      btn.onclick = () => issue(r, 'counterOffer', Number(btn.dataset.rival));
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-decline-btn')) {
-      btn.onclick = () => r.declineOffer(Number(btn.dataset.rival));
+      btn.onclick = () => issue(r, 'declineOffer', Number(btn.dataset.rival));
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-war-btn')) {
-      btn.onclick = () => r.declareWar(Number(btn.dataset.rival), btn.dataset.cb as CasusBelli);
+      btn.onclick = () => issue(r, 'declareWar', Number(btn.dataset.rival), btn.dataset.cb as CasusBelli);
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.war-mob-btn')) {
-      btn.onclick = () => r.setMobilization(btn.dataset.mob as Mobilization);
+      btn.onclick = () => issue(r, 'setMobilization', btn.dataset.mob as Mobilization);
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-deal-btn')) {
       btn.onclick = () => this.openDealModal(Number(btn.dataset.rival));
     }
     // Spec 12 §A2 — mediate a rival's foreign war.
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-broker-btn')) {
-      btn.onclick = () => r.brokerForeignPeace(Number(btn.dataset.rival));
+      btn.onclick = () => issue(r, 'brokerForeignPeace', Number(btn.dataset.rival));
     }
     // Spec 12 §B — submit to the encirclement coalition's ultimatum.
     this.statePanel.querySelector<HTMLButtonElement>('.coalition-yield-btn')?.addEventListener('click', () => {
-      r.yieldToCoalition();
+      issue(r, 'yieldToCoalition');
     });
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-preset-btn')) {
       btn.onclick = () => this.proposePresetDeal(Number(btn.dataset.rival), btn.dataset.preset!);
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-counter-sign-btn')) {
-      btn.onclick = () => r.acceptCounter(Number(btn.dataset.rival));
+      btn.onclick = () => issue(r, 'acceptCounter', Number(btn.dataset.rival));
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-counter-decline-btn')) {
-      btn.onclick = () => r.declineCounter(Number(btn.dataset.rival));
+      btn.onclick = () => issue(r, 'declineCounter', Number(btn.dataset.rival));
     }
     // Spec 10 §NEG: persistent negotiation verbs (rival replies on the monthly tick)
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-neg-btn')) {
@@ -3718,7 +3719,7 @@ export class RegionView {
         const typed = Number(this.statePanel.querySelector<HTMLInputElement>('#neg-gift-input')?.value);
         const gift = Number.isFinite(typed) ? typed : this.negDraftGift ?? r.negotiationBaseGift(rv);
         const sweeten = this.statePanel.querySelector<HTMLInputElement>('#neg-sweeten-input')?.checked ?? this.negDraftSweeten;
-        r.openNegotiation(rivalId, gift, sweeten ? 'goodwill' : 'none');
+        issue(r, 'openNegotiation', rivalId, gift, sweeten ? 'goodwill' : 'none');
         this.negTermsFor = null;
         this.negDraftGift = null;
         this.negDraftSweeten = false;
@@ -3729,7 +3730,7 @@ export class RegionView {
       input.oninput = () => this.negRecounterDraft.set(`${input.dataset.neg}:${input.dataset.round}`, Number(input.value));
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.neg-accept-btn')) {
-      btn.onclick = () => { r.acceptNegotiation(Number(btn.dataset.neg)); this.negRecounterDraft.clear(); forceRebuild(); };
+      btn.onclick = () => { issue(r, 'acceptNegotiation', Number(btn.dataset.neg)); this.negRecounterDraft.clear(); forceRebuild(); };
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.neg-recounter-btn')) {
       btn.onclick = () => {
@@ -3738,47 +3739,47 @@ export class RegionView {
         if (!neg) return;
         const typed = Number(this.statePanel.querySelector<HTMLInputElement>(`.neg-regift-input[data-neg="${id}"]`)?.value);
         const gift = Number.isFinite(typed) ? typed : this.negRecounterDraft.get(`${id}:${neg.round}`) ?? neg.gift;
-        r.recounterNegotiation(id, gift);
+        issue(r, 'recounterNegotiation', id, gift);
         this.negRecounterDraft.clear();
         forceRebuild();
       };
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.neg-walk-btn')) {
-      btn.onclick = () => { r.abandonNegotiation(Number(btn.dataset.neg)); this.negRecounterDraft.clear(); forceRebuild(); };
+      btn.onclick = () => { issue(r, 'abandonNegotiation', Number(btn.dataset.neg)); this.negRecounterDraft.clear(); forceRebuild(); };
     }
     // Espionage verbs (GDD §5.5)
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-spy-btn')) {
       btn.onclick = () => {
-        r.runEspionage(Number(btn.dataset.rival), btn.dataset.op as EspionageOp);
+        issue(r, 'runEspionage', Number(btn.dataset.rival), btn.dataset.op as EspionageOp);
         this.lastStatePanelBuildFrame = -999; // refresh intel meter + cooldowns
       };
     }
     // Trade bloc verbs (GDD §6.5)
     this.statePanel.querySelector<HTMLButtonElement>('#bloc-form-btn')?.addEventListener('click', () => {
-      r.formTradeBloc();
+      issue(r, 'formTradeBloc');
       this.lastStatePanelBuildFrame = -999;
     });
     this.statePanel.querySelector<HTMLButtonElement>('#bloc-leave-btn')?.addEventListener('click', () => {
-      r.leaveTradeBloc();
+      issue(r, 'leaveTradeBloc');
       this.lastStatePanelBuildFrame = -999;
     });
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.bloc-invite-btn')) {
       btn.onclick = () => {
-        r.inviteToBloc(Number(btn.dataset.rival));
+        issue(r, 'inviteToBloc', Number(btn.dataset.rival));
         this.lastStatePanelBuildFrame = -999;
       };
     }
     this.statePanel.querySelector<HTMLInputElement>('#bloc-tariff')?.addEventListener('input', (e) => {
-      r.setBlocTariff(Number((e.target as HTMLInputElement).value) / 100);
+      issue(r, 'setBlocTariff', Number((e.target as HTMLInputElement).value) / 100);
     });
     this.statePanel.querySelector<HTMLButtonElement>('.war-blockade-btn')?.addEventListener('click', () => {
-      r.setBlockade(!r.playerWar?.blockade);
+      issue(r, 'setBlockade', !r.playerWar?.blockade);
     });
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.war-ally-btn')) {
-      btn.onclick = () => r.callAlly(Number(btn.dataset.rival));
+      btn.onclick = () => issue(r, 'callAlly', Number(btn.dataset.rival));
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.war-occ-btn')) {
-      btn.onclick = () => r.setOccupationPolicy(btn.dataset.pol as OccupationPolicy);
+      btn.onclick = () => issue(r, 'setOccupationPolicy', btn.dataset.pol as OccupationPolicy);
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.war-term-btn')) {
       btn.onclick = () => {
@@ -3788,14 +3789,14 @@ export class RegionView {
       };
     }
     this.statePanel.querySelector<HTMLButtonElement>('.war-offer-btn')?.addEventListener('click', () => {
-      if (r.offerPeaceBasket([...this.peacePicks])) this.peacePicks.clear();
+      if (issue(r, 'offerPeaceBasket', [...this.peacePicks])) this.peacePicks.clear();
     });
     this.statePanel.querySelector<HTMLButtonElement>('.war-capitulate-btn')?.addEventListener('click', () => {
-      r.capitulate();
+      issue(r, 'capitulate');
       this.peacePicks.clear();
     });
     this.statePanel.querySelector<HTMLButtonElement>('#geo-deploy-btn')?.addEventListener('click', () => {
-      r.deployGeoengineering();
+      issue(r, 'deployGeoengineering');
     });
     this.statePanel.querySelector<HTMLButtonElement>('#war-recruit-btn')?.addEventListener('click', () => {
       this.showRecruitmentModal();
@@ -3808,63 +3809,63 @@ export class RegionView {
       this.toggleProvinceView();
     });
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dip-sanction-btn')) {
-      btn.onclick = () => r.sanctionAccordDefector(Number(btn.dataset.rival));
+      btn.onclick = () => issue(r, 'sanctionAccordDefector', Number(btn.dataset.rival));
     }
     // Phase 6: economic sanctions
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.sanction-impose-btn')) {
       btn.onclick = () => {
-        r.imposeSanction(Number(btn.dataset.rival));
+        issue(r, 'imposeSanction', Number(btn.dataset.rival));
         this.lastStatePanelBuildFrame = -999;
       };
     }
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.sanction-lift-btn')) {
       btn.onclick = () => {
-        r.liftSanction(Number(btn.dataset.rival));
+        issue(r, 'liftSanction', Number(btn.dataset.rival));
         this.lastStatePanelBuildFrame = -999;
       };
     }
     // Depression recovery crossroads
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.recovery-btn')) {
       btn.onclick = () => {
-        r.chooseRecoveryPath(btn.dataset.choice as 'stimulus' | 'austerity');
+        issue(r, 'chooseRecoveryPath', btn.dataset.choice as 'stimulus' | 'austerity');
         this.lastStatePanelBuildFrame = -999;
       };
     }
     // Depression emergency measures (QE, leave gold, public works)
     for (const btn of this.statePanel.querySelectorAll<HTMLButtonElement>('.dep-measure-btn')) {
       btn.onclick = () => {
-        r.enactDepressionMeasure(btn.dataset.measure as DepressionMeasure);
+        issue(r, 'enactDepressionMeasure', btn.dataset.measure as DepressionMeasure);
         this.lastStatePanelBuildFrame = -999;
       };
     }
     // Phase 12: Media & Press actions
     this.statePanel.querySelector<HTMLButtonElement>('#media-censor')?.addEventListener('click', () => {
-      r.censorMedia();
+      issue(r, 'censorMedia');
       this.lastStatePanelBuildFrame = -999;
     });
     this.statePanel.querySelector<HTMLButtonElement>('#media-liberalise')?.addEventListener('click', () => {
-      r.grantPressLicense();
+      issue(r, 'grantPressLicense');
       this.lastStatePanelBuildFrame = -999;
     });
     this.statePanel.querySelector<HTMLButtonElement>('#media-platform-reg')?.addEventListener('click', () => {
-      r.enactPlatformRegulation();
+      issue(r, 'enactPlatformRegulation');
       this.lastStatePanelBuildFrame = -999;
     });
     this.statePanel.querySelector<HTMLButtonElement>('#media-public-media')?.addEventListener('click', () => {
-      r.fundPublicMedia();
+      issue(r, 'fundPublicMedia');
       this.lastStatePanelBuildFrame = -999;
     });
     this.statePanel.querySelector<HTMLButtonElement>('#media-literacy')?.addEventListener('click', () => {
-      r.investMediaLiteracy();
+      issue(r, 'investMediaLiteracy');
       this.lastStatePanelBuildFrame = -999;
     });
     // Phase 13: Protest response buttons
     this.statePanel.querySelector<HTMLButtonElement>('.unrest-crackdown-btn')?.addEventListener('click', () => {
-      r.crackdownProtests();
+      issue(r, 'crackdownProtests');
       this.lastStatePanelBuildFrame = -999;
     });
     this.statePanel.querySelector<HTMLButtonElement>('.unrest-concede-btn')?.addEventListener('click', () => {
-      r.concedeToProtesters();
+      issue(r, 'concedeToProtesters');
       this.lastStatePanelBuildFrame = -999;
     });
   }
@@ -4436,7 +4437,7 @@ export class RegionView {
     for (const t of types) {
       this.recruitmentModal.querySelector<HTMLButtonElement>(`#recruit-${t}-btn`)!.onclick = () => {
         const count = parseInt(this.recruitmentModal.querySelector<HTMLInputElement>(`#recruit-${t}-count`)!.value) || 0;
-        r.recruitUnits(t, count);
+        issue(r, 'recruitUnits', t, count);
         this.showRecruitmentModal(); // refresh modal
       };
     }
@@ -4740,13 +4741,13 @@ export class RegionView {
 
     for (const btn of this.policyModal.querySelectorAll<HTMLButtonElement>('.policy-pick-btn')) {
       btn.onclick = () => {
-        r.setPolicy(i, btn.dataset.card!);
+        issue(r, 'setPolicy', i, btn.dataset.card!);
         this.policyModal.classList.add('hidden');
         this.policySlotIndex = -1;
       };
     }
     this.policyModal.querySelector<HTMLButtonElement>('#policy-clear-btn')?.addEventListener('click', () => {
-      r.setPolicy(i, null);
+      issue(r, 'setPolicy', i, null);
       this.policyModal.classList.add('hidden');
       this.policySlotIndex = -1;
     });
@@ -4840,7 +4841,7 @@ export class RegionView {
     const p = presets[presetName];
     if (!p) return;
     const basket: DealBasket = { treaties: p.treaties, goldToThem: p.gold, goldToYou: 0, borderSettlement: false };
-    r.proposeDeal(rivalId, basket);
+    issue(r, 'proposeDeal', rivalId, basket);
   }
 
   private renderDealModal(): void {
@@ -4925,7 +4926,7 @@ export class RegionView {
       refreshVerdict();
     };
     this.dealModal.querySelector<HTMLButtonElement>('#deal-propose-btn')!.onclick = () => {
-      r.proposeDeal(this.dealRivalId, this.currentBasket());
+      issue(r, 'proposeDeal', this.dealRivalId, this.currentBasket());
       this.closeDealModal(); // accepted, countered, or refused — the log has the answer
     };
     this.dealModal.querySelector<HTMLButtonElement>('#deal-cancel-btn')!.onclick = () => this.closeDealModal();
@@ -5320,28 +5321,28 @@ export class RegionView {
       };
     }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.road-btn')) {
-      rb.onclick = () => { this.region.buildRoad(t.id, Number(rb.dataset.to)); this.refreshPanel(); };
+      rb.onclick = () => { issue(this.region, 'buildRoad', t.id, Number(rb.dataset.to)); this.refreshPanel(); };
     }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.rail-btn')) {
-      rb.onclick = () => { this.region.buildRail(t.id, Number(rb.dataset.to)); this.refreshPanel(); };
+      rb.onclick = () => { issue(this.region, 'buildRail', t.id, Number(rb.dataset.to)); this.refreshPanel(); };
     }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.hwy-btn')) {
-      rb.onclick = () => { this.region.buildHighway(t.id, Number(rb.dataset.to)); this.refreshPanel(); };
+      rb.onclick = () => { issue(this.region, 'buildHighway', t.id, Number(rb.dataset.to)); this.refreshPanel(); };
     }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.mag-btn')) {
-      rb.onclick = () => { this.region.buildMaglev(t.id, Number(rb.dataset.to)); this.refreshPanel(); };
+      rb.onclick = () => { issue(this.region, 'buildMaglev', t.id, Number(rb.dataset.to)); this.refreshPanel(); };
     }
     for (const rb of this.panel.querySelectorAll<HTMLButtonElement>('.repair-btn')) {
-      rb.onclick = () => { this.region.repairRoute(t.id, Number(rb.dataset.to)); this.refreshPanel(); };
+      rb.onclick = () => { issue(this.region, 'repairRoute', t.id, Number(rb.dataset.to)); this.refreshPanel(); };
     }
     const sw = this.panel.querySelector<HTMLButtonElement>('#seawall-btn');
-    if (sw) sw.onclick = () => { this.region.buildSeaWall(t.id); this.refreshPanel(); };
+    if (sw) sw.onclick = () => { issue(this.region, 'buildSeaWall', t.id); this.refreshPanel(); };
     const fp = this.panel.querySelector<HTMLButtonElement>('#floodproof-btn');
-    if (fp) fp.onclick = () => { this.region.buildFloodProof(t.id); this.refreshPanel(); };
+    if (fp) fp.onclick = () => { issue(this.region, 'buildFloodProof', t.id); this.refreshPanel(); };
     const mr = this.panel.querySelector<HTMLButtonElement>('#retreat-btn');
-    if (mr) mr.onclick = () => { this.region.doManagedRetreat(t.id); this.refreshPanel(); };
+    if (mr) mr.onclick = () => { issue(this.region, 'doManagedRetreat', t.id); this.refreshPanel(); };
     const mil = this.panel.querySelector<HTMLButtonElement>('#militia-btn');
-    if (mil) mil.onclick = () => { this.region.recruitMilitia(t.id); this.refreshPanel(); };
+    if (mil) mil.onclick = () => { issue(this.region, 'recruitMilitia', t.id); this.refreshPanel(); };
     for (const cb of this.panel.querySelectorAll<HTMLButtonElement>('.city-build-btn')) {
       // Spatial-4X: arm placement mode (pick a hex in the worked ring) instead of
       // building abstractly. Re-clicking the same building cancels.
@@ -5352,21 +5353,21 @@ export class RegionView {
       db.onclick = () => { this.toggleDistrictPlacement(t.id, db.dataset.d!); };
     }
     for (const fb of this.panel.querySelectorAll<HTMLButtonElement>('.focus-btn')) {
-      fb.onclick = () => { this.region.setTownFocus(t.id, fb.dataset.f as TownFocus); this.refreshPanel(); };
+      fb.onclick = () => { issue(this.region, 'setTownFocus', t.id, fb.dataset.f as TownFocus); this.refreshPanel(); };
     }
     for (const tb of this.panel.querySelectorAll<HTMLButtonElement>('.policy-tax-btn')) {
-      tb.onclick = () => { this.region.setCityPolicy(t.id, 'taxBand', Number(tb.dataset.tax)); this.refreshPanel(); };
+      tb.onclick = () => { issue(this.region, 'setCityPolicy', t.id, 'taxBand', Number(tb.dataset.tax)); this.refreshPanel(); };
     }
     for (const wb of this.panel.querySelectorAll<HTMLButtonElement>('.policy-wage-btn')) {
-      wb.onclick = () => { this.region.setCityPolicy(t.id, 'wagePolicy', wb.dataset.wage as WagePolicy); this.refreshPanel(); };
+      wb.onclick = () => { issue(this.region, 'setCityPolicy', t.id, 'wagePolicy', wb.dataset.wage as WagePolicy); this.refreshPanel(); };
     }
     for (const sb of this.panel.querySelectorAll<HTMLButtonElement>('.policy-svc-btn')) {
-      sb.onclick = () => { this.region.setCityPolicy(t.id, 'serviceLevel', Number(sb.dataset.svc)); this.refreshPanel(); };
+      sb.onclick = () => { issue(this.region, 'setCityPolicy', t.id, 'serviceLevel', Number(sb.dataset.svc)); this.refreshPanel(); };
     }
     const scoutBtn = this.panel.querySelector<HTMLButtonElement>('.scout-btn');
-    if (scoutBtn) scoutBtn.onclick = () => { this.region.sendPlayerScout(t.id); this.refreshPanel(); };
+    if (scoutBtn) scoutBtn.onclick = () => { issue(this.region, 'sendPlayerScout', t.id); this.refreshPanel(); };
     const aidBtn = this.panel.querySelector<HTMLButtonElement>('.crisis-aid-btn');
-    if (aidBtn) aidBtn.onclick = () => { this.region.sendFoodAid(t.id); this.refreshPanel(); };
+    if (aidBtn) aidBtn.onclick = () => { issue(this.region, 'sendFoodAid', t.id); this.refreshPanel(); };
     const svcBtn = this.panel.querySelector<HTMLButtonElement>('.crisis-svc-btn');
     if (svcBtn) svcBtn.onclick = () => { this.region.servicesLevel = Math.min(2, this.region.servicesLevel + 1); this.refreshPanel(); };
     const taxBtn = this.panel.querySelector<HTMLButtonElement>('.crisis-tax-btn');
@@ -5448,7 +5449,7 @@ export class RegionView {
     const vassalBtn = this.rivalPanel.querySelector<HTMLButtonElement>('#rival-vassalize-btn');
     if (vassalBtn) {
       vassalBtn.onclick = () => {
-        const result = r.offerVassalage(fid);
+        const result = issue(r, 'offerVassalage', fid);
         if (result === 'accepted') {
           this.selectedFactionId = null;
         }
@@ -5458,7 +5459,7 @@ export class RegionView {
     const buyBtn = this.rivalPanel.querySelector<HTMLButtonElement>('#rival-buy-land-btn');
     if (buyBtn) {
       buyBtn.onclick = () => {
-        r.buyLand(fid);
+        issue(r, 'buyLand', fid);
         this.lastRivalPanelFactionId = null;
       };
     }
@@ -5466,9 +5467,9 @@ export class RegionView {
     if (warBtn) {
       warBtn.onclick = () => {
         if (r.playerRegionalWars.has(fid)) {
-          r.makeRegionalPeace(fid);
+          issue(r, 'makeRegionalPeace', fid);
         } else {
-          r.declareWarOnFaction(fid);
+          issue(r, 'declareWarOnFaction', fid);
         }
         this.lastRivalPanelFactionId = null;
       };
@@ -5476,7 +5477,7 @@ export class RegionView {
     this.rivalPanel.querySelectorAll<HTMLButtonElement>('.assault-btn').forEach((btn) => {
       btn.onclick = () => {
         const sid = Number(btn.dataset.sid);
-        r.assaultSettlement(sid);
+        issue(r, 'assaultSettlement', sid);
         this.lastRivalPanelFactionId = null; // rebuild to refresh odds & ownership
       };
     });
@@ -5748,28 +5749,28 @@ export class RegionView {
     for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-upgrade-btn')) {
       b.onclick = () => {
         const a = Number(b.dataset.a), to = Number(b.dataset.b), kind = b.dataset.kind;
-        if (kind === 'road') r.buildRoad(a, to);
-        else if (kind === 'rail') r.buildRail(a, to);
-        else if (kind === 'highway') r.buildHighway(a, to);
-        else if (kind === 'maglev') r.buildMaglev(a, to);
+        if (kind === 'road') issue(r, 'buildRoad', a, to);
+        else if (kind === 'rail') issue(r, 'buildRail', a, to);
+        else if (kind === 'highway') issue(r, 'buildHighway', a, to);
+        else if (kind === 'maglev') issue(r, 'buildMaglev', a, to);
         refresh();
       };
     }
     for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-repair-btn')) {
-      b.onclick = () => { r.repairRoute(Number(b.dataset.a), Number(b.dataset.b)); refresh(); };
+      b.onclick = () => { issue(r, 'repairRoute', Number(b.dataset.a), Number(b.dataset.b)); refresh(); };
     }
     for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-delete-btn')) {
-      b.onclick = () => { r.deleteRoute(Number(b.dataset.a), Number(b.dataset.b)); refresh(); };
+      b.onclick = () => { issue(r, 'deleteRoute', Number(b.dataset.a), Number(b.dataset.b)); refresh(); };
     }
     for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-cargo-btn')) {
       b.onclick = () => {
         const s = b.dataset.sector === 'auto' ? null : (b.dataset.sector as SectorId);
-        r.setRouteCargoPriority(Number(b.dataset.a), Number(b.dataset.b), s);
+        issue(r, 'setRouteCargoPriority', Number(b.dataset.a), Number(b.dataset.b), s);
         refresh();
       };
     }
     for (const b of this.routeNetworkPanel.querySelectorAll<HTMLButtonElement>('.rn-autobuild-btn')) {
-      b.onclick = () => { r.setAutoBuildRoutes(!r.autoBuildRoutes); refresh(); };
+      b.onclick = () => { issue(r, 'setAutoBuildRoutes', !r.autoBuildRoutes); refresh(); };
     }
     const slider = this.routeNetworkPanel.querySelector<HTMLInputElement>('.rn-budget-slider');
     if (slider) {
@@ -5777,7 +5778,7 @@ export class RegionView {
       // so the slider node survives the drag (the rebuild guard would replace it).
       slider.oninput = () => {
         const pct = Number(slider.value);
-        r.setRouteBudget(pct / 100);
+        issue(r, 'setRouteBudget', pct / 100);
         const label = pct === 0 ? 'unfunded' : pct < 100 ? 'lean' : pct === 100 ? 'full' : 'priority';
         const readout = this.routeNetworkPanel.querySelector<HTMLElement>('.rn-budget-readout');
         if (readout) readout.textContent = `${pct}% (${label}) · ${formatCurrency(r.routeUpkeepProjected(), 1)}/mo`;
@@ -5910,7 +5911,7 @@ export class RegionView {
       };
     }
     for (const b of this.settlementListPanel.querySelectorAll<HTMLButtonElement>('.sl-aid-btn')) {
-      b.onclick = () => { r.sendFoodAid(Number(b.dataset.sid)); this.lastSettlementListBuildFrame = -999; };
+      b.onclick = () => { issue(r, 'sendFoodAid', Number(b.dataset.sid)); this.lastSettlementListBuildFrame = -999; };
     }
   }
 
@@ -5971,14 +5972,14 @@ export class RegionView {
     for (const b of this.economyPanel.querySelectorAll<HTMLButtonElement>('.ep-tax-up')) {
       b.onclick = () => {
         const t = r.settlement(Number(b.dataset.sid));
-        if (t) r.setCityPolicy(t.id, 'taxBand', Math.min(3, t.policies.taxBand + 1));
+        if (t) issue(r, 'setCityPolicy', t.id, 'taxBand', Math.min(3, t.policies.taxBand + 1));
         refresh();
       };
     }
     for (const b of this.economyPanel.querySelectorAll<HTMLButtonElement>('.ep-tax-dn')) {
       b.onclick = () => {
         const t = r.settlement(Number(b.dataset.sid));
-        if (t) r.setCityPolicy(t.id, 'taxBand', Math.max(0, t.policies.taxBand - 1));
+        if (t) issue(r, 'setCityPolicy', t.id, 'taxBand', Math.max(0, t.policies.taxBand - 1));
         refresh();
       };
     }
@@ -6020,13 +6021,13 @@ export class RegionView {
       };
     }
     for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-regime-btn')) {
-      btn.onclick = () => { r.setMonetaryRegime(btn.dataset.regime as MonetaryRegime); refresh(); };
+      btn.onclick = () => { issue(r, 'setMonetaryRegime', btn.dataset.regime as MonetaryRegime); refresh(); };
     }
     for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-bond-btn')) {
-      btn.onclick = () => { r.issueBonds(Number(btn.dataset.amount)); refresh(); };
+      btn.onclick = () => { issue(r, 'issueBonds', Number(btn.dataset.amount)); refresh(); };
     }
     for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-cur-announce')) {
-      btn.onclick = () => { r.announceCurrencyChange(btn.dataset.sym as CurrencySymbol); refresh(); };
+      btn.onclick = () => { issue(r, 'announceCurrencyChange', btn.dataset.sym as CurrencySymbol); refresh(); };
     }
     for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-cur-switch')) {
       btn.onclick = () => {
@@ -6041,19 +6042,19 @@ export class RegionView {
           `Switch the currency standard to ${sym}?`,
           `${verdict}\n\nAnnounced switches (${ANNOUNCE_LEAD_DAYS}+ days notice) and deep treasury reserves soften the blow.`,
           'Switch',
-          () => { r.changeCurrency(sym, cause); refresh(); },
+          () => { issue(r, 'changeCurrency', sym, cause); refresh(); },
         );
       };
     }
     for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-dw-draw')) {
       btn.onclick = () => {
-        const result = r.borrowFromCentralBank(Number(btn.dataset.amount));
+        const result = issue(r, 'borrowFromCentralBank', Number(btn.dataset.amount));
         if (!result.ok) this.showError(result.reason ?? 'Request rejected.'); else refresh();
       };
     }
     for (const btn of p.querySelectorAll<HTMLButtonElement>('.cb-dw-repay')) {
       btn.onclick = () => {
-        const result = r.repayCentralBank(Number(btn.dataset.amount));
+        const result = issue(r, 'repayCentralBank', Number(btn.dataset.amount));
         if (!result.ok) this.showError(result.reason ?? 'Request rejected.'); else refresh();
       };
     }
@@ -6480,10 +6481,10 @@ export class RegionView {
     this.wireTabs(this.researchPanel, (t) => { this.researchTab = t as 'tech' | 'civics'; }, 'pal-tab', 'pal-section', true);
     for (const node of this.researchPanel.querySelectorAll<HTMLElement>('.tt-node')) {
       if (node.dataset.state !== 'avail') continue;
-      node.onclick = () => { r.startResearch(node.dataset.id!); forceResearchRebuild(); };
+      node.onclick = () => { issue(r, 'startResearch', node.dataset.id!); forceResearchRebuild(); };
     }
     const cancelBtn = this.researchPanel.querySelector<HTMLButtonElement>('.res-cancel-btn');
-    if (cancelBtn) cancelBtn.onclick = () => { r.cancelResearch(); forceResearchRebuild(); };
+    if (cancelBtn) cancelBtn.onclick = () => { issue(r, 'cancelResearch'); forceResearchRebuild(); };
   }
 
   /** Escape a string for safe use inside an HTML attribute (e.g. title tooltips). */
@@ -6730,7 +6731,7 @@ export class RegionView {
       return;
     }
 
-    const result = r.requestLoan(lenderId, amount, term);
+    const result = issue(r, 'requestLoan', lenderId, amount, term);
     if (result.ok) {
       this.refreshPanel();
     } else {
@@ -6767,7 +6768,7 @@ export class RegionView {
       return;
     }
 
-    const result = r.repayLoan(loanId, amount);
+    const result = issue(r, 'repayLoan', loanId, amount);
     if (result.ok) {
       this.refreshPanel();
     } else {

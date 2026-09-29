@@ -506,3 +506,4 @@ touching balance, no new `any`, no schema mutation without the separate sign-off
 
 ## Centuria 2.0 scope (2026-09-29)
 Scope approved: `docs/specs/centuria-2.0-scope.md`. Next: write the Phase 1 detailed spec (command layer, determinism fix, stakes pass) and get approval before any code.
+- **Phase 1 shipped (2026-09-29):** command layer `src/sim/commands.ts` (`issue()`/`replay()`/`onCommand()`; UI mutates only via `issue`; `commandLog` in save, schema v6); advisor-forecast noise now hash-based (no `Math.random` in sim); stakes: battles move `playerWar.score`/`warSupport` (`applyBattleToWar`), GDP-share levies taper (`LEVY_STACK_CEILING`), war-quality multipliers log-taper (`WAR_QUALITY_TAPER`), print seigniorage fades with inflation (`PRINT_YIELD_ZERO_INFLATION`). Standard 80y×12: 2/12 losses (unchanged), treasuries −1..4%.

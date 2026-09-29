@@ -6,7 +6,8 @@
  * grow, age, migrate, and get raided as populations, not agents — this is the
  * performance answer that lets the game scale to a State and beyond.
  */
-import { Rng } from './rng';
+import { Rng, hash01 } from './rng';
+import type { Command } from './commands';
 import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, MONTHS, DAYS_PER_MONTH, FactionId as NewFactionId, activeFactions, formatCurrency, setCurrencySymbol, AI_DIFFICULTY, TUNING } from './defs';
 import type { CurrencySymbol, RegionDesign, NationDesign, AiDifficulty } from './defs';
 import { computePenalty, transitionEfficiency, ANNOUNCE_LEAD_DAYS } from './currency';
@@ -3759,7 +3760,11 @@ export const MIN_SETTLEMENT_SPACING = 8;
  *  `insolvencyMonths` (the §ECON-COLLAPSE counter); v5 (spec 12) adds `ententes`
  *  (player bloc alignment) and `coalition` (the encirclement pressure). Saves below
  *  this are a hard cutover — `deserialize` rejects them via IncompatibleSaveError. */
-export const SAVE_SCHEMA_VERSION = 5;
+export const SAVE_SCHEMA_VERSION = 6;
+
+/** Centuria 2.0 §F stakes caps. */
+export const LEVY_STACK_CEILING = 0.2;
+export const WAR_QUALITY_TAPER = 0.75;
 
 /** Thrown by `RegionSim.deserialize` when a save blob predates SAVE_SCHEMA_VERSION.
  *  Callers (load menu, boot) catch this and offer delete-only rather than crashing. */
@@ -3797,6 +3802,8 @@ export class RegionSim {
   expeditions: Expedition[] = [];
   routes: Route[] = [];
   log: LogEntry[] = [];
+  /** Centuria 2.0 §A — every player command, in issue order (see commands.ts). */
+  commandLog: Command[] = [];
   stateProclaimed = false;
   /** charter done, waiting on the player's ceremony choices */
   ceremonyPending = false;
@@ -7148,8 +7155,14 @@ export class RegionSim {
       this.exportEarningsLastMonth *= this.fxBoost;
     }
     const treasuryBefore = this.treasury;
-    this.treasury += revenue - spending + incomeTaxBonus + centralBankingBonus + estateLevyBonus +
-      progressiveTaxBonus + protectionismBonus + austerityBonus + bankInterest + carbonLevyBonus + this.exportEarningsLastMonth;
+    // Centuria 2.0 §F: the GDP-share levies stack with diminishing returns (a Laffer-style
+    // taper), so civics complement the base tax instead of summing into a free surplus.
+    const levyShare = this.gdpLastMonth > 0
+      ? (incomeTaxBonus + centralBankingBonus + progressiveTaxBonus + protectionismBonus + carbonLevyBonus) / this.gdpLastMonth
+      : 0;
+    const levyTaper = Math.max(0, 1 - levyShare / LEVY_STACK_CEILING);
+    this.treasury += revenue - spending + (incomeTaxBonus + centralBankingBonus + progressiveTaxBonus +
+      protectionismBonus + carbonLevyBonus) * levyTaper + estateLevyBonus + austerityBonus + bankInterest + this.exportEarningsLastMonth;
 
     // Autoplay STATE government-consumption sink (see AUTOPLAY_STATE_* above). Bounds
     // the headless autoplay state's treasury, which would otherwise pile income-tax
@@ -10372,15 +10385,16 @@ export class RegionSim {
   advisorForecast(portfolioName: string, trueValue: number): number {
     const role = this.portfolioToRole(portfolioName);
     const minister = role ? this.ministerFor(role) : null;
+    const month = Math.floor(this.day / 30);
 
     let noiseScale: number;
     if (minister) {
       const skill = minister.skill ?? 50;
       noiseScale = (1 - skill / 100) * Math.abs(trueValue) * 0.3;
     } else {
-      noiseScale = Math.abs(trueValue) * (0.30 + Math.random() * 0.30);
+      noiseScale = Math.abs(trueValue) * (0.30 + hash01(this.map.seed, portfolioName, month, 0) * 0.30);
     }
-    const gaussian = (Math.random() + Math.random() + Math.random() - 1.5) * noiseScale;
+    const gaussian = (hash01(this.map.seed, portfolioName, month, 1) + hash01(this.map.seed, portfolioName, month, 2) + hash01(this.map.seed, portfolioName, month, 3) - 1.5) * noiseScale;
     return trueValue + gaussian;
   }
 
@@ -11845,12 +11859,15 @@ export class RegionSim {
       basePower = Math.pow(Math.max(1, this.totalPop()), 0.6) * (1 + 0.25 * this.militiaLevel);
     }
 
-    const quality =
+    const rawQuality =
       (this.policyActive('standing_army') ? 1.5 : 1) *
       (this.ministerFor('defence') ? 1.2 : 1) *
       (this.passedLaws.has('military_reform') ? 1.2 : 1) *
       (this.govType === 'junta' ? 1.15 : 1) *
       (this.militaryDoctrine === 'expansionist' ? 1.15 : this.militaryDoctrine === 'defensive' ? 0.9 : 1);
+    // Centuria 2.0 §F: quality bonuses soft-cap (log taper above ×1) so stacking
+    // them can't substitute for fielding real units.
+    const quality = rawQuality <= 1 ? rawQuality : 1 + Math.log(rawQuality) * WAR_QUALITY_TAPER;
     const mob = w ? MOBILIZATION_DEFS[w.mobilization].power : 1;
     // The arms base equips the force (GDD §7.2): a nation that forges its own steel
     // and chemicals into weapons fields well-supplied troops; an embargoed or
@@ -12857,6 +12874,7 @@ export class RegionSim {
       expeditions: this.expeditions,
       routes: this.routes,
       log: this.log,
+      commandLog: this.commandLog,
       stateProclaimed: this.stateProclaimed,
       ceremonyPending: this.ceremonyPending,
       charterProgress: this.charterProgress,
@@ -13126,6 +13144,7 @@ export class RegionSim {
     r.expeditions = d.expeditions;
     r.routes = (d.routes as Route[]).map((rt) => ({ ...rt, cargoType: rt.cargoType ?? null, cargoPriority: rt.cargoPriority ?? null }));
     r.log = d.log;
+    r.commandLog = d.commandLog ?? [];
     r.stateProclaimed = d.stateProclaimed;
     r.ceremonyPending = d.ceremonyPending;
     r.charterProgress = d.charterProgress;

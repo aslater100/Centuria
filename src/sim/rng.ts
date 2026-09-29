@@ -31,3 +31,22 @@ export class Rng {
     this.s = s >>> 0;
   }
 }
+
+/** Stateless deterministic hash → [0,1). For display-only noise that must be
+ *  stable across frames and never consume a serialized RNG stream. */
+export function hash01(...parts: (number | string)[]): number {
+  let h = 0x811c9dc5;
+  for (const p of parts) {
+    const str = String(p);
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    h ^= 0x7c;
+    h = Math.imul(h, 0x01000193);
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  return (h >>> 0) / 4294967296;
+}
