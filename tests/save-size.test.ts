@@ -43,7 +43,7 @@ function saveKiB(r: RegionSim): number {
 }
 
 const EARLY_CEIL_KIB = 64; // today ~22 KiB
-const CENTURY_CEIL_KIB = 224; // today ~198 KiB (grew with rival AI, statsHistory); was 192 → re-baselined
+const CENTURY_CEIL_KIB = 256; // ~231 KiB after Centuria 2.0 living borders (territory grid + yearly delta history, +~33 KiB); was 224
 
 describe('save-size regression guard (roadmap risk #5)', () => {
   it('a fresh nation serializes small', () => {

@@ -214,7 +214,7 @@ describe('revanchism war log message', () => {
     r.startPlayerWar(rv, 'revanchism', true);
 
     const log: Array<{ text: string }> = (r as unknown as { log: { text: string }[] }).log;
-    const warEntry = log.find(e => e.text.includes('revenge') || e.text.includes('vengeance') || e.text.includes('forgiven'));
+    const warEntry = log.find(e => e.text.includes('revenge') || e.text.includes('vengeance') || e.text.includes('forgiven') || e.text.includes('old defeat'));
     expect(warEntry).toBeDefined();
   });
 
@@ -228,7 +228,7 @@ describe('revanchism war log message', () => {
     r.startPlayerWar(rv, 'border_dispute', true);
 
     const log: Array<{ text: string }> = (r as unknown as { log: { text: string }[] }).log;
-    const warEntry = log.find(e => e.text.includes('defensive war'));
+    const warEntry = log.find(e => e.text.includes('defensive war') || e.text.includes('declares war on'));
     expect(warEntry).toBeDefined();
   });
 

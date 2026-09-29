@@ -27,6 +27,8 @@ import { Backdrop, buildBackdropPalette, eraIdForYear, eraKeyLight, type Sky, ty
 import { Modal, createErrorState } from './components';
 import { WikiPanel } from './WikiPanel';
 import { issue } from '../sim/commands';
+import { QUIRKS } from '../sim/procgen/nation';
+import { flagDataUrl } from './flag';
 
 /** localStorage flag (U3): the in-game wiki auto-opens once on a player's first game. */
 const WIKI_FIRST_RUN_KEY = 'centuria-wiki-seen';
@@ -944,6 +946,7 @@ export class RegionView {
     // Terrain + territory (the O(N²) layers) come from the static cache as one blit.
     this.ensureMapCache(W, H);
     g.drawImage(this.mapCache!, 0, 0);
+    this.drawBorderPulses(g, W, H);
     // (Memory-fog layer deleted 2026-07: fog of war is retired, so the old
     // per-frame full-screen blit composited only transparent pixels.)
 
@@ -1419,6 +1422,7 @@ export class RegionView {
     // town/backdrop arrivals must not trigger 16k-hex rebuilds, and an in-place
     // slot replacement (regenerated art) must.
     s += `|a${this.assets.version('terrain-')}`;
+    s += `|tv${r.territoryVersion}`;
     return s;
   }
 
@@ -2154,7 +2158,8 @@ export class RegionView {
   private drawTerritories(g: CanvasRenderingContext2D, W: number, H: number): void {
     const { region } = this;
     const N = REGION_N;
-    const { grid } = region.computeTerritoryGrid();
+    const { grid, contested, controlLevel } = region.computeTerritoryGrid();
+    this.noteBorderChanges(grid);
     const m = 60;
     const { size, ox, oy } = hexLayoutParams(W, H, N, m);
     const colorCache = new Map<number, { r: number; g: number; b: number } | null>();
@@ -2166,17 +2171,41 @@ export class RegionView {
       colorCache.set(fid, rgb);
       return rgb;
     };
-    // 1) translucent interior fills
+    // 1) translucent interior fills — a weak grip reads fainter, so eroding
+    //    frontiers visibly thin before they flip (Centuria 2.0 §G)
     for (let y = 0; y < N; y++) {
       for (let x = 0; x < N; x++) {
-        const rgb = rgbOf(grid[x * N + y]);
+        const idx = x * N + y;
+        const rgb = rgbOf(grid[idx]);
         if (!rgb) continue;
         const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
-        g.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},0.12)`;
+        const alpha = 0.05 + 0.1 * (controlLevel[idx] / 255);
+        g.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha.toFixed(3)})`;
         fillHexPath(g, hexCorners(cx, cy, size));
       }
     }
-    // 2) frontier glow: each hex edge bordering a different faction gets a wide
+    // 2) contested ground: diagonal hatching in the holder's colour
+    g.save();
+    g.lineWidth = Math.max(0.6, size * 0.12);
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        const idx = x * N + y;
+        if (!contested[idx]) continue;
+        const rgb = rgbOf(grid[idx]);
+        if (!rgb) continue;
+        const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
+        g.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},0.45)`;
+        g.beginPath();
+        for (let k = -1; k <= 1; k++) {
+          const o = k * size * 0.6;
+          g.moveTo(cx - size * 0.6 + o, cy + size * 0.6);
+          g.lineTo(cx + size * 0.6 + o, cy - size * 0.6);
+        }
+        g.stroke();
+      }
+    }
+    g.restore();
+    // 3) frontier glow: each hex edge bordering a different faction gets a wide
     //    soft cultural halo under a crisp core line, so borders read as lit bands
     //    of influence rather than hard ink strokes. Three passes, widest first.
     const frontierPasses: [number, number][] = [[6, 0.09], [3.2, 0.2], [1.3, 0.9]];
@@ -2205,6 +2234,43 @@ export class RegionView {
       }
     }
     g.lineWidth = 1;
+  }
+
+  private prevTerritoryGrid: Int16Array | null = null;
+  private borderPulse: { cells: number[]; owners: number[]; start: number } | null = null;
+  private static readonly BORDER_PULSE_MS = 2200;
+
+  /** Diff the new ownership grid against the last one drawn; flipped cells pulse. */
+  private noteBorderChanges(grid: Int16Array): void {
+    const prev = this.prevTerritoryGrid;
+    this.prevTerritoryGrid = grid.slice();
+    if (!prev || prev.length !== grid.length) return;
+    const cells: number[] = [];
+    const owners: number[] = [];
+    for (let i = 0; i < grid.length; i++) {
+      if (grid[i] !== prev[i] && grid[i] >= 0 && prev[i] >= 0) { cells.push(i); owners.push(grid[i]); }
+    }
+    if (cells.length) this.borderPulse = { cells, owners, start: performance.now() };
+  }
+
+  /** Per-frame: flipped hexes flare in their new owner's colour, then fade. */
+  private drawBorderPulses(g: CanvasRenderingContext2D, W: number, H: number): void {
+    const p = this.borderPulse;
+    if (!p) return;
+    const t = (performance.now() - p.start) / RegionView.BORDER_PULSE_MS;
+    if (t >= 1) { this.borderPulse = null; return; }
+    const N = REGION_N;
+    const { size, ox, oy } = hexLayoutParams(W, H, N, 60);
+    const alpha = 0.55 * (1 - t) * (0.6 + 0.4 * Math.sin(t * Math.PI * 6));
+    for (let k = 0; k < p.cells.length; k++) {
+      const idx = p.cells[k];
+      const x = Math.floor(idx / N), y = idx % N;
+      const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
+      if (!this.inView(cx, cy, size * 2)) continue;
+      const rgb = hexToRgb(this.region.faction(p.owners[k])?.color ?? '#ffffff');
+      g.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${Math.max(0, alpha).toFixed(3)})`;
+      fillHexPath(g, hexCorners(cx, cy, size));
+    }
   }
 
   /** Phase 0: at-a-glance resource health under each settlement — three small
@@ -4005,8 +4071,15 @@ export class RegionView {
       const personalityInfo = profile
         ? `${profile.traits.join(', ')} — ${profile.approximateStrength} (${profile.comparison})`
         : '';
-      const flagHtml = rv.flagData
+      const flagHtml = rv.identity
+        ? `<img class="flag-img" src="${flagDataUrl(rv.identity.flag, 36, 24)}" alt="" title="Flag of ${rv.name}">`
+        : rv.flagData
         ? `<span class="flag-chip" style="background:linear-gradient(90deg, ${rv.flagData.primary} 50%, ${rv.flagData.secondary} 50%)" title="${rv.flagData.symbol}"></span>`
+        : '';
+      const quirkHtml = rv.identity
+        ? rv.identity.quirks.map((id) => QUIRKS.find((q) => q.id === id))
+            .filter((q): q is NonNullable<typeof q> => !!q)
+            .map((q) => `<span class="quirk-tag" title="${q.desc}">${q.label}</span>`).join(' ')
         : '';
       const emblemHtml = rv.flagData ? `${rv.flagData.emblem}&nbsp;` : '';
       const archetypeData = RIVAL_ARCHETYPES[rv.archetype];
@@ -4054,10 +4127,11 @@ export class RegionView {
           })()
         : '';
       return `<div class="bar-row" title="${archetypeTooltip}\n\nAgenda: ${agendaShown}\n\n${personalityInfo}">` +
-        `${flagHtml}<span class="row-label">${emblemHtml}<b>${rv.name}</b></span>` +
+        `${flagHtml}<span class="row-label">${emblemHtml}<b>${rv.name}</b> <span class="c-muted t-10">${rv.leader}</span></span>` +
         meterBar(pct, relTone as 'good' | 'warn' | 'bad') +
         `<span>${rel}</span></div>` +
         `<p class="insp-skills" title="${recentHistory}">${gov} · ${COMPASS_FLAVOR[rv.compass]}${rv.borderSettled ? ' · border settled' : ''} · ${personalityInfo}${personalityInfo ? ' · ' : ''}${treaties}</p>` +
+        (quirkHtml ? `<p class="insp-skills">${quirkHtml}</p>` : '') +
         offerRow + counterRow + warRecordLine + brokerRow +
         verbs + espionage + rivalIntel + armsIntel;
     }).join('');
@@ -5419,8 +5493,15 @@ export class RegionView {
 
     this.setInnerHtml(
       this.rivalPanel,
-      `<h3 class="panel-title"><span style="color:${faction.color}">■</span> ${faction.name}</h3>` +
-      `<p class="insp-skills">${regimeName} · ${faction.regime}</p>` +
+      `<h3 class="panel-title">${faction.identity
+        ? `<img class="flag-img" src="${flagDataUrl(faction.identity.flag, 36, 24)}" alt="">`
+        : `<span style="color:${faction.color}">■</span>`} ${faction.name}</h3>` +
+      `<p class="insp-skills">${regimeName}${faction.identity ? ` · ${faction.identity.adjective} people` : ''}</p>` +
+      (faction.identity
+        ? `<p class="insp-skills">${faction.identity.quirks.map((id) => QUIRKS.find((q) => q.id === id))
+            .filter((q): q is NonNullable<typeof q> => !!q)
+            .map((q) => `<span class="quirk-tag" title="${q.desc}">${q.label}</span>`).join(' ')}</p>`
+        : '') +
       (isVassal ? `<p class="c-good">★ Vassal of your state</p>` : '') +
       (atWar ? `<p class="c-bad">⚔ AT WAR</p>` : '') +
       `<p>settlements <b>${stats.settlements}</b> · pop <b>${stats.population}</b></p>` +

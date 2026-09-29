@@ -8,6 +8,15 @@
  */
 import { Rng, hash01 } from './rng';
 import type { Command } from './commands';
+import {
+  createTerritory, settleTerritory, advanceTerritory, contestedMask, areaByFid,
+  serializeTerritory, deserializeTerritory, makeSnapshot, expandHistory, SHIFT_REPORT_MIN, CONTROL_MAX,
+  type TerritoryState, type BorderShift, type TerritorySnapshot, type InfluenceSource,
+} from './territory';
+import {
+  generateNation, nationRng, personName, reviseFlag, stateNameFor, leaderTitleFor,
+  type CultureId, type FlagSpec, type NationVoice,
+} from './procgen/nation';
 import { MINUTES_PER_DAY, DAYS_PER_SEASON, DAYS_PER_YEAR, SEASONS, START_YEAR, MONTHS, DAYS_PER_MONTH, FactionId as NewFactionId, activeFactions, formatCurrency, setCurrencySymbol, AI_DIFFICULTY, TUNING } from './defs';
 import type { CurrencySymbol, RegionDesign, NationDesign, AiDifficulty } from './defs';
 import { computePenalty, transitionEfficiency, ANNOUNCE_LEAD_DAYS } from './currency';
@@ -247,7 +256,11 @@ export interface Province {
 export interface TerritoryControl {
   /** Land cell ownership over the REGION_N×REGION_N grid, row-major (x*N+y).
    *  Values: faction id (≥0), -1 unclaimed land, -2 water/uninhabitable. */
-  grid: Int8Array;
+  grid: Int16Array;
+  /** 1 where the holder is under live pressure from a rival claimant. */
+  contested: Uint8Array;
+  /** Holder's grip on each cell, 0..255. */
+  controlLevel: Uint8Array;
   /** factionId → fraction of claimable land (0..1). */
   control: Map<number, number>;
   /** Count of claimable (non-water) cells — the denominator for control. */
@@ -1927,6 +1940,8 @@ export interface RegionalFaction {
   // ---- Phase C: Vassalage (conquest tier) ----
   /** Faction this faction is a vassal of; null if independent. */
   overlordId: number | null;
+  /** Procedural identity (Centuria 2.0 §H). */
+  identity?: NationIdentity;
   /** Faction IDs that have submitted as vassals to this faction. */
   vassals: number[];
 }
@@ -1995,7 +2010,24 @@ export interface RivalNation {
     emblem: string;
     symbol: string;
   };
+  /** Procedural identity (Centuria 2.0 §H); absent on historical-roster powers. */
+  identity?: NationIdentity;
 }
+
+/** A generated nation's culture, heraldry and character (Centuria 2.0 §H). */
+export interface NationIdentity {
+  culture: CultureId;
+  land: string;
+  adjective: string;
+  leaderTitle: string;
+  flag: FlagSpec;
+  quirks: string[];
+  voice: NationVoice;
+}
+
+/** 'procedural' (default): every foreign power is generated from the map seed.
+ *  'historical': off-map powers are drawn from the rival_nations.json roster. */
+export type WorldMode = 'procedural' | 'historical';
 
 /** Continental identity of an off-map rival power (GDD §6.4). The visible map
  *  is the PLAYER's home region; each rival looms beyond one compass horizon,
@@ -3912,6 +3944,7 @@ export class RegionSim {
   rivals: RivalNation[] = [];
   /** Named rival nations that have been used (to avoid duplicates). */
   usedNamedRivals: Set<string> = new Set();
+  worldMode: WorldMode = 'procedural';
   /** AI-initiated treaty offers awaiting the player's signature. */
   offers: TreatyOffer[] = [];
   /** Spec 10 §NEG — open multi-round negotiations (persisted, schema v3). Max 2 at once. */
@@ -4703,40 +4736,77 @@ export class RegionSim {
    *  (radius − distance) onto it, or left unclaimed if no settlement reaches.
    *  Cached by signature so it's cheap to call every render frame. */
   computeTerritoryGrid(): TerritoryControl {
-    const sig = this.territorySignature();
+    const sig = `${this.territorySignature()}#${this.territoryVersion}`;
     if (this._territoryCache && this._territoryCache.sig === sig) {
       return this._territoryCache.result;
     }
-    const N = REGION_N;
-    const grid = new Int8Array(N * N);
-    const prep = this.settlements.map((t) => {
-      const cell = this.map.coordToCell(t.x, t.y);
-      return { cx: cell.x, cy: cell.y, r: (this.territoryRadius(t) / 100) * N, fid: t.factionId };
-    });
-    let landCells = 0;
-    const area = new Map<number, number>();
-    for (let x = 0; x < N; x++) {
-      for (let y = 0; y < N; y++) {
-        const idx = x * N + y;
-        if (this.map.isWater(x, y)) { grid[idx] = -2; continue; }
-        landCells++;
-        let bestFid = -1;
-        let bestInf = 0;
-        for (const p of prep) {
-          const d = Math.hypot(x - p.cx, y - p.cy);
-          if (d > p.r) continue;
-          const inf = p.r - d;
-          if (inf > bestInf) { bestInf = inf; bestFid = p.fid; }
-        }
-        grid[idx] = bestFid;
-        if (bestFid >= 0) area.set(bestFid, (area.get(bestFid) ?? 0) + 1);
-      }
-    }
+    const t = this.ensureTerritory();
+    const sources = this.territorySources();
+    settleTerritory(t, sources);
+    const { area, land } = areaByFid(t);
     const control = new Map<number, number>();
-    if (landCells > 0) for (const [fid, cells] of area) control.set(fid, cells / landCells);
-    const result: TerritoryControl = { grid, control, landCells };
+    if (land > 0) for (const [fid, cells] of area) control.set(fid, cells / land);
+    const result: TerritoryControl = {
+      grid: t.owner.slice(),
+      contested: contestedMask(t, sources),
+      controlLevel: t.control.slice(),
+      control,
+      landCells: land,
+    };
     this._territoryCache = { sig, result };
     return result;
+  }
+
+  /** Centuria 2.0 §G — persistent hex ownership, created on first use. */
+  territory: TerritoryState | null = null;
+  territoryVersion = 0;
+  /** Border shifts from the most recent monthly territory pass. */
+  lastBorderShifts: BorderShift[] = [];
+  /** One ownership snapshot per January, for the history scrubber. */
+  territoryHistory: TerritorySnapshot[] = [];
+  private lastSnapshotOwner: Int16Array | null = null;
+
+  private ensureTerritory(): TerritoryState {
+    if (!this.territory) this.territory = createTerritory(REGION_N, (x, y) => this.map.isWater(x, y));
+    return this.territory;
+  }
+
+  /** Every settlement projects influence; disloyal towns project less. */
+  territorySources(): InfluenceSource[] {
+    const N = REGION_N;
+    return this.settlements.map((t) => {
+      const cell = this.map.coordToCell(t.x, t.y);
+      const loyalty = Math.max(0, Math.min(100, t.loyaltyToFaction ?? 100));
+      return {
+        x: cell.x,
+        y: cell.y,
+        radius: (this.territoryRadius(t) / 100) * N,
+        fid: t.factionId,
+        strength: 0.4 + 0.6 * (loyalty / 100),
+      };
+    });
+  }
+
+  /** Monthly: frontiers erode and flip; big shifts make the news. */
+  tickTerritory(): void {
+    const t = this.ensureTerritory();
+    const sources = this.territorySources();
+    settleTerritory(t, sources);
+    this.lastBorderShifts = advanceTerritory(t, sources);
+    this.territoryVersion++;
+    const name = (fid: number) => this.faction(fid)?.name ?? 'a rival power';
+    for (const sh of this.lastBorderShifts) {
+      if (sh.cells < SHIFT_REPORT_MIN) continue;
+      if (sh.to === this.playerFactionId) {
+        this.addLog(`FRONTIER: our border advances — ${sh.cells} hexes pass from ${name(sh.from)} to us.`, 'good');
+      } else if (sh.from === this.playerFactionId) {
+        this.addLog(`FRONTIER: ${name(sh.to)} presses into our borderlands — ${sh.cells} hexes lost.`, 'bad');
+      }
+    }
+    if (this.day % DAYS_PER_YEAR < 30 && !this.territoryHistory.some((h) => h.year === this.year)) {
+      this.territoryHistory.push(makeSnapshot(this.year, t.owner, this.lastSnapshotOwner));
+      this.lastSnapshotOwner = t.owner.slice();
+    }
   }
 
   /** Fraction (0..1) of claimable regional land a faction controls. */
@@ -4866,9 +4936,13 @@ export class RegionSim {
     for (let i = 0; i < numRivals; i++) {
       const rivalId = i + 1; // ids 1, 2, 3, etc.
       const regime = eraRegimes[this.aiRng.int(eraRegimes.length)] ?? 'abs_monarchy';
+      const gen = generateNation(this.map.seed, `faction:${rivalId}`, {
+        regime,
+        taken: new Set(this.regionalFactions.map((f) => f.identity?.land ?? '')),
+      });
       const faction: RegionalFaction = {
         id: rivalId,
-        name: rivalNames[i] || `Rival Faction ${i}`,
+        name: this.worldMode === 'procedural' ? gen.name : rivalNames[i] || `Rival Faction ${i}`,
         color: rivalColors[i] || '#999999',
         capital: -1, // no capital yet; will be set when they found a settlement
         settlementIds: [],
@@ -4878,7 +4952,7 @@ export class RegionSim {
         techProgress: 0,
         centralBank: null,
         currencyId: rivalId,
-        currencyName: ['Francs', 'Guilders', 'Crowns', 'Marks'][i] || 'Marks',
+        currencyName: this.worldMode === 'procedural' ? gen.currencyName : ['Francs', 'Guilders', 'Crowns', 'Marks'][i] || 'Marks',
         aggressiveness: Math.max(0, Math.min(100, 30 + this.rng.int(70) + knobs.aggressionBias)),
         regime,
         techFocus: ['mining', 'forestry', 'farming'][this.rng.int(3)],
@@ -4891,6 +4965,10 @@ export class RegionSim {
         lastGoalCheckDay: this.day,
         overlordId: null,
         vassals: [],
+        identity: this.worldMode === 'procedural' ? {
+          culture: gen.culture, land: gen.land, adjective: gen.adjective, leaderTitle: gen.leaderTitle,
+          flag: gen.flag, quirks: gen.quirks, voice: gen.voice,
+        } : undefined,
       };
 
       faction.treasury = 120 + this.aiRng.int(60); // enough to found immediately
@@ -6696,6 +6774,7 @@ export class RegionSim {
   }
 
   private monthlyUpdate(): void {
+    this.tickTerritory();
     // Record the prior month's net treasury swing before this month's books move.
     this.treasuryDeltaMonth = this.treasury - this.prevMonthTreasury;
     this.prevMonthTreasury = this.treasury;
@@ -9166,13 +9245,15 @@ export class RegionSim {
     const can = this.canClaimCell(x, y);
     if (!can.ok) return false;
 
-    const r = this.computeTerritoryGrid();
+    const t = this.ensureTerritory();
     const N = REGION_N;
     const COST = 25;
 
-    r.grid[x * N + y] = this.playerFactionId;
+    t.owner[x * N + y] = this.playerFactionId;
+    t.control[x * N + y] = CONTROL_MAX;
+    t.anchored[x * N + y] = 1;
     this.treasury -= COST;
-    this._territoryCache = null; // invalidate territory cache
+    this.territoryVersion++;
 
     this.addLog(`Claimed land at (${x}, ${y}) for £${COST}`, 'good');
     return true;
@@ -10698,6 +10779,8 @@ export class RegionSim {
     const availableNamed = (rivalNationsJson as unknown as RivalNationDef[]).filter(
       (n) => !this.usedNamedRivals.has(n.id),
     );
+    // Procedural worlds still draw a roster entry — as a balance template for
+    // archetype, personality and regime — then dress it in a generated identity.
     if (availableNamed.length > 0) {
       namedDef = availableNamed[this.rng.int(availableNamed.length)];
       this.usedNamedRivals.add(namedDef.id);
@@ -10710,6 +10793,7 @@ export class RegionSim {
     let name: string;
     let leader: string;
     let agenda: string;
+    let identity: NationIdentity | undefined;
 
     if (namedDef) {
       arch = namedDef.archetype as RivalArchetype;
@@ -10718,6 +10802,19 @@ export class RegionSim {
       name = namedDef.name;
       leader = namedDef.leader;
       agenda = namedDef.agenda;
+      if (this.worldMode === 'procedural') {
+        const g = this.generateRivalIdentity(regime.id);
+        name = g.name;
+        leader = g.leader;
+        identity = g.identity;
+        const jr = nationRng(this.map.seed, `temper:${this.nextId}`);
+        const jitter = (v: number) => Math.max(0, Math.min(10, v + jr.int(3) - 1));
+        weights = {
+          expansion: jitter(weights.expansion), commerce: jitter(weights.commerce),
+          ideology: jitter(weights.ideology), risk: jitter(weights.risk),
+          honor: jitter(weights.honor), grudge: jitter(weights.grudge),
+        };
+      }
     } else {
       // Fallback to procedural generation
       const kinds = Object.keys(RIVAL_ARCHETYPES) as RivalArchetype[];
@@ -10738,6 +10835,12 @@ export class RegionSim {
       name = names[this.rng.int(names.length)] ?? `Power ${this.rivals.length + 1}`;
       leader = leaders[this.rng.int(leaders.length)] ?? 'the Directorate';
       agenda = RIVAL_AGENDAS[arch];
+      if (this.worldMode === 'procedural') {
+        const g = this.generateRivalIdentity(regime.id);
+        name = g.name;
+        leader = g.leader;
+        identity = g.identity;
+      }
     }
 
     // banners stack, but spread the powers around the horizon first
@@ -10771,7 +10874,8 @@ export class RegionSim {
       history: [`Proclaimed ${this.year}, ${COMPASS_FLAVOR[compass]} — ${origin}.`],
       lastEnvoyDay: -999,
       lastGiftDay: -999,
-      flagData: namedDef ? namedDef.flag : undefined,
+      flagData: namedDef && !identity ? namedDef.flag : undefined,
+      identity,
     };
 
     // The newcomer arrives into a world with opinions already formed — and
@@ -10791,6 +10895,19 @@ export class RegionSim {
       'info',
     );
     return rv;
+  }
+
+  private generateRivalIdentity(regimeId: string): { name: string; leader: string; identity: NationIdentity } {
+    const taken = new Set([...this.rivals, ...this.regionalFactions].map((x) => x.identity?.land ?? ''));
+    const gen = generateNation(this.map.seed, `rival:${this.nextId}`, { regime: regimeId, taken });
+    return {
+      name: gen.name,
+      leader: `${gen.leaderTitle} ${gen.leaderName}`,
+      identity: {
+        culture: gen.culture, land: gen.land, adjective: gen.adjective, leaderTitle: gen.leaderTitle,
+        flag: gen.flag, quirks: gen.quirks, voice: gen.voice,
+      },
+    };
   }
 
   /** What this rival wants on the ledger before it signs (GDD §6.3: the
@@ -11566,6 +11683,16 @@ export class RegionSim {
     const old = this.regimeOf(rv);
     const next = this.pickRegime(rv.weights, old.id);
     rv.regime = next.id;
+    const oldName = rv.name;
+    if (rv.identity) {
+      const nrng = nationRng(this.map.seed, `regime:${rv.id}:${this.year}:${next.id}`);
+      const leader = personName(nrng, rv.identity.culture);
+      rv.identity.leaderTitle = leaderTitleFor(next.id, nrng, leader.feminine);
+      rv.leader = `${rv.identity.leaderTitle} ${leader.name}`;
+      rv.name = stateNameFor(rv.identity.land, next.id, nrng);
+      rv.identity.flag = reviseFlag(rv.identity.flag, next.id, this.map.seed + rv.id);
+      if (rv.name !== oldName) this.noteHistory(rv, `${oldName} renamed itself ${rv.name}, ${this.year}; ${rv.leader} leads.`);
+    }
     this.noteHistory(rv,
       cause === 'defeat'
         ? `Defeat brought down the ${old.name}; a ${next.name} seized power, ${this.year}.`
@@ -11573,8 +11700,8 @@ export class RegionSim {
     );
     this.addLog(
       cause === 'defeat'
-        ? `REVOLUTION in ${rv.name}: defeat brings down the ${old.name.toLowerCase()} — a ${next.name.toLowerCase()} seizes power.`
-        : `REGIME CHANGE in ${rv.name}: the ${old.name.toLowerCase()} falls; a ${next.name.toLowerCase()} takes its place.`,
+        ? `REVOLUTION in ${oldName}: defeat brings down the ${old.name.toLowerCase()} — a ${next.name.toLowerCase()} seizes power${rv.name !== oldName ? ` and proclaims the ${rv.name}` : ''}.`
+        : `REGIME CHANGE in ${oldName}: the ${old.name.toLowerCase()} falls; a ${next.name.toLowerCase()} takes its place${rv.name !== oldName ? ` as the ${rv.name}` : ''}.`,
       'info',
     );
   }
@@ -12875,6 +13002,8 @@ export class RegionSim {
       routes: this.routes,
       log: this.log,
       commandLog: this.commandLog,
+      territory: this.territory ? serializeTerritory(this.territory) : null,
+      territoryHistory: this.territoryHistory,
       stateProclaimed: this.stateProclaimed,
       ceremonyPending: this.ceremonyPending,
       charterProgress: this.charterProgress,
@@ -12910,6 +13039,7 @@ export class RegionSim {
       activePolicies: this.activePolicies,
       rivals: this.rivals,
       usedNamedRivals: [...this.usedNamedRivals],
+      worldMode: this.worldMode,
       offers: this.offers,
       counters: this.counters,
       treatiesBroken: this.treatiesBroken,
@@ -13145,6 +13275,10 @@ export class RegionSim {
     r.routes = (d.routes as Route[]).map((rt) => ({ ...rt, cargoType: rt.cargoType ?? null, cargoPriority: rt.cargoPriority ?? null }));
     r.log = d.log;
     r.commandLog = d.commandLog ?? [];
+    r.territory = d.territory ? deserializeTerritory(d.territory) : null;
+    r.territoryHistory = d.territoryHistory ?? [];
+    const hist = expandHistory(r.territoryHistory, REGION_N * REGION_N);
+    r.lastSnapshotOwner = hist.length ? hist[hist.length - 1].owner : null;
     r.stateProclaimed = d.stateProclaimed;
     r.ceremonyPending = d.ceremonyPending;
     r.charterProgress = d.charterProgress;
@@ -13190,6 +13324,7 @@ export class RegionSim {
     // pre-diplomacy saves carry no rivals: the world is still empty
     r.rivals = (d.rivals ?? []).map((rv: RivalNation) => ({ ...rv, borderSettled: rv.borderSettled ?? false }));
     r.usedNamedRivals = new Set(d.usedNamedRivals ?? []);
+    r.worldMode = d.worldMode ?? 'procedural';
     r.offers = d.offers ?? [];
     r.counters = d.counters ?? [];
     r.treatiesBroken = d.treatiesBroken ?? 0;
