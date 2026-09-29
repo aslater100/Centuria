@@ -367,3 +367,6 @@ layer-policy comment added instead); the three per-hex hash sites could share a 
 
 Suite: **1654** green · tsc ✓ · build ✓ · post-fix A/B re-shoot ✓ (full tile coverage after the
 shift fix, 33fps steady with art).
+
+## 2026-09-29 — session 25: Centuria 2.0 Phases 1–6
+Command layer · procgen nations & flags · living borders · memory/reactions · Dispatch + monthly agenda · decision events + breakaways · diplomacy/history/settings/onboarding. 1683 tests green, build green, schema v6. See centuria-plan.md.
