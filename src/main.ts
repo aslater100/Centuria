@@ -195,7 +195,6 @@ function enterRegionMode(r: RegionSim): void {
   regionView.onRailScreen = (id) => {
     if (id === 'history') regionView?.toggleHistory();
     else if (id === 'settings') settingsPanel.open();
-    else if (id === 'nation') regionView?.toggleStatePanel();
   };
   applySettings(settings);
   onboarding = settings.showTutorial ? new Onboarding(root) : null;
@@ -405,7 +404,7 @@ window.addEventListener('keydown', (e) => {
     const typing = target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
     if (!typing) {
       if (e.key === 'e' || e.key === 'E') { regionView.toggleEconomyPanel(); e.preventDefault(); return; }
-      if (e.key === 'g' || e.key === 'G') { regionView.toggleStatePanel(); e.preventDefault(); return; }
+      if (e.key === 'g' || e.key === 'G') { regionView.openScreen('nation'); e.preventDefault(); return; }
       if (e.key === 'o' || e.key === 'O') { regionView.toggleOverviewPanel(); e.preventDefault(); return; }
       if (e.key === 'c' || e.key === 'C') { regionView.openCenturyGraph(); e.preventDefault(); return; }
       if (e.key === '?') { regionView.toggleWikiPanel(); e.preventDefault(); return; }

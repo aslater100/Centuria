@@ -26,7 +26,7 @@ export const COMMAND_NAMES = [
   'sendGift', 'sendPlayerScout', 'setAutoBuildRoutes', 'setBlocTariff', 'setBlockade',
   'setCityPolicy', 'setMobilization', 'setMonetaryRegime', 'setOccupationPolicy',
   'setPolicy', 'setProvincePolicy', 'setRouteBudget', 'setRouteCargoPriority',
-  'setScoutTarget', 'setTownFocus', 'startResearch', 'yieldToCoalition',
+  'setScoutTarget', 'setTownFocus', 'setTaxRate', 'setServicesLevel', 'setMilitiaLevel', 'startResearch', 'yieldToCoalition',
 ] as const;
 
 export type CommandName = typeof COMMAND_NAMES[number];

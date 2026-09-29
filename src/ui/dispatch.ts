@@ -111,6 +111,7 @@ export class AgendaBar {
   onFocusRival: ((rivalId: number) => void) | null = null;
   onFocusSettlement: ((settlementId: number) => void) | null = null;
   onOpenDecision: ((eventId: string) => void) | null = null;
+  onOpenNation: ((tab: 'government' | 'military') => void) | null = null;
   private items: AgendaItem[] = [];
 
   constructor(root: HTMLElement) {
@@ -123,7 +124,8 @@ export class AgendaBar {
       const chip = t.closest<HTMLElement>('.agenda-item');
       if (!chip) return;
       const it = this.items.find((x) => x.id === chip.dataset.id);
-      if (it?.eventId !== undefined) this.onOpenDecision?.(it.eventId);
+      if (it?.kind === 'milestone' || it?.kind === 'war' || it?.kind === 'ultimatum') this.onOpenNation?.(it.kind === 'milestone' ? 'government' : 'military');
+      else if (it?.eventId !== undefined) this.onOpenDecision?.(it.eventId);
       else if (it?.rivalId !== undefined) this.onFocusRival?.(it.rivalId);
       else if (it?.settlementId !== undefined) this.onFocusSettlement?.(it.settlementId);
     });

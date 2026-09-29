@@ -36,6 +36,7 @@ import { DiplomacyScreen } from './diplomacyScreen';
 import { EconomyScreen } from './screens/economyScreen';
 import { ResearchScreen } from './screens/researchScreen';
 import { TownDrawer } from './screens/townDrawer';
+import { NationScreen } from './screens/nationScreen';
 import { ScreenRail, type RailScreen } from './screens/rail';
 
 /** localStorage flag (U3): the in-game wiki auto-opens once on a player's first game. */
@@ -445,6 +446,14 @@ export class RegionView {
     this.economyScreen = new EconomyScreen(root);
     this.researchScreen = new ResearchScreen(root);
     this.townDrawer = new TownDrawer(root);
+    this.nationScreen = new NationScreen(root);
+    this.nationScreen.onSetFiscal = (k, v) => {
+      if (k === 'taxRate') issue(this.region, 'setTaxRate', v);
+      else if (k === 'servicesLevel') issue(this.region, 'setServicesLevel', v);
+      else issue(this.region, 'setMilitiaLevel', v);
+    };
+    this.agendaBar.onOpenNation = (tab) => this.nationScreen.open(this.region, tab);
+    this.nationScreen.onProclaimNation = () => { this.nationScreen.close(); this.conventionOpen = true; };
     this.rail = new ScreenRail(root);
     this.rail.onOpen = (id) => this.openScreen(id);
     this.economyScreen.onFocusTown = (id) => { this.economyScreen.close(); this.focusTown(id); };
@@ -478,6 +487,7 @@ export class RegionView {
   readonly economyScreen: EconomyScreen;
   readonly researchScreen: ResearchScreen;
   readonly townDrawer: TownDrawer;
+  readonly nationScreen: NationScreen;
   readonly rail: ScreenRail;
   /** Set by main.ts for rail entries it owns (history, settings, nation). */
   onRailScreen: ((id: RailScreen) => void) | null = null;
@@ -486,7 +496,8 @@ export class RegionView {
   openScreen(id: RailScreen): void {
     const r = this.region;
     const toggle = (s: { isOpen: boolean; open(r: RegionSim): void; close(): void }) => (s.isOpen ? s.close() : s.open(r));
-    if (id === 'economy') toggle(this.economyScreen);
+    if (id === 'nation') toggle(this.nationScreen);
+    else if (id === 'economy') toggle(this.economyScreen);
     else if (id === 'research') toggle(this.researchScreen);
     else if (id === 'foreign') toggle(this.diplomacyScreen);
     else if (id === 'help') this.toggleWikiPanel();
@@ -5469,8 +5480,9 @@ export class RegionView {
       this.economyScreen.refresh(this.region);
       this.researchScreen.refresh(this.region);
       this.townDrawer.refresh(this.region);
+      this.nationScreen.refresh(this.region);
     }
-    this.rail.setActive(this.economyScreen.isOpen ? 'economy' : this.researchScreen.isOpen ? 'research'
+    this.rail.setActive(this.nationScreen.isOpen ? 'nation' : this.economyScreen.isOpen ? 'economy' : this.researchScreen.isOpen ? 'research'
       : this.diplomacyScreen.isOpen ? 'foreign' : this.historyOpen ? 'history' : null);
     this.agendaBar.update(this.region, this.awaitingTurn);
   }

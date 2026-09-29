@@ -3896,6 +3896,19 @@ export class RegionSim {
   eventsFired: Record<string, number> = {};
   eventFlags: string[] = [];
 
+  /** Fiscal levers as commands (Centuria 2.0: every player act is logged). */
+  setTaxRate(rate: number): void {
+    this.taxRate = Math.max(0, Math.min(0.6, rate));
+  }
+
+  setServicesLevel(level: number): void {
+    this.servicesLevel = Math.max(0, Math.min(2, Math.round(level)));
+  }
+
+  setMilitiaLevel(level: number): void {
+    this.militiaLevel = Math.max(0, Math.min(2, Math.round(level)));
+  }
+
   /** Answer an open decision event (routed through issue()). */
   chooseEventOption(eventId: string, index: number): boolean {
     return chooseOption(this, eventId, index);
