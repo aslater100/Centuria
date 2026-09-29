@@ -5,8 +5,9 @@
  * on a short list of heavy decisions instead of a wall of panels.
  */
 import type { RegionSim } from './region';
+import { eventDef } from './events/decisions';
 
-export type AgendaKind = 'offer' | 'negotiation' | 'ultimatum' | 'war' | 'unrest' | 'reaction' | 'advisor' | 'milestone';
+export type AgendaKind = 'decision' | 'offer' | 'negotiation' | 'ultimatum' | 'war' | 'unrest' | 'reaction' | 'advisor' | 'milestone';
 
 export interface AgendaItem {
   id: string;
@@ -17,12 +18,22 @@ export interface AgendaItem {
   /** Rival or settlement the item concerns, for the UI to focus. */
   rivalId?: number;
   settlementId?: number;
+  eventId?: string;
 }
 
 const REACTION_WINDOW_DAYS = 30;
 
 export function agenda(r: RegionSim): AgendaItem[] {
   const items: AgendaItem[] = [];
+  for (const a of r.activeDecisions) {
+    const def = eventDef(a.eventId);
+    if (!def) continue;
+    items.push({
+      id: `decision:${a.eventId}`, kind: 'decision', urgency: 3, eventId: a.eventId,
+      title: def.title,
+      detail: `${a.speakerName} awaits your answer (${Math.max(0, a.expires - r.day)} days).`,
+    });
+  }
   const c = r.coalition;
   if (c?.demand && c.ultimatumDay !== null && !c.warDeclared) {
     items.push({

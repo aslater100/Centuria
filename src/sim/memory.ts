@@ -12,7 +12,7 @@ export type DeedTag =
   | 'censorship' | 'press_freedom' | 'relief' | 'gift' | 'sanction' | 'lifted_sanction'
   | 'printed_money' | 'reform' | 'land_grab' | 'purchase' | 'brutal_occupation'
   | 'peacemaker' | 'proclaimed' | 'yielded' | 'capitulated' | 'vassalized'
-  | 'took_land' | 'lost_land' | 'espionage' | 'treaty_signed' | 'war_won' | 'war_lost';
+  | 'took_land' | 'lost_land' | 'secession' | 'espionage' | 'treaty_signed' | 'war_won' | 'war_lost';
 
 export type ActorKind = 'rival' | 'faction';
 
@@ -89,6 +89,7 @@ const REPUTATION_AXES: Record<DeedTag, Partial<Reputation>> = {
   vassalized: { aggressive: 0.4 },
   took_land: { aggressive: 0.3 },
   lost_land: {},
+  secession: {},
   espionage: { trustworthy: -0.6 },
   treaty_signed: { trustworthy: 0.5 },
   war_won: { aggressive: 0.2 },

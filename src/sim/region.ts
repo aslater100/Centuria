@@ -11,6 +11,7 @@ import type { Command } from './commands';
 import { recordDeed, fadeDeeds, type Deed, type OpinionEntry, type ActorKind } from './memory';
 import type { NewsCategory } from './narrative/press';
 import { scheduleReactions as scheduleReactionsFor, tickReactions, type PendingReaction } from './reactions';
+import { tickDecisionEvents, chooseOption, type ActiveDecision, type ScheduledEvent } from './events/decisions';
 import {
   createTerritory, settleTerritory, advanceTerritory, contestedMask, areaByFid,
   serializeTerritory, deserializeTerritory, makeSnapshot, expandHistory, SHIFT_REPORT_MIN, CONTROL_MAX,
@@ -3807,6 +3808,10 @@ export const SAVE_SCHEMA_VERSION = 6;
 
 /** Centuria 2.0 §F stakes caps. */
 export const LEVY_STACK_CEILING = 0.2;
+/** Centuria 2.0 §G breakaway nations. */
+export const BREAKAWAY_DISTANCE = 30;
+export const BREAKAWAY_JOIN_RADIUS = 18;
+export const BREAKAWAY_JOIN_GRIEVANCE = 60;
 export const WAR_QUALITY_TAPER = 0.75;
 
 /** Thrown by `RegionSim.deserialize` when a save blob predates SAVE_SCHEMA_VERSION.
@@ -3852,6 +3857,16 @@ export class RegionSim {
   nextDeedId = 1;
   /** Centuria 2.0 §C — reactions rolled but not yet delivered. */
   pendingReactions: PendingReaction[] = [];
+  /** Centuria 2.0 §D — decision events awaiting the player, chain follow-ups, history. */
+  activeDecisions: ActiveDecision[] = [];
+  scheduledEvents: ScheduledEvent[] = [];
+  eventsFired: Record<string, number> = {};
+  eventFlags: string[] = [];
+
+  /** Answer an open decision event (routed through issue()). */
+  chooseEventOption(eventId: string, index: number): boolean {
+    return chooseOption(this, eventId, index);
+  }
 
   scheduleReactions(d: Deed): void {
     scheduleReactionsFor(this, d);
@@ -4853,6 +4868,61 @@ export class RegionSim {
     return Math.min(1, total);
   }
 
+  /** Centuria 2.0 §G — a town (and its restless near neighbours) proclaims
+   *  independence as a new generated nation on the map. */
+  spawnBreakaway(capital: Settlement): RegionalFaction | null {
+    const player = this.faction(this.playerFactionId);
+    if (!player) return null;
+    const own = this.settlements.filter((s) => s.factionId === this.playerFactionId);
+    if (own.length <= 1) return null;
+    const joining = own.filter((s) => s.id === capital.id ||
+      (s.id !== player.capital && s.grievance >= BREAKAWAY_JOIN_GRIEVANCE &&
+        Math.hypot(s.x - capital.x, s.y - capital.y) <= BREAKAWAY_JOIN_RADIUS));
+    if (joining.length >= own.length) return null;
+    const id = Math.max(...this.regionalFactions.map((f) => f.id)) + 1;
+    const nrng = nationRng(this.map.seed, `breakaway:${id}`);
+    const regime = nrng.pick(['parliamentary', 'peoples_republic', 'junta', 'merchant_republic'] as const);
+    const gen = generateNation(this.map.seed, `breakaway:${id}`, { regime });
+    const land = capital.name;
+    const name = stateNameFor(land, regime, nrng);
+    const palette = ['#9b59b6', '#16a085', '#d35400', '#2c3e50', '#c0392b', '#7f8c8d'];
+    const knobs = this.aiKnobs();
+    const f: RegionalFaction = {
+      id, name, color: palette[id % palette.length], capital: capital.id, settlementIds: [],
+      treasury: 60, treasuryByCurrency: { [id]: 60 }, militaryStrength: 3, techProgress: 0,
+      centralBank: null, currencyId: id, currencyName: gen.currencyName,
+      aggressiveness: 55, regime, techFocus: 'farming', aiGoal: 'secure independence',
+      lastScoutDay: -1, lastRaidDay: -999, lastUpdateDay: this.day, updateFrequency: knobs.updateFreq,
+      currentGoal: null, lastGoalCheckDay: this.day, overlordId: null, vassals: [],
+      identity: {
+        culture: gen.culture, land, adjective: gen.adjective, leaderTitle: gen.leaderTitle,
+        leaderName: gen.leaderName, flag: gen.flag, quirks: [...gen.quirks.filter((q) => q !== 'revanchist'), 'revanchist'].slice(-2),
+        voice: gen.voice,
+      },
+    };
+    this.regionalFactions.push(f);
+    this.exchangeRates[`0:${id}`] = 1.0;
+    this.exchangeRates[`${id}:0`] = 1.0;
+    for (const s of joining) {
+      player.settlementIds = player.settlementIds.filter((x) => x !== s.id);
+      s.factionId = id;
+      s.loyaltyToFaction = 70;
+      s.grievance = Math.max(0, s.grievance - 40);
+      f.settlementIds.push(s.id);
+    }
+    if (joining.some((s) => s.id === player.capital)) player.capital = player.settlementIds[0] ?? -1;
+    this._territoryCache = null;
+    this.territoryVersion++;
+    this.secessionsFired++;
+    this.addLog(
+      `INDEPENDENCE: ${joining.map((s) => s.name).join(', ')} ${joining.length > 1 ? 'break' : 'breaks'} away and ` +
+      `${joining.length > 1 ? 'proclaim' : 'proclaims'} the ${name}. ${f.identity!.leaderTitle} ${f.identity!.leaderName} raises a new flag.`,
+      'bad', { cat: 'frontier', actor: { kind: 'faction', id } },
+    );
+    recordDeed(this, { tag: 'secession', weight: 3, targetKind: 'faction', targetId: id });
+    return f;
+  }
+
   /** D2 — a settlement fractures away from the player after a failed revolution, handed to
    *  the nearest hostile regional faction (nearest of any faction if none is hostile). Mirrors
    *  assaultSettlement's ownership bookkeeping in reverse and invalidates the territory cache
@@ -4864,7 +4934,6 @@ export class RegionSim {
     const candidates = this.regionalFactions.filter(
       (f) => f.id !== this.playerFactionId && f.overlordId !== this.playerFactionId && f.settlementIds.length > 0,
     );
-    if (candidates.length === 0) return false;
     const nearestDist = (f: RegionalFaction): number => {
       const dists = f.settlementIds
         .map((id) => this.settlement(id))
@@ -4872,6 +4941,11 @@ export class RegionSim {
         .map((s) => Math.hypot(s.x - t.x, s.y - t.y));
       return dists.length ? Math.min(...dists) : Infinity;
     };
+    // Centuria 2.0 §G: far from any neighbour, a breaking town declares itself a nation.
+    if (candidates.length === 0 || Math.min(...candidates.map(nearestDist)) > BREAKAWAY_DISTANCE) {
+      if (this.spawnBreakaway(t)) return true;
+      if (candidates.length === 0) return false;
+    }
     const hostile = candidates.filter((f) => this.playerRegionalWars.has(f.id) || f.aggressiveness > 60);
     const pool = hostile.length > 0 ? hostile : candidates;
     const target = pool.reduce((a, b) => (nearestDist(a) <= nearestDist(b) ? a : b));
@@ -6803,6 +6877,7 @@ export class RegionSim {
   private monthlyUpdate(): void {
     this.tickTerritory();
     fadeDeeds(this);
+    tickDecisionEvents(this);
     // Record the prior month's net treasury swing before this month's books move.
     this.treasuryDeltaMonth = this.treasury - this.prevMonthTreasury;
     this.prevMonthTreasury = this.treasury;
@@ -13036,6 +13111,10 @@ export class RegionSim {
       deeds: this.deeds,
       nextDeedId: this.nextDeedId,
       pendingReactions: this.pendingReactions,
+      activeDecisions: this.activeDecisions,
+      scheduledEvents: this.scheduledEvents,
+      eventsFired: this.eventsFired,
+      eventFlags: this.eventFlags,
       territory: this.territory ? serializeTerritory(this.territory) : null,
       territoryHistory: this.territoryHistory,
       stateProclaimed: this.stateProclaimed,
@@ -13312,6 +13391,10 @@ export class RegionSim {
     r.deeds = d.deeds ?? [];
     r.nextDeedId = d.nextDeedId ?? 1;
     r.pendingReactions = d.pendingReactions ?? [];
+    r.activeDecisions = d.activeDecisions ?? [];
+    r.scheduledEvents = d.scheduledEvents ?? [];
+    r.eventsFired = d.eventsFired ?? {};
+    r.eventFlags = d.eventFlags ?? [];
     r.territory = d.territory ? deserializeTerritory(d.territory) : null;
     r.territoryHistory = d.territoryHistory ?? [];
     const hist = expandHistory(r.territoryHistory, REGION_N * REGION_N);

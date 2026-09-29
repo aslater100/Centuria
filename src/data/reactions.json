@@ -1,98 +1,608 @@
 [
-  { "id": "war_victim_fury", "on": "aggression", "who": "target", "chance": 1, "delay": [3, 10],
-    "effects": { "relations": -25, "grudge": 2 },
-    "text": "{leader} of {actor}: \"This unprovoked assault will be remembered for generations.\"", "kind": "bad" },
-  { "id": "war_alarm_honorable", "on": "aggression", "who": "others", "chance": 0.25,
-    "traits": { "honor": 0.05 }, "quirks": { "humanitarian": 0.3, "crown_legitimist": 0.1 }, "delay": [10, 45],
-    "effects": { "relations": -8 },
-    "text": "{actor} condemns our war — {leader} warns that no border is safe while we march.", "kind": "bad" },
-  { "id": "war_opportunist_cheer", "on": "aggression", "who": "others", "chance": 0.15,
-    "traits": { "risk": 0.04 }, "quirks": { "grain_hawk": 0.2 }, "requireRelToTarget": { "lt": -20 }, "delay": [10, 40],
-    "effects": { "relations": 6 },
-    "text": "{actor}, no friend of {target}, quietly toasts our campaign.", "kind": "good" },
-  { "id": "arms_race", "on": "aggression", "who": "others", "chance": 0.1, "quirks": { "arms_racer": 0.8 }, "delay": [20, 90],
-    "effects": { "grudge": 1, "relations": -4 },
-    "text": "{actor} doubles its conscription quotas, citing our belligerence.", "kind": "bad" },
-
-  { "id": "betrayal_victim", "on": "broke_treaty", "who": "target", "chance": 1, "delay": [2, 8],
-    "effects": { "relations": -20, "grudge": 3 },
-    "text": "{leader} of {actor}: \"Our signature meant something. Yours, evidently, did not.\"", "kind": "bad" },
-  { "id": "betrayal_noticed", "on": "broke_treaty", "who": "others", "chance": 0.45,
-    "traits": { "honor": 0.05 }, "quirks": { "status_seeker": 0.2, "pragmatist": -0.3 }, "delay": [10, 50],
-    "effects": { "relations": -7 },
-    "text": "Chanceries take note: {actor} now demands stronger guarantees from us before any signature.", "kind": "bad" },
-  { "id": "betrayal_offer_cancel", "on": "broke_treaty", "who": "others", "chance": 0.2, "traits": { "grudge": 0.03 },
-    "requireTreaty": true, "delay": [30, 90],
-    "effects": { "cancelTreaty": true, "relations": -5 },
-    "text": "{actor} withdraws from its treaty with us, fearing it would be next to be betrayed.", "kind": "bad" },
-
-  { "id": "crackdown_humanitarian", "on": "crackdown", "who": "others", "chance": 0.1,
-    "quirks": { "humanitarian": 0.8, "republic_patron": 0.3 }, "blocs": ["liberal"], "blocBonus": 0.3, "delay": [7, 30],
-    "effects": { "relations": -9 },
-    "text": "{actor} condemns the crackdown: \"A government that fires on its people forfeits the name.\"", "kind": "bad" },
-  { "id": "crackdown_autocrat_nod", "on": "crackdown", "who": "others", "chance": 0.05, "blocs": ["autocratic"], "blocBonus": 0.4,
-    "delay": [7, 30], "effects": { "relations": 5 },
-    "text": "{actor}'s state press praises our \"restoration of order.\"", "kind": "info" },
-  { "id": "concession_liberal", "on": "concession", "who": "others", "chance": 0.05, "blocs": ["liberal"], "blocBonus": 0.3,
-    "quirks": { "humanitarian": 0.3 }, "delay": [10, 40], "effects": { "relations": 4 },
-    "text": "{actor} welcomes our concessions to the protesters as \"the mark of a confident state.\"", "kind": "good" },
-  { "id": "censorship_frown", "on": "censorship", "who": "others", "chance": 0.05, "blocs": ["liberal"], "blocBonus": 0.35,
-    "delay": [10, 40], "effects": { "relations": -5 },
-    "text": "Newspapers in {actor} run blank columns in solidarity with our silenced press.", "kind": "bad" },
-  { "id": "press_freedom_praise", "on": "press_freedom", "who": "others", "chance": 0.05, "blocs": ["liberal"], "blocBonus": 0.3,
-    "delay": [10, 40], "effects": { "relations": 3 },
-    "text": "{actor}'s correspondents hail our newly free press.", "kind": "good" },
-
-  { "id": "gift_warmth", "on": "gift", "who": "target", "chance": 0.7, "traits": { "commerce": 0.03 },
-    "quirks": { "merchant_soul": 0.2, "status_seeker": 0.2 }, "delay": [3, 15], "effects": { "relations": 4 },
-    "text": "{leader} of {actor} sends thanks for our gift — and a case of their finest.", "kind": "good" },
-  { "id": "gift_insult", "on": "gift", "who": "target", "chance": 0.05, "quirks": { "status_seeker": 0.25, "isolationist": 0.2 },
-    "delay": [3, 15], "effects": { "relations": -3 },
-    "text": "{actor} returns our gift unopened: \"We are not for sale.\"", "kind": "bad" },
-  { "id": "relief_goodwill", "on": "relief", "who": "others", "chance": 0.03, "quirks": { "humanitarian": 0.4 },
-    "delay": [10, 40], "effects": { "relations": 3 },
-    "text": "{actor} praises the relief convoys we sent to our own hungry towns.", "kind": "good" },
-
-  { "id": "sanction_retaliate", "on": "sanction", "who": "target", "chance": 0.5, "traits": { "grudge": 0.05 },
-    "quirks": { "status_seeker": 0.2, "merchant_soul": -0.2 }, "delay": [5, 30], "effects": { "sanction": true, "relations": -5 },
-    "text": "{actor} answers our sanctions with its own: \"Two can close a harbour.\"", "kind": "bad" },
-  { "id": "sanction_lifted_thaw", "on": "lifted_sanction", "who": "target", "chance": 0.8, "delay": [5, 20],
-    "effects": { "relations": 5 },
-    "text": "{actor}'s merchants cheer as our markets reopen to them.", "kind": "good" },
-
-  { "id": "printing_scorn", "on": "printed_money", "who": "others", "chance": 0.1, "traits": { "commerce": 0.05 },
-    "quirks": { "merchant_soul": 0.3 }, "delay": [20, 60], "effects": { "relations": -4 },
-    "text": "{actor}'s bankers mock our currency: \"Their notes make better kindling than coin.\"", "kind": "bad" },
-  { "id": "printing_trade_pullback", "on": "printed_money", "who": "others", "chance": 0.05, "traits": { "commerce": 0.03 },
-    "requireTreaty": "trade_agreement", "delay": [30, 90], "effects": { "cancelTreaty": "trade_agreement", "relations": -3 },
-    "text": "{actor} suspends its trade agreement, unwilling to be paid in our inflating currency.", "kind": "bad" },
-
-  { "id": "land_grab_neighbour", "on": "land_grab", "who": "factions", "chance": 0.1, "delay": [15, 60],
-    "effects": { "aggressiveness": 4 },
-    "text": "{actor} protests our new frontier claims and garrisons its border towns.", "kind": "bad" },
-  { "id": "took_land_revanche", "on": "took_land", "who": "target", "chance": 0.6, "quirks": { "revanchist": 0.4 },
-    "delay": [10, 40], "effects": { "aggressiveness": 8, "relations": -6, "grudge": 1 },
-    "text": "{actor} swears the lost borderlands will be restored. Maps with the old frontier hang in every schoolroom.", "kind": "bad" },
-  { "id": "brutal_occupation_outrage", "on": "brutal_occupation", "who": "others", "chance": 0.3,
-    "quirks": { "humanitarian": 0.6 }, "traits": { "honor": 0.03 }, "delay": [15, 60], "effects": { "relations": -8 },
-    "text": "Reports of our occupation methods reach {actor}; {leader} calls it \"a stain on the century.\"", "kind": "bad" },
-
-  { "id": "peacemaker_respect", "on": "peacemaker", "who": "others", "chance": 0.25, "traits": { "honor": 0.04 },
-    "quirks": { "pragmatist": 0.2, "humanitarian": 0.2 }, "delay": [10, 40], "effects": { "relations": 5 },
-    "text": "{actor} commends our peacemaking: \"A rare statesmanship in this age.\"", "kind": "good" },
-  { "id": "treaty_goodwill", "on": "treaty_signed", "who": "others", "chance": 0.08, "quirks": { "merchant_soul": 0.2 },
-    "delay": [15, 60], "effects": { "relations": 2 },
-    "text": "{actor} takes note of our new treaty and sounds out terms of its own.", "kind": "info" },
-  { "id": "proclamation_salute", "on": "proclaimed", "who": "others", "chance": 0.5, "quirks": { "republic_patron": 0.4 },
-    "delay": [5, 30], "effects": { "relations": 5 },
-    "text": "{actor} is among the first to recognise our new nation. {leader} sends congratulations.", "kind": "good" },
-  { "id": "proclamation_suspicion", "on": "proclaimed", "who": "others", "chance": 0.2, "traits": { "expansion": 0.04 },
-    "quirks": { "status_seeker": 0.2, "arms_racer": 0.2 }, "delay": [5, 30], "effects": { "relations": -5 },
-    "text": "{actor} declines to recognise our proclamation — \"a colony in a borrowed crown.\"", "kind": "bad" },
-  { "id": "espionage_exposed", "on": "espionage", "who": "target", "chance": 1, "delay": [1, 5],
-    "effects": { "relations": -6, "grudge": 1 },
-    "text": "{actor} parades our captured agents before the press.", "kind": "bad" },
-  { "id": "yield_contempt", "on": "yielded", "who": "others", "chance": 0.3, "traits": { "expansion": 0.05 },
-    "delay": [10, 40], "effects": { "relations": -3, "grudge": 1 },
-    "text": "{actor}'s press sneers at our climbdown: \"They bent once. They will bend again.\"", "kind": "bad" }
+ {
+  "id": "war_victim_fury",
+  "on": "aggression",
+  "who": "target",
+  "chance": 1,
+  "delay": [
+   3,
+   10
+  ],
+  "effects": {
+   "relations": -25,
+   "grudge": 2
+  },
+  "text": "{leader} of {actor}: \"This unprovoked assault will be remembered for generations.\"",
+  "kind": "bad"
+ },
+ {
+  "id": "war_alarm_honorable",
+  "on": "aggression",
+  "who": "others",
+  "chance": 0.25,
+  "traits": {
+   "honor": 0.05
+  },
+  "quirks": {
+   "humanitarian": 0.3,
+   "crown_legitimist": 0.1
+  },
+  "delay": [
+   10,
+   45
+  ],
+  "effects": {
+   "relations": -8
+  },
+  "text": "{actor} condemns our war — {leader} warns that no border is safe while we march.",
+  "kind": "bad"
+ },
+ {
+  "id": "war_opportunist_cheer",
+  "on": "aggression",
+  "who": "others",
+  "chance": 0.15,
+  "traits": {
+   "risk": 0.04
+  },
+  "quirks": {
+   "grain_hawk": 0.2
+  },
+  "requireRelToTarget": {
+   "lt": -20
+  },
+  "delay": [
+   10,
+   40
+  ],
+  "effects": {
+   "relations": 6
+  },
+  "text": "{actor}, no friend of {target}, quietly toasts our campaign.",
+  "kind": "good"
+ },
+ {
+  "id": "arms_race",
+  "on": "aggression",
+  "who": "others",
+  "chance": 0.1,
+  "quirks": {
+   "arms_racer": 0.8
+  },
+  "delay": [
+   20,
+   90
+  ],
+  "effects": {
+   "grudge": 1,
+   "relations": -4
+  },
+  "text": "{actor} doubles its conscription quotas, citing our belligerence.",
+  "kind": "bad"
+ },
+ {
+  "id": "betrayal_victim",
+  "on": "broke_treaty",
+  "who": "target",
+  "chance": 1,
+  "delay": [
+   2,
+   8
+  ],
+  "effects": {
+   "relations": -20,
+   "grudge": 3
+  },
+  "text": "{leader} of {actor}: \"Our signature meant something. Yours, evidently, did not.\"",
+  "kind": "bad"
+ },
+ {
+  "id": "betrayal_noticed",
+  "on": "broke_treaty",
+  "who": "others",
+  "chance": 0.45,
+  "traits": {
+   "honor": 0.05
+  },
+  "quirks": {
+   "status_seeker": 0.2,
+   "pragmatist": -0.3
+  },
+  "delay": [
+   10,
+   50
+  ],
+  "effects": {
+   "relations": -7
+  },
+  "text": "Chanceries take note: {actor} now demands stronger guarantees from us before any signature.",
+  "kind": "bad"
+ },
+ {
+  "id": "betrayal_offer_cancel",
+  "on": "broke_treaty",
+  "who": "others",
+  "chance": 0.2,
+  "traits": {
+   "grudge": 0.03
+  },
+  "requireTreaty": true,
+  "delay": [
+   30,
+   90
+  ],
+  "effects": {
+   "cancelTreaty": true,
+   "relations": -5
+  },
+  "text": "{actor} withdraws from its treaty with us, fearing it would be next to be betrayed.",
+  "kind": "bad"
+ },
+ {
+  "id": "crackdown_humanitarian",
+  "on": "crackdown",
+  "who": "others",
+  "chance": 0.1,
+  "quirks": {
+   "humanitarian": 0.8,
+   "republic_patron": 0.3
+  },
+  "blocs": [
+   "liberal"
+  ],
+  "blocBonus": 0.3,
+  "delay": [
+   7,
+   30
+  ],
+  "effects": {
+   "relations": -9
+  },
+  "text": "{actor} condemns the crackdown: \"A government that fires on its people forfeits the name.\"",
+  "kind": "bad"
+ },
+ {
+  "id": "crackdown_autocrat_nod",
+  "on": "crackdown",
+  "who": "others",
+  "chance": 0.05,
+  "blocs": [
+   "autocratic"
+  ],
+  "blocBonus": 0.4,
+  "delay": [
+   7,
+   30
+  ],
+  "effects": {
+   "relations": 5
+  },
+  "text": "{actor}'s state press praises our \"restoration of order.\"",
+  "kind": "info"
+ },
+ {
+  "id": "concession_liberal",
+  "on": "concession",
+  "who": "others",
+  "chance": 0.05,
+  "blocs": [
+   "liberal"
+  ],
+  "blocBonus": 0.3,
+  "quirks": {
+   "humanitarian": 0.3
+  },
+  "delay": [
+   10,
+   40
+  ],
+  "effects": {
+   "relations": 4
+  },
+  "text": "{actor} welcomes our concessions to the protesters as \"the mark of a confident state.\"",
+  "kind": "good"
+ },
+ {
+  "id": "censorship_frown",
+  "on": "censorship",
+  "who": "others",
+  "chance": 0.05,
+  "blocs": [
+   "liberal"
+  ],
+  "blocBonus": 0.35,
+  "delay": [
+   10,
+   40
+  ],
+  "effects": {
+   "relations": -5
+  },
+  "text": "Newspapers in {actor} run blank columns in solidarity with our silenced press.",
+  "kind": "bad"
+ },
+ {
+  "id": "press_freedom_praise",
+  "on": "press_freedom",
+  "who": "others",
+  "chance": 0.05,
+  "blocs": [
+   "liberal"
+  ],
+  "blocBonus": 0.3,
+  "delay": [
+   10,
+   40
+  ],
+  "effects": {
+   "relations": 3
+  },
+  "text": "{actor}'s correspondents hail our newly free press.",
+  "kind": "good"
+ },
+ {
+  "id": "gift_warmth",
+  "on": "gift",
+  "who": "target",
+  "chance": 0.7,
+  "traits": {
+   "commerce": 0.03
+  },
+  "quirks": {
+   "merchant_soul": 0.2,
+   "status_seeker": 0.2
+  },
+  "delay": [
+   3,
+   15
+  ],
+  "effects": {
+   "relations": 4
+  },
+  "text": "{leader} of {actor} sends thanks for our gift — and a case of their finest.",
+  "kind": "good"
+ },
+ {
+  "id": "gift_insult",
+  "on": "gift",
+  "who": "target",
+  "chance": 0.05,
+  "quirks": {
+   "status_seeker": 0.25,
+   "isolationist": 0.2
+  },
+  "delay": [
+   3,
+   15
+  ],
+  "effects": {
+   "relations": -3
+  },
+  "text": "{actor} returns our gift unopened: \"We are not for sale.\"",
+  "kind": "bad"
+ },
+ {
+  "id": "relief_goodwill",
+  "on": "relief",
+  "who": "others",
+  "chance": 0.03,
+  "quirks": {
+   "humanitarian": 0.4
+  },
+  "delay": [
+   10,
+   40
+  ],
+  "effects": {
+   "relations": 3
+  },
+  "text": "{actor} praises the relief convoys we sent to our own hungry towns.",
+  "kind": "good"
+ },
+ {
+  "id": "sanction_retaliate",
+  "on": "sanction",
+  "who": "target",
+  "chance": 0.5,
+  "traits": {
+   "grudge": 0.05
+  },
+  "quirks": {
+   "status_seeker": 0.2,
+   "merchant_soul": -0.2
+  },
+  "delay": [
+   5,
+   30
+  ],
+  "effects": {
+   "sanction": true,
+   "relations": -5
+  },
+  "text": "{actor} answers our sanctions with its own: \"Two can close a harbour.\"",
+  "kind": "bad"
+ },
+ {
+  "id": "sanction_lifted_thaw",
+  "on": "lifted_sanction",
+  "who": "target",
+  "chance": 0.8,
+  "delay": [
+   5,
+   20
+  ],
+  "effects": {
+   "relations": 5
+  },
+  "text": "{actor}'s merchants cheer as our markets reopen to them.",
+  "kind": "good"
+ },
+ {
+  "id": "printing_scorn",
+  "on": "printed_money",
+  "who": "others",
+  "chance": 0.1,
+  "traits": {
+   "commerce": 0.05
+  },
+  "quirks": {
+   "merchant_soul": 0.3
+  },
+  "delay": [
+   20,
+   60
+  ],
+  "effects": {
+   "relations": -4
+  },
+  "text": "{actor}'s bankers mock our currency: \"Their notes make better kindling than coin.\"",
+  "kind": "bad"
+ },
+ {
+  "id": "printing_trade_pullback",
+  "on": "printed_money",
+  "who": "others",
+  "chance": 0.05,
+  "traits": {
+   "commerce": 0.03
+  },
+  "requireTreaty": "trade_agreement",
+  "delay": [
+   30,
+   90
+  ],
+  "effects": {
+   "cancelTreaty": "trade_agreement",
+   "relations": -3
+  },
+  "text": "{actor} suspends its trade agreement, unwilling to be paid in our inflating currency.",
+  "kind": "bad"
+ },
+ {
+  "id": "land_grab_neighbour",
+  "on": "land_grab",
+  "who": "factions",
+  "chance": 0.1,
+  "delay": [
+   15,
+   60
+  ],
+  "effects": {
+   "aggressiveness": 4
+  },
+  "text": "{actor} protests our new frontier claims and garrisons its border towns.",
+  "kind": "bad"
+ },
+ {
+  "id": "took_land_revanche",
+  "on": "took_land",
+  "who": "target",
+  "chance": 0.6,
+  "quirks": {
+   "revanchist": 0.4
+  },
+  "delay": [
+   10,
+   40
+  ],
+  "effects": {
+   "aggressiveness": 8,
+   "relations": -6,
+   "grudge": 1
+  },
+  "text": "{actor} swears the lost borderlands will be restored. Maps with the old frontier hang in every schoolroom.",
+  "kind": "bad"
+ },
+ {
+  "id": "brutal_occupation_outrage",
+  "on": "brutal_occupation",
+  "who": "others",
+  "chance": 0.3,
+  "quirks": {
+   "humanitarian": 0.6
+  },
+  "traits": {
+   "honor": 0.03
+  },
+  "delay": [
+   15,
+   60
+  ],
+  "effects": {
+   "relations": -8
+  },
+  "text": "Reports of our occupation methods reach {actor}; {leader} calls it \"a stain on the century.\"",
+  "kind": "bad"
+ },
+ {
+  "id": "peacemaker_respect",
+  "on": "peacemaker",
+  "who": "others",
+  "chance": 0.25,
+  "traits": {
+   "honor": 0.04
+  },
+  "quirks": {
+   "pragmatist": 0.2,
+   "humanitarian": 0.2
+  },
+  "delay": [
+   10,
+   40
+  ],
+  "effects": {
+   "relations": 5
+  },
+  "text": "{actor} commends our peacemaking: \"A rare statesmanship in this age.\"",
+  "kind": "good"
+ },
+ {
+  "id": "treaty_goodwill",
+  "on": "treaty_signed",
+  "who": "others",
+  "chance": 0.08,
+  "quirks": {
+   "merchant_soul": 0.2
+  },
+  "delay": [
+   15,
+   60
+  ],
+  "effects": {
+   "relations": 2
+  },
+  "text": "{actor} takes note of our new treaty and sounds out terms of its own.",
+  "kind": "info"
+ },
+ {
+  "id": "proclamation_salute",
+  "on": "proclaimed",
+  "who": "others",
+  "chance": 0.5,
+  "quirks": {
+   "republic_patron": 0.4
+  },
+  "delay": [
+   5,
+   30
+  ],
+  "effects": {
+   "relations": 5
+  },
+  "text": "{actor} is among the first to recognise our new nation. {leader} sends congratulations.",
+  "kind": "good"
+ },
+ {
+  "id": "proclamation_suspicion",
+  "on": "proclaimed",
+  "who": "others",
+  "chance": 0.2,
+  "traits": {
+   "expansion": 0.04
+  },
+  "quirks": {
+   "status_seeker": 0.2,
+   "arms_racer": 0.2
+  },
+  "delay": [
+   5,
+   30
+  ],
+  "effects": {
+   "relations": -5
+  },
+  "text": "{actor} declines to recognise our proclamation — \"a colony in a borrowed crown.\"",
+  "kind": "bad"
+ },
+ {
+  "id": "espionage_exposed",
+  "on": "espionage",
+  "who": "target",
+  "chance": 1,
+  "delay": [
+   1,
+   5
+  ],
+  "effects": {
+   "relations": -6,
+   "grudge": 1
+  },
+  "text": "{actor} parades our captured agents before the press.",
+  "kind": "bad"
+ },
+ {
+  "id": "yield_contempt",
+  "on": "yielded",
+  "who": "others",
+  "chance": 0.3,
+  "traits": {
+   "expansion": 0.05
+  },
+  "delay": [
+   10,
+   40
+  ],
+  "effects": {
+   "relations": -3,
+   "grudge": 1
+  },
+  "text": "{actor}'s press sneers at our climbdown: \"They bent once. They will bend again.\"",
+  "kind": "bad"
+ },
+ {
+  "id": "secession_recognition",
+  "on": "secession",
+  "who": "rivals",
+  "chance": 0.2,
+  "quirks": {
+   "republic_patron": 0.5,
+   "grain_hawk": 0.2
+  },
+  "traits": {
+   "risk": 0.02
+  },
+  "delay": [
+   10,
+   45
+  ],
+  "effects": {
+   "relations": -5
+  },
+  "text": "{actor} recognises the breakaway {target} — and sends it arms and advisers.",
+  "kind": "bad"
+ },
+ {
+  "id": "secession_sympathy",
+  "on": "secession",
+  "who": "rivals",
+  "chance": 0.15,
+  "quirks": {
+   "crown_legitimist": 0.5,
+   "pragmatist": 0.2
+  },
+  "delay": [
+   10,
+   45
+  ],
+  "effects": {
+   "relations": 4
+  },
+  "text": "{actor} refuses to recognise {target}: \"Borders are not redrawn by mobs.\"",
+  "kind": "good"
+ },
+ {
+  "id": "breakaway_defiance",
+  "on": "secession",
+  "who": "target",
+  "chance": 1,
+  "delay": [
+   20,
+   60
+  ],
+  "effects": {
+   "aggressiveness": 10
+  },
+  "text": "{leader} of {target} vows the new republic will never kneel again.",
+  "kind": "bad"
+ }
 ]

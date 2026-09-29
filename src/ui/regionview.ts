@@ -29,7 +29,7 @@ import { WikiPanel } from './WikiPanel';
 import { issue } from '../sim/commands';
 import { QUIRKS } from '../sim/procgen/nation';
 import { flagDataUrl } from './flag';
-import { Dispatch, AgendaBar } from './dispatch';
+import { Dispatch, AgendaBar, DecisionCard } from './dispatch';
 
 /** localStorage flag (U3): the in-game wiki auto-opens once on a player's first game. */
 const WIKI_FIRST_RUN_KEY = 'centuria-wiki-seen';
@@ -435,6 +435,9 @@ export class RegionView {
       this.lastPanelBuildFrame = -999;
     };
     this.agendaBar.onAdvanceMonth = () => this.onAdvanceMonth?.();
+    this.decisionCard = new DecisionCard(root);
+    this.agendaBar.onOpenDecision = (id) => this.decisionCard.open(this.region, id);
+    this.decisionCard.onChoose = (id, i) => { issue(this.region, 'chooseEventOption', id, i); };
     // Start zoomed in on the founding settlement (Civ-style entry view).
     if (region.settlements.length > 0) {
       const home = region.settlements[0];
@@ -454,6 +457,13 @@ export class RegionView {
   /** Scrollable event log showing recent events (newest first). */
   readonly dispatch: Dispatch;
   readonly agendaBar: AgendaBar;
+  readonly decisionCard: DecisionCard;
+
+  /** Pop the first open decision (called by main.ts when the turn holds). */
+  openPendingDecision(): void {
+    const a = this.region.activeDecisions[0];
+    if (a && !this.decisionCard.isOpen) this.decisionCard.open(this.region, a.eventId);
+  }
   /** Set by main.ts: the loop is holding at the turn of the month. */
   awaitingTurn = false;
   onAdvanceMonth: (() => void) | null = null;

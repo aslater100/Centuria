@@ -7,6 +7,7 @@ import type { RegionSim } from '../sim/region';
 import { newsFeed, type NewsItem } from '../sim/news';
 import { masthead, registerFor, type NewsCategory } from '../sim/narrative/press';
 import { agenda, type AgendaItem } from '../sim/agenda';
+import { eventDef, optionAvailable } from '../sim/events/decisions';
 import { flagDataUrl } from './flag';
 import { MONTHS, DAYS_PER_MONTH, DAYS_PER_YEAR } from '../sim/defs';
 
@@ -109,6 +110,7 @@ export class AgendaBar {
   onAdvanceMonth: (() => void) | null = null;
   onFocusRival: ((rivalId: number) => void) | null = null;
   onFocusSettlement: ((settlementId: number) => void) | null = null;
+  onOpenDecision: ((eventId: string) => void) | null = null;
   private items: AgendaItem[] = [];
 
   constructor(root: HTMLElement) {
@@ -121,7 +123,8 @@ export class AgendaBar {
       const chip = t.closest<HTMLElement>('.agenda-item');
       if (!chip) return;
       const it = this.items.find((x) => x.id === chip.dataset.id);
-      if (it?.rivalId !== undefined) this.onFocusRival?.(it.rivalId);
+      if (it?.eventId !== undefined) this.onOpenDecision?.(it.eventId);
+      else if (it?.rivalId !== undefined) this.onFocusRival?.(it.rivalId);
       else if (it?.settlementId !== undefined) this.onFocusSettlement?.(it.settlementId);
     });
   }
@@ -143,5 +146,59 @@ export class AgendaBar {
       `<div class="agenda-label">${MONTHS[r.month] ?? ''} ${r.year}<small>${this.items.length ? `${this.items.length} matter${this.items.length > 1 ? 's' : ''} before you` : 'A quiet month'}</small></div>` +
       `<div class="agenda-items">${chips}</div>` +
       `<button class="agenda-advance" title="Run to the start of next month, then pause (Enter)">End month ▶</button>`;
+  }
+}
+
+/** Modal card for an open decision event: who speaks, what happened, the choices. */
+export class DecisionCard {
+  readonly el: HTMLElement;
+  private openId: string | null = null;
+  onChoose: ((eventId: string, index: number) => void) | null = null;
+
+  constructor(root: HTMLElement) {
+    this.el = document.createElement('div');
+    this.el.className = 'decision-card hidden';
+    root.appendChild(this.el);
+    this.el.addEventListener('click', (ev) => {
+      const t = ev.target as HTMLElement;
+      if (t.closest('.decision-close')) { this.close(); return; }
+      const b = t.closest<HTMLButtonElement>('.decision-opt');
+      if (b && !b.disabled && this.openId) {
+        this.onChoose?.(this.openId, Number(b.dataset.i));
+        this.close();
+      }
+    });
+  }
+
+  get isOpen(): boolean {
+    return this.openId !== null;
+  }
+
+  open(r: RegionSim, eventId: string): void {
+    const a = r.activeDecisions.find((x) => x.eventId === eventId);
+    const def = eventDef(eventId);
+    if (!a || !def) return;
+    this.openId = eventId;
+    const rv = a.rivalId !== undefined ? r.rival(a.rivalId) : null;
+    const flag = rv?.identity ? `<img class="decision-flag" src="${flagDataUrl(rv.identity.flag, 48, 32)}" alt="">` : '';
+    this.el.innerHTML =
+      `<div class="decision-inner">` +
+      `<button class="decision-close" title="Decide later">×</button>` +
+      `<div class="decision-speaker">${flag}<span>${esc(a.speakerName)}</span></div>` +
+      `<h2 class="decision-title">${esc(def.title)}</h2>` +
+      `<p class="decision-body">${esc(a.body)}</p>` +
+      `<div class="decision-opts">` +
+      def.options.map((o, i) => {
+        const ok = optionAvailable(r, o);
+        return `<button class="decision-opt" data-i="${i}" ${ok ? '' : 'disabled'}>` +
+          `<b>${esc(o.label)}</b>${o.tooltip ? `<small>${esc(o.tooltip)}</small>` : ''}</button>`;
+      }).join('') +
+      `</div><p class="decision-foot">Unanswered in ${Math.max(0, a.expires - r.day)} days, events will decide for you.</p></div>`;
+    this.el.classList.remove('hidden');
+  }
+
+  close(): void {
+    this.openId = null;
+    this.el.classList.add('hidden');
   }
 }

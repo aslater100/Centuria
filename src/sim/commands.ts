@@ -12,7 +12,7 @@ export const COMMAND_NAMES = [
   'borrowFromCentralBank', 'breakTreaty', 'brokerForeignPeace', 'buildCity',
   'buildFloodProof', 'buildHighway', 'buildMaglev', 'buildRail', 'buildRoad',
   'buildSeaWall', 'buyLand', 'callAlly', 'cancelArmyMovement', 'cancelResearch',
-  'capitulate', 'censorMedia', 'changeCurrency', 'chooseRecoveryPath', 'claimCell',
+  'capitulate', 'censorMedia', 'chooseEventOption', 'changeCurrency', 'chooseRecoveryPath', 'claimCell',
   'completeIncorporation', 'concedeToProtesters', 'counterOffer', 'crackdownProtests',
   'declareWar', 'declareWarOnFaction', 'declineCounter', 'declineOffer', 'deleteRoute',
   'deployGeoengineering', 'doManagedRetreat', 'enactDepressionMeasure', 'enactLaw',

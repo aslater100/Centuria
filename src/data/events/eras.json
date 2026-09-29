@@ -1,0 +1,634 @@
+[
+  {
+    "id": "bread_lines", "title": "Bread Lines", "speaker": "treasury", "era": [1929, 1939],
+    "trigger": { "any": [ { "stat": "avgSatisfaction", "lt": 50 }, { "stat": "treasuryMonths", "lt": 1 } ] },
+    "weight": 3, "cooldownDays": 1440,
+    "body": "{speaker} reports queues for bread and soup stretching around the block in {town}. Factories are laying off by the hundred and the tax receipts are falling with them.",
+    "options": [
+      { "label": "Launch public works", "tooltip": "Treasury −0.5 months of GDP · satisfaction +6 · grievance −10 · a reformist deed",
+        "effects": { "treasuryGdp": -0.5, "satisfaction": 6, "grievance": -10, "deed": "reform", "setFlag": "public_works_drive" },
+        "followUp": { "id": "works_ledger", "delay": [120, 300] } },
+      { "label": "Open soup kitchens", "tooltip": "Treasury −0.2 months of GDP · grievance −5 · relief remembered abroad",
+        "effects": { "treasuryGdp": -0.2, "grievance": -5, "deed": "relief", "deedWeight": 1 } },
+      { "label": "Balance the budget", "tooltip": "Confidence +5 · satisfaction −6 · grievance +10",
+        "effects": { "confidence": 5, "satisfaction": -6, "grievance": 10 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "works_ledger", "title": "The Contractors' Bills", "speaker": "treasury", "chainOnly": true,
+    "trigger": { "eventFlag": "public_works_drive" },
+    "body": "The new roads and dams are rising, but {speaker} lays the invoices on the desk. Some contractors are plainly padding their costs, and the opposition has noticed.",
+    "options": [
+      { "label": "Audit every contract", "tooltip": "Political capital −1 · legitimacy +4 · confidence +3",
+        "effects": { "politicalCapital": -1, "legitimacy": 4, "confidence": 3, "deed": "reform", "clearFlag": "public_works_drive" } },
+      { "label": "Pay and press on", "tooltip": "Treasury −0.3 months of GDP · satisfaction +3 · legitimacy −3",
+        "effects": { "treasuryGdp": -0.3, "satisfaction": 3, "legitimacy": -3, "clearFlag": "public_works_drive" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "union_bill", "title": "The Union Question", "speaker": "interior", "era": [1919, 1939],
+    "trigger": { "all": [ { "stat": "towns", "gte": 2 }, { "stat": "maxGrievance", "gte": 35 } ] },
+    "weight": 2, "cooldownDays": 1440,
+    "body": "{speaker} says the workers of {town} have formed unions of their own accord and want them recognised in law. The mill owners want them broken.",
+    "options": [
+      { "label": "Recognise the unions", "tooltip": "Grievance −12 · satisfaction +4 · confidence −4 · a concession",
+        "effects": { "grievance": -12, "satisfaction": 4, "confidence": -4, "deed": "concession", "setFlag": "unions_recognised" },
+        "followUp": { "id": "union_congress", "delay": [180, 420] } },
+      { "label": "Ban the unions", "tooltip": "Grievance +10 · confidence +4 · a crackdown",
+        "effects": { "grievance": 10, "confidence": 4, "legitimacy": -4, "deed": "crackdown", "setFlag": "unions_banned" } },
+      { "label": "License tame unions only", "tooltip": "Grievance −4 · legitimacy −2",
+        "effects": { "grievance": -4, "legitimacy": -2 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "union_congress", "title": "The Union Congress", "speaker": "interior", "chainOnly": true,
+    "trigger": { "eventFlag": "unions_recognised" },
+    "body": "The unions have federated, and their first congress threatens a general strike unless a minimum wage is set. {speaker} says they mean it.",
+    "options": [
+      { "label": "Legislate a minimum wage", "tooltip": "Treasury −0.3 months of GDP · grievance −10 · satisfaction +5",
+        "effects": { "treasuryGdp": -0.3, "grievance": -10, "satisfaction": 5, "deed": "reform", "clearFlag": "unions_recognised" } },
+      { "label": "Call their bluff", "tooltip": "Grievance +12 · legitimacy −5 · a crackdown if it comes to blows",
+        "effects": { "grievance": 12, "legitimacy": -5, "deed": "crackdown", "deedWeight": 1, "clearFlag": "unions_recognised" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "red_agitators", "title": "Agitators in the Foundries", "speaker": "interior", "era": [1919, 1939],
+    "trigger": { "all": [ { "stat": "maxGrievance", "gte": 40 }, { "stat": "towns", "gte": 2 } ] },
+    "weight": 2, "cooldownDays": 1440,
+    "body": "{speaker} brings pamphlets seized in {town}, calling for soviets of workers and the seizure of the factories. Police want warrants; the workers want bread.",
+    "options": [
+      { "label": "Raid and arrest", "tooltip": "Grievance −6 now · legitimacy −4 · a crackdown",
+        "effects": { "grievance": -6, "legitimacy": -4, "deed": "crackdown", "deedWeight": 1.5, "setFlag": "red_scare" },
+        "followUp": { "id": "red_trials", "delay": [120, 300] } },
+      { "label": "Address the grievances", "tooltip": "Treasury −0.3 months of GDP · grievance −12 · a reformist deed",
+        "effects": { "treasuryGdp": -0.3, "grievance": -12, "deed": "reform" } },
+      { "label": "Do nothing", "tooltip": "Grievance +6 · nothing spent",
+        "effects": { "grievance": 6 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "red_trials", "title": "The Show Trials", "speaker": "press", "chainOnly": true,
+    "trigger": { "eventFlag": "red_scare" },
+    "body": "The prisoners of the raids are due in court. {speaker} says the evidence is thin, foreign papers are watching, and the public wants a verdict.",
+    "options": [
+      { "label": "Proceed with the trials", "tooltip": "War support +3 · legitimacy −5 · a second crackdown",
+        "effects": { "warSupport": 3, "legitimacy": -5, "deed": "crackdown", "deedWeight": 2, "clearFlag": "red_scare" } },
+      { "label": "Quietly release them", "tooltip": "Grievance −6 · confidence −2 · press freedom noted",
+        "effects": { "grievance": -6, "confidence": -2, "deed": "press_freedom", "clearFlag": "red_scare" } }
+    ],
+    "defaultOption": 0
+  },
+  {
+    "id": "blackshirt_rallies", "title": "Men in Uniform Shirts", "speaker": "defence", "era": [1922, 1939],
+    "trigger": { "all": [ { "stat": "avgSatisfaction", "lt": 55 }, { "stat": "towns", "gte": 2 } ] },
+    "weight": 2, "cooldownDays": 1800,
+    "body": "{speaker} reports that a league of uniformed veterans marches nightly through {town}, beating strikers and promising national rebirth. Some officers cheer them.",
+    "options": [
+      { "label": "Ban the leagues", "tooltip": "Grievance +4 · legitimacy +3 · a crackdown on the far right",
+        "effects": { "grievance": 4, "legitimacy": 3, "deed": "crackdown", "deedWeight": 1 } },
+      { "label": "Tolerate them", "tooltip": "War support +6 · legitimacy −4 · they will not stay quiet",
+        "effects": { "warSupport": 6, "legitimacy": -4, "setFlag": "leagues_tolerated" },
+        "followUp": { "id": "leagues_march", "delay": [180, 420] } },
+      { "label": "Fold them into the militia", "tooltip": "War support +4 · relations −3 with everyone",
+        "effects": { "warSupport": 4, "relationsAll": -3 } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "leagues_march", "title": "The March on the Capital", "speaker": "defence", "chainOnly": true,
+    "trigger": { "eventFlag": "leagues_tolerated" },
+    "body": "The leagues have announced a march on the capital. {speaker} says the garrison will obey orders — if orders are given.",
+    "options": [
+      { "label": "Arrest the ringleaders", "tooltip": "War support −5 · legitimacy +4 · a crackdown",
+        "effects": { "warSupport": -5, "legitimacy": 4, "deed": "crackdown", "deedWeight": 1.5, "clearFlag": "leagues_tolerated" } },
+      { "label": "Let them parade", "tooltip": "Legitimacy −8 · grievance +8 · war support +5",
+        "effects": { "legitimacy": -8, "grievance": 8, "warSupport": 5, "clearFlag": "leagues_tolerated" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "radio_age", "title": "The Wireless", "speaker": "press", "era": [1922, 1940],
+    "trigger": { "flag": "stateProclaimed" },
+    "weight": 2, "cooldownDays": 3600, "once": true,
+    "body": "{speaker} says wireless sets are appearing in every parlour of {state}. Someone must decide who owns the airwaves before the private stations do.",
+    "options": [
+      { "label": "Create a state broadcaster", "tooltip": "Legitimacy +5 · satisfaction +2 · censorship charges later",
+        "effects": { "legitimacy": 5, "satisfaction": 2, "deed": "censorship", "deedWeight": 1, "setFlag": "state_radio" } },
+      { "label": "License private stations", "tooltip": "Confidence +3 · press freedom noted",
+        "effects": { "confidence": 3, "deed": "press_freedom", "deedWeight": 1 } },
+      { "label": "Leave it to the market", "tooltip": "Satisfaction +3 · grievance +3",
+        "effects": { "satisfaction": 3, "grievance": 3 } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "bank_run", "title": "A Run on the Banks", "speaker": "treasury", "era": [1929, 1938],
+    "trigger": { "any": [ { "stat": "confidence", "lt": 45 }, { "stat": "inflation", "gt": 0.06 } ] },
+    "weight": 2, "cooldownDays": 1800,
+    "body": "{speaker} reports lines of depositors outside the banks of {town}. Three savings houses are already closed, and rumour is faster than telegraph.",
+    "options": [
+      { "label": "Guarantee all deposits", "tooltip": "Treasury −0.6 months of GDP · confidence +10",
+        "effects": { "treasuryGdp": -0.6, "confidence": 10 } },
+      { "label": "Declare a bank holiday", "tooltip": "Confidence +4 · satisfaction −4 · political capital −1",
+        "effects": { "confidence": 4, "satisfaction": -4, "politicalCapital": -1 } },
+      { "label": "Let the weak banks fail", "tooltip": "Confidence −8 · grievance +8",
+        "effects": { "confidence": -8, "grievance": 8 } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "ration_books", "title": "The Ration Books", "speaker": "treasury", "era": [1939, 1950],
+    "trigger": { "any": [ { "flag": "atWar" }, { "stat": "inflation", "gt": 0.04 } ] },
+    "weight": 3, "cooldownDays": 1440,
+    "body": "{speaker} says shelves are emptying and prices climb weekly. The ministry proposes ration books for sugar, fat and cloth. The black market is already flourishing.",
+    "options": [
+      { "label": "Ration strictly", "tooltip": "Satisfaction −3 · grievance −5 · legitimacy +3",
+        "effects": { "satisfaction": -3, "grievance": -5, "legitimacy": 3 } },
+      { "label": "Subsidise staples", "tooltip": "Treasury −0.4 months of GDP · satisfaction +5",
+        "effects": { "treasuryGdp": -0.4, "satisfaction": 5 } },
+      { "label": "Trust the market", "tooltip": "Satisfaction −6 · grievance +8 · confidence +3",
+        "effects": { "satisfaction": -6, "grievance": 8, "confidence": 3 } }
+    ],
+    "defaultOption": 0
+  },
+  {
+    "id": "postwar_rebuilding", "title": "Rebuilding the Towns", "speaker": "interior", "era": [1945, 1958],
+    "trigger": { "any": [ { "deed": "war_won", "withinDays": 2160 }, { "deed": "war_lost", "withinDays": 2160 }, { "stat": "warSupport", "gt": 40 } ] },
+    "weight": 3, "cooldownDays": 2160,
+    "body": "{speaker} presents plans to rebuild {town} and the ruined districts. Housing, rail or heavy industry — there is not money for all three.",
+    "options": [
+      { "label": "Housing first", "tooltip": "Treasury −0.5 months of GDP · satisfaction +8 · grievance −8",
+        "effects": { "treasuryGdp": -0.5, "satisfaction": 8, "grievance": -8, "deed": "relief" } },
+      { "label": "Heavy industry first", "tooltip": "Treasury −0.4 months of GDP · confidence +8 · satisfaction −2",
+        "effects": { "treasuryGdp": -0.4, "confidence": 8, "satisfaction": -2 } },
+      { "label": "Seek foreign reconstruction loans", "tooltip": "Treasury +0.8 months of GDP · relations with our best friend +6 · confidence −3",
+        "effects": { "treasuryGdp": 0.8, "relationsBest": 6, "confidence": -3 } }
+    ],
+    "defaultOption": 0
+  },
+  {
+    "id": "displaced_persons", "title": "The Displaced", "speaker": "interior", "era": [1945, 1955],
+    "trigger": { "stat": "avgSatisfaction", "gt": 35 },
+    "weight": 2, "cooldownDays": 2160,
+    "body": "Columns of displaced families reach {town} with whatever they could carry. {speaker} says camps are full and local feeling is mixed.",
+    "options": [
+      { "label": "Resettle them", "tooltip": "Treasury −0.3 months of GDP · satisfaction −3 · a humane deed",
+        "effects": { "treasuryGdp": -0.3, "satisfaction": -3, "deed": "relief", "deedWeight": 2 } },
+      { "label": "Keep them in camps", "tooltip": "Treasury −0.1 months of GDP · grievance +4",
+        "effects": { "treasuryGdp": -0.1, "grievance": 4 } },
+      { "label": "Turn them back", "tooltip": "Satisfaction +2 · legitimacy −4 · relations −3 with everyone",
+        "effects": { "satisfaction": 2, "legitimacy": -4, "relationsAll": -3 } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "colonial_petition", "title": "The Independence Petition", "speaker": "foreign", "era": [1945, 1970],
+    "trigger": { "all": [ { "stat": "towns", "gte": 3 }, { "stat": "maxGrievance", "gte": 40 } ] },
+    "weight": 2, "cooldownDays": 1800,
+    "body": "{speaker} carries a petition signed by tens of thousands in {town}, demanding self-rule. Colonial administrators elsewhere are watching what we do.",
+    "options": [
+      { "label": "Grant self-government", "tooltip": "Grievance −15 · legitimacy +4 · relations −4 with everyone · a concession",
+        "effects": { "grievance": -15, "legitimacy": 4, "relationsAll": -4, "deed": "concession", "deedWeight": 2, "setFlag": "granted_self_rule" },
+        "followUp": { "id": "independence_talks", "delay": [180, 360] } },
+      { "label": "Promise gradual reform", "tooltip": "Grievance −4 · political capital −1",
+        "effects": { "grievance": -4, "politicalCapital": -1, "deed": "reform" } },
+      { "label": "Suppress the movement", "tooltip": "Grievance +10 · legitimacy −5 · a brutal crackdown",
+        "effects": { "grievance": 10, "legitimacy": -5, "deed": "brutal_occupation", "deedWeight": 1.5 } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "independence_talks", "title": "Terms of Independence", "speaker": "foreign", "chainOnly": true,
+    "trigger": { "eventFlag": "granted_self_rule" },
+    "body": "The new assembly asks for treaty terms: a defence pact, trade preference, and a seat in the councils. {speaker} advises generosity.",
+    "options": [
+      { "label": "Sign a friendship treaty", "tooltip": "Treasury −0.2 months of GDP · relations +5 with everyone · treaty signed",
+        "effects": { "treasuryGdp": -0.2, "relationsAll": 5, "deed": "treaty_signed", "clearFlag": "granted_self_rule" } },
+      { "label": "Withdraw and wish them well", "tooltip": "Nothing spent · a lost territory in the ledger",
+        "effects": { "deed": "lost_land", "deedWeight": 0.5, "clearFlag": "granted_self_rule" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "atomic_fear", "title": "The Shadow of the Bomb", "speaker": "defence", "era": [1949, 1968],
+    "trigger": { "stat": "worstRelations", "lt": 10 },
+    "weight": 2, "cooldownDays": 1800,
+    "body": "{speaker} says {rival} has tested an atomic device. Schoolchildren drill under their desks and letters arrive at the ministry demanding shelters.",
+    "options": [
+      { "label": "Build civil shelters", "tooltip": "Treasury −0.4 months of GDP · satisfaction +4 · war support +4",
+        "effects": { "treasuryGdp": -0.4, "satisfaction": 4, "warSupport": 4 } },
+      { "label": "Call for disarmament talks", "tooltip": "Political capital −1 · relations +6 with everyone · peacemaker",
+        "effects": { "politicalCapital": -1, "relationsAll": 6, "deed": "peacemaker", "deedWeight": 1.5 } },
+      { "label": "Reassure the public", "tooltip": "Satisfaction −2 · legitimacy −2",
+        "effects": { "satisfaction": -2, "legitimacy": -2 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "television_debut", "title": "The Television Age", "speaker": "press", "era": [1952, 1975],
+    "trigger": { "flag": "stateProclaimed" },
+    "weight": 2, "cooldownDays": 3600, "once": true,
+    "body": "{speaker} reports that television has arrived in the living rooms of {town}. A candidate's smile now counts for more than his platform.",
+    "options": [
+      { "label": "Televise the parliament", "tooltip": "Legitimacy +4 · political capital −1 · press freedom",
+        "effects": { "legitimacy": 4, "politicalCapital": -1, "deed": "press_freedom" } },
+      { "label": "Run a state channel", "tooltip": "Satisfaction +3 · legitimacy +2 · censorship charges",
+        "effects": { "satisfaction": 3, "legitimacy": 2, "deed": "censorship", "deedWeight": 1 } },
+      { "label": "Leave it to private networks", "tooltip": "Confidence +4 · grievance +2",
+        "effects": { "confidence": 4, "grievance": 2 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "space_race", "title": "The Race to the Moon", "speaker": "science", "era": [1957, 1975],
+    "trigger": { "all": [ { "stat": "treasuryMonths", "gt": 1 }, { "stat": "confidence", "gt": 40 } ] },
+    "weight": 2, "cooldownDays": 2160,
+    "body": "{speaker} says {rival} has put a satellite into orbit. The ministry begs for a rocket programme, and the public asks why we are not first.",
+    "options": [
+      { "label": "Fund a space programme", "tooltip": "Treasury −0.7 months of GDP · confidence +6 · legitimacy +3",
+        "effects": { "treasuryGdp": -0.7, "confidence": 6, "legitimacy": 3, "setFlag": "space_program" },
+        "followUp": { "id": "space_payoff", "delay": [360, 720] } },
+      { "label": "Join a joint venture with {friend}", "tooltip": "Treasury −0.3 months of GDP · relations with our best friend +8",
+        "effects": { "treasuryGdp": -0.3, "relationsBest": 8, "deed": "gift", "deedWeight": 1 } },
+      { "label": "Spend it on the ground", "tooltip": "Satisfaction +4 · confidence −2",
+        "effects": { "satisfaction": 4, "confidence": -2 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "space_payoff", "title": "Spin-offs and Spectacle", "speaker": "science", "chainOnly": true,
+    "trigger": { "eventFlag": "space_program" },
+    "body": "The programme has reached orbit. {speaker} says the spin-off industries are ready — if we back them — and the world is watching the launch.",
+    "options": [
+      { "label": "License the spin-offs", "tooltip": "Treasury +0.5 months of GDP · confidence +5",
+        "effects": { "treasuryGdp": 0.5, "confidence": 5, "clearFlag": "space_program" } },
+      { "label": "Stage a grand launch", "tooltip": "Legitimacy +6 · satisfaction +4 · treasury −0.2 months of GDP",
+        "effects": { "legitimacy": 6, "satisfaction": 4, "treasuryGdp": -0.2, "clearFlag": "space_program" } }
+    ],
+    "defaultOption": 0
+  },
+  {
+    "id": "oil_shock", "title": "The Oil Embargo", "speaker": "treasury", "era": [1973, 1985],
+    "trigger": { "stat": "inflation", "gt": 0.02 },
+    "weight": 3, "cooldownDays": 2160,
+    "body": "{speaker} says petrol has tripled in price overnight. Motorists queue in {town}, hauliers threaten to block the highways, and the budget is buckling.",
+    "options": [
+      { "label": "Ration fuel", "tooltip": "Satisfaction −4 · grievance −4 · legitimacy +2",
+        "effects": { "satisfaction": -4, "grievance": -4, "legitimacy": 2, "setFlag": "fuel_rationed" },
+        "followUp": { "id": "fuel_queues", "delay": [90, 240] } },
+      { "label": "Subsidise fuel", "tooltip": "Treasury −0.6 months of GDP · satisfaction +5 · confidence −4",
+        "effects": { "treasuryGdp": -0.6, "satisfaction": 5, "confidence": -4 } },
+      { "label": "Let prices bite", "tooltip": "Confidence +3 · satisfaction −7 · grievance +8",
+        "effects": { "confidence": 3, "satisfaction": -7, "grievance": 8 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "fuel_queues", "title": "Odd-Even Days", "speaker": "interior", "chainOnly": true,
+    "trigger": { "eventFlag": "fuel_rationed" },
+    "body": "The rationing schemes have bred fraud and a thriving trade in forged coupons. {speaker} asks whether to police it or relax the limits.",
+    "options": [
+      { "label": "Crack down on forgers", "tooltip": "Grievance +4 · legitimacy +2 · a crackdown",
+        "effects": { "grievance": 4, "legitimacy": 2, "deed": "crackdown", "deedWeight": 0.8, "clearFlag": "fuel_rationed" } },
+      { "label": "Relax the limits", "tooltip": "Satisfaction +4 · treasury −0.2 months of GDP",
+        "effects": { "satisfaction": 4, "treasuryGdp": -0.2, "clearFlag": "fuel_rationed" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "dissident_letter", "title": "The Open Letter", "speaker": "press", "era": [1965, 1991],
+    "trigger": { "any": [ { "stat": "legitimacy", "lt": 60 }, { "deed": "censorship", "min": 1 } ] },
+    "weight": 2, "cooldownDays": 1800,
+    "body": "{speaker} holds a typed manifesto signed by two hundred writers and engineers, calling for an end to censorship. Copies are circulating hand to hand in {town}.",
+    "options": [
+      { "label": "Receive the signatories", "tooltip": "Legitimacy +4 · political capital −1 · press freedom",
+        "effects": { "legitimacy": 4, "politicalCapital": -1, "deed": "press_freedom", "setFlag": "heard_dissidents" } },
+      { "label": "Arrest the organisers", "tooltip": "Grievance +6 · legitimacy −4 · censorship and crackdown",
+        "effects": { "grievance": 6, "legitimacy": -4, "deed": "crackdown", "deedWeight": 1.5, "setFlag": "jailed_dissidents" },
+        "followUp": { "id": "dissident_trial", "delay": [120, 300] } },
+      { "label": "Ignore it", "tooltip": "Grievance +3",
+        "effects": { "grievance": 3 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "dissident_trial", "title": "The Trial of the Signatories", "speaker": "foreign", "chainOnly": true,
+    "trigger": { "eventFlag": "jailed_dissidents" },
+    "body": "The trial of the signatories has drawn foreign journalists. {speaker} says {friend} is prepared to break off talks if the sentences are harsh.",
+    "options": [
+      { "label": "Pardon them", "tooltip": "Legitimacy −2 · relations +6 with everyone · press freedom",
+        "effects": { "legitimacy": -2, "relationsAll": 6, "deed": "press_freedom", "clearFlag": "jailed_dissidents" } },
+      { "label": "Impose harsh sentences", "tooltip": "Grievance +8 · relations −6 with everyone · censorship",
+        "effects": { "grievance": 8, "relationsAll": -6, "deed": "censorship", "deedWeight": 2, "clearFlag": "jailed_dissidents" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "arms_race_budget", "title": "The Arms Race Bill", "speaker": "defence", "era": [1960, 1990],
+    "trigger": { "stat": "worstRelations", "lt": 0 },
+    "weight": 2, "cooldownDays": 1440,
+    "body": "{speaker} presents an estimate for new missiles and tanks. {rivalLeader} has just unveiled a larger programme, and the general staff calls it a race we cannot skip.",
+    "options": [
+      { "label": "Match them", "tooltip": "Treasury −0.7 months of GDP · war support +8 · relations with them −5",
+        "effects": { "treasuryGdp": -0.7, "warSupport": 8, "relationsWorst": -5, "deed": "aggression", "deedWeight": 0.7 } },
+      { "label": "Build a minimum deterrent", "tooltip": "Treasury −0.3 months of GDP · war support +3",
+        "effects": { "treasuryGdp": -0.3, "warSupport": 3 } },
+      { "label": "Seek an arms-control treaty", "tooltip": "Political capital −1 · relations with them +8 · treaty signed",
+        "effects": { "politicalCapital": -1, "relationsWorst": 8, "deed": "treaty_signed", "deedWeight": 1 } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "counterculture", "title": "Flowers and Barricades", "speaker": "people", "era": [1965, 1978],
+    "trigger": { "stat": "avgSatisfaction", "gt": 40 },
+    "weight": 2, "cooldownDays": 2160,
+    "body": "Students fill the squares of {town}, demanding peace, freedom and a say in their universities. Their elders are outraged. The police are waiting for a signal.",
+    "options": [
+      { "label": "Open the universities to reform", "tooltip": "Treasury −0.2 months of GDP · grievance −10 · legitimacy +3",
+        "effects": { "treasuryGdp": -0.2, "grievance": -10, "legitimacy": 3, "deed": "reform" } },
+      { "label": "Clear the squares", "tooltip": "Grievance +8 · legitimacy −4 · a crackdown",
+        "effects": { "grievance": 8, "legitimacy": -4, "deed": "crackdown", "deedWeight": 1.2 } },
+      { "label": "Wait for the term to end", "tooltip": "Grievance +2",
+        "effects": { "grievance": 2 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "dotcom_boom", "title": "The Dot-Com Boom", "speaker": "treasury", "era": [1995, 2003],
+    "trigger": { "stat": "confidence", "gt": 45 },
+    "weight": 2, "cooldownDays": 2160,
+    "body": "{speaker} says start-ups with no profits are valued in billions and every dentist trades shares. Analysts call it a new economy. {speaker} is less sure.",
+    "options": [
+      { "label": "Tax the windfall", "tooltip": "Treasury +0.5 months of GDP · confidence −5",
+        "effects": { "treasuryGdp": 0.5, "confidence": -5 } },
+      { "label": "Ride the boom", "tooltip": "Confidence +8 · satisfaction +3 · a bust may follow",
+        "effects": { "confidence": 8, "satisfaction": 3 } },
+      { "label": "Cool the market with rates", "tooltip": "Confidence −3 · satisfaction −2 · treasury +0.2 months of GDP",
+        "effects": { "confidence": -3, "satisfaction": -2, "treasuryGdp": 0.2 } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "offshoring_wave", "title": "The Factories Leave", "speaker": "interior", "era": [1990, 2015],
+    "trigger": { "all": [ { "stat": "towns", "gte": 2 }, { "stat": "confidence", "gt": 40 } ] },
+    "weight": 3, "cooldownDays": 2160,
+    "body": "{speaker} reports that manufacturers are moving production overseas. The mill in {town} closes on Friday, and its workers are asking what the government will do.",
+    "options": [
+      { "label": "Subsidise retraining", "tooltip": "Treasury −0.4 months of GDP · grievance −8 · a reformist deed",
+        "effects": { "treasuryGdp": -0.4, "grievance": -8, "deed": "reform", "setFlag": "retraining_scheme" },
+        "followUp": { "id": "hollowed_towns", "delay": [360, 720] } },
+      { "label": "Impose tariffs", "tooltip": "Satisfaction +4 · confidence −5 · relations −4 with everyone · a sanction",
+        "effects": { "satisfaction": 4, "confidence": -5, "relationsAll": -4, "deed": "sanction", "deedWeight": 0.8 } },
+      { "label": "Let the market decide", "tooltip": "Confidence +4 · grievance +10 · satisfaction −4",
+        "effects": { "confidence": 4, "grievance": 10, "satisfaction": -4 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "hollowed_towns", "title": "The Hollowed Towns", "speaker": "interior", "chainOnly": true,
+    "trigger": { "eventFlag": "retraining_scheme" },
+    "body": "Years on, the retrained workers found few new jobs at home. {speaker} says the empty streets of {town} are feeding the opposition.",
+    "options": [
+      { "label": "Fund regional investment zones", "tooltip": "Treasury −0.5 months of GDP · grievance −10 · satisfaction +4",
+        "effects": { "treasuryGdp": -0.5, "grievance": -10, "satisfaction": 4, "clearFlag": "retraining_scheme" } },
+      { "label": "Accept the decline", "tooltip": "Grievance +8 · legitimacy −4",
+        "effects": { "grievance": 8, "legitimacy": -4, "clearFlag": "retraining_scheme" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "terror_plot", "title": "The Plot Foiled", "speaker": "interior", "era": [2001, 2025],
+    "trigger": { "stat": "rivals", "gte": 1 },
+    "weight": 2, "cooldownDays": 1800,
+    "body": "{speaker} says a bomb plot in {town} has been foiled by luck, not design. Papers demand sweeping new powers of surveillance and detention.",
+    "options": [
+      { "label": "Grant sweeping powers", "tooltip": "Satisfaction +3 · legitimacy −3 · censorship remembered",
+        "effects": { "satisfaction": 3, "legitimacy": -3, "deed": "censorship", "deedWeight": 1, "setFlag": "surveillance_state" },
+        "followUp": { "id": "surveillance_leak", "delay": [240, 540] } },
+      { "label": "Targeted policing only", "tooltip": "Treasury −0.2 months of GDP · satisfaction +1 · press freedom",
+        "effects": { "treasuryGdp": -0.2, "satisfaction": 1, "deed": "press_freedom", "deedWeight": 0.8 } },
+      { "label": "Blame a foreign sponsor", "tooltip": "War support +6 · relations with them −8 · an accusation of aggression",
+        "effects": { "warSupport": 6, "relationsWorst": -8, "deed": "aggression", "deedWeight": 0.6 } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "surveillance_leak", "title": "The Leaked Files", "speaker": "press", "chainOnly": true,
+    "trigger": { "eventFlag": "surveillance_state" },
+    "body": "A contractor has leaked the archives of the surveillance programme. {speaker} says half the capital finds it outrageous, and the other half is not sure it minds.",
+    "options": [
+      { "label": "Curb the programme", "tooltip": "Legitimacy +5 · satisfaction +2 · press freedom",
+        "effects": { "legitimacy": 5, "satisfaction": 2, "deed": "press_freedom", "clearFlag": "surveillance_state" } },
+      { "label": "Prosecute the leaker", "tooltip": "Legitimacy −5 · grievance +6 · censorship",
+        "effects": { "legitimacy": -5, "grievance": 6, "deed": "censorship", "deedWeight": 1.5, "clearFlag": "surveillance_state" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "financial_crisis", "title": "The Great Unwinding", "speaker": "treasury", "era": [2007, 2014],
+    "trigger": { "any": [ { "stat": "debt", "gt": 0 }, { "stat": "confidence", "lt": 50 } ] },
+    "weight": 3, "cooldownDays": 2160,
+    "body": "{speaker} says a mortgage bank has collapsed and the others refuse to lend to each other. Panic is spreading faster than any ministry can answer.",
+    "options": [
+      { "label": "Bail out the banks", "tooltip": "Treasury −0.8 months of GDP · confidence +10 · grievance +6",
+        "effects": { "treasuryGdp": -0.8, "confidence": 10, "grievance": 6, "setFlag": "banks_bailed_out" },
+        "followUp": { "id": "bailout_backlash", "delay": [180, 420] } },
+      { "label": "Protect households", "tooltip": "Treasury −0.6 months of GDP · satisfaction +6 · confidence −4",
+        "effects": { "treasuryGdp": -0.6, "satisfaction": 6, "confidence": -4, "deed": "relief" } },
+      { "label": "Let the banks fail", "tooltip": "Confidence −12 · grievance +10 · treasury spared",
+        "effects": { "confidence": -12, "grievance": 10 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "bailout_backlash", "title": "Bonuses for the Bailed Out", "speaker": "press", "chainOnly": true,
+    "trigger": { "eventFlag": "banks_bailed_out" },
+    "body": "{speaker} reveals that the rescued banks paid record bonuses. Crowds gather outside the exchange in {town}.",
+    "options": [
+      { "label": "Tax the bonuses", "tooltip": "Treasury +0.4 months of GDP · confidence −3 · legitimacy +4",
+        "effects": { "treasuryGdp": 0.4, "confidence": -3, "legitimacy": 4, "clearFlag": "banks_bailed_out" } },
+      { "label": "Defend the banks", "tooltip": "Confidence +3 · grievance +8 · legitimacy −4",
+        "effects": { "confidence": 3, "grievance": 8, "legitimacy": -4, "clearFlag": "banks_bailed_out" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "internet_age", "title": "The Network Arrives", "speaker": "science", "era": [1993, 2010],
+    "trigger": { "flag": "stateProclaimed" },
+    "weight": 2, "cooldownDays": 3600, "once": true,
+    "body": "{speaker} says universities are linking their computers and businesses want to follow. It could be the next telegraph, or the next headache.",
+    "options": [
+      { "label": "Lay a national backbone", "tooltip": "Treasury −0.5 months of GDP · confidence +7 · satisfaction +3",
+        "effects": { "treasuryGdp": -0.5, "confidence": 7, "satisfaction": 3 } },
+      { "label": "Let telecoms build it", "tooltip": "Confidence +3 · satisfaction +1",
+        "effects": { "confidence": 3, "satisfaction": 1 } },
+      { "label": "Filter what the public may see", "tooltip": "Legitimacy +2 · confidence −3 · censorship",
+        "effects": { "legitimacy": 2, "confidence": -3, "deed": "censorship", "deedWeight": 1.5 } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "social_media_outrage", "title": "Trending in {town}", "speaker": "press", "era": [2008, 2040],
+    "trigger": { "stat": "maxGrievance", "gte": 30 },
+    "weight": 2, "cooldownDays": 1080,
+    "body": "{speaker} says a video from {town} has been seen twelve million times. Hashtags demand resignations and the opposition is already quoting it.",
+    "options": [
+      { "label": "Apologise and investigate", "tooltip": "Legitimacy +3 · political capital −1 · grievance −5",
+        "effects": { "legitimacy": 3, "politicalCapital": -1, "grievance": -5, "deed": "press_freedom", "deedWeight": 0.8 } },
+      { "label": "Throttle the platforms", "tooltip": "Grievance +6 · legitimacy −4 · censorship",
+        "effects": { "grievance": 6, "legitimacy": -4, "deed": "censorship", "deedWeight": 1.5 } },
+      { "label": "Change the subject", "tooltip": "Satisfaction −2",
+        "effects": { "satisfaction": -2 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "climate_refugees", "title": "Climate Refugees", "speaker": "interior", "era": [2025, 2100],
+    "trigger": { "stat": "warming", "gt": 1.2 },
+    "weight": 3, "cooldownDays": 1800,
+    "body": "Drought and floods abroad send thousands toward {town}. {speaker} says shelters are full and {rivalLeader} warns against a 'flood of migrants' at their frontier.",
+    "options": [
+      { "label": "Open resettlement corridors", "tooltip": "Treasury −0.4 months of GDP · satisfaction −3 · a humane deed · relations +4 with everyone",
+        "effects": { "treasuryGdp": -0.4, "satisfaction": -3, "relationsAll": 4, "deed": "relief", "deedWeight": 2, "setFlag": "welcomed_climate_refugees" } },
+      { "label": "Fund camps abroad", "tooltip": "Treasury −0.3 months of GDP · relations +3 with everyone",
+        "effects": { "treasuryGdp": -0.3, "relationsAll": 3, "deed": "gift", "deedWeight": 1 } },
+      { "label": "Seal the frontier", "tooltip": "Satisfaction +2 · legitimacy −4 · relations −5 with everyone",
+        "effects": { "satisfaction": 2, "legitimacy": -4, "relationsAll": -5 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "automation_layoffs", "title": "The Robot Dividend", "speaker": "interior", "era": [2025, 2100],
+    "trigger": { "stat": "confidence", "gt": 40 },
+    "weight": 3, "cooldownDays": 2160,
+    "body": "{speaker} reports that autonomous fleets and warehouse robots have cut thousands of jobs in {town}. Firms report record profits; the unemployed report to the ministry.",
+    "options": [
+      { "label": "Tax robots and pay a dividend", "tooltip": "Treasury −0.4 months of GDP · satisfaction +6 · grievance −10 · confidence −4",
+        "effects": { "treasuryGdp": -0.4, "satisfaction": 6, "grievance": -10, "confidence": -4, "deed": "reform", "setFlag": "robot_dividend" },
+        "followUp": { "id": "dividend_debate", "delay": [360, 720] } },
+      { "label": "Fund retraining", "tooltip": "Treasury −0.3 months of GDP · grievance −5 · satisfaction +2",
+        "effects": { "treasuryGdp": -0.3, "grievance": -5, "satisfaction": 2 } },
+      { "label": "Leave it to the firms", "tooltip": "Confidence +6 · grievance +10 · satisfaction −4",
+        "effects": { "confidence": 6, "grievance": 10, "satisfaction": -4 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "dividend_debate", "title": "The Dividend Debate", "speaker": "treasury", "chainOnly": true,
+    "trigger": { "eventFlag": "robot_dividend" },
+    "body": "The robot dividend is popular but costly. {speaker} asks whether to expand it into a universal income or trim it before the treasury bleeds.",
+    "options": [
+      { "label": "Expand to universal income", "tooltip": "Treasury −0.6 months of GDP · satisfaction +8 · grievance −10",
+        "effects": { "treasuryGdp": -0.6, "satisfaction": 8, "grievance": -10, "deed": "reform", "clearFlag": "robot_dividend" } },
+      { "label": "Trim it", "tooltip": "Treasury +0.3 months of GDP · satisfaction −5 · grievance +6",
+        "effects": { "treasuryGdp": 0.3, "satisfaction": -5, "grievance": 6, "clearFlag": "robot_dividend" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "ai_pilot", "title": "The Machine Advisers", "speaker": "science", "era": [2030, 2100],
+    "trigger": { "stat": "confidence", "gt": 35 },
+    "weight": 2, "cooldownDays": 2160,
+    "body": "{speaker} proposes letting an AI system draft the budget and triage the tax-office backlog. Results in pilot ministries elsewhere are impressive, and opaque.",
+    "options": [
+      { "label": "Adopt it across ministries", "tooltip": "Treasury +0.5 months of GDP · confidence +5 · legitimacy −3",
+        "effects": { "treasuryGdp": 0.5, "confidence": 5, "legitimacy": -3, "setFlag": "ai_governance" },
+        "followUp": { "id": "ai_audit", "delay": [360, 720] } },
+      { "label": "Advisory role only", "tooltip": "Treasury +0.1 months of GDP · confidence +2",
+        "effects": { "treasuryGdp": 0.1, "confidence": 2 } },
+      { "label": "Ban it from government", "tooltip": "Confidence −3 · legitimacy +2",
+        "effects": { "confidence": -3, "legitimacy": 2 } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "ai_audit", "title": "The Opaque Ledger", "speaker": "press", "chainOnly": true,
+    "trigger": { "eventFlag": "ai_governance" },
+    "body": "{speaker} reports that a benefits algorithm has wrongly denied thousands of claimants in {town}. No official can explain how it decided.",
+    "options": [
+      { "label": "Mandate audits and appeals", "tooltip": "Treasury −0.2 months of GDP · legitimacy +5 · grievance −6",
+        "effects": { "treasuryGdp": -0.2, "legitimacy": 5, "grievance": -6, "deed": "reform", "clearFlag": "ai_governance" } },
+      { "label": "Defend the system", "tooltip": "Legitimacy −6 · grievance +8",
+        "effects": { "legitimacy": -6, "grievance": 8, "clearFlag": "ai_governance" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "sea_wall", "title": "The Sea Wall", "speaker": "interior", "era": [2035, 2100],
+    "trigger": { "stat": "warming", "gt": 1.6 },
+    "weight": 3, "cooldownDays": 2160,
+    "body": "{speaker} says storm surges are breaching the lower quarters of {town}. Engineers propose a sea wall; economists propose retreat.",
+    "options": [
+      { "label": "Build the sea wall", "tooltip": "Treasury −0.9 months of GDP · satisfaction +5 · confidence +4",
+        "effects": { "treasuryGdp": -0.9, "satisfaction": 5, "confidence": 4 } },
+      { "label": "Managed retreat", "tooltip": "Treasury −0.4 months of GDP · satisfaction −4 · grievance +5",
+        "effects": { "treasuryGdp": -0.4, "satisfaction": -4, "grievance": 5 } },
+      { "label": "Do nothing", "tooltip": "Satisfaction −8 · grievance +10 · confidence −5",
+        "effects": { "satisfaction": -8, "grievance": 10, "confidence": -5 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "geoengineering", "title": "The Aerosol Proposal", "speaker": "science", "era": [2040, 2100],
+    "trigger": { "stat": "warming", "gt": 2 },
+    "weight": 2, "cooldownDays": 3600, "once": true,
+    "body": "{speaker} says stratospheric aerosols could cool the planet within a few years. It would be unilateral, cheap and irreversible. {rivalLeader} has threatened to treat it as an act of war.",
+    "options": [
+      { "label": "Launch the aerosol fleet", "tooltip": "Treasury −0.5 months of GDP · confidence +6 · relations −10 with everyone · an act of aggression",
+        "effects": { "treasuryGdp": -0.5, "confidence": 6, "relationsAll": -10, "deed": "aggression", "deedWeight": 1.5, "setFlag": "sky_dimmed" },
+        "followUp": { "id": "aerosol_fallout", "delay": [360, 900] } },
+      { "label": "Propose a global treaty", "tooltip": "Political capital −2 · relations +6 with everyone · treaty signed",
+        "effects": { "politicalCapital": -2, "relationsAll": 6, "deed": "treaty_signed", "deedWeight": 1.5 } },
+      { "label": "Refuse", "tooltip": "Confidence −3 · relations +2 with everyone",
+        "effects": { "confidence": -3, "relationsAll": 2 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "aerosol_fallout", "title": "Failed Monsoons", "speaker": "foreign", "chainOnly": true,
+    "trigger": { "eventFlag": "sky_dimmed" },
+    "body": "The aerosols have cooled the globe, but monsoons have failed in distant lands. {speaker} says {rival} is demanding compensation.",
+    "options": [
+      { "label": "Pay reparations", "tooltip": "Treasury −0.6 months of GDP · relations with them +12 · humane deed",
+        "effects": { "treasuryGdp": -0.6, "relationsWorst": 12, "deed": "relief", "deedWeight": 1.5, "clearFlag": "sky_dimmed" } },
+      { "label": "Deny responsibility", "tooltip": "Relations with them −12 · legitimacy −3 · an act of aggression",
+        "effects": { "relationsWorst": -12, "legitimacy": -3, "deed": "aggression", "deedWeight": 1, "clearFlag": "sky_dimmed" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "deepfake_election", "title": "The Forged Broadcast", "speaker": "press", "era": [2028, 2100],
+    "trigger": { "stat": "legitimacy", "lt": 75 },
+    "weight": 2, "cooldownDays": 1440,
+    "body": "{speaker} says a perfect video of the opposition leader confessing to bribery is spreading. It looks real, and it is fake. Voting is in three weeks.",
+    "options": [
+      { "label": "Expose it publicly", "tooltip": "Legitimacy +4 · political capital −1 · press freedom",
+        "effects": { "legitimacy": 4, "politicalCapital": -1, "deed": "press_freedom", "deedWeight": 1 } },
+      { "label": "Mandate content verification", "tooltip": "Treasury −0.2 months of GDP · legitimacy +2 · censorship charges",
+        "effects": { "treasuryGdp": -0.2, "legitimacy": 2, "deed": "censorship", "deedWeight": 0.8 } },
+      { "label": "Stay silent", "tooltip": "Legitimacy −5 · grievance +5",
+        "effects": { "legitimacy": -5, "grievance": 5 } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "heat_dome", "title": "The Heat Dome", "speaker": "interior", "era": [2025, 2100],
+    "trigger": { "stat": "warming", "gt": 1.4 },
+    "weight": 2, "cooldownDays": 1080,
+    "body": "Fifty degrees in {town} for nine days. {speaker} reports overwhelmed hospitals and power grids on the brink of failure.",
+    "options": [
+      { "label": "Emergency cooling centres", "tooltip": "Treasury −0.3 months of GDP · satisfaction +4 · a humane deed",
+        "effects": { "treasuryGdp": -0.3, "satisfaction": 4, "deed": "relief", "deedWeight": 1 } },
+      { "label": "Rolling blackouts", "tooltip": "Satisfaction −5 · grievance +6 · confidence +2",
+        "effects": { "satisfaction": -5, "grievance": 6, "confidence": 2 } },
+      { "label": "Advise citizens to stay indoors", "tooltip": "Satisfaction −3 · legitimacy −2",
+        "effects": { "satisfaction": -3, "legitimacy": -2 } }
+    ],
+    "defaultOption": 2
+  }
+]

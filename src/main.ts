@@ -130,6 +130,7 @@ function checkTurnBoundary(r: RegionSim, rv: RegionView): void {
     turnHoldMonth = -1;
     paused = true;
     rv.awaitingTurn = true;
+    rv.openPendingDecision();
     updateUIState();
   }
 }
