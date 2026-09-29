@@ -3271,7 +3271,7 @@ input[type='range']::-moz-range-thumb {
 .dip-mem li { padding: 1px 0; }
 .dip-mem b { font-family: var(--sans); font-variant-numeric: tabular-nums; margin-right: 4px; }
 .dip-why { margin: 6px 0 0; font-family: var(--sans); font-size: 11px; line-height: 1.5; }
-.dip-why > span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; opacity: 0.6; }
+.dip-why-h { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; opacity: 0.6; }
 .dip-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(59, 47, 27, 0.2); }
 .dip-btn { padding: 4px 9px; font: 11px var(--sans); background: #efe6cf; border: 1px solid rgba(59, 47, 27, 0.4); border-radius: 3px; cursor: pointer; color: inherit; }
 .dip-btn:hover:not(:disabled) { background: #fff; border-color: #3b2f1b; }

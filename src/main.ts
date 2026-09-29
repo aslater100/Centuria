@@ -22,6 +22,8 @@ import { TitleScreen } from './ui/titlescreen';
 import { PauseMenu } from './ui/pausemenu';
 import { TICKS_PER_SECOND, DAYS_PER_MONTH } from './sim/defs';
 import { agenda } from './sim/agenda';
+import { loadSettings, SettingsPanel, actionForKey, type Settings } from './ui/settings';
+import { Onboarding } from './ui/onboarding';
 import { runCatchUp } from './ui/simLoop';
 import { FramePacer } from './ui/framePacer';
 import { displayScale } from './ui/dpr';
@@ -102,6 +104,17 @@ let pauseMenuOpen = false;
 
 // Centuria 2.0 monthly turns: "End month" runs to the next month and holds;
 // a month that brings a NEW urgent matter also stops the clock on its own.
+let settings: Settings = loadSettings();
+const settingsPanel = new SettingsPanel(document.getElementById('app') ?? document.body);
+let onboarding: Onboarding | null = null;
+let onboardingTick = 0;
+function applySettings(s: Settings): void {
+  settings = s;
+  document.documentElement.style.setProperty('--ui-scale', String(s.uiScale));
+  regionView?.setColorSettings(s);
+  if (!s.showTutorial) onboarding?.dismissAll();
+}
+settingsPanel.onChange = applySettings;
 let turnHoldMonth = -1;
 let lastMonthIdx = -1;
 let seenAgendaIds = new Set<string>();
@@ -126,7 +139,7 @@ function checkTurnBoundary(r: RegionSim, rv: RegionView): void {
   const fresh = items.filter((i) => i.urgency >= 2 && !seenAgendaIds.has(i.id));
   seenAgendaIds = new Set(items.map((i) => i.id));
   const held = turnHoldMonth >= 0 && mi >= turnHoldMonth;
-  if (held || fresh.length > 0) {
+  if (held || (settings.monthlyTurns && fresh.length > 0)) {
     turnHoldMonth = -1;
     paused = true;
     rv.awaitingTurn = true;
@@ -179,6 +192,8 @@ function enterRegionMode(r: RegionSim): void {
   regionView.onSetSpeed = (s: number) => { speed = s; paused = false; updateUIState(); };
   regionView.onTogglePause = () => { if (!pauseMenuOpen) { paused = !paused; updateUIState(); } };
   regionView.onAdvanceMonth = advanceMonth;
+  applySettings(settings);
+  onboarding = settings.showTutorial ? new Onboarding(root) : null;
   turnHoldMonth = -1;
   lastMonthIdx = -1;
   seenAgendaIds = new Set(agenda(r).map((i) => i.id));
@@ -352,7 +367,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === '1') { speed = 1; updateUIState(); }
   if (e.key === '2') { speed = 3; updateUIState(); }
   if (e.key === '3') { speed = 8; updateUIState(); }
-  if (e.key === 'Enter' && regionView && !pauseMenuOpen && !(e.target instanceof HTMLInputElement)) { advanceMonth(); e.preventDefault(); return; }
+  if (e.key === ',' && regionView && !pauseMenuOpen) { settingsPanel.open(); e.preventDefault(); return; }
+  if (actionForKey(settings, e.key) === 'endMonth' && regionView && !pauseMenuOpen && !(e.target instanceof HTMLInputElement)) { advanceMonth(); e.preventDefault(); return; }
   if ((e.key === '+' || e.key === '=') && regionView) { regionView.zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1); e.preventDefault(); return; }
   if (e.key === '-' && regionView) { regionView.zoomAt(window.innerWidth / 2, window.innerHeight / 2, -1); e.preventDefault(); return; }
   if (e.key === 's' && e.ctrlKey) { save(); e.preventDefault(); return; }
@@ -487,6 +503,13 @@ function loop(now: number): void {
 
   if (region && regionView) {
     regionView.draw();
+    if (onboarding && onboardingTick++ % 60 === 0) {
+      onboarding.update({
+        year: region.year, month: region.month, paused, hasDecision: region.activeDecisions.length > 0,
+        logLen: region.log.length, stateProclaimed: region.stateProclaimed,
+        towns: region.settlements.filter((s) => s.factionId === region!.playerFactionId).length,
+      });
+    }
     // Era skin: mirror eraBranch onto #app[data-era] so CSS can theme per
     // branch. Write-guarded — an unconditional set forces a style recalc
     // against every [data-era] selector each frame.

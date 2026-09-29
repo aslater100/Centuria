@@ -28,6 +28,7 @@ import { Modal, createErrorState } from './components';
 import { WikiPanel } from './WikiPanel';
 import { issue } from '../sim/commands';
 import { expandHistory } from '../sim/territory';
+import { factionColor, type Settings } from './settings';
 import { QUIRKS } from '../sim/procgen/nation';
 import { flagDataUrl } from './flag';
 import { Dispatch, AgendaBar, DecisionCard } from './dispatch';
@@ -2190,7 +2191,9 @@ export class RegionView {
     const rgbOf = (fid: number): { r: number; g: number; b: number } | null => {
       if (fid < 0) return null;
       if (colorCache.has(fid)) return colorCache.get(fid)!;
-      const col = region.faction(fid)?.color ?? '#888888';
+      const base = region.faction(fid)?.color ?? '#888888';
+      const idx = region.regionalFactions.findIndex((f) => f.id === fid);
+      const col = this.colorSettings ? factionColor(base, Math.max(0, idx), this.colorSettings) : base;
       const rgb = hexToRgb(col);
       colorCache.set(fid, rgb);
       return rgb;
@@ -2309,6 +2312,14 @@ export class RegionView {
       }, 350);
     };
     bar.querySelector<HTMLButtonElement>('.history-close')!.onclick = () => this.toggleHistory();
+  }
+
+  private colorSettings: Settings | null = null;
+
+  /** Colourblind palette for territory (Centuria 2.0 accessibility). */
+  setColorSettings(s: Settings): void {
+    this.colorSettings = s;
+    this.mapCacheSig = '';
   }
 
   private prevTerritoryGrid: Int16Array | null = null;
