@@ -503,3 +503,6 @@ schema design.
 Same bar as CLAUDE.md's existing Definition of Done: build passes, tests pass, no type errors,
 changed files listed, `npm run sim -- <years> <runs>` shows no regression for anything
 touching balance, no new `any`, no schema mutation without the separate sign-off noted above.
+
+## Centuria 2.0 scope (2026-09-29)
+Scope approved: `docs/specs/centuria-2.0-scope.md`. Next: write the Phase 1 detailed spec (command layer, determinism fix, stakes pass) and get approval before any code.
