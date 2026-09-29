@@ -92,6 +92,25 @@
 }
 
 /* ---- Flag chip in the rival ledger (background stays inline: data) ---- */
+.flag-img {
+  width: 24px;
+  height: 16px;
+  margin-right: 6px;
+  vertical-align: middle;
+  image-rendering: auto;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+.quirk-tag {
+  display: inline-block;
+  padding: 0 6px;
+  margin-right: 4px;
+  border-radius: 8px;
+  font-size: 10px;
+  background: rgba(194, 161, 77, 0.18);
+  border: 1px solid rgba(194, 161, 77, 0.45);
+}
+
 .flag-chip {
   display: inline-block;
   width: 16px;

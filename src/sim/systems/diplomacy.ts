@@ -336,7 +336,7 @@ export function updateDiplomacy(r: RegionSim): void {
     tickNegotiations(r);
     const myBloc = r.playerBloc();
     for (const rv of r.rivals) {
-      rv.pop *= 1.0015; // they grow whether you watch or not
+      r.syncPowerPop(rv); // a nation grows with its towns (Centuria 2.0)
       if (r.playerWar?.rivalId === rv.id) {
         rv.relations = r.clampRel(Math.min(rv.relations, -60)); // war pins the ledger
         continue; // mischief, offers, and drift all yield to the front

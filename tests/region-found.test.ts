@@ -14,7 +14,7 @@ import { MINUTES_PER_DAY } from '../src/sim/defs';
 const ticksPerDay = MINUTES_PER_DAY / REGION_MINUTES_PER_TICK;
 
 function colony(seed: number): RegionSim {
-  return RegionSim.foundColony(new Rng(seed), new RegionMap(seed), new Weather(seed), {});
+  return RegionSim.foundColony(new Rng(seed), new RegionMap(seed), new Weather(seed), { worldPowers: 0 });
 }
 
 describe('RegionSim.foundColony — the 4X day zero', () => {

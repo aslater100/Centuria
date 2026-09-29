@@ -1,0 +1,118 @@
+[
+  {
+    "id": "strike_wave", "title": "The Strike Committee", "speaker": "interior",
+    "trigger": { "all": [ { "stat": "maxGrievance", "gte": 55 }, { "stat": "towns", "gte": 2 } ] },
+    "weight": 3, "cooldownDays": 900,
+    "body": "{speaker} reports that the mills of {town} have fallen silent. A strike committee demands shorter hours and a living wage, and the garrison asks for orders.",
+    "options": [
+      { "label": "Meet their demands", "tooltip": "Treasury −0.3 months of GDP · grievance −20 · a concession the world will notice",
+        "effects": { "treasuryGdp": -0.3, "grievance": -20, "satisfaction": 6, "deed": "concession", "setFlag": "sided_with_workers" } },
+      { "label": "Send in the militia", "tooltip": "Grievance −10 now, but a crackdown is remembered at home and abroad",
+        "effects": { "grievance": -10, "satisfaction": -8, "legitimacy": -5, "deed": "crackdown", "deedWeight": 2, "setFlag": "broke_the_strike" },
+        "followUp": { "id": "strike_martyrs", "delay": [90, 240] } },
+      { "label": "Wait it out", "tooltip": "Nothing is spent; nothing is settled",
+        "effects": { "grievance": 5, "log": "The strike drags on in {town}; the committee paints its demands on the town hall." } }
+    ],
+    "defaultOption": 2
+  },
+  {
+    "id": "strike_martyrs", "title": "The Martyrs of the Mill", "speaker": "people", "chainOnly": true,
+    "trigger": { "eventFlag": "broke_the_strike" },
+    "body": "A year on, crowds gather in {town} to lay flowers where the strikers fell. The organisers have a name for the day now, and a list of demands longer than before.",
+    "options": [
+      { "label": "Permit the memorial", "tooltip": "Grievance −8 · legitimacy +3",
+        "effects": { "grievance": -8, "legitimacy": 3, "deed": "concession", "clearFlag": "broke_the_strike" } },
+      { "label": "Ban the gathering", "tooltip": "A second crackdown — the movement goes underground",
+        "effects": { "grievance": 12, "legitimacy": -6, "deed": "crackdown", "deedWeight": 2.5, "setFlag": "underground_movement" } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "border_incident", "title": "Shots at the Frontier Post", "speaker": "rival",
+    "trigger": { "all": [ { "stat": "worstRelations", "lt": -30 }, { "flag": "stateProclaimed" } ] },
+    "weight": 2, "cooldownDays": 720,
+    "body": "{speaker} accuses our border guards of firing on a customs patrol. {rivalLeader} demands an apology and indemnity — or 'consequences'.",
+    "options": [
+      { "label": "Apologise and pay", "tooltip": "Treasury −0.2 months of GDP · relations with them +12",
+        "effects": { "treasuryGdp": -0.2, "relationsWorst": 12, "deed": "yielded", "deedWeight": 1 } },
+      { "label": "Demand our own inquiry", "tooltip": "Relations −4 · nothing conceded",
+        "effects": { "relationsWorst": -4, "log": "Our inquiry into the frontier shooting convenes; {rival} calls it a whitewash." } },
+      { "label": "Mobilise the border garrisons", "tooltip": "War support +10 · relations −15 · an act of aggression",
+        "effects": { "warSupport": 10, "relationsWorst": -15, "deed": "aggression", "deedWeight": 1 },
+        "followUp": { "id": "border_escalation", "delay": [60, 150] } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "border_escalation", "title": "Troops on Both Banks", "speaker": "defence", "chainOnly": true,
+    "trigger": { "stat": "worstRelations", "lt": -20 },
+    "body": "{speaker} reports that {rival} has answered our mobilisation in kind. Two armies now eye each other across the river. One false step and the century decides for us.",
+    "options": [
+      { "label": "Stand down, quietly", "tooltip": "War support −8 · relations +10",
+        "effects": { "warSupport": -8, "relationsWorst": 10, "deed": "peacemaker", "deedWeight": 1 } },
+      { "label": "Hold the line", "tooltip": "Relations −5 · the standoff hardens",
+        "effects": { "relationsWorst": -5, "warSupport": 5 } }
+    ],
+    "defaultOption": 1
+  },
+  {
+    "id": "foreign_loan_offer", "title": "Bankers from Abroad", "speaker": "treasury",
+    "trigger": { "all": [ { "stat": "treasuryMonths", "lt": 1 }, { "stat": "bestRelations", "gt": 20 } ] },
+    "weight": 2, "cooldownDays": 1080,
+    "body": "{speaker} brings word that financiers backed by {friend} will extend credit — in exchange for favourable access to our markets.",
+    "options": [
+      { "label": "Take the money", "tooltip": "Treasury +1 month of GDP · confidence −5 · relations with them +6",
+        "effects": { "treasuryGdp": 1, "confidence": -5, "relationsBest": 6 } },
+      { "label": "Decline politely", "tooltip": "Confidence +3",
+        "effects": { "confidence": 3 } }
+    ]
+  },
+  {
+    "id": "press_scandal", "title": "The Ledger Affair", "speaker": "press",
+    "trigger": { "all": [ { "flag": "stateProclaimed" }, { "stat": "legitimacy", "lt": 60 } ] },
+    "weight": 2, "cooldownDays": 1080,
+    "body": "{speaker} warns that a newspaper holds copies of ministry ledgers showing contracts steered to friends of the government. It goes to print on Friday.",
+    "options": [
+      { "label": "Let it run and sack the ministers", "tooltip": "Legitimacy −4 now, +political capital later · free press",
+        "effects": { "legitimacy": -4, "politicalCapital": 2, "deed": "press_freedom" } },
+      { "label": "Seize the presses", "tooltip": "Scandal buried · censorship remembered",
+        "effects": { "legitimacy": 2, "satisfaction": -3, "deed": "censorship", "deedWeight": 2 } }
+    ]
+  },
+  {
+    "id": "refugees_at_border", "title": "Refugees at the Gates", "speaker": "interior",
+    "trigger": { "all": [ { "stat": "rivals", "gte": 1 }, { "stat": "worstRelations", "lt": -10 }, { "stat": "avgSatisfaction", "gt": 45 } ] },
+    "weight": 1, "cooldownDays": 1440,
+    "body": "Families fleeing {rival} gather at our border posts. {speaker} asks whether we open the gates — {rivalLeader} will call it interference either way.",
+    "options": [
+      { "label": "Open the gates", "tooltip": "Humane deed · relations with them −6 · a small strain at home",
+        "effects": { "relationsWorst": -6, "satisfaction": -2, "deed": "relief", "deedWeight": 2 } },
+      { "label": "Close the border", "tooltip": "No strain · relations +3",
+        "effects": { "relationsWorst": 3 } }
+    ]
+  },
+  {
+    "id": "reputation_warmonger", "title": "The Neighbours Arm", "speaker": "foreign",
+    "trigger": { "rep": "aggressive", "gt": 3 },
+    "weight": 2, "cooldownDays": 1080,
+    "body": "{speaker} warns that our record has frightened the chanceries. Several powers are quietly comparing notes on us.",
+    "options": [
+      { "label": "Launch a peace initiative", "tooltip": "Political capital −2 · relations +4 with everyone",
+        "effects": { "politicalCapital": -2, "relationsAll": 4, "deed": "peacemaker" } },
+      { "label": "Let them fear us", "tooltip": "War support +5 · relations −3 with everyone",
+        "effects": { "warSupport": 5, "relationsAll": -3 } }
+    ]
+  },
+  {
+    "id": "reputation_oathbreaker", "title": "Our Word Is Worthless", "speaker": "foreign",
+    "trigger": { "deed": "broke_treaty", "withinDays": 1440, "min": 1 },
+    "weight": 2, "cooldownDays": 1440,
+    "body": "{speaker} reports that envoys now demand hostages, bonds and third-party guarantees before they will sign anything with us.",
+    "options": [
+      { "label": "Post a good-faith bond", "tooltip": "Treasury −0.25 months of GDP · relations +5 with everyone",
+        "effects": { "treasuryGdp": -0.25, "relationsAll": 5, "deed": "treaty_signed", "deedWeight": 1 } },
+      { "label": "Ignore the whispering", "tooltip": "Nothing changes",
+        "effects": {} }
+    ]
+  }
+]

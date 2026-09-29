@@ -62,6 +62,7 @@ describe('Phase 18 — advisorForecast (GDD §8.7)', () => {
     const trueValue = 10000;
     let allClose = true;
     for (let i = 0; i < 30; i++) {
+      r.minute += 30 * 1440; // forecast noise is stable within a month
       const est = r.advisorForecast('Finance', trueValue);
       if (Math.abs(est - trueValue) / trueValue > 0.05) {
         allClose = false;
@@ -77,6 +78,7 @@ describe('Phase 18 — advisorForecast (GDD §8.7)', () => {
     const trueValue = 10000;
     let anyFar = false;
     for (let i = 0; i < 100; i++) {
+      r.minute += 30 * 1440; // forecast noise is stable within a month
       const est = r.advisorForecast('Finance', trueValue);
       if (Math.abs(est - trueValue) / trueValue > 0.10) {
         anyFar = true;
@@ -93,6 +95,7 @@ describe('Phase 18 — advisorForecast (GDD §8.7)', () => {
     const trueValue = 10000;
     let anyFar = false;
     for (let i = 0; i < 100; i++) {
+      r.minute += 30 * 1440; // forecast noise is stable within a month
       const est = r.advisorForecast('Finance', trueValue);
       if (Math.abs(est - trueValue) / trueValue > 0.20) {
         anyFar = true;

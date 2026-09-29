@@ -233,7 +233,7 @@ describe('§ECON-COLLAPSE sovereign default', () => {
   });
 
   it('insolvencyMonths round-trips through serialize/deserialize (schema v5)', () => {
-    expect(SAVE_SCHEMA_VERSION).toBe(5);
+    expect(SAVE_SCHEMA_VERSION).toBe(6);
     const r = RegionSim.create(7);
     r.insolvencyMonths = 7;
     const r2 = RegionSim.deserialize(r.serialize());

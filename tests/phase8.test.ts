@@ -235,11 +235,13 @@ describe('Phase 8 — advisorForecast()', () => {
 
     r.ministers[0].notableId = nHigh.id;
     for (let i = 0; i < trials; i++) {
+      r.minute += 30 * 1440;
       highForecasts.push(r.advisorForecast('Interior', trueValue));
     }
 
     r.ministers[0].notableId = nLow.id;
     for (let i = 0; i < trials; i++) {
+      r.minute += 30 * 1440;
       lowForecasts.push(r.advisorForecast('Interior', trueValue));
     }
 
@@ -259,12 +261,12 @@ describe('Phase 8 — advisorForecast()', () => {
     // With minister
     r.ministers[0].notableId = n.id;
     const withMin: number[] = [];
-    for (let i = 0; i < 30; i++) withMin.push(r.advisorForecast('Interior', trueValue));
+    for (let i = 0; i < 30; i++, r.minute += 30 * 1440) withMin.push(r.advisorForecast('Interior', trueValue));
 
     // Without minister
     r.ministers[0].notableId = null;
     const withoutMin: number[] = [];
-    for (let i = 0; i < 30; i++) withoutMin.push(r.advisorForecast('Interior', trueValue));
+    for (let i = 0; i < 30; i++, r.minute += 30 * 1440) withoutMin.push(r.advisorForecast('Interior', trueValue));
 
     const spread = (arr: number[]) => Math.max(...arr) - Math.min(...arr);
     expect(spread(withoutMin)).toBeGreaterThan(spread(withMin));

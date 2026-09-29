@@ -20,7 +20,10 @@ import { AudioRegistry } from './ui/audio/audioRegistry';
 import { DesignScreen } from './ui/designscreen';
 import { TitleScreen } from './ui/titlescreen';
 import { PauseMenu } from './ui/pausemenu';
-import { TICKS_PER_SECOND } from './sim/defs';
+import { TICKS_PER_SECOND, DAYS_PER_MONTH } from './sim/defs';
+import { agenda } from './sim/agenda';
+import { loadSettings, SettingsPanel, actionForKey, type Settings } from './ui/settings';
+import { Onboarding } from './ui/onboarding';
 import { runCatchUp } from './ui/simLoop';
 import { FramePacer } from './ui/framePacer';
 import { displayScale } from './ui/dpr';
@@ -99,6 +102,52 @@ let paused = false;
 let speed = 1;
 let pauseMenuOpen = false;
 
+// Centuria 2.0 monthly turns: "End month" runs to the next month and holds;
+// a month that brings a NEW urgent matter also stops the clock on its own.
+let settings: Settings = loadSettings();
+const settingsPanel = new SettingsPanel(document.getElementById('app') ?? document.body);
+let onboarding: Onboarding | null = null;
+let onboardingTick = 0;
+function applySettings(s: Settings): void {
+  settings = s;
+  document.documentElement.style.setProperty('--ui-scale', String(s.uiScale));
+  regionView?.setColorSettings(s);
+  if (!s.showTutorial) onboarding?.dismissAll();
+}
+settingsPanel.onChange = applySettings;
+let turnHoldMonth = -1;
+let lastMonthIdx = -1;
+let seenAgendaIds = new Set<string>();
+const monthIdx = (r: RegionSim): number => Math.floor(r.day / DAYS_PER_MONTH);
+
+function advanceMonth(): void {
+  if (!region || !regionView || pauseMenuOpen) return;
+  turnHoldMonth = monthIdx(region) + 1;
+  regionView.awaitingTurn = false;
+  if (speed < 3) speed = 8;
+  paused = false;
+  updateUIState();
+}
+
+function checkTurnBoundary(r: RegionSim, rv: RegionView): void {
+  const mi = monthIdx(r);
+  if (mi === lastMonthIdx) return;
+  const first = lastMonthIdx < 0;
+  lastMonthIdx = mi;
+  if (first) return;
+  const items = agenda(r);
+  const fresh = items.filter((i) => i.urgency >= 2 && !seenAgendaIds.has(i.id));
+  seenAgendaIds = new Set(items.map((i) => i.id));
+  const held = turnHoldMonth >= 0 && mi >= turnHoldMonth;
+  if (held || (settings.monthlyTurns && fresh.length > 0)) {
+    turnHoldMonth = -1;
+    paused = true;
+    rv.awaitingTurn = true;
+    rv.openPendingDecision();
+    updateUIState();
+  }
+}
+
 function updateUIState(): void {
   window.gameSpeed = speed;
   window.gamePaused = paused;
@@ -142,6 +191,16 @@ function enterRegionMode(r: RegionSim): void {
   // authoritative speed/pause/menu state, kept in sync with the keyboard.
   regionView.onSetSpeed = (s: number) => { speed = s; paused = false; updateUIState(); };
   regionView.onTogglePause = () => { if (!pauseMenuOpen) { paused = !paused; updateUIState(); } };
+  regionView.onAdvanceMonth = advanceMonth;
+  regionView.onRailScreen = (id) => {
+    if (id === 'history') regionView?.toggleHistory();
+    else if (id === 'settings') settingsPanel.open();
+  };
+  applySettings(settings);
+  onboarding = settings.showTutorial ? new Onboarding(root) : null;
+  turnHoldMonth = -1;
+  lastMonthIdx = -1;
+  seenAgendaIds = new Set(agenda(r).map((i) => i.id));
   regionView.onOpenGameMenu = () => {
     if (!pauseMenuOpen && regionView && !regionView.ceremonyOpen) {
       pauseMenuOpen = true;
@@ -312,6 +371,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === '1') { speed = 1; updateUIState(); }
   if (e.key === '2') { speed = 3; updateUIState(); }
   if (e.key === '3') { speed = 8; updateUIState(); }
+  if (e.key === ',' && regionView && !pauseMenuOpen) { settingsPanel.open(); e.preventDefault(); return; }
+  if (actionForKey(settings, e.key) === 'endMonth' && regionView && !pauseMenuOpen && !(e.target instanceof HTMLInputElement)) { advanceMonth(); e.preventDefault(); return; }
   if ((e.key === '+' || e.key === '=') && regionView) { regionView.zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1); e.preventDefault(); return; }
   if (e.key === '-' && regionView) { regionView.zoomAt(window.innerWidth / 2, window.innerHeight / 2, -1); e.preventDefault(); return; }
   if (e.key === 's' && e.ctrlKey) { save(); e.preventDefault(); return; }
@@ -331,11 +392,9 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (regionView && !pauseMenuOpen) {
-    if (e.key === 't' || e.key === 'T') { regionView.researchOpen = !regionView.researchOpen; e.preventDefault(); return; }
+    if (e.key === 't' || e.key === 'T') { regionView.openScreen('research'); e.preventDefault(); return; }
     if (e.key === 'p' || e.key === 'P') { regionView.toggleProvinceView(); e.preventDefault(); return; }
-    if ((e.key === 'b' || e.key === 'B') && region?.hasCentralBank()) {
-      regionView.centralBankOpen = !regionView.centralBankOpen; e.preventDefault(); return;
-    }
+    if (e.key === 'b' || e.key === 'B') { regionView.openNation('budget'); e.preventDefault(); return; }
     // U6: gameplay-panel shortcuts (docs/specs/09-audit-nine.md §U6). Skipped
     // while focus is in a text field (town rename, tax slider, loan prompts)
     // so single letters never hijack typing.
@@ -343,10 +402,13 @@ window.addEventListener('keydown', (e) => {
     const typing = target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
     if (!typing) {
       if (e.key === 'e' || e.key === 'E') { regionView.toggleEconomyPanel(); e.preventDefault(); return; }
-      if (e.key === 'g' || e.key === 'G') { regionView.toggleStatePanel(); e.preventDefault(); return; }
+      if (e.key === 'g' || e.key === 'G') { regionView.openScreen('nation'); e.preventDefault(); return; }
       if (e.key === 'o' || e.key === 'O') { regionView.toggleOverviewPanel(); e.preventDefault(); return; }
       if (e.key === 'c' || e.key === 'C') { regionView.openCenturyGraph(); e.preventDefault(); return; }
-      if (e.key === '?' || e.key === 'h' || e.key === 'H') { regionView.toggleWikiPanel(); e.preventDefault(); return; }
+      if (e.key === '?') { regionView.toggleWikiPanel(); e.preventDefault(); return; }
+      if (e.key === 'h' || e.key === 'H') { regionView.toggleHistory(); e.preventDefault(); return; }
+      if (e.key === 'd' || e.key === 'D') { regionView.toggleDiplomacy(); e.preventDefault(); return; }
+      if (e.key === 'l' || e.key === 'L') { regionView.openScreen('claim'); e.preventDefault(); return; }
     }
   }
 });
@@ -418,6 +480,7 @@ function loop(now: number): void {
   void dt; // pan not yet implemented in RegionView
 
   if (!paused && region && regionView) {
+    regionView.awaitingTurn = false;
     acc += dt * TICKS_PER_SECOND * speed;
     // Budget the sim catch-up by wall-clock, not a fixed iteration count: a heavy
     // late-game tick (the monthly/yearly spike) can't blow the 16.7 ms frame — we
@@ -432,6 +495,7 @@ function loop(now: number): void {
       { budgetMs: 8, maxTicks: 240, maxBacklog: 240 },
     );
     acc = res.acc;
+    checkTurnBoundary(r, rv);
 
     // Autosave once per in-game year. `region.year` is a monotonic integer, so a
     // strict inequality fires exactly once on each new year — never per tick.
@@ -443,6 +507,13 @@ function loop(now: number): void {
 
   if (region && regionView) {
     regionView.draw();
+    if (onboarding && onboardingTick++ % 60 === 0) {
+      onboarding.update({
+        year: region.year, month: region.month, paused, hasDecision: region.activeDecisions.length > 0,
+        logLen: region.log.length, stateProclaimed: region.stateProclaimed,
+        towns: region.settlements.filter((s) => s.factionId === region!.playerFactionId).length,
+      });
+    }
     // Era skin: mirror eraBranch onto #app[data-era] so CSS can theme per
     // branch. Write-guarded — an unconditional set forces a style recalc
     // against every [data-era] selector each frame.

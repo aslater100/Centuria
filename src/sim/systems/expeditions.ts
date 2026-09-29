@@ -58,6 +58,7 @@ export function updateExpeditions(r: RegionSim): void {
         if (playerFaction) {
           playerFaction.settlementIds.push(town.id);
         }
+        r.settleOwnership();
         r.expeditions = r.expeditions.filter((o) => o !== e);
         const flavor = e.site.river ? 'on the riverbank' : e.site.coastal ? 'by the sea' : e.site.fertility > 1 ? 'in good black soil' : 'on thin ground';
         r.addLog(`${town.name} is founded ${flavor} — the ${r.ordinal(r.settlements.length)} town of the colony.`, 'good');

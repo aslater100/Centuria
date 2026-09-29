@@ -30,7 +30,7 @@ function basePrice(id: string): number {
 /** Build a sim with `layout.length` player towns, pinned sector outputs and an empty
  *  ledger, the reported year pinned so every good is unlocked. */
 function townsSim(layout: Array<{ ind: number; agri: number }>, year = 2000): RegionSim {
-  const r = RegionSim.create(7);
+  const r = RegionSim.create(7, { worldPowers: 0 });
   const base = r.settlements[0];
   while (r.settlements.length < layout.length) {
     const clone = structuredClone(base) as Settlement;

@@ -28,7 +28,7 @@ function runDays(r: RegionSim, days: number): void {
   for (let i = 0; i < days * ticksPerDay; i++) r.tick();
 }
 function colony(seed: number): RegionSim {
-  return RegionSim.foundColony(new Rng(seed), new RegionMap(seed), new Weather(seed), {});
+  return RegionSim.foundColony(new Rng(seed), new RegionMap(seed), new Weather(seed), { worldPowers: 0 });
 }
 
 // ---- WAR_SUPPORT_DECAY_MULT ----

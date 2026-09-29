@@ -14,7 +14,7 @@ function runDays(r: RegionSim, days: number): void {
 
 /** Create a colony and immediately launch and land the first expedition (2 settlements). */
 function twoTownColony(seed: number): RegionSim {
-  const r = RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$' });
+  const r = RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
   r.settlements[0].cohorts.bands[2] += 20;
   r.settlements[0].food = 200;
   r.settlements[0].wood = 200;
@@ -25,7 +25,7 @@ function twoTownColony(seed: number): RegionSim {
 
 describe('RegionSim (aggregate model)', () => {
   it('the expedition arrives and founds town #2', () => {
-    const r = RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$' });
+    const r = RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
     r.settlements[0].cohorts.bands[2] += 20;
     r.settlements[0].food = 200;
     r.settlements[0].wood = 200;
@@ -155,9 +155,10 @@ describe('RegionSim (aggregate model)', () => {
     const t = r.settlements[0];
     r.treasury = 1000;
     const before = t.garrisonStrength || 0;
+    const cost = r.militiaCost();
     expect(r.recruitMilitia(t.id)).toBe(true);
     expect(t.garrisonStrength).toBe(before + 2);
-    expect(r.treasury).toBe(750);
+    expect(r.treasury).toBe(1000 - cost);
     // Drilling stops at the population-scaled cap.
     for (let i = 0; i < 20; i++) { r.treasury = 1000; r.recruitMilitia(t.id); }
     expect(t.garrisonStrength).toBeLessThanOrEqual(r.garrisonCap(t));
@@ -602,7 +603,7 @@ describe('Elections & faction politics (v0.14.0)', () => {
   });
 
   it('politics fields survive save/load round-trip', () => {
-    const r = RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$' });
+    const r = RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
     r.stateProclaimed = true;
     r.politicalCapital = 45;
     r.nextElectionDay = 300;
@@ -644,7 +645,7 @@ describe('Constitutional Convention & Nation Proclamation (v0.15.0)', () => {
   }
 
   it('canCallConvention() false before stateProclaimed', () => {
-    const r = RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$' });
+    const r = RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
     r.researched.add('statecraft');
     for (const t of r.settlements) t.cohorts.bands[2] += 800;
     expect(r.canCallConvention()).toBe(false);
@@ -748,7 +749,7 @@ describe('Constitutional Convention & Nation Proclamation (v0.15.0)', () => {
   });
 
   it('nation fields survive save/load round-trip', () => {
-    const r = RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$' });
+    const r = RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
     r.stateProclaimed = true;
     r.proclaimNation('Saved Nation', 'monarchy', {});
     r.legitimacy = 72;
@@ -1188,7 +1189,7 @@ describe('City works & zoning (Phase 2)', () => {
   });
 
   it('basic buildings constructible before Incorporation, full management after', () => {
-    const r = RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$' });
+    const r = RegionSim.create(42, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
     r.treasury = 500;
     expect(r.canManageCity(r.settlements[0]).ok).toBe(false);
     // Basic buildings (no prereq) are constructible pre-state
@@ -1268,7 +1269,7 @@ describe('City works & zoning (Phase 2)', () => {
 
 describe('Cost scaling with development & size (Baumol / Wagner / ideas-harder-to-find)', () => {
   function freshState(seed: number): RegionSim {
-    const r = RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$' });
+    const r = RegionSim.create(seed, { aiDifficulty: 'normal', currencySymbol: '$', worldPowers: 0 });
     r.stateProclaimed = true;
     r.treasury = 5000;
     return r;
@@ -1588,12 +1589,14 @@ describe('Phase 0: Territory & resource visualization', () => {
     expect(r.playerTerritoryControl()).toBeGreaterThan(0);
   });
 
-  it('the grid cache invalidates when a settlement changes', () => {
+  it('the grid is a pure read; borders move on the monthly territory pass', () => {
     const r = flipped(11);
     const g1 = r.computeTerritoryGrid();
     expect(r.computeTerritoryGrid()).toBe(g1); // same object while nothing moved
     r.settlements[0].garrisonStrength += 50;
-    expect(r.computeTerritoryGrid()).not.toBe(g1); // signature changed → recomputed
+    expect(r.computeTerritoryGrid()).toBe(g1); // reading never mutates ownership (save/load determinism)
+    r.tickTerritory();
+    expect(r.computeTerritoryGrid()).not.toBe(g1); // the monthly pass recomputes
   });
 
   it('classifies a well-fed town as food surplus and a starving one as deficit', () => {

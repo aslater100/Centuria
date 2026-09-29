@@ -1,3 +1,4 @@
+import { REGION_N } from '../src/sim/worldgen';
 import { describe, it, expect } from 'vitest';
 import { RegionSim } from '../src/sim/region';
 import { MINUTES_PER_DAY } from '../src/sim/defs';
@@ -296,12 +297,12 @@ describe('Phase C: conquest & diplomacy', () => {
       expect(playerSettlement).toBeDefined();
 
       // Unclaimed land sits just beyond a settlement's territory radius, so scan the
-      // whole 128×128 grid (territory grid is cached, so this is cheap) for the first
+      // whole REGION_N² grid (territory grid is cached, so this is cheap) for the first
       // claimable frontier cell. At least one must exist — the capital never fills the
       // map — so the assertion runs unconditionally, no escape hatch.
       let claimed: { x: number; y: number } | null = null;
-      for (let x = 0; x < 128 && !claimed; x++) {
-        for (let y = 0; y < 128 && !claimed; y++) {
+      for (let x = 0; x < REGION_N && !claimed; x++) {
+        for (let y = 0; y < REGION_N && !claimed; y++) {
           if (r.canClaimCell(x, y).ok) claimed = { x, y };
         }
       }

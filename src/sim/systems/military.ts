@@ -218,6 +218,18 @@ export function updateArmyMovement(r: RegionSim): void {
   }
 
   /** Resolve combat when opposing armies occupy the same province. */
+/** Centuria 2.0 §F — a field battle against the rival you are formally at war with
+ *  moves that war's score and home-front support, so the map decides the war. */
+export const BATTLE_WAR_SCORE = 8;
+export const BATTLE_ROUT_WAR_SCORE_MULT = 1.5;
+export function applyBattleToWar(r: RegionSim, rivalId: number, playerWon: boolean, routed: boolean): void {
+  const w = r.playerWar;
+  if (!w || w.rivalId !== rivalId) return;
+  const swing = BATTLE_WAR_SCORE * (routed ? BATTLE_ROUT_WAR_SCORE_MULT : 1) * (playerWon ? 1 : -1);
+  w.score = Math.max(-100, Math.min(100, w.score + swing));
+  r.warSupport = Math.max(0, Math.min(100, r.warSupport + swing / 2));
+}
+
 export function resolveProvinceBattle(r: RegionSim, provinceId: number): void {
     const playerArmies = r.provincialArmies.filter((a) => a.ownerId === 0 && a.provinceId === provinceId && !a.destinationId);
     const rivalArmies = r.provincialArmies.filter((a) => a.ownerId !== 0 && a.provinceId === provinceId && !a.destinationId);
@@ -320,6 +332,7 @@ export function resolveProvinceBattle(r: RegionSim, provinceId: number): void {
       }
       r.addLog(`BATTLE of ${sName}: ${rv?.name ?? 'the enemy'} drives our forces back!`, 'bad');
     }
+    applyBattleToWar(r, rvId, playerWinsBattle, routed);
   }
 
   /** Monthly: rival AI spawns and manoeuvres armies (expansion-minded powers threaten borders). */
@@ -475,6 +488,7 @@ export function resolveArmyGroupBattle(r: RegionSim, provinceId: number): void {
       r.lastBattleWon = false;
       r.addLog(`BATTLE OF ${sName.toUpperCase()}: our forces lose, ${rvName} holds the field — ${casualties} casualties.`, 'bad');
     }
+    applyBattleToWar(r, rvId, playerWinsBattle, routed);
     // Remove armies with no manpower
     r.armyGroups = r.armyGroups.filter((a) => a.manpower > 0);
   }
@@ -798,11 +812,25 @@ export function tickPlayerWar(r: RegionSim): void {
     if (w.front.position >= FRONT_OCCUPY_THRESHOLD && w.occupied < MAX_OCCUPIED_MARCHES && takeRoll) {
       w.occupied++;
       w.support = Math.min(100, w.support + 3); // the parade writes the headline
-      r.addLog(`Our columns take one of ${rv.name}'s marches — military administration begins (${w.occupied} occupied).`, 'good');
+      const town = r.frontierTownOf(rv);
+      if (town) {
+        r.transferSettlement(town, r.playerFactionId, 20);
+        (w.occupiedTowns ??= []).push(town.id);
+        r.addLog(`OCCUPATION: our columns take ${town.name} from ${rv.name} — military administration begins (${w.occupied} occupied).`, 'good', { cat: 'war' });
+      } else {
+        r.addLog(`Our columns take one of ${rv.name}'s marches — military administration begins (${w.occupied} occupied).`, 'good');
+      }
     } else if (w.front.position < 0 && w.occupied > 0 && cedeRoll) {
       w.occupied--;
       if (w.occupied === 0) w.resistance = 0;
-      r.addLog(`${rv.name}'s counterattack retakes its march — the garrison falls back (${w.occupied} occupied).`, 'bad');
+      const lostId = w.occupiedTowns?.pop();
+      const lost = lostId !== undefined ? r.settlement(lostId) : undefined;
+      if (lost && rv.factionId !== undefined && lost.factionId === r.playerFactionId) {
+        r.transferSettlement(lost, rv.factionId, 70);
+        r.addLog(`${rv.name}'s counterattack retakes ${lost.name} — the garrison falls back (${w.occupied} occupied).`, 'bad', { cat: 'war' });
+      } else {
+        r.addLog(`${rv.name}'s counterattack retakes its march — the garrison falls back (${w.occupied} occupied).`, 'bad');
+      }
     }
     if (w.occupied > 0) {
       const occ = OCCUPATION_DEFS[w.occupationPolicy];
