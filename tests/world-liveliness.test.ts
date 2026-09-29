@@ -69,21 +69,21 @@ function injectRival(
 
 describe('pairRelationsBase — the widened, floored baseline', () => {
   it('a warm same-bloc trading pair reads above the alliance ramp start', () => {
-    const r = RegionSim.create(7);
+    const r = RegionSim.create(7, { worldPowers: 0 });
     const a = injectRival(r, 9001, 'trading_republic', 'east', 'merchant_republic');
     const b = injectRival(r, 9002, 'trading_republic', 'east', 'parliamentary');
     expect(pairRelationsBase(a, b, 12)).toBeGreaterThan(ALLIANCE_RAMP_START);
   });
 
   it('a quarrel-bloc hegemon pair reads below the war ramp start', () => {
-    const r = RegionSim.create(7);
+    const r = RegionSim.create(7, { worldPowers: 0 });
     const a = injectRival(r, 9001, 'hegemon', 'east', 'junta');
     const b = injectRival(r, 9002, 'hegemon', 'east', 'parliamentary');
     expect(pairRelationsBase(a, b, -14)).toBeLessThan(FOREIGN_WAR_RAMP_START);
   });
 
   it('the floor bounds even the most hostile pair — war depth is an excursion, not a steady state', () => {
-    const r = RegionSim.create(7);
+    const r = RegionSim.create(7, { worldPowers: 0 });
     const a = injectRival(r, 9001, 'hegemon', 'east', 'junta');
     const b = injectRival(r, 9002, 'hegemon', 'east', 'parliamentary');
     a.weights.expansion = 10;
@@ -94,7 +94,7 @@ describe('pairRelationsBase — the widened, floored baseline', () => {
   });
 
   it('spawned newcomers seed their opening opinions from the same formula (clamped, jittered ±10)', () => {
-    const r = RegionSim.create(7);
+    const r = RegionSim.create(7, { worldPowers: 0 });
     // Spawn two rivals via the real path; the pair opinion must sit within
     // the jitter band of pairRelationsBase (or its [−60, 40] clamp).
     (r as unknown as { spawnRival(): void }).spawnRival();
@@ -124,7 +124,7 @@ describe('the ramps replace the knife-edge cliffs', () => {
   });
 
   it('a pinned deep-hostile pair goes to war within a bounded horizon; a mild pair never does', () => {
-    const r = RegionSim.create(11);
+    const r = RegionSim.create(11, { worldPowers: 0 });
     const a = injectRival(r, 9001, 'hegemon', 'east', 'junta');
     const b = injectRival(r, 9002, 'hegemon', 'east', 'parliamentary');
     const key = r.pairKey(a.id, b.id);
@@ -136,7 +136,7 @@ describe('the ramps replace the knife-edge cliffs', () => {
     }
     expect(warAt).toBeGreaterThanOrEqual(0);
 
-    const r2 = RegionSim.create(11);
+    const r2 = RegionSim.create(11, { worldPowers: 0 });
     const c = injectRival(r2, 9001, 'hegemon', 'east', 'junta');
     const d = injectRival(r2, 9002, 'hegemon', 'east', 'parliamentary');
     const key2 = r2.pairKey(c.id, d.id);
@@ -148,7 +148,7 @@ describe('the ramps replace the knife-edge cliffs', () => {
   });
 
   it('a pinned very-warm honor pair signs an alliance within a bounded horizon; a cool pair never does', () => {
-    const r = RegionSim.create(13);
+    const r = RegionSim.create(13, { worldPowers: 0 });
     const a = injectRival(r, 9001, 'trading_republic', 'east', 'merchant_republic');
     const b = injectRival(r, 9002, 'trading_republic', 'east', 'parliamentary');
     const key = r.pairKey(a.id, b.id);
@@ -160,7 +160,7 @@ describe('the ramps replace the knife-edge cliffs', () => {
     }
     expect(allyAt).toBeGreaterThanOrEqual(0);
 
-    const r2 = RegionSim.create(13);
+    const r2 = RegionSim.create(13, { worldPowers: 0 });
     const c = injectRival(r2, 9001, 'trading_republic', 'east', 'merchant_republic');
     const d = injectRival(r2, 9002, 'trading_republic', 'east', 'parliamentary');
     const key2 = r2.pairKey(c.id, d.id);
@@ -174,7 +174,7 @@ describe('the ramps replace the knife-edge cliffs', () => {
 
 describe('the world is alive — a synthetic century is not frozen', () => {
   it('a mixed six-power world produces alliances AND foreign wars inside 181 years of months', () => {
-    const r = RegionSim.create(1021);
+    const r = RegionSim.create(1021, { worldPowers: 0 });
     injectRival(r, 9001, 'hegemon', 'east', 'junta');
     injectRival(r, 9002, 'trading_republic', 'east', 'merchant_republic');
     injectRival(r, 9003, 'hermit_kingdom', 'west', 'theocracy');
@@ -191,7 +191,7 @@ describe('the world is alive — a synthetic century is not frozen', () => {
 
   it('same seed, same code — the lively world is still deterministic', () => {
     const run = () => {
-      const r = RegionSim.create(77);
+      const r = RegionSim.create(77, { worldPowers: 0 });
       injectRival(r, 9001, 'hegemon', 'east', 'junta');
       injectRival(r, 9002, 'trading_republic', 'east', 'merchant_republic');
       injectRival(r, 9003, 'crusader_state', 'west', 'peoples_republic');
@@ -209,7 +209,7 @@ describe('alliance dissolution — a pact can outlive the warmth that formed it'
   });
 
   it('a pinned deep-cold allied pair dissolves within a bounded horizon', () => {
-    const r = RegionSim.create(21);
+    const r = RegionSim.create(21, { worldPowers: 0 });
     const a = injectRival(r, 9001, 'hegemon', 'east', 'junta');
     const b = injectRival(r, 9002, 'hegemon', 'east', 'parliamentary');
     const key = r.pairKey(a.id, b.id);
@@ -224,7 +224,7 @@ describe('alliance dissolution — a pact can outlive the warmth that formed it'
   });
 
   it('a pinned pair inside the 0..25 dead zone never dissolves — no flicker from ordinary wander', () => {
-    const r = RegionSim.create(23);
+    const r = RegionSim.create(23, { worldPowers: 0 });
     const a = injectRival(r, 9001, 'hegemon', 'east', 'junta');
     const b = injectRival(r, 9002, 'hegemon', 'east', 'parliamentary');
     const key = r.pairKey(a.id, b.id);
@@ -237,7 +237,7 @@ describe('alliance dissolution — a pact can outlive the warmth that formed it'
   });
 
   it('a hostile regime change organically sours an alliance over time — no special-case hook needed', () => {
-    const r = RegionSim.create(29);
+    const r = RegionSim.create(29, { worldPowers: 0 });
     // Low-commerce/high-expansion archetype (hegemon) keeps the warmth term
     // small relative to the ideology/geography swing, so a bloc flip actually
     // crosses the dissolution ramp instead of being masked by the `allied`
@@ -264,7 +264,7 @@ describe('alliance dissolution — a pact can outlive the warmth that formed it'
   it('the existing incite_unrest espionage dissolution path is untouched (still a plain filter)', () => {
     // Regression guard: the organic dissolution above must not interfere with
     // the pre-existing player-triggered alliance fracture.
-    const r = RegionSim.create(31);
+    const r = RegionSim.create(31, { worldPowers: 0 });
     const a = injectRival(r, 9001, 'hegemon', 'east', 'junta');
     const b = injectRival(r, 9002, 'hegemon', 'west', 'parliamentary');
     const key = r.pairKey(a.id, b.id);

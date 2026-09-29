@@ -154,7 +154,7 @@ export class RegionMap {
         cy: Math.max(0.12, Math.min(0.88, by + (rnd(i, 2) - 0.5) * 0.04)),
         rx: 0.095 + heart + rnd(i, 3) * 0.03,
         ry: 0.09 + heart + rnd(i, 4) * 0.03,
-        h: i === 0 ? 0.95 : 0.84 + rnd(i, 5) * 0.1,
+        h: i === 0 ? 0.78 : 0.7 + rnd(i, 5) * 0.08, // gentler shelves: ranges, not one ice dome
       };
     });
   }

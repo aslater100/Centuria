@@ -275,9 +275,6 @@ export class RegionView {
   //      so render them once into an offscreen canvas (base coords) and blit it
   //      under the camera each frame. Rebuilt only when the signature changes,
   //      which keeps the per-frame cost independent of REGION_N. ----
-  private mapCache: HTMLCanvasElement | null = null;
-  private mapCacheCtx: CanvasRenderingContext2D | null = null;
-  private mapCacheSig = '';
   // Memory-fog cache: explored-but-not-visible tiles. Same idea as mapCache but
   // keyed on exploredCount + visibilityVersion so it rebuilds when scouts move.
   // Offscreen canvas of water pixels; rebuilt only on canvas resize (biomes are fixed).
@@ -324,14 +321,16 @@ export class RegionView {
   private selectedScoutId: number | null = null;
   // ---- Map camera (zoom + pan). Default view starts zoomed on the founding
   //      settlement (Civ-style); zoom out to see the whole region. ----
-  private camScale = 8;
+  private camScale = 11;
   private camX = 0; // screen-px offset applied after scaling
   private camY = 0;
-  // MIN_SCALE 2 lets the player pull back far enough to take in most of the
-  // continent at once (whole-world overview still lives on the minimap);
-  // MAX_SCALE 20 zooms in until a single hex fills a good chunk of the screen.
-  private static readonly MIN_SCALE = 2;
-  private static readonly MAX_SCALE = 20;
+  // Centuria 2.0 world map: HOME_SCALE frames the founding valley at the same hex
+  // size as the old 128² region; MIN_SCALE pulls back to the whole world (the
+  // tiled cache keeps that cheap); MAX_SCALE zooms until one hex fills a good
+  // chunk of the screen.
+  private static readonly HOME_SCALE = 11;
+  private static readonly MIN_SCALE = 0.9;
+  private static readonly MAX_SCALE = 40;
   // ---- Minimap (corner navigation aid) ----
   private minimap: Minimap;
   // ---- Tooltips (settlement hover info) ----
@@ -444,7 +443,7 @@ export class RegionView {
     // Start zoomed in on the founding settlement (Civ-style entry view).
     if (region.settlements.length > 0) {
       const home = region.settlements[0];
-      this.camScale = 8;
+      this.camScale = RegionView.HOME_SCALE;
       const { size, ox, oy } = hexLayoutParams(this.viewW, this.viewH, REGION_N, 60);
       const col = Math.max(0, Math.min(REGION_N - 1, Math.floor((home.x / 100) * REGION_N)));
       const row = Math.max(0, Math.min(REGION_N - 1, Math.floor((home.y / 100) * REGION_N)));
@@ -967,9 +966,9 @@ export class RegionView {
       b: (H - this.camY) / this.camScale,
     };
     // Terrain + territory (the O(N²) layers) come from the static cache as one blit.
-    this.ensureMapCache(W, H);
-    g.drawImage(this.mapCache!, 0, 0);
+    this.drawMapTiles(g, W, H);
     this.drawBorderPulses(g, W, H);
+    this.drawCapitalFlags(g, W, H);
     // (Memory-fog layer deleted 2026-07: fog of war is retired, so the old
     // per-frame full-screen blit composited only transparent pixels.)
 
@@ -1449,24 +1448,113 @@ export class RegionView {
     return s;
   }
 
-  /** Rebuild the offscreen terrain+territory canvas only when its signature
-   *  changes; otherwise the per-frame map cost is a single drawImage. */
-  private ensureMapCache(W: number, H: number): void {
+  /** Centuria 2.0 tiled map cache: the world is cut into TILE_BASE-px tiles in
+   *  base coords, each rendered (culled to its own hexes) at a detail level
+   *  matched to the zoom, so the 256² world stays crisp close up and cheap far
+   *  out. A signature change drops every tile; at most TILE_BUILDS_PER_FRAME new
+   *  tiles are painted per frame, drawing a coarser cached tile meanwhile. */
+  private static readonly TILE_BASE = 256;
+  private static readonly TILE_BUILDS_PER_FRAME = 3;
+  private static readonly TILE_CACHE_MAX = 64;
+  private tiles = new Map<string, HTMLCanvasElement>();
+  private tileSig = '';
+  private lastTerritoryVersionSeen = -1;
+
+  private drawMapTiles(g: CanvasRenderingContext2D, W: number, H: number): void {
     const sig = this.mapCacheSignature();
-    if (this.mapCache && this.mapCacheSig === sig && this.mapCache.width === W && this.mapCache.height === H) return;
-    if (!this.mapCache) this.mapCache = document.createElement('canvas');
-    if (this.mapCache.width !== W || this.mapCache.height !== H) {
-      this.mapCache.width = W;
-      this.mapCache.height = H;
-      this.mapCacheCtx = this.mapCache.getContext('2d');
+    if (sig !== this.tileSig) {
+      this.tiles.clear();
+      this.tileSig = sig;
     }
-    const cg = this.mapCacheCtx!;
-    cg.clearRect(0, 0, W, H);
-    this.drawTerrain(cg, W, H);
-    this.drawTerritories(cg, W, H);
-    // Fog of war retired (2026-07): no shroud layer — the map reads clean.
-    this.mapCacheSig = sig;
+    if (this.region.territoryVersion !== this.lastTerritoryVersionSeen && !this.historyView) {
+      this.lastTerritoryVersionSeen = this.region.territoryVersion;
+      this.noteBorderChanges(this.region.computeTerritoryGrid().grid);
+    }
+    const T = RegionView.TILE_BASE;
+    const want = Math.max(0, Math.min(3, Math.ceil(Math.log2(Math.max(1, this.camScale * displayScale())))));
+    const vb = this.vb;
+    const tx0 = Math.max(0, Math.floor(vb.l / T)), tx1 = Math.min(Math.ceil(W / T) - 1, Math.floor(vb.r / T));
+    const ty0 = Math.max(0, Math.floor(vb.t / T)), ty1 = Math.min(Math.ceil(H / T) - 1, Math.floor(vb.b / T));
+    let built = 0;
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        let tile = this.tiles.get(`${want}:${tx}:${ty}`);
+        if (!tile && built < RegionView.TILE_BUILDS_PER_FRAME) {
+          tile = this.buildTile(tx, ty, want, W, H);
+          built++;
+        }
+        for (let lod = want - 1; !tile && lod >= 0; lod--) tile = this.tiles.get(`${lod}:${tx}:${ty}`);
+        if (!tile && built < RegionView.TILE_BUILDS_PER_FRAME + 2) { tile = this.buildTile(tx, ty, 0, W, H); built++; }
+        if (tile) g.drawImage(tile, tx * T, ty * T, T, T);
+      }
+    }
   }
+
+  private flagImages = new Map<string, HTMLImageElement>();
+
+  /** Great-power and faction capitals fly their flag at a constant screen size,
+   *  so the world map reads as nations when zoomed out. */
+  private drawCapitalFlags(g: CanvasRenderingContext2D, W: number, H: number): void {
+    const { size, ox, oy } = hexLayoutParams(W, H, REGION_N, 60);
+    const px = 1 / this.camScale;
+    const fw = 30 * px, fh = 20 * px;
+    for (const f of this.region.regionalFactions) {
+      if (f.id === this.region.playerFactionId || !f.identity) continue;
+      const cap = this.region.settlement(f.capital);
+      if (!cap) continue;
+      const cell = this.region.map.coordToCell(cap.x, cap.y);
+      const { x: cx, y: cy } = hexCenter(cell.x, cell.y, size, ox, oy);
+      if (!this.inView(cx, cy, fw * 2)) continue;
+      const key = JSON.stringify(f.identity.flag);
+      let img = this.flagImages.get(key);
+      if (!img) {
+        img = new Image();
+        img.src = flagDataUrl(f.identity.flag, 60, 40);
+        this.flagImages.set(key, img);
+      }
+      if (!img.complete) continue;
+      const x = cx - fw / 2, y = cy - size - fh - 6 * px;
+      g.fillStyle = 'rgba(0,0,0,0.55)';
+      g.fillRect(x - px, y - px, fw + 2 * px, fh + 2 * px);
+      g.drawImage(img, x, y, fw, fh);
+      g.fillStyle = 'rgba(40,30,20,0.9)';
+      g.fillRect(cx - px, y + fh, 2 * px, size + 6 * px);
+      if (this.camScale < 4) {
+        g.font = `${11 * px}px Georgia, serif`;
+        g.textAlign = 'center';
+        g.lineWidth = 3 * px;
+        g.strokeStyle = 'rgba(0,0,0,0.75)';
+        g.strokeText(f.name, cx, y - 4 * px);
+        g.fillStyle = '#f2e9d4';
+        g.fillText(f.name, cx, y - 4 * px);
+        g.textAlign = 'left';
+      }
+    }
+  }
+
+  private buildTile(tx: number, ty: number, lod: number, W: number, H: number): HTMLCanvasElement {
+    const T = RegionView.TILE_BASE;
+    const s = 2 ** lod;
+    const c = document.createElement('canvas');
+    c.width = c.height = T * s;
+    const cg = c.getContext('2d')!;
+    cg.setTransform(s, 0, 0, s, -tx * T * s, -ty * T * s);
+    this.cull = { l: tx * T, t: ty * T, r: (tx + 1) * T, b: (ty + 1) * T };
+    try {
+      this.drawTerrain(cg, W, H);
+      this.drawTerritories(cg, W, H);
+    } finally {
+      this.cull = null;
+    }
+    if (this.tiles.size >= RegionView.TILE_CACHE_MAX) {
+      const oldest = this.tiles.keys().next().value;
+      if (oldest !== undefined) this.tiles.delete(oldest);
+    }
+    this.tiles.set(`${lod}:${tx}:${ty}`, c);
+    return c;
+  }
+
+
 
   /** Composite + blit the parallax atmosphere behind the map. Palette is rebuilt
    *  each frame (cheap, pure) but the gradient canvas only re-paints when the
@@ -2186,7 +2274,7 @@ export class RegionView {
     const grid = hv ? hv.owners[hv.idx] : live.grid;
     const contested = hv ? new Uint8Array(grid.length) : live.contested;
     const controlLevel = hv ? new Uint8Array(grid.length).fill(255) : live.controlLevel;
-    if (!hv) this.noteBorderChanges(grid);
+
     const m = 60;
     const { size, ox, oy } = hexLayoutParams(W, H, N, m);
     const colorCache = new Map<number, { r: number; g: number; b: number } | null>();
@@ -2208,6 +2296,7 @@ export class RegionView {
         const rgb = rgbOf(grid[idx]);
         if (!rgb) continue;
         const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
+        if (this.culled(cx, cy, size)) continue;
         const alpha = 0.05 + 0.1 * (controlLevel[idx] / 255);
         g.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha.toFixed(3)})`;
         fillHexPath(g, hexCorners(cx, cy, size));
@@ -2223,6 +2312,7 @@ export class RegionView {
         const rgb = rgbOf(grid[idx]);
         if (!rgb) continue;
         const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
+        if (this.culled(cx, cy, size)) continue;
         g.strokeStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},0.45)`;
         g.beginPath();
         for (let k = -1; k <= 1; k++) {
@@ -2244,6 +2334,7 @@ export class RegionView {
         const rgb = rgbOf(fid);
         if (!rgb) continue;
         const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
+        if (this.culled(cx, cy, size)) continue;
         const corners = hexCorners(cx, cy, size);
         for (let d = 0; d < 6; d++) {
           const [nc, nr] = hexNeighborDir(x, y, d);
@@ -2318,10 +2409,20 @@ export class RegionView {
 
   private colorSettings: Settings | null = null;
 
+  /** Base-coord rect the current tile render covers; hexes outside are skipped. */
+  private cull: { l: number; t: number; r: number; b: number } | null = null;
+
+  private culled(cx: number, cy: number, size: number): boolean {
+    const c = this.cull;
+    if (!c) return false;
+    const m = size * 2;
+    return cx < c.l - m || cx > c.r + m || cy < c.t - m || cy > c.b + m;
+  }
+
   /** Colourblind palette for territory (Centuria 2.0 accessibility). */
   setColorSettings(s: Settings): void {
     this.colorSettings = s;
-    this.mapCacheSig = '';
+    this.tileSig = '';
   }
 
   private prevTerritoryGrid: Int16Array | null = null;
@@ -2888,6 +2989,7 @@ export class RegionView {
       for (let x = 0; x < N; x++) {
         const c = map.at(x, y);
         const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
+        if (this.culled(cx, cy, size)) continue;
         const corners = hexCorners(cx, cy, size);
         // Bounding box for texture details (stays within the hex)
         const bx = cx - hw;
@@ -3086,6 +3188,7 @@ export class RegionView {
           if (!hexNeighbors(x, y).some(([nc, nr]) => nc >= 0 && nr >= 0 && nc < N && nr < N
               && RegionView.WATER_BIOMES.has(map.at(nc, nr).biome))) continue;
           const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
+          if (this.culled(cx, cy, size)) continue;
           const corners = hexCorners(cx, cy, size);
           g.fillStyle = 'rgba(30,110,220,0.22)';
           fillHexPath(g, corners);
@@ -3114,6 +3217,7 @@ export class RegionView {
         for (let x = 0; x < N; x++) {
           const a = map.at(x, y).elevation;
           const { x: cx, y: cy } = hexCenter(x, y, size, ox, oy);
+          if (this.culled(cx, cy, size)) continue;
           const corners = hexCorners(cx, cy, size);
           for (const d of [0, 1, 2] as const) {
             const [nc, nr] = hexNeighborDir(x, y, d);
