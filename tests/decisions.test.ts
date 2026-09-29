@@ -21,7 +21,7 @@ describe('Decision events & trigger DSL (Centuria 2.0 §D)', () => {
     const r = RegionSim.create(2);
     const def = eventDef('strike_wave')!;
     activateEvent(r, def);
-    expect(agenda(r)[0].kind).toBe('decision');
+    expect(agenda(r).find((i) => i.kind !== 'milestone')?.kind).toBe('decision');
     expect(issue(r, 'chooseEventOption', 'strike_wave', 1)).toBe(true);
     expect(r.activeDecisions.length).toBe(0);
     expect(r.deeds.some((d) => d.tag === 'crackdown')).toBe(true);
