@@ -1,4 +1,5 @@
 import './screens.css';
+import './screens/menus.css';
 import { SCENARIOS } from '../sim/region';
 import { DIFFICULTY_TAGS, type DifficultyTag } from './designscreen';
 import { WikiPanel } from './WikiPanel';
@@ -512,12 +513,11 @@ export class TitleScreen {
         <div class="ts-left">
           <div class="ts-brand">
             <h1 class="ts-title">CENTURIA</h1>
-            <p class="ts-tagline">Build &nbsp;·&nbsp; Endure &nbsp;·&nbsp; Govern</p>
+            <p class="ts-tagline">1919 — 2100 &nbsp;·&nbsp; A world that remembers</p>
           </div>
-          <blockquote class="ts-quote">
-            "A colony is only as strong as the hands willing to work it —<br>
-            and the mind willing to lead them."
-          </blockquote>
+          <ol class="ts-eras" aria-hidden="true">
+            <li>1919</li><li>1945</li><li>1969</li><li>1989</li><li>2008</li><li>2050</li><li>2100</li>
+          </ol>
           <p class="ts-version">v${__APP_VERSION__} &nbsp;·&nbsp; Early Access</p>
         </div>
         <div class="ts-panel">
@@ -527,9 +527,9 @@ export class TitleScreen {
             <button class="ts-btn" id="ts-continue" ${this.hasSave ? '' : 'disabled'}>Continue</button>
             <div class="ts-sep"></div>
             <button class="ts-btn" id="ts-options">Options &nbsp;<span class="ts-arrow">›</span></button>
-            <button class="ts-btn" id="ts-help">? &nbsp;Help</button>
+            <button class="ts-btn" id="ts-help">Encyclopedia</button>
             <div class="ts-sep"></div>
-            <button class="ts-btn ts-btn-quit" id="ts-quit">Quit to Desktop</button>
+            <button class="ts-btn ts-btn-quit" id="ts-quit">Quit</button>
           </nav>
         </div>
       </div>`;

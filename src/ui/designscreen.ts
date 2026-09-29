@@ -6,6 +6,7 @@
  *    alliances) — and the one sanctioned chance to re-pick the currency.
  */
 import './screens.css';
+import './screens/menus.css';
 import type { CurrencySymbol, RegionDesign, NationDesign } from '../sim/defs';
 import { CURRENCY_SYMBOLS } from '../sim/defs';
 
@@ -70,22 +71,25 @@ export const DIFFICULTY_TAGS: Choice<DifficultyTag>[] = [
  */
 export function difficultyLegend(current?: DifficultyTag): HTMLElement {
   const wrap = document.createElement('div');
-  wrap.className = 'design-row';
+  wrap.className = 'design-row design-wide design-diff';
   const h = document.createElement('p');
   h.innerHTML = '<strong>Difficulty</strong>';
   h.className = 'design-row-title';
   wrap.appendChild(h);
   const row = document.createElement('div');
-  row.className = 'design-choices';
+  row.className = 'design-diff-grid';
   for (const tag of DIFFICULTY_TAGS) {
+    const item = document.createElement('div');
+    item.className = tag.value === current ? 'design-diff-item design-diff-on' : 'design-diff-item';
     const badge = document.createElement('span');
     badge.textContent = tag.label;
-    badge.className = tag.value === current ? 'design-choice design-choice-on' : 'design-choice';
-    row.appendChild(badge);
+    badge.className = 'design-diff-name';
+    item.appendChild(badge);
     const desc = document.createElement('p');
     desc.className = 'design-desc';
     desc.textContent = tag.desc;
-    row.appendChild(desc);
+    item.appendChild(desc);
+    row.appendChild(item);
   }
   wrap.appendChild(row);
   return wrap;
@@ -98,17 +102,26 @@ export function difficultyLegend(current?: DifficultyTag): HTMLElement {
 export class DesignScreen {
   private overlay: HTMLElement;
   private box: HTMLElement;
+  private grid: HTMLElement;
+  private footer: HTMLElement;
 
   constructor() {
     this.overlay = document.createElement('div');
     this.overlay.className = 'design-overlay';
     this.box = document.createElement('div');
     this.box.className = 'design-box';
+    this.box.setAttribute('role', 'dialog');
+    this.box.setAttribute('aria-modal', 'true');
+    this.grid = document.createElement('div');
+    this.grid.className = 'design-grid';
+    this.footer = document.createElement('div');
+    this.footer.className = 'design-footer';
     this.overlay.appendChild(this.box);
   }
 
   private open(): void {
     document.body.appendChild(this.overlay);
+    this.box.querySelector<HTMLElement>('.design-confirm')?.focus();
   }
 
   private close(): void {
@@ -126,6 +139,8 @@ export class DesignScreen {
     wrap.appendChild(h);
     const row = document.createElement('div');
     row.className = 'design-choices';
+    row.setAttribute('role', 'group');
+    row.setAttribute('aria-label', title);
     const buttons: HTMLButtonElement[] = [];
     const desc = document.createElement('p');
     desc.className = 'design-desc';
@@ -133,6 +148,7 @@ export class DesignScreen {
       buttons.forEach((b, i) => {
         const on = choices[i].value === selected;
         b.classList.toggle('design-choice-on', on);
+        b.setAttribute('aria-pressed', String(on));
         if (on) desc.textContent = choices[i].desc;
       });
     };
@@ -140,6 +156,7 @@ export class DesignScreen {
       const b = document.createElement('button');
       b.textContent = c.label;
       b.className = 'design-choice';
+      b.type = 'button';
       b.addEventListener('click', () => { selected = c.value; paint(); });
       buttons.push(b);
       row.appendChild(b);
@@ -160,14 +177,21 @@ export class DesignScreen {
 
   private title(text: string, sub: string): void {
     this.box.innerHTML = '';
+    this.grid.innerHTML = '';
+    this.footer.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'design-head';
     const h = document.createElement('h2');
     h.textContent = text;
     h.className = 'design-heading';
     const p = document.createElement('p');
     p.textContent = sub;
     p.className = 'design-sub';
-    this.box.appendChild(h);
-    this.box.appendChild(p);
+    head.appendChild(h);
+    head.appendChild(p);
+    this.box.appendChild(head);
+    this.box.appendChild(this.grid);
+    this.box.appendChild(this.footer);
   }
 
   showRegionDesign(cb: (d: RegionDesign) => void, currentDifficulty?: DifficultyTag): void {
@@ -188,26 +212,31 @@ export class DesignScreen {
     let taxRate = 0.10;
     const taxWrap = document.createElement('div');
     taxWrap.className = 'design-row';
-    taxWrap.innerHTML = `<p class="design-row-title"><strong>Tax Rate: <span id="ds-tax">10%</span></strong></p>`;
+    taxWrap.innerHTML = `<p class="design-row-title"><strong>Tax Rate</strong><span class="design-value" id="ds-tax">10%</span></p>`;
     const slider = document.createElement('input');
     slider.type = 'range';
     slider.min = '5';
     slider.max = '30';
     slider.value = '10';
     slider.className = 'design-slider';
+    slider.setAttribute('aria-label', 'Tax rate');
     slider.addEventListener('input', () => {
       taxRate = parseInt(slider.value) / 100;
       const span = taxWrap.querySelector('#ds-tax')!;
       span.textContent = `${slider.value}%`;
     });
     taxWrap.appendChild(slider);
+    const taxDesc = document.createElement('p');
+    taxDesc.className = 'design-desc';
+    taxDesc.textContent = 'Revenue against public patience. Higher rates fund more but raise unrest.';
+    taxWrap.appendChild(taxDesc);
 
-    this.box.appendChild(expansion.el);
-    this.box.appendChild(trade.el);
-    this.box.appendChild(taxWrap);
-    this.box.appendChild(services.el);
-    this.box.appendChild(difficultyLegend(currentDifficulty));
-    this.box.appendChild(
+    this.grid.appendChild(expansion.el);
+    this.grid.appendChild(trade.el);
+    this.grid.appendChild(taxWrap);
+    this.grid.appendChild(services.el);
+    this.grid.appendChild(difficultyLegend(currentDifficulty));
+    this.footer.appendChild(
       this.confirmButton('ESTABLISH CHARTER', () => {
         this.close();
         cb({
@@ -240,18 +269,18 @@ export class DesignScreen {
     const currency = this.choiceRow('Currency Standard', currencyChoices, KEEP);
 
     const warn = document.createElement('div');
-    warn.className = 'design-warn';
+    warn.className = 'design-warn design-wide';
     warn.innerHTML =
       '<strong>⚠ Currency changes carry penalties.</strong> A switch without cause reads as caprice: ' +
       'expect 20–30% efficiency loss and 10–15% capital flight, recovering over 2–3 years. ' +
       'Crisis-driven or well-telegraphed switches are forgiven faster.';
 
-    this.box.appendChild(economy.el);
-    this.box.appendChild(military.el);
-    this.box.appendChild(alliance.el);
-    this.box.appendChild(warn);
-    this.box.appendChild(currency.el);
-    this.box.appendChild(
+    this.grid.appendChild(economy.el);
+    this.grid.appendChild(military.el);
+    this.grid.appendChild(alliance.el);
+    this.grid.appendChild(currency.el);
+    this.grid.appendChild(warn);
+    this.footer.appendChild(
       this.confirmButton('PROCLAIM THE NATION', () => {
         this.close();
         const cur = currency.get();

@@ -394,9 +394,7 @@ window.addEventListener('keydown', (e) => {
   if (regionView && !pauseMenuOpen) {
     if (e.key === 't' || e.key === 'T') { regionView.openScreen('research'); e.preventDefault(); return; }
     if (e.key === 'p' || e.key === 'P') { regionView.toggleProvinceView(); e.preventDefault(); return; }
-    if ((e.key === 'b' || e.key === 'B') && region?.hasCentralBank()) {
-      regionView.centralBankOpen = !regionView.centralBankOpen; e.preventDefault(); return;
-    }
+    if (e.key === 'b' || e.key === 'B') { regionView.openNation('budget'); e.preventDefault(); return; }
     // U6: gameplay-panel shortcuts (docs/specs/09-audit-nine.md §U6). Skipped
     // while focus is in a text field (town rename, tax slider, loan prompts)
     // so single letters never hijack typing.
@@ -410,6 +408,7 @@ window.addEventListener('keydown', (e) => {
       if (e.key === '?') { regionView.toggleWikiPanel(); e.preventDefault(); return; }
       if (e.key === 'h' || e.key === 'H') { regionView.toggleHistory(); e.preventDefault(); return; }
       if (e.key === 'd' || e.key === 'D') { regionView.toggleDiplomacy(); e.preventDefault(); return; }
+      if (e.key === 'l' || e.key === 'L') { regionView.openScreen('claim'); e.preventDefault(); return; }
     }
   }
 });

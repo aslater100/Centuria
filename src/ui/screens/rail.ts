@@ -5,7 +5,7 @@
  */
 import './rail.css';
 
-export type RailScreen = 'nation' | 'economy' | 'research' | 'foreign' | 'history' | 'settings' | 'help';
+export type RailScreen = 'nation' | 'economy' | 'research' | 'foreign' | 'history' | 'provinces' | 'claim' | 'settings' | 'help';
 
 interface RailItem { id: RailScreen; icon: string; label: string; key: string }
 
@@ -15,6 +15,8 @@ const ITEMS: readonly RailItem[] = [
   { id: 'research', icon: '⚗', label: 'Research', key: 'T' },
   { id: 'foreign', icon: '⚑', label: 'Foreign Affairs', key: 'D' },
   { id: 'history', icon: '⌛', label: 'Border History', key: 'H' },
+  { id: 'provinces', icon: '▦', label: 'Province View', key: 'P' },
+  { id: 'claim', icon: '⚐', label: 'Claim Unclaimed Land (click hexes next to your border)', key: 'L' },
   { id: 'settings', icon: '⚙︎', label: 'Settings', key: ',' },
   { id: 'help', icon: '?', label: 'Encyclopedia', key: '?' },
 ];
@@ -36,7 +38,7 @@ export class ScreenRail {
     });
   }
 
-  setActive(id: RailScreen | null): void {
-    this.el.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) => b.classList.toggle('active', b.dataset.id === id));
+  setActive(ids: readonly RailScreen[]): void {
+    this.el.querySelectorAll<HTMLButtonElement>('.rail-btn').forEach((b) => b.classList.toggle('active', ids.includes(b.dataset.id as RailScreen)));
   }
 }

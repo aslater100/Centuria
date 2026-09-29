@@ -71,7 +71,7 @@ export class Dispatch {
   }
 
   update(r: RegionSim): void {
-    const key = `${r.log.length}|${r.log[r.log.length - 1]?.day ?? 0}|${this.filter}|${r.year}`;
+    const key = `${r.log.length}|${r.log[r.log.length - 1]?.day ?? 0}|${this.filter}|${r.year}|${r.month}`;
     if (key === this.lastKey) return;
     this.lastKey = key;
     const place = r.stateName || r.settlements.find((s) => s.factionId === r.playerFactionId)?.name || 'Colony';
