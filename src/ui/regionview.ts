@@ -346,6 +346,7 @@ export class RegionView {
     this.agendaBar.onAdvanceMonth = () => this.onAdvanceMonth?.();
     this.decisionCard = new DecisionCard(root);
     this.diplomacyScreen = new DiplomacyScreen(root);
+    this.diplomacyScreen.onLocate = (rid) => this.locateRival(rid);
     this.economyScreen = new EconomyScreen(root);
     this.researchScreen = new ResearchScreen(root);
     this.townDrawer = new TownDrawer(root);
@@ -408,16 +409,24 @@ export class RegionView {
     else this.onRailScreen?.(id);
   }
 
+  /** Pan to a great power's capital (Foreign Affairs → "Locate on map"). */
+  locateRival(rivalId: number): void {
+    const rv = this.region.rival(rivalId);
+    const f = rv?.factionId !== undefined ? this.region.faction(rv.factionId) : undefined;
+    const cap = f ? this.region.settlement(f.capital) : undefined;
+    if (!cap) return;
+    this.diplomacyScreen.close();
+    this.centerOn(cap.x, cap.y, Math.max(4, Math.min(this.camScale, 8)));
+    this.selectedFactionId = f!.id;
+  }
+
   /** Centre the camera on a town and open its drawer. */
   focusTown(id: number): void {
     const t = this.region.settlement(id);
     if (!t) return;
     this.selectedId = id;
     this.townDrawer.open(this.region, id);
-    const p = this.toPx(t.x, t.y);
-    this.camX += this.viewW / 2 - p.px;
-    this.camY += this.viewH / 2 - p.py;
-    this.clampCamera();
+    this.centerOn(t.x, t.y);
   }
 
   /** Pop the first open decision (called by main.ts when the turn holds). */

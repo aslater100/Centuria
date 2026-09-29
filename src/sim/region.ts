@@ -3837,8 +3837,8 @@ export const EXPAND_REACH = 16 * WORLD_SCALE;
 /** Border-history snapshot cadence (the scrubber appends the present). */
 export const TERRITORY_SNAPSHOT_YEARS = 3;
 /** Coalition dominance: our land relative to the largest great power's. A rising
- *  contender alarms the powers as it nears their size (threat bar ≈ 0.85×). */
-export const COALITION_HEGEMON_FLOOR = 0.58;
+ *  contender alarms the powers as it nears their size (threat bar ≈ 0.77×). */
+export const COALITION_HEGEMON_FLOOR = 0.5;
 export const COALITION_HEGEMON_SPAN = 0.6;
 export const BREAKAWAY_JOIN_RADIUS = 18 * WORLD_SCALE;
 export const BREAKAWAY_JOIN_GRIEVANCE = 60;
